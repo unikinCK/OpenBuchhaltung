@@ -1,0 +1,47 @@
+services:
+  app:
+    build: .
+    command: python run.py
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    environment:
+      - FLASK_ENV=development
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    command: python -m http.server 8010
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: openbuchhaltung
+      POSTGRES_USER: openbuchhaltung
+      POSTGRES_PASSWORD: openbuchhaltung
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

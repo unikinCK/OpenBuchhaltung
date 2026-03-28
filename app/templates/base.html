@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenBuchhaltung</title>
+  </head>
+  <body>
+    <header>
+      <h1>OpenBuchhaltung</h1>
+      <nav>
+        <a href="{{ url_for('main.index') }}">Start</a>
+        {% if session.get('user') %}
+          <span>Angemeldet: {{ session['user']['username'] }} ({{ session['user']['role'] }})</span>
+          <form method="post" action="{{ url_for('auth.logout') }}" style="display:inline;">
+            <button type="submit">Logout</button>
+          </form>
+        {% else %}
+          <a href="{{ url_for('auth.login_form') }}">Login</a>
+        {% endif %}
+      </nav>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul>
+            {% for category, message in messages %}
+              <li><strong>{{ category }}:</strong> {{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+    </header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
