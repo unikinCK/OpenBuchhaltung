@@ -106,11 +106,11 @@ um Wechsel zwischen Engines zu vereinfachen.
 ## 7. Projektphasen mit konkreten Tasks
 
 ## Phase 0 – Foundations (2–3 Wochen)
-- [ ] Repository-Struktur aufsetzen (`app/`, `domain/`, `tests/`, `migrations/`)
-- [ ] Docker-Compose (app + db + worker + adminer/pgadmin)
-- [ ] CI (Lint, Tests, Migrationscheck)
-- [ ] Coding-Guidelines + ADR-Template
-- [ ] Grundlegendes Rechtemodell + Login
+- [x] Repository-Struktur aufsetzen (`app/`, `domain/`, `tests/`, `migrations/`)
+- [x] Docker-Compose (app + db + worker + adminer/pgadmin)
+- [x] CI (Lint, Tests, Migrationscheck)
+- [x] Coding-Guidelines + ADR-Template
+- [x] Grundlegendes Rechtemodell + Login (v0, Demo-User)
 
 ## Phase 1 – Kernbuchhaltung MVP (6–10 Wochen)
 - [ ] Kontenrahmenimport SKR03/SKR04
