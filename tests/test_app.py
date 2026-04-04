@@ -364,3 +364,38 @@ def test_api_create_journal_entry_rejects_negative_amounts(tmp_path):
 
     assert create_response.status_code == 400
     assert "keine negativen Beträge" in create_response.get_json()["error"]
+
+
+def test_api_create_journal_entry_rejects_non_finite_amounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 6", "company_name": "Api GmbH 6"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Ungültige nicht-endliche Beträge",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "NaN", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "10.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 400
+    assert "endliche Dezimalzahl" in create_response.get_json()["error"]

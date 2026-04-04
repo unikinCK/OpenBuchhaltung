@@ -131,9 +131,14 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
 
 def parse_decimal(value: str) -> Decimal:
     try:
-        return Decimal(value)
+        parsed = Decimal(value)
     except (InvalidOperation, TypeError):
         raise JournalEntryCreationError("Betrag ist keine gültige Dezimalzahl.") from None
+
+    if not parsed.is_finite():
+        raise JournalEntryCreationError("Betrag muss eine endliche Dezimalzahl sein.")
+
+    return parsed
 
 
 def _get_or_create_fiscal_year(
