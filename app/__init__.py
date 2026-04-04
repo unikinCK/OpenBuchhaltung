@@ -4,6 +4,7 @@ from flask import Flask
 
 from .api import api_bp
 from .auth import auth_bp
+from .cli import register_cli_commands
 from .db import create_session_factory
 from .main import main_bp
 
@@ -25,5 +26,6 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
+    register_cli_commands(app)
 
     return app

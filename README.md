@@ -60,3 +60,18 @@ curl -X POST http://localhost:5000/api/v1/mcp/call \
   -H "Content-Type: application/json" \
   -d '{"id":"1","method":"tools/list","params":{}}'
 ```
+
+## Kontenrahmenimport (SKR03/SKR04)
+
+CSV-Import per Flask-CLI (idempotent, Duplikate werden uebersprungen):
+
+```bash
+flask --app run.py import-kontenrahmen --company-id 1 --csv-path ./skr03.csv
+```
+
+Unterstuetzte Kopfzeilen (Alias):
+- `code` oder `Kontonummer`
+- `name` oder `Bezeichnung`
+- `account_type` oder `Kontoart`
+
+Fehlerhafte Zeilen werden protokolliert und brechen den Gesamtimport nicht ab.
