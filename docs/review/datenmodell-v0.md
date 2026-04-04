@@ -1,8 +1,23 @@
 # Datenmodell v0 – Review-Dokument
 
-## Übersicht
-Das v0-Datenmodell bildet die Kernentitäten für Mandantenfähigkeit, Stammdaten,
-Buchungssätze, Belegreferenzen und Auditierbarkeit ab.
+## Zweck und Abgrenzung
+Dieser Entwurf konkretisiert den MVP-Domänenkern für die Umsetzungsplanung und leitet sich aus
+ADR-001 („Modularer Monolith mit Schichten“) ab. Schwerpunkt sind die Entitäten,
+Kernrelationen und Integritätsregeln für den Basis-Buchungsflow.
+
+**Verknüpfte Architekturentscheidung:** `docs/adr/ADR-001-monolith-modulare-schichten.md`
+
+## MVP-Domänenkern (P0-000 Scope)
+- `Tenant`
+- `Company`
+- `Account`
+- `JournalEntry`
+- `JournalEntryLine`
+- `TaxCode`
+- `Document`
+
+> Hinweis: `FiscalYear`, `Period`, `PeriodLock` und `AuditLog` bleiben Bestandteil von v0,
+> werden aber für die Umsetzung in separaten Folge-Tasks vertieft.
 
 ## ER-Diagramm (Mermaid)
 ```mermaid
@@ -38,6 +53,62 @@ erDiagram
 
     COMPANY ||--o{ AUDIT_LOG : optional_scope
 ```
+
+## Entitäten, Relationen und Kernregeln (MVP-fokussiert)
+
+### Tenant
+- Zweck: Technischer/fachlicher Isolationsanker für Mandantenfähigkeit.
+- Kernrelationen: `Tenant 1:n Company`, `Tenant 1:n Account`, `Tenant 1:n JournalEntry`.
+- Regel:
+  - Jede fachlich relevante Tabelle führt `tenant_id`.
+  - Tenant-übergreifende Referenzen sind unzulässig.
+
+### Company
+- Zweck: Buchhaltungseinheit je Gesellschaft innerhalb eines Mandanten.
+- Kernrelationen: `Company 1:n Account`, `Company 1:n TaxCode`, `Company 1:n JournalEntry`,
+  `Company 1:n Document`.
+- Regeln:
+  - `UNIQUE(tenant_id, name)` verhindert doppelte Gesellschaftsnamen im selben Mandanten.
+  - `currency_code` ist Pflicht und bestimmt die Buchungswährung für MVP-Standardfälle.
+
+### Account
+- Zweck: Kontenstamm für Soll/Haben-Buchungen.
+- Kernrelation: `Account 1:n JournalEntryLine`.
+- Regeln:
+  - `UNIQUE(company_id, code)`.
+  - Nur aktive Konten (`is_active = true`) dürfen neu bebucht werden.
+  - Account gehört zum selben `tenant_id` und `company_id` wie die Buchungszeile.
+
+### TaxCode
+- Zweck: Steuerkennzeichen für Buchungszeilen.
+- Kernrelation: `TaxCode 1:n JournalEntryLine` (optional).
+- Regeln:
+  - `UNIQUE(company_id, code)`.
+  - `rate >= 0`.
+  - Wenn gesetzt, muss der `TaxCode` zur selben Company wie die Buchungszeile gehören.
+
+### JournalEntry
+- Zweck: Buchungskopf mit fachlichem Kontext.
+- Kernrelationen: `JournalEntry 1:n JournalEntryLine`, `JournalEntry 1:n Document` (Referenz).
+- Regeln:
+  - `UNIQUE(company_id, posting_number)`.
+  - Ein JournalEntry ist nur gültig, wenn mindestens zwei Lines vorhanden sind.
+  - Summe Soll = Summe Haben über alle Lines (Buchungssatz-Invariante).
+
+### JournalEntryLine
+- Zweck: Einzelne Soll/Haben-Zeile.
+- Regeln:
+  - `UNIQUE(journal_entry_id, line_number)`.
+  - `debit_amount >= 0`, `credit_amount >= 0`.
+  - Genau eine Seite darf > 0 sein (XOR-Regel).
+  - `account_id` ist Pflicht; `tax_code_id` optional.
+
+### Document
+- Zweck: Belegmetadaten und Verknüpfung zum Buchungskontext.
+- Kernrelationen: `Company 1:n Document`, optional `JournalEntry 1:n Document`.
+- Regeln:
+  - `storage_key` muss je Tenant eindeutig sein.
+  - Verknüpfter `journal_entry_id` muss zur selben Company/Tenant gehören.
 
 ## Feldübersicht (Kernauszug)
 
@@ -113,3 +184,18 @@ erDiagram
 - `id` (PK)
 - `tenant_id` (FK), `company_id` (optionale FK)
 - `entity_type`, `entity_id`, `action`, `payload`, `changed_by`, `changed_at`
+
+## Entscheidungsbedarf (Folgeentscheidungen)
+1. **D-001:** Präzise Lebenszyklus-Regel für `JournalEntry` (Draft vs. Posted) und Unveränderbarkeit
+   nach Festschreibung final entscheiden.
+2. **D-002:** Steuerlogik-Schnittstelle definieren: bleibt `TaxCode` rein satzbasiert oder wird ein
+   separates Tax-Detail-Modell für komplexere USt-Fälle benötigt?
+3. **D-003:** Dokumentablage-Strategie festlegen (lokales FS vs. S3-kompatibel) inkl.
+   Anforderungen an Revisionssicherheit.
+4. **D-004:** Umgang mit Fremdwährungen im MVP entscheiden (`currency_code` je Line vs. nur Company-Währung).
+
+## Ableitbare Sprint-Arbeitspakete (für P0-001)
+- SQLAlchemy-Modelle für MVP-Kernentitäten (`Tenant` bis `Document`) priorisiert umsetzen.
+- Validierungslogik für JournalEntry/Lines als Domain-Service mit automatisierten Tests.
+- Tenant/Company-Scoping als wiederverwendbare Query-Policy implementieren.
+- Minimalen Document-Link-Flow im vertikalen Prototyp vorbereiten.

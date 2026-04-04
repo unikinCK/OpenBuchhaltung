@@ -1,5 +1,11 @@
 # Task P0-000: ADR 001 + Domänenmodell-Entwurf erstellen
 
+## Status
+- **Erledigt am:** 2026-04-04
+- **Ergebnisse:**
+  - `docs/adr/ADR-001-monolith-modulare-schichten.md`
+  - `docs/review/datenmodell-v0.md`
+
 ## Ziel
 Die Architekturentscheidung für den Start festhalten und einen belastbaren Domänenmodell-Entwurf als Grundlage für Umsetzung und Sprintplanung bereitstellen.
 
