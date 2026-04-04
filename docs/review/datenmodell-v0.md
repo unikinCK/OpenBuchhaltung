@@ -7,7 +7,7 @@ Kernrelationen und Integritätsregeln für den Basis-Buchungsflow.
 
 **Verknüpfte Architekturentscheidung:** `docs/adr/ADR-001-monolith-modulare-schichten.md`
 
-## MVP-Domänenkern (P0-000 Scope)
+## MVP-Domänenkern (P1-000 Scope)
 - `Tenant`
 - `Company`
 - `Account`
@@ -16,8 +16,7 @@ Kernrelationen und Integritätsregeln für den Basis-Buchungsflow.
 - `TaxCode`
 - `Document`
 
-> Hinweis: `FiscalYear`, `Period`, `PeriodLock` und `AuditLog` bleiben Bestandteil von v0,
-> werden aber für die Umsetzung in separaten Folge-Tasks vertieft.
+Alle oben genannten Entitäten sind als SQLAlchemy-Modelle und Migrationen im v0 enthalten.
 
 ## ER-Diagramm (Mermaid)
 ```mermaid
@@ -107,7 +106,7 @@ erDiagram
 - Zweck: Belegmetadaten und Verknüpfung zum Buchungskontext.
 - Kernrelationen: `Company 1:n Document`, optional `JournalEntry 1:n Document`.
 - Regeln:
-  - `storage_key` muss je Tenant eindeutig sein.
+  - `UNIQUE(tenant_id, storage_key)` verhindert doppelte Ablage-Keys pro Tenant.
   - Verknüpfter `journal_entry_id` muss zur selben Company/Tenant gehören.
 
 ## Feldübersicht (Kernauszug)
@@ -179,6 +178,7 @@ erDiagram
 - `id` (PK)
 - `tenant_id`, `company_id` (FKs), `journal_entry_id` (optionale FK)
 - `file_name`, `storage_key`, `mime_type`, `uploaded_at`
+- Constraint: `UNIQUE(tenant_id, storage_key)`
 
 ### AuditLog
 - `id` (PK)
@@ -194,7 +194,7 @@ erDiagram
    Anforderungen an Revisionssicherheit.
 4. **D-004:** Umgang mit Fremdwährungen im MVP entscheiden (`currency_code` je Line vs. nur Company-Währung).
 
-## Ableitbare Sprint-Arbeitspakete (für P0-001)
+## Ableitbare Sprint-Arbeitspakete (für P1-001 ff.)
 - SQLAlchemy-Modelle für MVP-Kernentitäten (`Tenant` bis `Document`) priorisiert umsetzen.
 - Validierungslogik für JournalEntry/Lines als Domain-Service mit automatisierten Tests.
 - Tenant/Company-Scoping als wiederverwendbare Query-Policy implementieren.
