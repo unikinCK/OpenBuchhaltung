@@ -82,7 +82,12 @@ def create_account():
             account_type=account_type,
         )
         session.add(account)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            flash("Konto mit dieser Nummer existiert bereits.", "error")
+            return redirect(url_for("main.index"))
 
     flash("Konto wurde angelegt.", "success")
     return redirect(url_for("main.index"))
