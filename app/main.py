@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from domain.models import Account, Company, Tenant
 
@@ -44,7 +45,13 @@ def create_tenant_and_company():
         tenant = Tenant(name=tenant_name)
         company = Company(name=company_name, currency_code="EUR", tenant=tenant)
         session.add_all([tenant, company])
-        session.commit()
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            flash("Mandant oder Gesellschaft existiert bereits.", "error")
+            return redirect(url_for("main.index"))
 
     flash("Mandant und Gesellschaft wurden angelegt.", "success")
     return redirect(url_for("main.index"))
