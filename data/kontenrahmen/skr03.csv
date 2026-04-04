@@ -1,0 +1,31 @@
+code,name,account_type
+1000,Kasse,asset
+1200,Bank,asset
+1360,Geldtransit,asset
+1400,Forderungen aus Lieferungen und Leistungen,asset
+1576,Abziehbare Vorsteuer 19 %,asset
+1571,Abziehbare Vorsteuer 7 %,asset
+1600,Verbindlichkeiten aus Lieferungen und Leistungen,liability
+1776,Umsatzsteuer 19 %,liability
+1771,Umsatzsteuer 7 %,liability
+1800,Privatentnahmen,equity
+1890,Privateinlagen,equity
+2000,Anlagevermögen,asset
+2400,Forderungsverluste,expense
+2600,Sonstige betriebliche Erträge,income
+3000,Rohstoffe und Hilfsstoffe,expense
+3200,Wareneingang,expense
+3400,Fremdleistungen,expense
+4100,Löhne und Gehälter,expense
+4120,Soziale Abgaben,expense
+4200,Miete und Nebenkosten,expense
+4300,Strom,expense
+4400,Versicherungen,expense
+4600,Werbekosten,expense
+4800,Reparaturen und Instandhaltung,expense
+4900,Sonstige betriebliche Aufwendungen,expense
+4970,Nebenkosten des Geldverkehrs,expense
+6000,Aufwendungen für bezogene Leistungen,expense
+6200,Abschreibungen auf Sachanlagen,expense
+8400,Erlöse 19 % USt,income
+8300,Erlöse 7 % USt,income
