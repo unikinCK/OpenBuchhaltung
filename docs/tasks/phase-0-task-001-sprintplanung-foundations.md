@@ -35,3 +35,6 @@ Nach ADR- und Domänenentwurf wird ein konkreter Delivery-Plan benötigt, um den
 ## Definition of Done
 - Sprintplan ist im Repo vorhanden
 - Team kann auf Basis des Plans mit Umsetzung starten
+
+## Ergebnisartefakt
+- `docs/sprint/phase-0-sprint-01-foundations.md`
