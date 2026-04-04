@@ -153,16 +153,24 @@ def create_journal_entry_via_api():
 
         if not description:
             return jsonify({"error": "description is required."}), 400
+        if not isinstance(raw_lines, list):
+            return jsonify({"error": "lines must be an array."}), 400
 
-        lines = [
-            JournalLineInput(
-                account_id=int(line["account_id"]),
-                debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
-                credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
-                description=(line.get("description") or "").strip() or None,
+        lines = []
+        for index, line in enumerate(raw_lines, start=1):
+            if not isinstance(line, dict):
+                return jsonify({"error": f"Line {index} must be an object."}), 400
+            if "account_id" not in line:
+                return jsonify({"error": f"Line {index} is missing account_id."}), 400
+
+            lines.append(
+                JournalLineInput(
+                    account_id=int(line["account_id"]),
+                    debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
+                    credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
+                    description=(line.get("description") or "").strip() or None,
+                )
             )
-            for line in raw_lines
-        ]
 
         entry_input = JournalEntryInput(
             company_id=company_id,
@@ -176,10 +184,10 @@ def create_journal_entry_via_api():
         with session_factory() as session:
             entry = create_journal_entry(session=session, payload=entry_input)
 
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid payload format."}), 400
     except (JournalEntryValidationError, JournalEntryCreationError) as exc:
         return jsonify({"error": str(exc)}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid payload format."}), 400
 
     return jsonify({"id": entry.id, "posting_number": entry.posting_number}), 201
 

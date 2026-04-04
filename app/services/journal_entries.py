@@ -41,6 +41,12 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
     if company is None:
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
+    for line in payload.lines:
+        if line.debit_amount < Decimal("0.00") or line.credit_amount < Decimal("0.00"):
+            raise JournalEntryCreationError("Buchungszeilen dürfen keine negativen Beträge enthalten.")
+        if line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00"):
+            raise JournalEntryCreationError("Buchungszeilen benötigen einen Betrag größer 0.")
+
     JournalEntryValidator.validate(
         JournalEntryDraft(
             status=payload.status,

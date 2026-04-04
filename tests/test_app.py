@@ -298,3 +298,69 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert report_response.status_code == 200
     payload = report_response.get_json()
     assert len(payload["rows"]) == 2
+
+
+def test_api_create_journal_entry_rejects_line_without_account_id(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 4", "company_name": "Api GmbH 4"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Ungültige API Buchung",
+            "status": "posted",
+            "lines": [
+                {"debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 400
+    assert "missing account_id" in create_response.get_json()["error"]
+
+
+def test_api_create_journal_entry_rejects_negative_amounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 5", "company_name": "Api GmbH 5"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Ungültige negative Beträge",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "-10.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "10.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 400
+    assert "keine negativen Beträge" in create_response.get_json()["error"]
