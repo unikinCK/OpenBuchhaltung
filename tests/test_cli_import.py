@@ -79,3 +79,33 @@ def test_cli_import_kontenrahmen_requires_exactly_one_source(tmp_path):
 
     assert result_with_both.exit_code != 0
     assert "Bitte genau eine Option" in result_with_both.output
+
+
+def test_cli_import_kontenrahmen_skr04_preserves_quoted_names(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _create_company(app)
+
+    runner = app.test_cli_runner()
+    result = runner.invoke(
+        args=[
+            "import-kontenrahmen",
+            "--company-id",
+            str(company_id),
+            "--chart",
+            "skr04",
+        ]
+    )
+
+    assert result.exit_code == 0
+
+    with app.extensions["db_session_factory"]() as session:
+        account_4240 = session.scalar(
+            select(Account).where(
+                Account.company_id == company_id,
+                Account.code == "4240",
+            )
+        )
+
+    assert account_4240 is not None
+    assert account_4240.name == "Gas, Strom, Wasser"
+    assert account_4240.account_type == "expense"
