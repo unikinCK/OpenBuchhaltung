@@ -41,6 +41,21 @@ curl -X POST http://localhost:5000/api/v1/tenants \
   -d '{"tenant_name":"Mandant A","company_name":"Mandant A GmbH","currency_code":"EUR"}'
 ```
 
+
+## UI-Screenshot Tool
+
+Für schnelle UI-Checks gibt es ein Screenshot-Skript:
+
+```bash
+python tools/screenshot_ui.py --url http://127.0.0.1:5000/ --output artifacts/ui-home.png
+```
+
+Einmalig Browser-Binaries installieren:
+
+```bash
+python -m playwright install chromium
+```
+
 ## LLM/MCP Kommunikation
 
 Es gibt einen MCP-Bridge-Endpunkt:
