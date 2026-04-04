@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -30,7 +30,7 @@ class Tenant(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     companies: Mapped[list[Company]] = relationship(back_populates="tenant", cascade="all, delete")
@@ -47,7 +47,7 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     tenant: Mapped[Tenant] = relationship(back_populates="companies")
@@ -127,7 +127,7 @@ class PeriodLock(Base):
         ForeignKey("period.id", ondelete="CASCADE"), nullable=False
     )
     locked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     reason: Mapped[str | None] = mapped_column(String(255))
     locked_by: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -202,7 +202,7 @@ class JournalEntry(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     company: Mapped[Company] = relationship(back_populates="journal_entries")
@@ -286,7 +286,7 @@ class Document(Base):
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
@@ -306,5 +306,5 @@ class AuditLog(Base):
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     changed_by: Mapped[str] = mapped_column(String(120), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
