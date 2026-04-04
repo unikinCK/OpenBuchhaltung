@@ -42,9 +42,21 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
     for line in payload.lines:
-        if line.debit_amount < Decimal("0.00") or line.credit_amount < Decimal("0.00"):
+        if not line.debit_amount.is_finite() or not line.credit_amount.is_finite():
+            raise JournalEntryCreationError("Betrag muss eine endliche Dezimalzahl sein.")
+        try:
+            has_negative_amount = (
+                line.debit_amount < Decimal("0.00") or line.credit_amount < Decimal("0.00")
+            )
+            is_zero_value_line = (
+                line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00")
+            )
+        except InvalidOperation:
+            raise JournalEntryCreationError("Betrag muss eine endliche Dezimalzahl sein.") from None
+
+        if has_negative_amount:
             raise JournalEntryCreationError("Buchungszeilen dürfen keine negativen Beträge enthalten.")
-        if line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00"):
+        if is_zero_value_line:
             raise JournalEntryCreationError("Buchungszeilen benötigen einen Betrag größer 0.")
 
     JournalEntryValidator.validate(
