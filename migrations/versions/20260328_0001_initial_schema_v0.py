@@ -163,6 +163,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["journal_entry_id"], ["journal_entry.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenant.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("tenant_id", "storage_key", name="uq_document_tenant_storage_key"),
     )
 
     op.create_table(

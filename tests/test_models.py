@@ -12,6 +12,7 @@ from domain.models import (
     Account,
     Base,
     Company,
+    Document,
     FiscalYear,
     JournalEntry,
     JournalEntryLine,
@@ -115,3 +116,29 @@ def test_journal_entry_line_integrity(session: Session) -> None:
             credit_amount=Decimal("10.00"),
             currency_code="EUR",
         )
+
+
+def test_document_storage_key_is_unique_per_tenant(session: Session) -> None:
+    tenant, company, *_ = _create_base_entities(session)
+
+    first_document = Document(
+        tenant_id=tenant.id,
+        company_id=company.id,
+        file_name="beleg-1.pdf",
+        storage_key="tenant-a/doc-1.pdf",
+        mime_type="application/pdf",
+    )
+    duplicate_document = Document(
+        tenant_id=tenant.id,
+        company_id=company.id,
+        file_name="beleg-2.pdf",
+        storage_key="tenant-a/doc-1.pdf",
+        mime_type="application/pdf",
+    )
+
+    session.add(first_document)
+    session.commit()
+
+    session.add(duplicate_document)
+    with pytest.raises(IntegrityError):
+        session.commit()

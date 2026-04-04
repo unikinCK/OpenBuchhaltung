@@ -271,6 +271,9 @@ class JournalEntryLine(Base):
 
 class Document(Base):
     __tablename__ = "document"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "storage_key", name="uq_document_tenant_storage_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
