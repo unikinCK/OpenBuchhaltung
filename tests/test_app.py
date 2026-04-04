@@ -100,3 +100,41 @@ def test_duplicate_tenant_or_company_shows_validation_message(tmp_path):
     assert duplicate_response.status_code == 200
     assert b"Mandant oder Gesellschaft existiert bereits" in duplicate_response.data
     assert b"Mandanten:</strong> 1" in duplicate_response.data
+
+
+def test_duplicate_account_code_shows_validation_message(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant D", "company_name": "Mandant D GmbH"},
+        follow_redirects=True,
+    )
+
+    first_response = client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    assert first_response.status_code == 200
+
+    duplicate_response = client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank 2",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+
+    assert duplicate_response.status_code == 200
+    assert b"Konto mit dieser Nummer existiert bereits" in duplicate_response.data
+    assert b"Konten:</strong> 1" in duplicate_response.data
