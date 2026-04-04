@@ -63,11 +63,22 @@ curl -X POST http://localhost:5000/api/v1/mcp/call \
 
 ## Kontenrahmenimport (SKR03/SKR04)
 
-CSV-Import per Flask-CLI (idempotent, Duplikate werden uebersprungen):
+CSV-Import per Flask-CLI (idempotent, Duplikate werden uebersprungen).
+
+Vorgebundene Kontenrahmen aus dem Repo importieren:
 
 ```bash
-flask --app run.py import-kontenrahmen --company-id 1 --csv-path ./skr03.csv
+flask --app run.py import-kontenrahmen --company-id 1 --chart skr03
+flask --app run.py import-kontenrahmen --company-id 1 --chart skr04
 ```
+
+Alternativ eigene CSV-Datei importieren:
+
+```bash
+flask --app run.py import-kontenrahmen --company-id 1 --csv-path ./mein_kontenrahmen.csv
+```
+
+Hinweis: Genau eine Quelle muss angegeben werden (`--chart` oder `--csv-path`).
 
 Unterstuetzte Kopfzeilen (Alias):
 - `code` oder `Kontonummer`
