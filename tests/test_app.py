@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
+from domain.models import FiscalYear, Period, PeriodLock
 
 
 def _create_test_app(tmp_path: Path):
@@ -258,6 +260,86 @@ def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
     assert b"Buchung 2026-0001 wurde gespeichert" in response.data
     assert b"1200" in response.data
     assert b"8400" in response.data
+
+
+def test_journal_entry_form_rejects_locked_period(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant F", "company_name": "Mandant F GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+
+    with app.extensions["db_session_factory"]() as session:
+        fiscal_year = FiscalYear(
+            tenant_id=1,
+            company_id=1,
+            label="2026",
+            start_date=datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            end_date=datetime(2026, 12, 31, tzinfo=timezone.utc).date(),
+            is_closed=False,
+        )
+        session.add(fiscal_year)
+        session.flush()
+
+        period = Period(
+            tenant_id=1,
+            fiscal_year_id=fiscal_year.id,
+            period_number=4,
+            start_date=datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+            end_date=datetime(2026, 4, 30, tzinfo=timezone.utc).date(),
+            status="closed",
+        )
+        session.add(period)
+        session.flush()
+
+        session.add(
+            PeriodLock(
+                tenant_id=1,
+                period_id=period.id,
+                reason="Monatsabschluss",
+                locked_by="test",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Gesperrte Periode",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Periode ist gesperrt" in response.data
     assert b"100.00" in response.data
 
 
