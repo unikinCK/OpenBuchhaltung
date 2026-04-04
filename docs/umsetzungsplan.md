@@ -113,7 +113,7 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [x] Grundlegendes Rechtemodell + Login (v0, Demo-User)
 
 ## Phase 1 – Kernbuchhaltung MVP (6–10 Wochen)
-- [ ] Kontenrahmenimport SKR03/SKR04
+- [x] Kontenrahmenimport SKR03/SKR04
 - [ ] Buchungsmaske (Soll/Haben, Steuercode, Beleglink)
 - [ ] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden)
 - [ ] Belegupload + Speicherung + Verknüpfung

@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from datetime import date
+
 from flask import Blueprint, current_app, jsonify, request
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.services.journal_entries import (
+    JournalEntryCreationError,
+    JournalEntryInput,
+    JournalLineInput,
+    create_journal_entry,
+    parse_decimal,
+)
 from app.services.mcp_client import MCPError, call_mcp_server
+from app.services.reports import trial_balance_for_company
+from app.services.scoping import scoped_select
 from domain.models import Account, Company, Tenant
+from domain.services.journal_entry_validation import JournalEntryValidationError
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/v1")
 
@@ -64,7 +75,7 @@ def create_tenant_with_company():
 def list_companies():
     session_factory = _get_session_factory()
     with session_factory() as session:
-        companies = session.execute(select(Company).order_by(Company.name)).scalars().all()
+        companies = session.execute(scoped_select(Company).order_by(Company.name)).scalars().all()
 
     return (
         jsonify(
@@ -127,6 +138,84 @@ def create_account():
             ),
             201,
         )
+
+
+@api_bp.post("/journal-entries")
+def create_journal_entry_via_api():
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        company_id = int(payload.get("company_id"))
+        entry_date = date.fromisoformat(payload.get("entry_date"))
+        description = (payload.get("description") or "").strip()
+        status = (payload.get("status") or "posted").strip()
+        raw_lines = payload.get("lines") or []
+
+        if not description:
+            return jsonify({"error": "description is required."}), 400
+
+        lines = [
+            JournalLineInput(
+                account_id=int(line["account_id"]),
+                debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
+                credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
+                description=(line.get("description") or "").strip() or None,
+            )
+            for line in raw_lines
+        ]
+
+        entry_input = JournalEntryInput(
+            company_id=company_id,
+            entry_date=entry_date,
+            description=description,
+            status=status,
+            lines=lines,
+        )
+
+        session_factory = _get_session_factory()
+        with session_factory() as session:
+            entry = create_journal_entry(session=session, payload=entry_input)
+
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid payload format."}), 400
+    except (JournalEntryValidationError, JournalEntryCreationError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"id": entry.id, "posting_number": entry.posting_number}), 201
+
+
+@api_bp.get("/trial-balance")
+def get_trial_balance():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        rows = trial_balance_for_company(session=session, company_id=company_id)
+
+    return (
+        jsonify(
+            {
+                "company_id": company_id,
+                "rows": [
+                    {
+                        "code": row["code"],
+                        "name": row["name"],
+                        "debit_total": str(row["debit_total"]),
+                        "credit_total": str(row["credit_total"]),
+                        "balance": str(row["balance"]),
+                    }
+                    for row in rows
+                ],
+            }
+        ),
+        200,
+    )
 
 
 @api_bp.post("/mcp/call")

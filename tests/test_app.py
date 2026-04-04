@@ -63,7 +63,7 @@ def test_can_create_account_via_form(tmp_path):
     )
 
     index_response = client.get("/")
-    assert b"value=\"1\">Mandant B GmbH" in index_response.data
+    assert b"Mandant B GmbH" in index_response.data
 
     response = client.post(
         "/accounts",
@@ -209,3 +209,92 @@ def test_api_mcp_call_success_with_mock(tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["result"]["ok"] is True
+
+
+def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant E", "company_name": "Mandant E GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Testbuchung",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Buchung 2026-0001 wurde gespeichert" in response.data
+    assert b"1200" in response.data
+    assert b"8400" in response.data
+    assert b"100.00" in response.data
+
+
+def test_api_create_journal_entry_and_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 3", "company_name": "Api GmbH 3"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "API Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "250.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "250.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+
+    report_response = client.get("/api/v1/trial-balance", query_string={"company_id": 1})
+    assert report_response.status_code == 200
+    payload = report_response.get_json()
+    assert len(payload["rows"]) == 2

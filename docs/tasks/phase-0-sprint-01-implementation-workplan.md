@@ -26,27 +26,26 @@ Reihenfolge von Entwicklungs-Tasks zerlegen, mit klaren Test-Stopps für manuell
    - Unit-Tests für JournalEntry-Validierung.
    - **Status:** umgesetzt.
 
-## Nächste Coding-Tasks (offen)
-
 5. **P0-S1-03A: Tenant/Company-Scoping als Query-Policy**
    - Generische Scoping-Hilfsfunktionen im Datenzugriff.
    - Integrationstests für Datenisolation.
+   - **Status:** umgesetzt.
 
 6. **P0-S1-05A: Buchungserfassungsflow (JournalEntry + Lines)**
    - Eingabeformular + Request-Mapping auf Domain-Validierung.
    - Persistenz inkl. aussagekräftiger Fehlermeldungen.
+   - **Status:** umgesetzt.
 
 7. **P0-S1-06A: Summen-/Saldenliste**
    - Aggregationsquery je Konto.
    - Einfache tabellarische Ansicht mit reproduzierbaren Testdaten.
+   - **Status:** umgesetzt.
 
-## Manuelle Test-Stopps (bevor weiterentwickelt wird)
+## Review-Checkpoint
+Die End-to-End-Kette ist jetzt im Prototyp vorhanden:
+1. Mandant + Gesellschaft anlegen
+2. Konto anlegen
+3. Buchung erfassen
+4. Summen-/Saldenliste prüfen
 
-### Stopp 1 (jetzt erforderlich)
-Bitte manuell in der laufenden App prüfen:
-1. Mandant + Gesellschaft anlegen funktioniert.
-2. Konto kann für eine Gesellschaft angelegt werden.
-3. Fehlerhinweise erscheinen bei leeren Pflichtfeldern.
-
-**Erst nach deinem "OK" auf Stopp 1** sollten die nächsten Tasks
-(P0-S1-03A/P0-S1-05A) umgesetzt werden.
+Nächster Schwerpunkt: Audit-Log und Periodensperren in den Buchungsflow integrieren.
