@@ -18,7 +18,7 @@ code,name,account_type
 4120,Löhne und Gehälter,expense
 4130,Gesetzliche soziale Aufwendungen,expense
 4210,Miete,expense
-4240,Gas, Strom, Wasser,expense
+4240,"Gas, Strom, Wasser",expense
 4360,Versicherungen,expense
 4600,Werbekosten,expense
 4800,Instandhaltung betrieblicher Räume,expense
