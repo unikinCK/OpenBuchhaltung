@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from datetime import date
+
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.services.journal_entries import (
+    JournalEntryCreationError,
+    JournalEntryInput,
+    JournalLineInput,
+    create_journal_entry,
+    parse_decimal,
+)
+from app.services.reports import trial_balance_for_company
+from app.services.scoping import scoped_select
 from domain.models import Account, Company, Tenant
+from domain.services.journal_entry_validation import JournalEntryValidationError
 
 main_bp = Blueprint("main", __name__)
 
@@ -18,16 +29,33 @@ def _get_session_factory():
 
 @main_bp.get("/")
 def index():
+    selected_company_id = request.args.get("company_id", type=int)
+
     session_factory = _get_session_factory()
     with session_factory() as session:
-        tenants = session.execute(select(Tenant).order_by(Tenant.name)).scalars().all()
-        companies = session.execute(select(Company).order_by(Company.name)).scalars().all()
-        accounts = session.execute(select(Account).order_by(Account.code)).scalars().all()
+        tenants = session.execute(scoped_select(Tenant).order_by(Tenant.name)).scalars().all()
+        companies = session.execute(scoped_select(Company).order_by(Company.name)).scalars().all()
+
+        if selected_company_id is None and companies:
+            selected_company_id = companies[0].id
+
+        account_query = scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
+        accounts = session.execute(account_query).scalars().all() if selected_company_id else []
+
+        trial_balance = (
+            trial_balance_for_company(session=session, company_id=selected_company_id)
+            if selected_company_id
+            else []
+        )
+
     return render_template(
         "index.html",
         tenants=tenants,
         companies=companies,
         accounts=accounts,
+        selected_company_id=selected_company_id,
+        trial_balance=trial_balance,
+        today=date.today().isoformat(),
     )
 
 
@@ -87,7 +115,55 @@ def create_account():
         except IntegrityError:
             session.rollback()
             flash("Konto mit dieser Nummer existiert bereits.", "error")
-            return redirect(url_for("main.index"))
+            return redirect(url_for("main.index", company_id=company_id))
 
     flash("Konto wurde angelegt.", "success")
-    return redirect(url_for("main.index"))
+    return redirect(url_for("main.index", company_id=company_id))
+
+
+@main_bp.post("/journal-entries")
+def create_journal_entry_from_form():
+    company_id = request.form.get("company_id", type=int)
+    entry_date_raw = request.form.get("entry_date", "").strip()
+    description = request.form.get("description", "").strip()
+    debit_account_id = request.form.get("debit_account_id", type=int)
+    credit_account_id = request.form.get("credit_account_id", type=int)
+    amount_raw = request.form.get("amount", "").strip()
+
+    if not company_id or not entry_date_raw or not description:
+        flash("Gesellschaft, Datum und Beschreibung sind Pflichtfelder.", "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    if not debit_account_id or not credit_account_id:
+        flash("Bitte Soll- und Habenkonto auswählen.", "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    try:
+        parsed_date = date.fromisoformat(entry_date_raw)
+    except ValueError:
+        flash("Ungültiges Datum.", "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    try:
+        amount = parse_decimal(amount_raw)
+        entry_payload = JournalEntryInput(
+            company_id=company_id,
+            entry_date=parsed_date,
+            description=description,
+            status="posted",
+            lines=[
+                JournalLineInput(account_id=debit_account_id, debit_amount=amount, credit_amount=parse_decimal("0.00")),
+                JournalLineInput(account_id=credit_account_id, debit_amount=parse_decimal("0.00"), credit_amount=amount),
+            ],
+        )
+
+        session_factory = _get_session_factory()
+        with session_factory() as session:
+            entry = create_journal_entry(session=session, payload=entry_payload)
+
+    except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
+    return redirect(url_for("main.index", company_id=company_id))
