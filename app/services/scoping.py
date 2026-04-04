@@ -3,7 +3,12 @@ from __future__ import annotations
 from sqlalchemy import Select, select
 
 
-def scoped_select(model: type, *, tenant_id: int | None = None, company_id: int | None = None) -> Select:
+def scoped_select(
+    model: type,
+    *,
+    tenant_id: int | None = None,
+    company_id: int | None = None,
+) -> Select:
     """Build a reusable select with optional tenant/company filters."""
     stmt = select(model)
 

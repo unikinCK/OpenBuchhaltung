@@ -26,8 +26,20 @@ def test_scoped_select_filters_by_company(tmp_path):
 
         session.add_all(
             [
-                Account(tenant_id=tenant.id, company_id=company_a.id, code="1000", name="A", account_type="asset"),
-                Account(tenant_id=tenant.id, company_id=company_b.id, code="2000", name="B", account_type="asset"),
+                Account(
+                    tenant_id=tenant.id,
+                    company_id=company_a.id,
+                    code="1000",
+                    name="A",
+                    account_type="asset",
+                ),
+                Account(
+                    tenant_id=tenant.id,
+                    company_id=company_b.id,
+                    code="2000",
+                    name="B",
+                    account_type="asset",
+                ),
             ]
         )
         session.commit()

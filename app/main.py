@@ -39,7 +39,10 @@ def index():
         if selected_company_id is None and companies:
             selected_company_id = companies[0].id
 
-        account_query = scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
+        account_query = scoped_select(
+            Account,
+            company_id=selected_company_id,
+        ).order_by(Account.code)
         accounts = session.execute(account_query).scalars().all() if selected_company_id else []
 
         trial_balance = (
@@ -152,8 +155,16 @@ def create_journal_entry_from_form():
             description=description,
             status="posted",
             lines=[
-                JournalLineInput(account_id=debit_account_id, debit_amount=amount, credit_amount=parse_decimal("0.00")),
-                JournalLineInput(account_id=credit_account_id, debit_amount=parse_decimal("0.00"), credit_amount=amount),
+                JournalLineInput(
+                    account_id=debit_account_id,
+                    debit_amount=amount,
+                    credit_amount=parse_decimal("0.00"),
+                ),
+                JournalLineInput(
+                    account_id=credit_account_id,
+                    debit_amount=parse_decimal("0.00"),
+                    credit_amount=amount,
+                ),
             ],
         )
 

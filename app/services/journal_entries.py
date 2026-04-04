@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from domain.models import Account, Company, FiscalYear, JournalEntry, JournalEntryLine, Period
 from domain.services.journal_entry_validation import (
     JournalEntryDraft,
-    JournalEntryValidationError,
     JournalEntryValidator,
     ValidationLine,
 )
@@ -84,7 +83,11 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         dt=payload.entry_date,
     )
 
-    posting_number = _next_posting_number(session=session, company_id=company.id, year=payload.entry_date.year)
+    posting_number = _next_posting_number(
+        session=session,
+        company_id=company.id,
+        year=payload.entry_date.year,
+    )
 
     entry = JournalEntry(
         tenant_id=company.tenant_id,
@@ -127,7 +130,13 @@ def parse_decimal(value: str) -> Decimal:
         raise JournalEntryCreationError("Betrag ist keine gültige Dezimalzahl.") from None
 
 
-def _get_or_create_fiscal_year(*, session: Session, tenant_id: int, company_id: int, dt: date) -> FiscalYear:
+def _get_or_create_fiscal_year(
+    *,
+    session: Session,
+    tenant_id: int,
+    company_id: int,
+    dt: date,
+) -> FiscalYear:
     label = str(dt.year)
     fiscal_year = session.execute(
         select(FiscalYear).where(FiscalYear.company_id == company_id, FiscalYear.label == label)
@@ -148,9 +157,18 @@ def _get_or_create_fiscal_year(*, session: Session, tenant_id: int, company_id: 
     return fiscal_year
 
 
-def _get_or_create_period(*, session: Session, tenant_id: int, fiscal_year_id: int, dt: date) -> Period:
+def _get_or_create_period(
+    *,
+    session: Session,
+    tenant_id: int,
+    fiscal_year_id: int,
+    dt: date,
+) -> Period:
     period = session.execute(
-        select(Period).where(Period.fiscal_year_id == fiscal_year_id, Period.period_number == dt.month)
+        select(Period).where(
+            Period.fiscal_year_id == fiscal_year_id,
+            Period.period_number == dt.month,
+        )
     ).scalar_one_or_none()
     if period:
         return period
@@ -175,5 +193,10 @@ def _get_or_create_period(*, session: Session, tenant_id: int, fiscal_year_id: i
 
 
 def _next_posting_number(*, session: Session, company_id: int, year: int) -> str:
-    count = session.scalar(select(func.count(JournalEntry.id)).where(JournalEntry.company_id == company_id)) or 0
+    count = (
+        session.scalar(
+            select(func.count(JournalEntry.id)).where(JournalEntry.company_id == company_id)
+        )
+        or 0
+    )
     return f"{year}-{count + 1:04d}"

@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 from domain.models import Account, JournalEntry, JournalEntryLine
 
 
-def trial_balance_for_company(*, session: Session, company_id: int) -> list[dict[str, Decimal | str]]:
+def trial_balance_for_company(
+    *,
+    session: Session,
+    company_id: int,
+) -> list[dict[str, Decimal | str]]:
     rows = session.execute(
         select(
             Account.code,
