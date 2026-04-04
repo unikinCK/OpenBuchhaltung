@@ -154,6 +154,7 @@ def create_journal_entry_from_form():
             entry_date=parsed_date,
             description=description,
             status="posted",
+            changed_by="web-form",
             lines=[
                 JournalLineInput(
                     account_id=debit_account_id,

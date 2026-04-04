@@ -7,7 +7,16 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from domain.models import Account, Company, FiscalYear, JournalEntry, JournalEntryLine, Period
+from app.services.audit_log import log_audit_event
+from domain.models import (
+    Account,
+    Company,
+    FiscalYear,
+    JournalEntry,
+    JournalEntryLine,
+    Period,
+    PeriodLock,
+)
 from domain.services.journal_entry_validation import (
     JournalEntryDraft,
     JournalEntryValidator,
@@ -34,6 +43,7 @@ class JournalEntryInput:
     description: str
     status: str
     lines: list[JournalLineInput]
+    changed_by: str = "system"
 
 
 def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> JournalEntry:
@@ -82,6 +92,7 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         fiscal_year_id=fiscal_year.id,
         dt=payload.entry_date,
     )
+    _ensure_period_is_open(session=session, period_id=period.id)
 
     posting_number = _next_posting_number(
         session=session,
@@ -117,6 +128,22 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
             line_payload["credit_amount"] = line.credit_amount
 
         session.add(JournalEntryLine(**line_payload))
+
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="journal_entry",
+        entity_id=str(entry.id),
+        action="created",
+        changed_by=payload.changed_by,
+        payload={
+            "posting_number": entry.posting_number,
+            "entry_date": entry.entry_date.isoformat(),
+            "description": entry.description,
+            "line_count": len(payload.lines),
+        },
+    )
 
     session.commit()
     session.refresh(entry)
@@ -200,3 +227,9 @@ def _next_posting_number(*, session: Session, company_id: int, year: int) -> str
         or 0
     )
     return f"{year}-{count + 1:04d}"
+
+
+def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
+    locked = session.execute(select(PeriodLock.id).where(PeriodLock.period_id == period_id)).first()
+    if locked:
+        raise JournalEntryCreationError("Die Periode ist gesperrt. Buchung nicht möglich.")
