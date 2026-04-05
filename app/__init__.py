@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from flask import Flask
 
 from .api import api_bp
@@ -16,10 +18,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         SECRET_KEY="dev-secret-key-change-me",
         DATABASE_URL=None,
         MCP_SERVER_URL=None,
+        DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
     )
 
     if test_config:
         app.config.update(test_config)
+
+    Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
     app.extensions["db_session_factory"] = create_session_factory(app.config.get("DATABASE_URL"))
 

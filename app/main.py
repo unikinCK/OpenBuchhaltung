@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+from uuid import uuid4
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
+from werkzeug.utils import secure_filename
 from sqlalchemy.exc import IntegrityError
 
 from app.services.journal_entries import (
@@ -14,7 +27,7 @@ from app.services.journal_entries import (
 )
 from app.services.reports import trial_balance_for_company
 from app.services.scoping import scoped_select
-from domain.models import Account, Company, Tenant
+from domain.models import Account, Company, Document, JournalEntry, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 main_bp = Blueprint("main", __name__)
@@ -50,6 +63,29 @@ def index():
             if selected_company_id
             else []
         )
+        journal_entries = (
+            session.execute(
+                scoped_select(JournalEntry, company_id=selected_company_id).order_by(
+                    JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+                )
+            )
+            .scalars()
+            .all()
+            if selected_company_id
+            else []
+        )
+        documents = (
+            session.execute(
+                scoped_select(Document, company_id=selected_company_id).order_by(
+                    Document.uploaded_at.desc()
+                )
+            )
+            .scalars()
+            .all()
+            if selected_company_id
+            else []
+        )
+        journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
 
     return render_template(
         "index.html",
@@ -58,6 +94,9 @@ def index():
         accounts=accounts,
         selected_company_id=selected_company_id,
         trial_balance=trial_balance,
+        journal_entries=journal_entries,
+        documents=documents,
+        journal_entry_labels=journal_entry_labels,
         today=date.today().isoformat(),
     )
 
@@ -216,3 +255,72 @@ def create_journal_entry_from_form():
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
     return redirect(url_for("main.index", company_id=company_id))
+
+
+@main_bp.post("/documents")
+def upload_document():
+    company_id = request.form.get("company_id", type=int)
+    journal_entry_id = request.form.get("journal_entry_id", type=int)
+    uploaded_file = request.files.get("document_file")
+
+    if not company_id or uploaded_file is None or not uploaded_file.filename:
+        flash("Gesellschaft und Datei sind Pflichtfelder.", "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    original_file_name = secure_filename(uploaded_file.filename)
+    if not original_file_name:
+        flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.index", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            abort(404)
+
+        linked_entry = None
+        if journal_entry_id is not None:
+            linked_entry = session.get(JournalEntry, journal_entry_id)
+            if linked_entry is None or linked_entry.company_id != company.id:
+                flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
+                return redirect(url_for("main.index", company_id=company_id))
+
+        unique_name = f"{uuid4().hex}_{original_file_name}"
+        tenant_dir = Path(current_app.config["DOCUMENT_UPLOAD_DIR"]) / str(company.tenant_id)
+        company_dir = tenant_dir / str(company.id)
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        uploaded_file.save(target_path)
+
+        document = Document(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            journal_entry_id=linked_entry.id if linked_entry else None,
+            file_name=original_file_name,
+            storage_key=str(target_path),
+            mime_type=uploaded_file.mimetype or "application/octet-stream",
+        )
+        session.add(document)
+        session.commit()
+
+    flash("Beleg wurde hochgeladen.", "success")
+    return redirect(url_for("main.index", company_id=company_id))
+
+
+@main_bp.get("/documents/<int:document_id>/download")
+def download_document(document_id: int):
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        document_path = Path(document.storage_key)
+        if not document_path.exists():
+            abort(404)
+
+        return send_file(
+            document_path,
+            mimetype=document.mime_type,
+            as_attachment=True,
+            download_name=document.file_name,
+        )

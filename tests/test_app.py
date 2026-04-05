@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
-from domain.models import FiscalYear, Period, PeriodLock
+from domain.models import Document, FiscalYear, Period, PeriodLock
 
 
 def _create_test_app(tmp_path: Path):
@@ -475,3 +476,91 @@ def test_journal_entry_form_supports_multiple_lines(tmp_path):
 
     assert response.status_code == 200
     assert b"Buchung 2026-0001 wurde gespeichert" in response.data
+
+
+def test_can_upload_document_and_link_to_journal_entry(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant H", "company_name": "Mandant H GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Beleglink",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "journal_entry_id": "1",
+            "document_file": (BytesIO(b"rechnung"), "rechnung.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg wurde hochgeladen" in response.data
+    assert b"rechnung.pdf" in response.data
+
+    with app.extensions["db_session_factory"]() as session:
+        document = session.query(Document).one()
+        assert document.file_name == "rechnung.pdf"
+        assert document.journal_entry_id == 1
+
+
+def test_document_download_returns_file(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant I", "company_name": "Mandant I GmbH"},
+        follow_redirects=True,
+    )
+    upload_response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_file": (BytesIO(b"testbeleg"), "beleg.txt"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert upload_response.status_code == 200
+
+    response = client.get("/documents/1/download")
+    assert response.status_code == 200
+    assert response.data == b"testbeleg"
