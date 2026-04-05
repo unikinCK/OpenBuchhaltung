@@ -21,6 +21,13 @@ from domain.services.journal_entry_validation import JournalEntryValidationError
 api_bp = Blueprint("api", __name__, url_prefix="/api/v1")
 
 
+def _validation_error(message: str, *, details: list[dict[str, str]] | None = None):
+    payload: dict[str, object] = {"error": message}
+    if details:
+        payload["details"] = details
+    return jsonify(payload), 422
+
+
 def _get_session_factory():
     session_factory = current_app.extensions.get("db_session_factory")
     if session_factory is None:
@@ -152,17 +159,57 @@ def create_journal_entry_via_api():
         raw_lines = payload.get("lines") or []
 
         if not description:
-            return jsonify({"error": "description is required."}), 400
-
-        lines = [
-            JournalLineInput(
-                account_id=int(line["account_id"]),
-                debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
-                credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
-                description=(line.get("description") or "").strip() or None,
+            return _validation_error(
+                "Validation failed.",
+                details=[{"field": "description", "message": "description is required."}],
             )
-            for line in raw_lines
-        ]
+        if not isinstance(raw_lines, list):
+            return _validation_error(
+                "Validation failed.",
+                details=[{"field": "lines", "message": "lines must be a list."}],
+            )
+
+        lines = []
+        for idx, line in enumerate(raw_lines):
+            if not isinstance(line, dict):
+                return _validation_error(
+                    "Validation failed.",
+                    details=[
+                        {
+                            "field": f"lines[{idx}]",
+                            "message": "line must be an object.",
+                        }
+                    ],
+                )
+            try:
+                lines.append(
+                    JournalLineInput(
+                        account_id=int(line["account_id"]),
+                        debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
+                        credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
+                        description=(line.get("description") or "").strip() or None,
+                    )
+                )
+            except KeyError:
+                return _validation_error(
+                    "Validation failed.",
+                    details=[
+                        {
+                            "field": f"lines[{idx}].account_id",
+                            "message": "account_id is required.",
+                        }
+                    ],
+                )
+            except (TypeError, ValueError) as exc:
+                return _validation_error(
+                    "Validation failed.",
+                    details=[
+                        {
+                            "field": f"lines[{idx}]",
+                            "message": str(exc),
+                        }
+                    ],
+                )
 
         entry_input = JournalEntryInput(
             company_id=company_id,
@@ -176,12 +223,24 @@ def create_journal_entry_via_api():
         with session_factory() as session:
             entry = create_journal_entry(session=session, payload=entry_input)
 
+    except (JournalEntryValidationError, JournalEntryCreationError) as exc:
+        return _validation_error(
+            "Validation failed.",
+            details=[{"field": "journal_entry", "message": str(exc)}],
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid payload format."}), 400
-    except (JournalEntryValidationError, JournalEntryCreationError) as exc:
-        return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"id": entry.id, "posting_number": entry.posting_number}), 201
+    return (
+        jsonify(
+            {
+                "id": entry.id,
+                "posting_number": entry.posting_number,
+                "created_at": entry.created_at.isoformat(),
+            }
+        ),
+        201,
+    )
 
 
 @api_bp.get("/trial-balance")

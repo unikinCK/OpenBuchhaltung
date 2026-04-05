@@ -11,7 +11,7 @@ from domain.services.journal_entry_validation import (
 
 
 def _line(debit: str, credit: str) -> ValidationLine:
-    return ValidationLine(debit_amount=Decimal(debit), credit_amount=Decimal(credit))
+    return ValidationLine(account_id=1, debit_amount=Decimal(debit), credit_amount=Decimal(credit))
 
 
 def test_validator_accepts_balanced_posted_entry() -> None:
@@ -47,4 +47,14 @@ def test_validator_rejects_unknown_status() -> None:
     )
 
     with pytest.raises(JournalEntryValidationError, match="Ungültiger Status"):
+        JournalEntryValidator.validate(draft)
+
+
+def test_validator_rejects_zero_line_amount() -> None:
+    draft = JournalEntryDraft(
+        status="draft",
+        lines=[_line("100.00", "0.00"), _line("0.00", "0.00")],
+    )
+
+    with pytest.raises(JournalEntryValidationError, match="Betrag muss größer 0"):
         JournalEntryValidator.validate(draft)
