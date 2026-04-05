@@ -15,8 +15,8 @@ from flask import (
     send_file,
     url_for,
 )
-from werkzeug.utils import secure_filename
 from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
 
 from app.services.journal_entries import (
     JournalEntryCreationError,
