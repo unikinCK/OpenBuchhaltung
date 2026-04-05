@@ -116,7 +116,7 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [x] Kontenrahmenimport SKR03/SKR04
 - [x] Buchungsmaske (Soll/Haben, Steuercode, Beleglink) *(MVP-Basis umgesetzt; Beleglink folgt mit P1-002)*
 - [x] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden) *(Basisregeln inkl. Periodensperre umgesetzt)*
-- [ ] Belegupload + Speicherung + Verknüpfung
+- [x] Belegupload + Speicherung + Verknüpfung
 - [ ] Externes LLM für Beleg-Updates über OpenAI-Responses-kompatible Schnittstelle integrieren
 - [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
 - [x] Summen-/Saldenliste

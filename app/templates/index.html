@@ -18,6 +18,61 @@
   </section>
 
   <section>
+    <h3>Belegupload</h3>
+    <form method="post" action="{{ url_for('main.upload_document') }}" enctype="multipart/form-data">
+      <label for="document_company_id">Gesellschaft</label>
+      <select id="document_company_id" name="company_id" required>
+        <option value="">Bitte wählen</option>
+        {% for company in companies %}
+          <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="journal_entry_id">Buchung (optional)</label>
+      <select id="journal_entry_id" name="journal_entry_id">
+        <option value="">Keine Verknüpfung</option>
+        {% for entry in journal_entries %}
+          <option value="{{ entry.id }}">{{ entry.posting_number }} - {{ entry.description }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="document_file">Datei</label>
+      <input id="document_file" name="document_file" type="file" required />
+
+      <button type="submit">Beleg hochladen</button>
+    </form>
+
+    {% if documents %}
+      <table>
+        <thead>
+          <tr>
+            <th>Datei</th>
+            <th>Buchung</th>
+            <th>Download</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for document in documents %}
+            <tr>
+              <td>{{ document.file_name }}</td>
+              <td>
+                {% if document.journal_entry_id %}
+                  {{ journal_entry_labels.get(document.journal_entry_id, '-') }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td><a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Noch keine Belege vorhanden.</p>
+    {% endif %}
+  </section>
+
+  <section>
     <h3>Konto anlegen</h3>
     <form method="post" action="{{ url_for('main.create_account') }}">
       <label for="company_id">Gesellschaft</label>
