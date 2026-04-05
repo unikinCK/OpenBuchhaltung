@@ -33,12 +33,41 @@ Basis-Endpunkte:
 - `POST /api/v1/tenants` (legt Mandant + Gesellschaft an)
 - `GET /api/v1/companies`
 - `POST /api/v1/accounts`
+- `POST /api/v1/journal-entries` (mehrzeilige Buchung, Validierung mit 422-Details)
+- `GET /api/v1/trial-balance`
 
 Beispiel:
 ```bash
 curl -X POST http://localhost:5000/api/v1/tenants \
   -H "Content-Type: application/json" \
   -d '{"tenant_name":"Mandant A","company_name":"Mandant A GmbH","currency_code":"EUR"}'
+```
+
+Journalbuchung (mehrzeilig):
+```bash
+curl -X POST http://localhost:5000/api/v1/journal-entries \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_id": 1,
+    "entry_date": "2026-04-04",
+    "description": "Rechnung 1001",
+    "status": "posted",
+    "lines": [
+      {"account_id": 1, "debit_amount": "80.00", "credit_amount": "0.00", "description": "Teilbetrag"},
+      {"account_id": 2, "debit_amount": "20.00", "credit_amount": "0.00", "description": "Nebenkosten"},
+      {"account_id": 3, "debit_amount": "0.00", "credit_amount": "100.00", "description": "Umsatzerlös"}
+    ]
+  }'
+```
+
+Validierungsfehler liefern `422` mit feldbezogenen Details:
+```json
+{
+  "error": "Validation failed.",
+  "details": [
+    {"field": "journal_entry", "message": "Zeile 2: Betrag muss größer 0 sein."}
+  ]
+}
 ```
 
 

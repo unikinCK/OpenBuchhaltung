@@ -58,27 +58,71 @@
       <label for="description">Beschreibung</label>
       <input id="description" name="description" required />
 
-      <label for="debit_account_id">Sollkonto</label>
-      <select id="debit_account_id" name="debit_account_id" required>
-        <option value="">Bitte wählen</option>
-        {% for account in accounts %}
-          <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
-        {% endfor %}
-      </select>
+      <div id="journal-lines">
+        <p><strong>Buchungszeilen</strong> (mindestens zwei)</p>
+        {% for _ in range(2) %}
+          <div class="journal-line">
+            <label>Konto</label>
+            <select name="line_account_id" required>
+              <option value="">Bitte wählen</option>
+              {% for account in accounts %}
+                <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
+              {% endfor %}
+            </select>
 
-      <label for="credit_account_id">Habenkonto</label>
-      <select id="credit_account_id" name="credit_account_id" required>
-        <option value="">Bitte wählen</option>
-        {% for account in accounts %}
-          <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
-        {% endfor %}
-      </select>
+            <label>Seite</label>
+            <select name="line_side" required>
+              <option value="debit">Soll</option>
+              <option value="credit">Haben</option>
+            </select>
 
-      <label for="amount">Betrag</label>
-      <input id="amount" name="amount" placeholder="100.00" required />
+            <label>Betrag</label>
+            <input name="line_amount" placeholder="100.00" required />
+
+            <label>Zeilenbeschreibung (optional)</label>
+            <input name="line_description" />
+          </div>
+        {% endfor %}
+      </div>
+
+      <button type="button" id="add-line-button">Weitere Zeile</button>
 
       <button type="submit">Buchung speichern</button>
     </form>
+    <template id="journal-line-template">
+      <div class="journal-line">
+        <label>Konto</label>
+        <select name="line_account_id" required>
+          <option value="">Bitte wählen</option>
+          {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label>Seite</label>
+        <select name="line_side" required>
+          <option value="debit">Soll</option>
+          <option value="credit">Haben</option>
+        </select>
+
+        <label>Betrag</label>
+        <input name="line_amount" placeholder="100.00" required />
+
+        <label>Zeilenbeschreibung (optional)</label>
+        <input name="line_description" />
+      </div>
+    </template>
+    <script>
+      (function() {
+        const addLineButton = document.getElementById("add-line-button");
+        const container = document.getElementById("journal-lines");
+        const template = document.getElementById("journal-line-template");
+        if (!addLineButton || !container || !template) return;
+        addLineButton.addEventListener("click", function() {
+          container.appendChild(template.content.cloneNode(true));
+        });
+      })();
+    </script>
   </section>
 
   <section>

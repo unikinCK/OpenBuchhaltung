@@ -55,7 +55,11 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         JournalEntryDraft(
             status=payload.status,
             lines=[
-                ValidationLine(debit_amount=line.debit_amount, credit_amount=line.credit_amount)
+                ValidationLine(
+                    account_id=line.account_id,
+                    debit_amount=line.debit_amount,
+                    credit_amount=line.credit_amount,
+                )
                 for line in payload.lines
             ],
         )

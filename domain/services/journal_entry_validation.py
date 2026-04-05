@@ -10,6 +10,7 @@ class JournalEntryValidationError(ValueError):
 
 @dataclass(slots=True)
 class ValidationLine:
+    account_id: int | None
     debit_amount: Decimal
     credit_amount: Decimal
 
@@ -35,8 +36,27 @@ class JournalEntryValidator:
                 "Eine Buchung benötigt mindestens zwei Buchungszeilen."
             )
 
-        debit_total = sum((line.debit_amount for line in entry.lines), Decimal("0.00"))
-        credit_total = sum((line.credit_amount for line in entry.lines), Decimal("0.00"))
+        debit_total = Decimal("0.00")
+        credit_total = Decimal("0.00")
+        for idx, line in enumerate(entry.lines, start=1):
+            if line.account_id is None:
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Konto ist erforderlich."
+                )
+            if line.debit_amount < Decimal("0.00") or line.credit_amount < Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Beträge dürfen nicht negativ sein."
+                )
+            if line.debit_amount > Decimal("0.00") and line.credit_amount > Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Soll und Haben dürfen nicht gleichzeitig > 0 sein."
+                )
+            if line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Betrag muss größer 0 sein."
+                )
+            debit_total += line.debit_amount
+            credit_total += line.credit_amount
 
         if debit_total != credit_total:
             raise JournalEntryValidationError(
