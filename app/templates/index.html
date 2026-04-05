@@ -129,6 +129,11 @@
     <h3>Summen-/Saldenliste</h3>
     {% if selected_company_id %}
       <p>Gesellschaft-ID: {{ selected_company_id }}</p>
+      <p>
+        <a href="{{ url_for('main.export_trial_balance_csv', company_id=selected_company_id) }}">CSV Export Summen-/Saldenliste</a>
+        |
+        <a href="{{ url_for('main.export_journal_csv', company_id=selected_company_id) }}">CSV Export Journal</a>
+      </p>
       {% if trial_balance %}
         <table>
           <thead>

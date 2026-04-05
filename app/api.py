@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.services.journal_entries import (
@@ -13,7 +13,11 @@ from app.services.journal_entries import (
     parse_decimal,
 )
 from app.services.mcp_client import MCPError, call_mcp_server
-from app.services.reports import trial_balance_for_company
+from app.services.reports import (
+    journal_entries_csv_for_company,
+    trial_balance_csv_for_company,
+    trial_balance_for_company,
+)
 from app.services.scoping import scoped_select
 from domain.models import Account, Company, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -274,6 +278,48 @@ def get_trial_balance():
             }
         ),
         200,
+    )
+
+
+@api_bp.get("/exports/trial-balance.csv")
+def export_trial_balance_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        csv_content = trial_balance_csv_for_company(session=session, company_id=company_id)
+
+    return Response(
+        csv_content,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="trial-balance-{company_id}.csv"'
+        },
+    )
+
+
+@api_bp.get("/exports/journal.csv")
+def export_journal_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        csv_content = journal_entries_csv_for_company(session=session, company_id=company_id)
+
+    return Response(
+        csv_content,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="journal-{company_id}.csv"'},
     )
 
 

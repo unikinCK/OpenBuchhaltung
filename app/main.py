@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from sqlalchemy.exc import IntegrityError
 
 from app.services.journal_entries import (
@@ -12,7 +22,11 @@ from app.services.journal_entries import (
     create_journal_entry,
     parse_decimal,
 )
-from app.services.reports import trial_balance_for_company
+from app.services.reports import (
+    journal_entries_csv_for_company,
+    trial_balance_csv_for_company,
+    trial_balance_for_company,
+)
 from app.services.scoping import scoped_select
 from domain.models import Account, Company, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -216,3 +230,47 @@ def create_journal_entry_from_form():
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
     return redirect(url_for("main.index", company_id=company_id))
+
+
+@main_bp.get("/exports/trial-balance.csv")
+def export_trial_balance_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        flash("Für den Export wird eine Gesellschaft benötigt.", "error")
+        return redirect(url_for("main.index"))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            abort(404)
+        csv_content = trial_balance_csv_for_company(session=session, company_id=company_id)
+
+    return Response(
+        csv_content,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="trial-balance-{company_id}.csv"'
+        },
+    )
+
+
+@main_bp.get("/exports/journal.csv")
+def export_journal_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        flash("Für den Export wird eine Gesellschaft benötigt.", "error")
+        return redirect(url_for("main.index"))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            abort(404)
+        csv_content = journal_entries_csv_for_company(session=session, company_id=company_id)
+
+    return Response(
+        csv_content,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="journal-{company_id}.csv"'},
+    )

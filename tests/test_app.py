@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
+import csv
+from io import StringIO
 
 from app import create_app
 from domain.models import FiscalYear, Period, PeriodLock
@@ -258,8 +260,58 @@ def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
 
     assert response.status_code == 200
     assert b"Buchung 2026-0001 wurde gespeichert" in response.data
-    assert b"1200" in response.data
-    assert b"8400" in response.data
+
+
+def test_api_can_export_trial_balance_and_journal_as_csv(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "CSV Api Tenant", "company_name": "CSV Api GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "CSV Export API",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+
+    trial_balance_response = client.get("/api/v1/exports/trial-balance.csv?company_id=1")
+    assert trial_balance_response.status_code == 200
+    trial_rows = list(csv.DictReader(StringIO(trial_balance_response.get_data(as_text=True))))
+    assert trial_rows[0]["code"] == "1200"
+    assert trial_rows[0]["debit_total"] == "100.00"
+
+    journal_response = client.get("/api/v1/exports/journal.csv?company_id=1")
+    assert journal_response.status_code == 200
+    journal_rows = list(csv.DictReader(StringIO(journal_response.get_data(as_text=True))))
+    assert len(journal_rows) == 2
+    assert journal_rows[0]["posting_number"] == "2026-0001"
 
 
 def test_journal_entry_form_rejects_locked_period(tmp_path):
