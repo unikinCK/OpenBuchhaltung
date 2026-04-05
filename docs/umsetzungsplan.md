@@ -114,11 +114,11 @@ um Wechsel zwischen Engines zu vereinfachen.
 
 ## Phase 1 – Kernbuchhaltung MVP (6–10 Wochen)
 - [x] Kontenrahmenimport SKR03/SKR04
-- [ ] Buchungsmaske (Soll/Haben, Steuercode, Beleglink)
-- [ ] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden)
+- [x] Buchungsmaske (Soll/Haben, Steuercode, Beleglink) *(MVP-Basis umgesetzt; Beleglink folgt mit P1-002)*
+- [x] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden) *(Basisregeln inkl. Periodensperre umgesetzt)*
 - [ ] Belegupload + Speicherung + Verknüpfung
-- [ ] Audit-Log für alle buchungsrelevanten Aktionen
-- [ ] Summen-/Saldenliste
+- [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
+- [x] Summen-/Saldenliste
 - [ ] GuV/Bilanz-Report (HGB-Basisschema)
 - [ ] CSV-Export
 - [ ] End-to-End-Tests für Kernflows
