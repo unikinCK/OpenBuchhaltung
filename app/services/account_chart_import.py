@@ -9,6 +9,7 @@ from typing import TextIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.account_hierarchy import resolve_parent_account_id
 from domain.models import Account, Company
 
 logger = logging.getLogger(__name__)
@@ -82,12 +83,16 @@ def import_account_chart_csv(
             report.duplicate_rows += 1
             continue
 
+        session.flush()
         account = Account(
             tenant_id=company.tenant_id,
             company_id=company.id,
             code=row["code"],
             name=row["name"],
             account_type=row["account_type"],
+            parent_account_id=resolve_parent_account_id(
+                session=session, company_id=company.id, code=row["code"]
+            ),
         )
         session.add(account)
         seen_codes.add(row["code"])

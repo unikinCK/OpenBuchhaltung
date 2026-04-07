@@ -59,6 +59,9 @@ def test_import_account_chart_csv_success_duplicate_and_invalid_row(tmp_path):
     assert "Pflichtfelder fehlen" in report.errors[0].message
 
     assert [account.code for account in accounts] == ["1000", "1200"]
+    assert accounts[0].hierarchy_level == 1
+    assert accounts[1].hierarchy_level == 2
+    assert accounts[1].parent_account_id == accounts[0].id
 
     with app.extensions["db_session_factory"]() as session:
         second_report = import_account_chart_csv(

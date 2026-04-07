@@ -18,6 +18,7 @@ from flask import (
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
+from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -150,6 +151,9 @@ def create_account():
             code=code,
             name=name,
             account_type=account_type,
+            parent_account_id=resolve_parent_account_id(
+                session=session, company_id=company.id, code=code
+            ),
         )
         session.add(account)
         try:

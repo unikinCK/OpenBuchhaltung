@@ -137,7 +137,10 @@ class PeriodLock(Base):
 
 class Account(Base):
     __tablename__ = "account"
-    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_account_company_code"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_account_company_code"),
+        CheckConstraint("hierarchy_level BETWEEN 1 AND 4", name="ck_account_hierarchy_level_range"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
@@ -149,10 +152,45 @@ class Account(Base):
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    hierarchy_level: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    level_1: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_2: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_3: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_4: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    parent_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL")
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     company: Mapped[Company] = relationship(back_populates="accounts")
     journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="account")
+    parent_account: Mapped[Account | None] = relationship(
+        remote_side="Account.id", back_populates="child_accounts"
+    )
+    child_accounts: Mapped[list[Account]] = relationship(back_populates="parent_account")
+
+    @validates("code")
+    def _sync_hierarchy(self, key: str, value: str) -> str:
+        del key
+        normalized_code = (value or "").strip()
+        self.level_1, self.level_2, self.level_3, self.level_4, self.hierarchy_level = (
+            self.derive_hierarchy(normalized_code)
+        )
+        return normalized_code
+
+    @staticmethod
+    def derive_hierarchy(code: str) -> tuple[str, str, str, str, int]:
+        digits = "".join(char for char in code if char.isdigit())
+        padded = (digits[:4]).ljust(4, "0")
+        if padded[3] != "0":
+            level = 4
+        elif padded[2] != "0":
+            level = 3
+        elif padded[1] != "0":
+            level = 2
+        else:
+            level = 1
+        return padded[0], padded[1], padded[2], padded[3], level
 
 
 class TaxCode(Base):

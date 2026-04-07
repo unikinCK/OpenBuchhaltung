@@ -80,6 +80,13 @@ def test_can_create_central_entities(session: Session) -> None:
     assert fiscal_year.id is not None
     assert period.id is not None
     assert account.id is not None
+    assert account.hierarchy_level == 2
+    assert (account.level_1, account.level_2, account.level_3, account.level_4) == (
+        "1",
+        "2",
+        "0",
+        "0",
+    )
 
 
 def test_foreign_key_constraints_are_enforced(session: Session) -> None:
@@ -142,3 +149,34 @@ def test_document_storage_key_is_unique_per_tenant(session: Session) -> None:
     session.add(duplicate_document)
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_account_parent_relation_can_be_set(session: Session) -> None:
+    tenant = Tenant(name="Hierarchy Tenant")
+    company = Company(tenant=tenant, name="Hierarchy GmbH", currency_code="EUR")
+    session.add_all([tenant, company])
+    session.flush()
+
+    parent = Account(
+        tenant_id=tenant.id,
+        company_id=company.id,
+        code="1200",
+        name="Bank",
+        account_type="asset",
+    )
+    session.add(parent)
+    session.flush()
+
+    child = Account(
+        tenant_id=tenant.id,
+        company_id=company.id,
+        code="1234",
+        name="Bank Unterkonto",
+        account_type="asset",
+        parent_account_id=parent.id,
+    )
+    session.add(child)
+    session.commit()
+
+    assert child.parent_account_id == parent.id
+    assert child.hierarchy_level == 4
