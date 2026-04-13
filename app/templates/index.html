@@ -189,6 +189,11 @@
     {% endif %}
     {% if selected_company_id %}
       <p>Gesellschaft-ID: {{ selected_company_id }}</p>
+      <p>
+        <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id) }}">
+          Summen-/Saldenliste als CSV exportieren
+        </a>
+      </p>
       {% if trial_balance %}
         <table>
           <thead>

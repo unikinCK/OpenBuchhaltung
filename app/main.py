@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 from datetime import date
+from io import StringIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +11,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -344,3 +347,40 @@ def download_document(document_id: int):
             as_attachment=True,
             download_name=document.file_name,
         )
+
+
+@main_bp.get("/reports/trial-balance.csv")
+def download_trial_balance_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        flash("Gesellschaft für Export fehlt.", "error")
+        return redirect(url_for("main.index"))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            abort(404)
+        rows = trial_balance_for_company(session=session, company_id=company_id)
+
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Konto", "Name", "Soll", "Haben", "Saldo"])
+    for row in rows:
+        writer.writerow(
+            [
+                row["code"],
+                row["name"],
+                f"{row['debit_total']:.2f}",
+                f"{row['credit_total']:.2f}",
+                f"{row['balance']:.2f}",
+            ]
+        )
+
+    csv_content = output.getvalue()
+    response = make_response(csv_content)
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=susa-{company_id}-{date.today().isoformat()}.csv"
+    )
+    return response
