@@ -29,7 +29,11 @@ from app.services.journal_entries import (
     create_journal_entry,
     parse_decimal,
 )
-from app.services.reports import trial_balance_for_company
+from app.services.reports import (
+    balance_sheet_for_company,
+    income_statement_for_company,
+    trial_balance_for_company,
+)
 from app.services.scoping import scoped_select
 from domain.models import Account, Company, Document, JournalEntry, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -67,6 +71,16 @@ def index():
             if selected_company_id
             else []
         )
+        income_statement = (
+            income_statement_for_company(session=session, company_id=selected_company_id)
+            if selected_company_id
+            else {"revenues": [], "expenses": [], "totals": {}}
+        )
+        balance_sheet = (
+            balance_sheet_for_company(session=session, company_id=selected_company_id)
+            if selected_company_id
+            else {"assets": [], "liabilities_and_equity": [], "totals": {}}
+        )
         journal_entries = (
             session.execute(
                 scoped_select(JournalEntry, company_id=selected_company_id).order_by(
@@ -98,6 +112,8 @@ def index():
         accounts=accounts,
         selected_company_id=selected_company_id,
         trial_balance=trial_balance,
+        income_statement=income_statement,
+        balance_sheet=balance_sheet,
         journal_entries=journal_entries,
         documents=documents,
         journal_entry_labels=journal_entry_labels,

@@ -386,6 +386,132 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert len(payload["rows"]) == 2
 
 
+def test_api_income_statement_and_balance_sheet(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 5", "company_name": "Api GmbH 5"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "2000", "name": "Eigenkapital", "account_type": "equity"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "4930", "name": "Buero", "account_type": "expense"},
+    )
+
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Startkapital",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "1000.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "1000.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Verkauf",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "200.00", "credit_amount": "0.00"},
+                {"account_id": 3, "debit_amount": "0.00", "credit_amount": "200.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Buerobedarf",
+            "status": "posted",
+            "lines": [
+                {"account_id": 4, "debit_amount": "50.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "50.00"},
+            ],
+        },
+    )
+
+    income_statement_response = client.get(
+        "/api/v1/income-statement", query_string={"company_id": 1}
+    )
+    assert income_statement_response.status_code == 200
+    income_payload = income_statement_response.get_json()
+    assert income_payload["totals"]["total_revenue"] == "200.00"
+    assert income_payload["totals"]["total_expense"] == "50.00"
+    assert income_payload["totals"]["net_income"] == "150.00"
+
+    balance_sheet_response = client.get("/api/v1/balance-sheet", query_string={"company_id": 1})
+    assert balance_sheet_response.status_code == 200
+    balance_payload = balance_sheet_response.get_json()
+    assert balance_payload["totals"]["is_balanced"] is True
+    assert balance_payload["totals"]["difference"] == "0.00"
+    assert balance_payload["totals"]["total_assets"] == "1150.00"
+    assert balance_payload["totals"]["total_liabilities_and_equity"] == "1150.00"
+
+
+def test_api_csv_exports_for_journal_and_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 6", "company_name": "Api GmbH 6"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "CSV Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "75.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "75.00"},
+            ],
+        },
+    )
+
+    journal_response = client.get("/api/v1/exports/journal.csv", query_string={"company_id": 1})
+    assert journal_response.status_code == 200
+    assert "text/csv" in journal_response.headers["Content-Type"]
+    assert "posting_number,entry_date,entry_description" in journal_response.get_data(as_text=True)
+
+    trial_balance_response = client.get(
+        "/api/v1/exports/trial-balance.csv", query_string={"company_id": 1}
+    )
+    assert trial_balance_response.status_code == 200
+    trial_balance_csv = trial_balance_response.get_data(as_text=True)
+    assert "account_code,account_name,debit_total,credit_total,balance" in trial_balance_csv
+
+
 def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):
     app = _create_test_app(tmp_path)
     client = app.test_client()

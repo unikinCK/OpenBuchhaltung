@@ -120,8 +120,8 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [ ] Externes LLM für Beleg-Updates über OpenAI-Responses-kompatible Schnittstelle integrieren
 - [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
 - [x] Summen-/Saldenliste
-- [ ] GuV/Bilanz-Report (HGB-Basisschema)
-- [x] CSV-Export *(Summen-/Saldenliste als CSV-Download umgesetzt)*
+- [x] GuV/Bilanz-Report (HGB-Basisschema) *(MVP-Basis mit GuV/Bilanz-Endpunkten, Bilanzgleichheitsindikator und UI-Totals umgesetzt)*
+- [x] CSV-Export *(Core-Exports für Journal und Summen-/Saldenliste über API + UI-Downloadlinks umgesetzt)*
 - [ ] End-to-End-Tests für Kernflows
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)

@@ -183,6 +183,11 @@
   <section>
     <h3>Summen-/Saldenliste</h3>
     {% if selected_company_id %}
+      <p>
+        <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id) }}">CSV Export Summen-/Saldenliste</a>
+      </p>
+    {% endif %}
+    {% if selected_company_id %}
       <p>Gesellschaft-ID: {{ selected_company_id }}</p>
       <p>
         <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id) }}">
@@ -215,6 +220,48 @@
       {% else %}
         <p>Noch keine Buchungen für diese Gesellschaft.</p>
       {% endif %}
+    {% else %}
+      <p>Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h3>GuV (MVP)</h3>
+    {% if selected_company_id %}
+      <p>Umsätze: {{ income_statement.totals.total_revenue }}</p>
+      <p>Aufwendungen: {{ income_statement.totals.total_expense }}</p>
+      <p><strong>Jahresergebnis: {{ income_statement.totals.net_income }}</strong></p>
+    {% else %}
+      <p>Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h3>Bilanz (MVP)</h3>
+    {% if selected_company_id %}
+      <p>Summe Aktiva: {{ balance_sheet.totals.total_assets }}</p>
+      <p>Summe Passiva inkl. Eigenkapital: {{ balance_sheet.totals.total_liabilities_and_equity }}</p>
+      <p>Differenz: {{ balance_sheet.totals.difference }}</p>
+      <p>
+        Bilanzgleichheit:
+        {% if balance_sheet.totals.is_balanced %}
+          Ja
+        {% else %}
+          Nein
+        {% endif %}
+      </p>
+    {% else %}
+      <p>Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h3>CSV-Exporte</h3>
+    {% if selected_company_id %}
+      <ul>
+        <li><a href="{{ url_for('api.export_journal_csv', company_id=selected_company_id) }}">Journal-Export (CSV)</a></li>
+        <li><a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id) }}">Summen-/Salden-Export (CSV)</a></li>
+      </ul>
     {% else %}
       <p>Bitte zuerst eine Gesellschaft anlegen.</p>
     {% endif %}

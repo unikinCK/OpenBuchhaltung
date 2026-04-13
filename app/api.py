@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 from datetime import date
+from io import StringIO
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.services.account_hierarchy import resolve_parent_account_id
@@ -14,9 +16,13 @@ from app.services.journal_entries import (
     parse_decimal,
 )
 from app.services.mcp_client import MCPError, call_mcp_server
-from app.services.reports import trial_balance_for_company
+from app.services.reports import (
+    balance_sheet_for_company,
+    income_statement_for_company,
+    trial_balance_for_company,
+)
 from app.services.scoping import scoped_select
-from domain.models import Account, Company, Tenant
+from domain.models import Account, Company, JournalEntry, JournalEntryLine, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/v1")
@@ -278,6 +284,185 @@ def get_trial_balance():
             }
         ),
         200,
+    )
+
+
+@api_bp.get("/income-statement")
+def get_income_statement():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        report = income_statement_for_company(session=session, company_id=company_id)
+
+    return (
+        jsonify(
+            {
+                "company_id": company_id,
+                "revenues": [
+                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    for row in report["revenues"]
+                ],
+                "expenses": [
+                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    for row in report["expenses"]
+                ],
+                "totals": {key: str(value) for key, value in report["totals"].items()},
+            }
+        ),
+        200,
+    )
+
+
+@api_bp.get("/balance-sheet")
+def get_balance_sheet():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        report = balance_sheet_for_company(session=session, company_id=company_id)
+
+    totals = report["totals"]
+    return (
+        jsonify(
+            {
+                "company_id": company_id,
+                "assets": [
+                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    for row in report["assets"]
+                ],
+                "liabilities_and_equity": [
+                    {
+                        "code": row["code"],
+                        "name": row["name"],
+                        "account_type": row["account_type"],
+                        "amount": str(row["amount"]),
+                    }
+                    for row in report["liabilities_and_equity"]
+                ],
+                "totals": {
+                    "total_assets": str(totals["total_assets"]),
+                    "total_liabilities_and_equity": str(totals["total_liabilities_and_equity"]),
+                    "difference": str(totals["difference"]),
+                    "is_balanced": totals["is_balanced"],
+                },
+            }
+        ),
+        200,
+    )
+
+
+@api_bp.get("/exports/trial-balance.csv")
+def export_trial_balance_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        rows = trial_balance_for_company(session=session, company_id=company_id)
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["account_code", "account_name", "debit_total", "credit_total", "balance"])
+    for row in rows:
+        writer.writerow(
+            [
+                row["code"],
+                row["name"],
+                row["debit_total"],
+                row["credit_total"],
+                row["balance"],
+            ]
+        )
+
+    file_name = f"trial-balance-company-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/journal.csv")
+def export_journal_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        journal_rows = (
+            session.query(
+                JournalEntry.id,
+                JournalEntry.posting_number,
+                JournalEntry.entry_date,
+                JournalEntry.description,
+                JournalEntryLine.line_number,
+                Account.code,
+                Account.name,
+                JournalEntryLine.debit_amount,
+                JournalEntryLine.credit_amount,
+            )
+            .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
+            .join(Account, Account.id == JournalEntryLine.account_id)
+            .filter(JournalEntry.company_id == company_id)
+            .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
+            .all()
+        )
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(
+        [
+            "posting_number",
+            "entry_date",
+            "entry_description",
+            "line_number",
+            "account_code",
+            "account_name",
+            "debit_amount",
+            "credit_amount",
+        ]
+    )
+    for row in journal_rows:
+        writer.writerow(
+            [
+                row.posting_number,
+                row.entry_date.isoformat(),
+                row.description,
+                row.line_number,
+                row.code,
+                row.name,
+                row.debit_amount,
+                row.credit_amount,
+            ]
+        )
+
+    file_name = f"journal-company-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
     )
 
 
