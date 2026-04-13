@@ -564,3 +564,55 @@ def test_document_download_returns_file(tmp_path):
     response = client.get("/documents/1/download")
     assert response.status_code == 200
     assert response.data == b"testbeleg"
+
+
+def test_trial_balance_csv_export_download(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant J", "company_name": "Mandant J GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "CSV Export Buchung",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.get("/reports/trial-balance.csv", query_string={"company_id": 1})
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/csv")
+    assert "attachment; filename=susa-1-" in response.headers["Content-Disposition"]
+    csv_text = response.data.decode("utf-8")
+    assert "Konto,Name,Soll,Haben,Saldo" in csv_text
+    assert "1200,Bank,100.00,0.00,100.00" in csv_text
+    assert "8400,Erlöse,0.00,100.00,-100.00" in csv_text

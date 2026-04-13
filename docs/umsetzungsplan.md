@@ -121,7 +121,7 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
 - [x] Summen-/Saldenliste
 - [ ] GuV/Bilanz-Report (HGB-Basisschema)
-- [ ] CSV-Export
+- [x] CSV-Export *(Summen-/Saldenliste als CSV-Download umgesetzt)*
 - [ ] End-to-End-Tests für Kernflows
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
