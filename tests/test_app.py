@@ -13,6 +13,8 @@ def _create_test_app(tmp_path: Path):
         {
             "TESTING": True,
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_app.db'}",
+            "DEFAULT_USER_ROLE": "Admin",
+            "DEFAULT_USER_NAME": "pytest",
         }
     )
 
@@ -547,6 +549,33 @@ def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):
     assert "Betrag muss größer 0" in payload["details"][0]["message"]
 
 
+def test_write_endpoints_return_403_for_pruefer_role(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant Rollen", "company_name": "Api Rollen GmbH"},
+    )
+
+    api_forbidden_response = client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+        headers={"X-User-Role": "Pruefer", "X-User-Name": "pytest-pruefer"},
+    )
+    assert api_forbidden_response.status_code == 403
+    assert "Forbidden" in api_forbidden_response.get_json()["error"]
+
+    ui_forbidden_response = client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "1200", "name": "Bank", "account_type": "asset"},
+        headers={"X-User-Role": "Pruefer", "X-User-Name": "pytest-pruefer"},
+        follow_redirects=True,
+    )
+    assert ui_forbidden_response.status_code == 200
+    assert b"Keine Berechtigung" in ui_forbidden_response.data
+
+
 def test_journal_entry_form_supports_multiple_lines(tmp_path):
     app = _create_test_app(tmp_path)
     client = app.test_client()
@@ -743,6 +772,49 @@ def test_trial_balance_csv_export_download(tmp_path):
     assert "Konto,Name,Soll,Haben,Saldo" in csv_text
     assert "1200,Bank,100.00,0.00,100.00" in csv_text
     assert "8400,Erlöse,0.00,100.00,-100.00" in csv_text
+
+
+def test_csv_export_writes_audit_log(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Audit Export", "company_name": "Audit Export GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-11",
+            "description": "Audit CSV",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "10.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "10.00"},
+            ],
+        },
+    )
+
+    response = client.get("/api/v1/exports/journal.csv", query_string={"company_id": 1})
+    assert response.status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        export_event = (
+            session.query(AuditLog)
+            .filter_by(entity_type="report_export", entity_id="journal:1", action="downloaded")
+            .one()
+        )
+
+    assert export_event.payload["export_type"] == "journal_csv"
 
 
 def test_document_upload_writes_audit_log(tmp_path):

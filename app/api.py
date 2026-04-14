@@ -8,6 +8,8 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.services.account_hierarchy import resolve_parent_account_id
+from app.services.audit_log import log_audit_event
+from app.services.authz import current_user_name, require_roles
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -108,6 +110,7 @@ def list_companies():
 
 
 @api_bp.post("/accounts")
+@require_roles("Admin", "Buchhalter")
 def create_account():
     payload = request.get_json(silent=True) or {}
     company_id = payload.get("company_id")
@@ -137,6 +140,21 @@ def create_account():
         session.add(account)
 
         try:
+            session.flush()
+            log_audit_event(
+                session=session,
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                entity_type="account",
+                entity_id=str(account.id),
+                action="created",
+                changed_by=current_user_name(),
+                payload={
+                    "code": account.code,
+                    "name": account.name,
+                    "account_type": account.account_type,
+                },
+            )
             session.commit()
         except IntegrityError:
             session.rollback()
@@ -158,6 +176,7 @@ def create_account():
 
 
 @api_bp.post("/journal-entries")
+@require_roles("Admin", "Buchhalter")
 def create_journal_entry_via_api():
     payload = request.get_json(silent=True) or {}
 
@@ -226,6 +245,7 @@ def create_journal_entry_via_api():
             entry_date=entry_date,
             description=description,
             status=status,
+            changed_by=current_user_name(),
             lines=lines,
         )
 
@@ -376,6 +396,18 @@ def export_trial_balance_csv():
         if company is None:
             return jsonify({"error": "Company not found."}), 404
         rows = trial_balance_for_company(session=session, company_id=company_id)
+        file_name = f"trial-balance-company-{company_id}-{date.today().isoformat()}.csv"
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="report_export",
+            entity_id=f"trial-balance:{company_id}",
+            action="downloaded",
+            changed_by=current_user_name(),
+            payload={"export_type": "trial_balance_csv", "file_name": file_name},
+        )
+        session.commit()
 
     csv_buffer = StringIO()
     writer = csv.writer(csv_buffer)
@@ -391,7 +423,6 @@ def export_trial_balance_csv():
             ]
         )
 
-    file_name = f"trial-balance-company-{company_id}-{date.today().isoformat()}.csv"
     return Response(
         csv_buffer.getvalue(),
         mimetype="text/csv; charset=utf-8",
@@ -429,6 +460,18 @@ def export_journal_csv():
             .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
             .all()
         )
+        file_name = f"journal-company-{company_id}-{date.today().isoformat()}.csv"
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="report_export",
+            entity_id=f"journal:{company_id}",
+            action="downloaded",
+            changed_by=current_user_name(),
+            payload={"export_type": "journal_csv", "file_name": file_name},
+        )
+        session.commit()
 
     csv_buffer = StringIO()
     writer = csv.writer(csv_buffer)
@@ -458,7 +501,6 @@ def export_journal_csv():
             ]
         )
 
-    file_name = f"journal-company-{company_id}-{date.today().isoformat()}.csv"
     return Response(
         csv_buffer.getvalue(),
         mimetype="text/csv; charset=utf-8",

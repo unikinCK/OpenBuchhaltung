@@ -21,6 +21,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
         DOCUMENT_LLM_ENDPOINT_URL=None,
         DOCUMENT_LLM_MODEL="gpt-4.1-mini",
+        DEFAULT_USER_ROLE=None,
+        DEFAULT_USER_NAME=None,
     )
 
     if test_config:

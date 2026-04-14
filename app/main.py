@@ -23,6 +23,7 @@ from werkzeug.utils import secure_filename
 
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.audit_log import log_audit_event
+from app.services.authz import current_user_name, require_roles
 from app.services.document_llm import DocumentLLMError, send_document_update
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -150,6 +151,7 @@ def create_tenant_and_company():
 
 
 @main_bp.post("/accounts")
+@require_roles("Admin", "Buchhalter")
 def create_account():
     company_id = request.form.get("company_id", type=int)
     code = request.form.get("code", "").strip()
@@ -178,6 +180,21 @@ def create_account():
         )
         session.add(account)
         try:
+            session.flush()
+            log_audit_event(
+                session=session,
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                entity_type="account",
+                entity_id=str(account.id),
+                action="created",
+                changed_by=current_user_name(),
+                payload={
+                    "code": account.code,
+                    "name": account.name,
+                    "account_type": account.account_type,
+                },
+            )
             session.commit()
         except IntegrityError:
             session.rollback()
@@ -189,6 +206,7 @@ def create_account():
 
 
 @main_bp.post("/journal-entries")
+@require_roles("Admin", "Buchhalter")
 def create_journal_entry_from_form():
     company_id = request.form.get("company_id", type=int)
     entry_date_raw = request.form.get("entry_date", "").strip()
@@ -266,7 +284,7 @@ def create_journal_entry_from_form():
             entry_date=parsed_date,
             description=description,
             status="posted",
-            changed_by="web-form",
+            changed_by=current_user_name(),
             lines=line_inputs,
         )
 
@@ -283,6 +301,7 @@ def create_journal_entry_from_form():
 
 
 @main_bp.post("/documents")
+@require_roles("Admin", "Buchhalter")
 def upload_document():
     company_id = request.form.get("company_id", type=int)
     journal_entry_id = request.form.get("journal_entry_id", type=int)
@@ -335,7 +354,7 @@ def upload_document():
             entity_type="document",
             entity_id=str(document.id),
             action="uploaded",
-            changed_by="web-form",
+            changed_by=current_user_name(),
             payload={
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
@@ -371,7 +390,7 @@ def upload_document():
                     entity_type="document",
                     entity_id=str(uploaded_document_id),
                     action="llm_update_requested",
-                    changed_by="web-form",
+                    changed_by=current_user_name(),
                     payload={"status": "success", "response": llm_response},
                 )
                 session.commit()
@@ -389,7 +408,7 @@ def upload_document():
                     entity_type="document",
                     entity_id=str(uploaded_document_id),
                     action="llm_update_requested",
-                    changed_by="web-form",
+                    changed_by=current_user_name(),
                     payload={"status": "error", "message": exc.message},
                 )
                 session.commit()
@@ -430,6 +449,21 @@ def download_trial_balance_csv():
         if company is None:
             abort(404)
         rows = trial_balance_for_company(session=session, company_id=company_id)
+        export_file_name = f"susa-{company_id}-{date.today().isoformat()}.csv"
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="report_export",
+            entity_id=f"trial-balance:{company_id}",
+            action="downloaded",
+            changed_by=current_user_name(),
+            payload={
+                "export_type": "trial_balance_csv",
+                "file_name": export_file_name,
+            },
+        )
+        session.commit()
 
     output = StringIO()
     writer = csv.writer(output)
@@ -448,7 +482,5 @@ def download_trial_balance_csv():
     csv_content = output.getvalue()
     response = make_response(csv_content)
     response.headers["Content-Type"] = "text/csv; charset=utf-8"
-    response.headers["Content-Disposition"] = (
-        f"attachment; filename=susa-{company_id}-{date.today().isoformat()}.csv"
-    )
+    response.headers["Content-Disposition"] = f"attachment; filename={export_file_name}"
     return response
