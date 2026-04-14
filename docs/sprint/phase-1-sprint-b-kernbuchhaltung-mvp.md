@@ -32,9 +32,9 @@
 - [x] Integrationstest für CSV-Download ergänzen.
 
 ### Track 2: Rechte + Audit (P1-005)
-- [ ] Schreiboperationen (Konto, Buchung, Belegupload) rollenbasiert absichern.
-- [ ] Audit-Log auf Upload + Export erweitern.
-- [ ] Negative Tests (403 bei fehlender Rolle) ergänzen.
+- [x] Schreiboperationen (Konto, Buchung, Belegupload) rollenbasiert absichern.
+- [x] Audit-Log auf Upload + Export erweitern.
+- [x] Negative Tests (403 bei fehlender Rolle) ergänzen.
 
 ### Track 3: GuV/Bilanz MVP (P1-003)
 - [ ] GuV-Sicht aus revenue/expense Aggregation bereitstellen.
@@ -42,7 +42,7 @@
 - [ ] API + UI-Integration sowie Basistests ergänzen.
 
 ### Track 4: E2E Kernflow (P1-006)
-- [ ] E2E-Flow (Anlage Stammdaten → Buchung → Belegupload → CSV-Export) automatisieren.
+- [x] E2E-Flow (Anlage Stammdaten → Buchung → Belegupload → CSV-Export) automatisieren.
 
 ## Ausführung in diesem Changeset
-In diesem Changeset wird **Track 1 (P1-004 CSV-Export Core)** vollständig umgesetzt. Die Tracks 2–4 bleiben als nächste Sprint-B-Inkremente im Backlog.
+In diesem Changeset werden **Track 2 (P1-005)** und **Track 4 (P1-006)** umgesetzt; Track 3 bleibt als nächstes Sprint-B-Inkrement im Backlog.

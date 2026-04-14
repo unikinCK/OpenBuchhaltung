@@ -13,6 +13,8 @@ def e2e_app(tmp_path: Path):
         {
             "TESTING": True,
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_e2e.db'}",
+            "DEFAULT_USER_ROLE": "Admin",
+            "DEFAULT_USER_NAME": "pytest-e2e",
         }
     )
 
@@ -134,3 +136,23 @@ def test_e2e_negative_document_link_to_missing_journal_entry(e2e_app):
 
     with e2e_app.extensions["db_session_factory"]() as session:
         assert session.query(Document).count() == 0
+
+
+@pytest.mark.e2e
+def test_e2e_negative_forbidden_write_for_pruefer_role(e2e_app):
+    client = e2e_app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "E2E Rechte", "company_name": "E2E Rechte GmbH"},
+    )
+
+    response = client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+        headers={"X-User-Role": "Pruefer", "X-User-Name": "pytest-pruefer"},
+    )
+
+    assert response.status_code == 403
+    payload = response.get_json()
+    assert "Forbidden" in payload["error"]
