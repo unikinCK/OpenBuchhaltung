@@ -22,6 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from app.services.account_hierarchy import resolve_parent_account_id
+from app.services.audit_log import log_audit_event
+from app.services.document_llm import DocumentLLMError, send_document_update
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -324,7 +326,73 @@ def upload_document():
             mime_type=uploaded_file.mimetype or "application/octet-stream",
         )
         session.add(document)
+        session.flush()
+
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="uploaded",
+            changed_by="web-form",
+            payload={
+                "file_name": document.file_name,
+                "journal_entry_id": document.journal_entry_id,
+                "mime_type": document.mime_type,
+            },
+        )
         session.commit()
+
+        uploaded_document_id = document.id
+        uploaded_tenant_id = document.tenant_id
+        uploaded_company_id = document.company_id
+        uploaded_file_name = document.file_name
+        uploaded_mime_type = document.mime_type
+        uploaded_journal_entry_id = document.journal_entry_id
+
+    llm_endpoint = current_app.config.get("DOCUMENT_LLM_ENDPOINT_URL")
+    if llm_endpoint:
+        try:
+            llm_response = send_document_update(
+                endpoint_url=llm_endpoint,
+                model=current_app.config.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
+                company_id=company_id,
+                document_id=uploaded_document_id,
+                file_name=uploaded_file_name,
+                mime_type=uploaded_mime_type,
+                journal_entry_id=uploaded_journal_entry_id,
+            )
+            with session_factory() as session:
+                log_audit_event(
+                    session=session,
+                    tenant_id=uploaded_tenant_id,
+                    company_id=uploaded_company_id,
+                    entity_type="document",
+                    entity_id=str(uploaded_document_id),
+                    action="llm_update_requested",
+                    changed_by="web-form",
+                    payload={"status": "success", "response": llm_response},
+                )
+                session.commit()
+        except DocumentLLMError as exc:
+            current_app.logger.warning(
+                "LLM request for document %s failed: %s",
+                uploaded_document_id,
+                exc.message,
+            )
+            with session_factory() as session:
+                log_audit_event(
+                    session=session,
+                    tenant_id=uploaded_tenant_id,
+                    company_id=uploaded_company_id,
+                    entity_type="document",
+                    entity_id=str(uploaded_document_id),
+                    action="llm_update_requested",
+                    changed_by="web-form",
+                    payload={"status": "error", "message": exc.message},
+                )
+                session.commit()
 
     flash("Beleg wurde hochgeladen.", "success")
     return redirect(url_for("main.index", company_id=company_id))

@@ -70,6 +70,26 @@ Validierungsfehler liefern `422` mit feldbezogenen Details:
 }
 ```
 
+## Dokument-Upload mit optionalem LLM-Update
+
+Wenn ein externer OpenAI-Responses-kompatibler Endpoint konfiguriert ist, wird beim Belegupload
+zusätzlich ein nicht-blockierender LLM-Request ausgeführt:
+
+```bash
+export DOCUMENT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
+export DOCUMENT_LLM_MODEL="gpt-4.1-mini"
+```
+
+Bei LLM-Fehlern bleibt der Upload erfolgreich; der Fehler wird als Audit-Event protokolliert.
+
+## End-to-End-Kernflows
+
+Ausführen der E2E-Suite lokal:
+
+```bash
+pytest -m e2e
+```
+
 
 ## UI-Screenshot Tool
 

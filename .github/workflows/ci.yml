@@ -20,5 +20,7 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest
+      - name: E2E Kernflows
+        run: pytest -m e2e
       - name: Migrations check (Phase 0 placeholder)
         run: test -d migrations
