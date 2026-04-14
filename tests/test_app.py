@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
-from domain.models import Document, FiscalYear, Period, PeriodLock
+from app.services.document_llm import DocumentLLMError
+from domain.models import AuditLog, Document, FiscalYear, Period, PeriodLock
 
 
 def _create_test_app(tmp_path: Path):
@@ -742,3 +743,97 @@ def test_trial_balance_csv_export_download(tmp_path):
     assert "Konto,Name,Soll,Haben,Saldo" in csv_text
     assert "1200,Bank,100.00,0.00,100.00" in csv_text
     assert "8400,Erlöse,0.00,100.00,-100.00" in csv_text
+
+
+def test_document_upload_writes_audit_log(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Audit", "company_name": "Mandant Audit GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_file": (BytesIO(b"beleg-audit"), "audit.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        audit_events = (
+            session.query(AuditLog)
+            .filter_by(entity_type="document", entity_id="1")
+            .all()
+        )
+
+    assert any(event.action == "uploaded" for event in audit_events)
+
+
+def test_document_upload_calls_configured_llm_endpoint(tmp_path):
+    app = _create_test_app(tmp_path)
+    app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
+    app.config["DOCUMENT_LLM_MODEL"] = "gpt-4.1-mini"
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant LLM", "company_name": "Mandant LLM GmbH"},
+        follow_redirects=True,
+    )
+
+    with patch("app.main.send_document_update") as llm_mock:
+        llm_mock.return_value = {"id": "resp_123", "status": "completed"}
+
+        response = client.post(
+            "/documents",
+            data={
+                "company_id": "1",
+                "document_file": (BytesIO(b"llm-beleg"), "llm.pdf"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    llm_mock.assert_called_once()
+
+    with app.extensions["db_session_factory"]() as session:
+        llm_audit = session.query(AuditLog).filter_by(action="llm_update_requested").one()
+
+    assert llm_audit.payload["status"] == "success"
+
+
+def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
+    app = _create_test_app(tmp_path)
+    app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
+    client = app.test_client()
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant LLM2", "company_name": "Mandant LLM2 GmbH"},
+        follow_redirects=True,
+    )
+
+    with patch("app.main.send_document_update") as llm_mock:
+        llm_mock.side_effect = DocumentLLMError("boom")
+
+        response = client.post(
+            "/documents",
+            data={
+                "company_id": "1",
+                "document_file": (BytesIO(b"llm-fehler"), "llm-fehler.pdf"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Beleg wurde hochgeladen" in response.data

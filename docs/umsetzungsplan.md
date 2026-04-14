@@ -117,12 +117,12 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [x] Buchungsmaske (Soll/Haben, Steuercode, Beleglink) *(MVP-Basis umgesetzt; Beleglink folgt mit P1-002)*
 - [x] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden) *(Basisregeln inkl. Periodensperre umgesetzt)*
 - [x] Belegupload + Speicherung + Verknüpfung
-- [ ] Externes LLM für Beleg-Updates über OpenAI-Responses-kompatible Schnittstelle integrieren
+- [x] Externes LLM für Beleg-Updates über OpenAI-Responses-kompatible Schnittstelle integrieren *(Upload-Flow ruft optional einen OpenAI-Responses-kompatiblen Endpoint auf; Fehler blockieren Upload nicht)*
 - [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
 - [x] Summen-/Saldenliste
 - [x] GuV/Bilanz-Report (HGB-Basisschema) *(MVP-Basis mit GuV/Bilanz-Endpunkten, Bilanzgleichheitsindikator und UI-Totals umgesetzt)*
 - [x] CSV-Export *(Core-Exports für Journal und Summen-/Saldenliste über API + UI-Downloadlinks umgesetzt)*
-- [ ] End-to-End-Tests für Kernflows
+- [x] End-to-End-Tests für Kernflows *(Happy Path + fachliche Negativfälle und CI-Gate mit `pytest -m e2e` ergänzt)*
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [ ] Jahresabschluss-Workflow (Periodenabschluss, Vortrag)

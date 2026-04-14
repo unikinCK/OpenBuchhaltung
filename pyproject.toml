@@ -7,3 +7,7 @@ select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+markers = [
+  "e2e: End-to-End Kernflows",
+]
