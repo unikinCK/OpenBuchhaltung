@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -15,12 +16,13 @@ def create_app(test_config: dict | None = None) -> Flask:
     """Application factory for OpenBuchhaltung."""
     app = Flask(__name__)
     app.config.from_mapping(
-        SECRET_KEY="dev-secret-key-change-me",
-        DATABASE_URL=None,
-        MCP_SERVER_URL=None,
+        SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key-change-me"),
+        DATABASE_URL=os.environ.get("DATABASE_URL"),
+        MCP_SERVER_URL=os.environ.get("MCP_SERVER_URL"),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
-        DOCUMENT_LLM_ENDPOINT_URL=None,
-        DOCUMENT_LLM_MODEL="gpt-4.1-mini",
+        DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
+        API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
     )
 
     if test_config:

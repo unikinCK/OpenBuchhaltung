@@ -4,27 +4,55 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
+from app.auth import hash_password
 from app.services.document_llm import DocumentLLMError
-from domain.models import AuditLog, Document, FiscalYear, Period, PeriodLock
+from domain.models import AuditLog, Document, FiscalYear, Period, PeriodLock, User
 
 
 def _create_test_app(tmp_path: Path):
-    return create_app(
+    app = create_app(
         {
             "TESTING": True,
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_app.db'}",
         }
     )
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+    return app
+
+
+def _logged_in_client(app):
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    return client
 
 
 def test_index_page_loads(tmp_path):
     app = _create_test_app(tmp_path)
 
-    client = app.test_client()
+    client = _logged_in_client(app)
     response = client.get("/")
 
     assert response.status_code == 200
     assert b"OpenBuchhaltung" in response.data
+
+
+def test_index_redirects_to_login_when_not_authenticated(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = app.test_client()
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert "/auth/login" in response.headers["Location"]
 
 
 def test_login_with_valid_credentials(tmp_path):
@@ -33,7 +61,7 @@ def test_login_with_valid_credentials(tmp_path):
     client = app.test_client()
     response = client.post(
         "/auth/login",
-        data={"username": "admin", "password": "admin"},
+        data={"username": "admin", "password": "admin123"},
         follow_redirects=True,
     )
 
@@ -41,9 +69,49 @@ def test_login_with_valid_credentials(tmp_path):
     assert b"Login erfolgreich" in response.data
 
 
+def test_login_with_wrong_password_is_rejected(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = app.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "falsch"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Ungültige Zugangsdaten".encode() in response.data
+
+
+def test_pruefer_role_cannot_write(tmp_path):
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="pruefer",
+                password_hash=hash_password("lesen123"),
+                role="Pruefer",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "pruefer", "password": "lesen123"})
+
+    response = client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant X", "company_name": "Mandant X GmbH"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"nur Lesezugriff" in response.data
+
+
 def test_can_create_tenant_and_company_via_form(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     response = client.post(
         "/tenants",
@@ -58,7 +126,7 @@ def test_can_create_tenant_and_company_via_form(tmp_path):
 
 def test_can_create_account_via_form(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -87,7 +155,7 @@ def test_can_create_account_via_form(tmp_path):
 
 def test_duplicate_tenant_or_company_shows_validation_message(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     first_response = client.post(
         "/tenants",
@@ -109,7 +177,7 @@ def test_duplicate_tenant_or_company_shows_validation_message(tmp_path):
 
 def test_duplicate_account_code_shows_validation_message(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -147,7 +215,7 @@ def test_duplicate_account_code_shows_validation_message(tmp_path):
 
 def test_api_create_tenant_with_company(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     response = client.post(
         "/api/v1/tenants",
@@ -162,7 +230,7 @@ def test_api_create_tenant_with_company(tmp_path):
 
 def test_api_create_account_and_validate_required_fields(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/api/v1/tenants",
@@ -191,7 +259,7 @@ def test_api_create_account_and_validate_required_fields(tmp_path):
 
 def test_api_mcp_call_when_not_configured(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     response = client.post("/api/v1/mcp/call", json={"method": "tools/list", "params": {}})
 
@@ -202,7 +270,7 @@ def test_api_mcp_call_when_not_configured(tmp_path):
 def test_api_mcp_call_success_with_mock(tmp_path):
     app = _create_test_app(tmp_path)
     app.config["MCP_SERVER_URL"] = "http://mcp.local/rpc"
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     with patch("app.api.call_mcp_server") as call_mock:
         call_mock.return_value = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
@@ -217,7 +285,7 @@ def test_api_mcp_call_success_with_mock(tmp_path):
 
 def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -266,7 +334,7 @@ def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
 
 def test_journal_entry_form_rejects_locked_period(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -347,7 +415,7 @@ def test_journal_entry_form_rejects_locked_period(tmp_path):
 
 def test_api_create_journal_entry_and_trial_balance(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/api/v1/tenants",
@@ -389,7 +457,7 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
 
 def test_api_income_statement_and_balance_sheet(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/api/v1/tenants",
@@ -472,7 +540,7 @@ def test_api_income_statement_and_balance_sheet(tmp_path):
 
 def test_api_csv_exports_for_journal_and_trial_balance(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/api/v1/tenants",
@@ -515,7 +583,7 @@ def test_api_csv_exports_for_journal_and_trial_balance(tmp_path):
 
 def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/api/v1/tenants",
@@ -549,7 +617,7 @@ def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):
 
 def test_journal_entry_form_supports_multiple_lines(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -607,7 +675,7 @@ def test_journal_entry_form_supports_multiple_lines(tmp_path):
 
 def test_can_upload_document_and_link_to_journal_entry(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -670,7 +738,7 @@ def test_can_upload_document_and_link_to_journal_entry(tmp_path):
 
 def test_document_download_returns_file(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -695,7 +763,7 @@ def test_document_download_returns_file(tmp_path):
 
 def test_trial_balance_csv_export_download(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -747,7 +815,7 @@ def test_trial_balance_csv_export_download(tmp_path):
 
 def test_document_upload_writes_audit_log(tmp_path):
     app = _create_test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -781,7 +849,7 @@ def test_document_upload_calls_configured_llm_endpoint(tmp_path):
     app = _create_test_app(tmp_path)
     app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
     app.config["DOCUMENT_LLM_MODEL"] = "gpt-4.1-mini"
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",
@@ -814,7 +882,7 @@ def test_document_upload_calls_configured_llm_endpoint(tmp_path):
 def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
     app = _create_test_app(tmp_path)
     app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
-    client = app.test_client()
+    client = _logged_in_client(app)
 
     client.post(
         "/tenants",

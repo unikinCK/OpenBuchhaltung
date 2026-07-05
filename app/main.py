@@ -21,6 +21,7 @@ from flask import (
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
+from app.auth import current_tenant_id, current_user, require_ui_login
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError, send_document_update
@@ -37,10 +38,11 @@ from app.services.reports import (
     trial_balance_for_company,
 )
 from app.services.scoping import scoped_select
-from domain.models import Account, Company, Document, JournalEntry, Tenant
+from domain.models import Account, Company, Document, JournalEntry, TaxCode, Tenant
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 main_bp = Blueprint("main", __name__)
+main_bp.before_request(require_ui_login)
 
 
 def _get_session_factory():
@@ -50,15 +52,44 @@ def _get_session_factory():
     return session_factory
 
 
+def _require_company_access(session, company_id: int) -> Company:
+    """Load a company and enforce that it belongs to the user's tenant scope."""
+    company = session.get(Company, company_id)
+    if company is None:
+        abort(404)
+    tenant_id = current_tenant_id()
+    if tenant_id is not None and company.tenant_id != tenant_id:
+        abort(404)
+    return company
+
+
+def _changed_by() -> str:
+    user = current_user()
+    return user["username"] if user else "web-form"
+
+
 @main_bp.get("/")
 def index():
     selected_company_id = request.args.get("company_id", type=int)
 
+    tenant_scope = current_tenant_id()
     session_factory = _get_session_factory()
     with session_factory() as session:
-        tenants = session.execute(scoped_select(Tenant).order_by(Tenant.name)).scalars().all()
-        companies = session.execute(scoped_select(Company).order_by(Company.name)).scalars().all()
+        tenant_query = scoped_select(Tenant).order_by(Tenant.name)
+        if tenant_scope is not None:
+            tenant_query = tenant_query.where(Tenant.id == tenant_scope)
+        tenants = session.execute(tenant_query).scalars().all()
+        companies = (
+            session.execute(
+                scoped_select(Company, tenant_id=tenant_scope).order_by(Company.name)
+            )
+            .scalars()
+            .all()
+        )
 
+        accessible_company_ids = {company.id for company in companies}
+        if selected_company_id is not None and selected_company_id not in accessible_company_ids:
+            selected_company_id = None
         if selected_company_id is None and companies:
             selected_company_id = companies[0].id
 
@@ -67,6 +98,18 @@ def index():
             company_id=selected_company_id,
         ).order_by(Account.code)
         accounts = session.execute(account_query).scalars().all() if selected_company_id else []
+
+        tax_codes = (
+            session.execute(
+                scoped_select(TaxCode, company_id=selected_company_id)
+                .where(TaxCode.is_active.is_(True))
+                .order_by(TaxCode.code)
+            )
+            .scalars()
+            .all()
+            if selected_company_id
+            else []
+        )
 
         trial_balance = (
             trial_balance_for_company(session=session, company_id=selected_company_id)
@@ -112,6 +155,7 @@ def index():
         tenants=tenants,
         companies=companies,
         accounts=accounts,
+        tax_codes=tax_codes,
         selected_company_id=selected_company_id,
         trial_balance=trial_balance,
         income_statement=income_statement,
@@ -125,6 +169,10 @@ def index():
 
 @main_bp.post("/tenants")
 def create_tenant_and_company():
+    if current_tenant_id() is not None:
+        flash("Neue Mandanten kann nur ein globaler Administrator anlegen.", "error")
+        return redirect(url_for("main.index"))
+
     tenant_name = request.form.get("tenant_name", "").strip()
     company_name = request.form.get("company_name", "").strip()
 
@@ -162,9 +210,7 @@ def create_account():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
-        if company is None:
-            abort(404)
+        company = _require_company_access(session, company_id)
 
         account = Account(
             tenant_id=company.tenant_id,
@@ -209,6 +255,7 @@ def create_journal_entry_from_form():
         line_sides = request.form.getlist("line_side")
         line_amounts = request.form.getlist("line_amount")
         line_descriptions = request.form.getlist("line_description")
+        line_tax_code_ids = request.form.getlist("line_tax_code_id")
 
         # Backward-compatible fallback (legacy single amount + Soll/Haben Felder)
         if not line_account_ids:
@@ -240,6 +287,9 @@ def create_journal_entry_from_form():
                 description_raw = (
                     line_descriptions[idx] if idx < len(line_descriptions) else ""
                 ).strip()
+                tax_code_raw = (
+                    line_tax_code_ids[idx] if idx < len(line_tax_code_ids) else ""
+                ).strip()
                 if not account_raw and not amount_raw and not side_raw:
                     continue
                 if not account_raw or not amount_raw or side_raw not in {"debit", "credit"}:
@@ -255,6 +305,7 @@ def create_journal_entry_from_form():
                         debit_amount=amount if side_raw == "debit" else parse_decimal("0.00"),
                         credit_amount=amount if side_raw == "credit" else parse_decimal("0.00"),
                         description=description_raw or None,
+                        tax_code_id=int(tax_code_raw) if tax_code_raw else None,
                     )
                 )
 
@@ -266,12 +317,13 @@ def create_journal_entry_from_form():
             entry_date=parsed_date,
             description=description,
             status="posted",
-            changed_by="web-form",
+            changed_by=_changed_by(),
             lines=line_inputs,
         )
 
         session_factory = _get_session_factory()
         with session_factory() as session:
+            _require_company_access(session, company_id)
             entry = create_journal_entry(session=session, payload=entry_payload)
 
     except (JournalEntryCreationError, JournalEntryValidationError) as exc:
@@ -299,9 +351,7 @@ def upload_document():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
-        if company is None:
-            abort(404)
+        company = _require_company_access(session, company_id)
 
         linked_entry = None
         if journal_entry_id is not None:
@@ -335,7 +385,7 @@ def upload_document():
             entity_type="document",
             entity_id=str(document.id),
             action="uploaded",
-            changed_by="web-form",
+            changed_by=_changed_by(),
             payload={
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
@@ -371,7 +421,7 @@ def upload_document():
                     entity_type="document",
                     entity_id=str(uploaded_document_id),
                     action="llm_update_requested",
-                    changed_by="web-form",
+                    changed_by=_changed_by(),
                     payload={"status": "success", "response": llm_response},
                 )
                 session.commit()
@@ -389,7 +439,7 @@ def upload_document():
                     entity_type="document",
                     entity_id=str(uploaded_document_id),
                     action="llm_update_requested",
-                    changed_by="web-form",
+                    changed_by=_changed_by(),
                     payload={"status": "error", "message": exc.message},
                 )
                 session.commit()
@@ -404,6 +454,9 @@ def download_document(document_id: int):
     with session_factory() as session:
         document = session.get(Document, document_id)
         if document is None:
+            abort(404)
+        tenant_scope = current_tenant_id()
+        if tenant_scope is not None and document.tenant_id != tenant_scope:
             abort(404)
         document_path = Path(document.storage_key)
         if not document_path.exists():
@@ -426,9 +479,7 @@ def download_trial_balance_csv():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
-        if company is None:
-            abort(404)
+        _require_company_access(session, company_id)
         rows = trial_balance_for_company(session=session, company_id=company_id)
 
     output = StringIO()
