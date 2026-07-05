@@ -86,14 +86,24 @@ Beispiel Ausgangsrechnung: Forderungen 1.190 € (Soll) an Erlöse 1.000 € (Ha
 
 ## REST API (API-First)
 
-Die API ist im Entwicklungsmodus offen. Für geschützten Betrieb einen Token setzen —
-dann erfordern alle API-Aufrufe (außer `/health`) den Header `Authorization: Bearer <token>`:
+Die API ist im Entwicklungsmodus offen. Für geschützten Betrieb entweder einen globalen
+Token setzen oder API-Auth erzwingen und Benutzer-Tokens ausgeben — dann erfordern alle
+API-Aufrufe (außer `/health`) den Header `Authorization: Bearer <token>`:
 
 ```bash
 export API_AUTH_TOKEN="mein-geheimer-token"
+# oder ohne globalen Token:
+export API_REQUIRE_AUTH=1
 ```
 
-Vollwertige API-Tokens je Benutzer folgen in Phase 3.
+Benutzer-Token erzeugen/rotieren:
+```bash
+flask --app run.py set-api-token --username maria
+```
+
+Benutzer-Tokens übernehmen die Rolle und den Tenant-Scope des Benutzers: globale Admins
+sehen alle Mandanten, tenantgebundene Benutzer nur ihren Mandanten, Prüfer haben API-seitig
+Lesezugriff.
 
 Basis-Endpunkte:
 

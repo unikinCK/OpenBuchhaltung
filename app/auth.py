@@ -8,6 +8,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    g,
     redirect,
     render_template,
     request,
@@ -36,8 +37,31 @@ def hash_password(password: str) -> str:
     return generate_password_hash(password)
 
 
+def generate_api_token() -> str:
+    return f"obk_{secrets.token_urlsafe(32)}"
+
+
+def hash_api_token(token: str) -> str:
+    return generate_password_hash(token)
+
+
 def current_user() -> dict | None:
     return session.get("user")
+
+
+def current_api_user() -> dict | None:
+    return getattr(g, "api_user", None)
+
+
+def current_api_tenant_id() -> int | None:
+    user = current_api_user()
+    if user is None:
+        return None
+    return user.get("tenant_id")
+
+
+def api_has_global_access() -> bool:
+    return bool(getattr(g, "api_global_access", False))
 
 
 def current_tenant_id() -> int | None:
@@ -95,21 +119,47 @@ def require_ui_login():
 
 
 def require_api_token():
-    """before_request-Hook für die API: prüft Bearer-Token, falls API_AUTH_TOKEN gesetzt ist.
+    """before_request-Hook für die API: prüft Bearer-Token, falls API-Auth aktiv ist.
 
-    Ohne konfigurierten Token bleibt die API offen (Entwicklungsmodus);
-    vollwertige API-Tokens je Benutzer folgen in Phase 3.
+    Ohne API_AUTH_TOKEN/API_REQUIRE_AUTH bleibt die API offen (Entwicklungsmodus).
+    Ist API-Auth aktiv, werden entweder der globale API_AUTH_TOKEN oder ein
+    Benutzer-API-Token akzeptiert.
     """
-    configured_token = current_app.config.get("API_AUTH_TOKEN")
-    if not configured_token:
-        return None
-
     if request.endpoint == "api.health":
         return None
 
+    configured_token = current_app.config.get("API_AUTH_TOKEN")
+    require_auth = bool(configured_token) or current_app.config.get("API_REQUIRE_AUTH", False)
     auth_header = request.headers.get("Authorization", "")
-    if auth_header == f"Bearer {configured_token}":
+    if not auth_header.startswith("Bearer "):
+        if require_auth:
+            return {"error": "Unauthorized."}, 401
         return None
+
+    token = auth_header.removeprefix("Bearer ").strip()
+    if configured_token and secrets.compare_digest(token, configured_token):
+        g.api_global_access = True
+        return None
+
+    session_factory = _get_session_factory()
+    with session_factory() as db_session:
+        users = (
+            db_session.execute(select(User).where(User.api_token_hash.is_not(None)))
+            .scalars()
+            .all()
+        )
+        for user in users:
+            if user.api_token_hash and check_password_hash(user.api_token_hash, token):
+                if not user.is_active:
+                    break
+                g.api_user = {
+                    "id": user.id,
+                    "username": user.username,
+                    "role": user.role,
+                    "tenant_id": user.tenant_id,
+                }
+                g.api_global_access = user.tenant_id is None
+                return None
 
     return {"error": "Unauthorized."}, 401
 

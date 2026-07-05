@@ -7,7 +7,14 @@ from io import StringIO
 from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import require_api_token
+from app.auth import (
+    ROLE_ADMIN,
+    WRITE_ROLES,
+    api_has_global_access,
+    current_api_tenant_id,
+    current_api_user,
+    require_api_token,
+)
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -44,6 +51,34 @@ def _get_session_factory():
     return session_factory
 
 
+def _api_scoped_company(session, company_id: int) -> Company | None:
+    company = session.get(Company, company_id)
+    if company is None:
+        return None
+    tenant_id = current_api_tenant_id()
+    if tenant_id is not None and company.tenant_id != tenant_id:
+        return None
+    return company
+
+
+def _api_can_write() -> bool:
+    user = current_api_user()
+    if user is None or api_has_global_access():
+        return True
+    return user["role"] in WRITE_ROLES
+
+
+def _api_can_create_tenant() -> bool:
+    user = current_api_user()
+    if user is None or api_has_global_access():
+        return True
+    return user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
+
+
+def _forbidden():
+    return jsonify({"error": "Forbidden."}), 403
+
+
 @api_bp.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -51,6 +86,9 @@ def health():
 
 @api_bp.post("/tenants")
 def create_tenant_with_company():
+    if not _api_can_create_tenant():
+        return _forbidden()
+
     payload = request.get_json(silent=True) or {}
     tenant_name = (payload.get("tenant_name") or "").strip()
     company_name = (payload.get("company_name") or "").strip()
@@ -91,7 +129,13 @@ def create_tenant_with_company():
 def list_companies():
     session_factory = _get_session_factory()
     with session_factory() as session:
-        companies = session.execute(scoped_select(Company).order_by(Company.name)).scalars().all()
+        companies = (
+            session.execute(
+                scoped_select(Company, tenant_id=current_api_tenant_id()).order_by(Company.name)
+            )
+            .scalars()
+            .all()
+        )
 
     return (
         jsonify(
@@ -111,6 +155,9 @@ def list_companies():
 
 @api_bp.post("/accounts")
 def create_account():
+    if not _api_can_write():
+        return _forbidden()
+
     payload = request.get_json(silent=True) or {}
     company_id = payload.get("company_id")
     code = (payload.get("code") or "").strip()
@@ -122,7 +169,7 @@ def create_account():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
@@ -161,6 +208,9 @@ def create_account():
 
 @api_bp.post("/journal-entries")
 def create_journal_entry_via_api():
+    if not _api_can_write():
+        return _forbidden()
+
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -235,6 +285,8 @@ def create_journal_entry_via_api():
 
         session_factory = _get_session_factory()
         with session_factory() as session:
+            if _api_scoped_company(session, company_id) is None:
+                return jsonify({"error": "Company not found."}), 404
             entry = create_journal_entry(session=session, payload=entry_input)
 
     except (JournalEntryValidationError, JournalEntryCreationError) as exc:
@@ -265,7 +317,7 @@ def get_trial_balance():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
@@ -299,7 +351,7 @@ def get_income_statement():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
@@ -332,7 +384,7 @@ def get_balance_sheet():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
@@ -376,7 +428,7 @@ def export_trial_balance_csv():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
         rows = trial_balance_for_company(session=session, company_id=company_id)
@@ -411,7 +463,7 @@ def export_journal_csv():
 
     session_factory = _get_session_factory()
     with session_factory() as session:
-        company = session.get(Company, company_id)
+        company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
@@ -472,6 +524,9 @@ def export_journal_csv():
 
 @api_bp.post("/mcp/call")
 def mcp_call():
+    if not _api_can_write():
+        return _forbidden()
+
     payload = request.get_json(silent=True) or {}
     method = (payload.get("method") or "").strip()
     params = payload.get("params") or {}

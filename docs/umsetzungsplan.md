@@ -177,7 +177,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
 - [ ] DATEV-kompatiblere Exporte ausbauen
 - [ ] E-Rechnung Import/Export
 - [ ] OCR-Pipeline für Belege
-- [ ] REST-API + API-Tokens
+- [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
+      Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende
+      API-Endpunkte umgesetzt; weiterer API-Ausbau offen)*
 - [ ] Mandantenübergreifendes Rollen-/Supportmodell
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
