@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
-from app.auth import current_tenant_id, current_user, require_ui_login
+from app.auth import ROLE_ADMIN, current_tenant_id, current_user, require_ui_login
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError, send_document_update
@@ -32,6 +32,12 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
     parse_decimal,
+)
+from app.services.periods import (
+    PeriodActionError,
+    close_fiscal_year,
+    lock_period,
+    unlock_period,
 )
 from app.services.reports import (
     balance_sheet_for_company,
@@ -43,8 +49,11 @@ from domain.models import (
     Account,
     Company,
     Document,
+    FiscalYear,
     JournalEntry,
     JournalEntryLine,
+    Period,
+    PeriodLock,
     TaxCode,
     Tenant,
 )
@@ -340,6 +349,134 @@ def admin_page():
         account_count=account_count,
         is_global_admin=tenant_scope is None,
     )
+
+
+@main_bp.get("/perioden")
+def periods_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+
+        fiscal_years = []
+        periods_by_year: dict[int, list[Period]] = {}
+        locked_period_ids: set[int] = set()
+        if selected_company_id:
+            fiscal_years = (
+                session.execute(
+                    select(FiscalYear)
+                    .where(FiscalYear.company_id == selected_company_id)
+                    .order_by(FiscalYear.label.desc())
+                )
+                .scalars()
+                .all()
+            )
+            year_ids = [fiscal_year.id for fiscal_year in fiscal_years]
+            if year_ids:
+                periods = (
+                    session.execute(
+                        select(Period)
+                        .where(Period.fiscal_year_id.in_(year_ids))
+                        .order_by(Period.period_number)
+                    )
+                    .scalars()
+                    .all()
+                )
+                for period in periods:
+                    periods_by_year.setdefault(period.fiscal_year_id, []).append(period)
+                locked_period_ids = set(
+                    session.execute(
+                        select(PeriodLock.period_id).where(
+                            PeriodLock.period_id.in_([period.id for period in periods])
+                        )
+                    ).scalars()
+                )
+
+    user = current_user()
+    return render_template(
+        "perioden.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        fiscal_years=fiscal_years,
+        periods_by_year=periods_by_year,
+        locked_period_ids=locked_period_ids,
+        is_admin=user is not None and user["role"] == ROLE_ADMIN,
+    )
+
+
+def _require_period_access(session, period_id: int) -> Period:
+    period = session.get(Period, period_id)
+    if period is None:
+        abort(404)
+    fiscal_year = session.get(FiscalYear, period.fiscal_year_id)
+    _require_company_access(session, fiscal_year.company_id)
+    return period
+
+
+@main_bp.post("/perioden/<int:period_id>/sperren")
+def lock_period_action(period_id: int):
+    company_id = request.form.get("company_id", type=int)
+    reason = request.form.get("reason", "").strip() or None
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        _require_period_access(session, period_id)
+        try:
+            period = lock_period(
+                session=session, period_id=period_id, locked_by=_changed_by(), reason=reason
+            )
+        except PeriodActionError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.periods_page", company_id=company_id))
+
+    flash(f"Periode {period.period_number} wurde gesperrt.", "success")
+    return redirect(url_for("main.periods_page", company_id=company_id))
+
+
+@main_bp.post("/perioden/<int:period_id>/entsperren")
+def unlock_period_action(period_id: int):
+    company_id = request.form.get("company_id", type=int)
+    user = current_user()
+    if user is None or user["role"] != ROLE_ADMIN:
+        flash("Perioden entsperren darf nur ein Administrator.", "error")
+        return redirect(url_for("main.periods_page", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        _require_period_access(session, period_id)
+        try:
+            period = unlock_period(session=session, period_id=period_id, changed_by=_changed_by())
+        except PeriodActionError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.periods_page", company_id=company_id))
+
+    flash(f"Periode {period.period_number} wurde entsperrt.", "success")
+    return redirect(url_for("main.periods_page", company_id=company_id))
+
+
+@main_bp.post("/geschaeftsjahre/<int:fiscal_year_id>/abschliessen")
+def close_fiscal_year_action(fiscal_year_id: int):
+    company_id = request.form.get("company_id", type=int)
+    user = current_user()
+    if user is None or user["role"] != ROLE_ADMIN:
+        flash("Den Jahresabschluss darf nur ein Administrator durchführen.", "error")
+        return redirect(url_for("main.periods_page", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        fiscal_year = session.get(FiscalYear, fiscal_year_id)
+        if fiscal_year is None:
+            abort(404)
+        _require_company_access(session, fiscal_year.company_id)
+        try:
+            fiscal_year = close_fiscal_year(
+                session=session, fiscal_year_id=fiscal_year_id, changed_by=_changed_by()
+            )
+        except PeriodActionError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.periods_page", company_id=company_id))
+
+    flash(f"Geschäftsjahr {fiscal_year.label} wurde abgeschlossen.", "success")
+    return redirect(url_for("main.periods_page", company_id=company_id))
 
 
 @main_bp.post("/tenants")
