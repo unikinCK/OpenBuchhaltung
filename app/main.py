@@ -18,6 +18,7 @@ from flask import (
     send_file,
     url_for,
 )
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
@@ -38,7 +39,15 @@ from app.services.reports import (
     trial_balance_for_company,
 )
 from app.services.scoping import scoped_select
-from domain.models import Account, Company, Document, JournalEntry, TaxCode, Tenant
+from domain.models import (
+    Account,
+    Company,
+    Document,
+    JournalEntry,
+    JournalEntryLine,
+    TaxCode,
+    Tenant,
+)
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 main_bp = Blueprint("main", __name__)
@@ -68,10 +77,243 @@ def _changed_by() -> str:
     return user["username"] if user else "web-form"
 
 
+def _company_context(session) -> tuple[list[Company], int | None]:
+    """Companies im Tenant-Scope plus validierte Auswahl aus ?company_id=."""
+    tenant_scope = current_tenant_id()
+    companies = (
+        session.execute(scoped_select(Company, tenant_id=tenant_scope).order_by(Company.name))
+        .scalars()
+        .all()
+    )
+
+    selected_company_id = request.args.get("company_id", type=int)
+    accessible_ids = {company.id for company in companies}
+    if selected_company_id is not None and selected_company_id not in accessible_ids:
+        selected_company_id = None
+    if selected_company_id is None and companies:
+        selected_company_id = companies[0].id
+    return companies, selected_company_id
+
+
 @main_bp.get("/")
 def index():
-    selected_company_id = request.args.get("company_id", type=int)
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
 
+        stats = {"accounts": 0, "journal_entries": 0, "documents": 0}
+        totals = None
+        balance_totals = None
+        recent_entries = []
+        if selected_company_id:
+            stats["accounts"] = len(
+                session.execute(scoped_select(Account, company_id=selected_company_id))
+                .scalars()
+                .all()
+            )
+            stats["documents"] = len(
+                session.execute(scoped_select(Document, company_id=selected_company_id))
+                .scalars()
+                .all()
+            )
+            entries = (
+                session.execute(
+                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
+                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            stats["journal_entries"] = len(entries)
+            recent_entries = entries[:5]
+            totals = income_statement_for_company(
+                session=session, company_id=selected_company_id
+            )["totals"]
+            balance_totals = balance_sheet_for_company(
+                session=session, company_id=selected_company_id
+            )["totals"]
+
+    return render_template(
+        "dashboard.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        stats=stats,
+        totals=totals,
+        balance_totals=balance_totals,
+        recent_entries=recent_entries,
+    )
+
+
+@main_bp.get("/buchungen")
+def journal_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+
+        accounts = []
+        tax_codes = []
+        journal_entries = []
+        lines_by_entry: dict[int, list[dict]] = {}
+        if selected_company_id:
+            accounts = (
+                session.execute(
+                    scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
+                )
+                .scalars()
+                .all()
+            )
+            tax_codes = (
+                session.execute(
+                    scoped_select(TaxCode, company_id=selected_company_id)
+                    .where(TaxCode.is_active.is_(True))
+                    .order_by(TaxCode.code)
+                )
+                .scalars()
+                .all()
+            )
+            journal_entries = (
+                session.execute(
+                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
+                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            line_rows = session.execute(
+                select(
+                    JournalEntryLine.journal_entry_id,
+                    JournalEntryLine.line_number,
+                    Account.code,
+                    Account.name,
+                    JournalEntryLine.debit_amount,
+                    JournalEntryLine.credit_amount,
+                    JournalEntryLine.description,
+                )
+                .join(Account, Account.id == JournalEntryLine.account_id)
+                .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+                .where(JournalEntry.company_id == selected_company_id)
+                .order_by(JournalEntryLine.journal_entry_id, JournalEntryLine.line_number)
+            ).all()
+            for row in line_rows:
+                lines_by_entry.setdefault(row.journal_entry_id, []).append(
+                    {
+                        "line_number": row.line_number,
+                        "account_code": row.code,
+                        "account_name": row.name,
+                        "debit_amount": row.debit_amount,
+                        "credit_amount": row.credit_amount,
+                        "description": row.description,
+                    }
+                )
+
+    return render_template(
+        "buchungen.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        accounts=accounts,
+        tax_codes=tax_codes,
+        journal_entries=journal_entries,
+        lines_by_entry=lines_by_entry,
+        today=date.today().isoformat(),
+    )
+
+
+@main_bp.get("/konten")
+def accounts_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+        accounts = (
+            session.execute(
+                scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
+            )
+            .scalars()
+            .all()
+            if selected_company_id
+            else []
+        )
+
+    return render_template(
+        "konten.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        accounts=accounts,
+    )
+
+
+@main_bp.get("/belege")
+def documents_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+
+        documents = []
+        journal_entries = []
+        if selected_company_id:
+            documents = (
+                session.execute(
+                    scoped_select(Document, company_id=selected_company_id).order_by(
+                        Document.uploaded_at.desc()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            journal_entries = (
+                session.execute(
+                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
+                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
+
+    return render_template(
+        "belege.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        documents=documents,
+        journal_entries=journal_entries,
+        journal_entry_labels=journal_entry_labels,
+    )
+
+
+@main_bp.get("/berichte")
+def reports_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+
+        trial_balance = []
+        income_statement = {"revenues": [], "expenses": [], "totals": {}}
+        balance_sheet = {"assets": [], "liabilities_and_equity": [], "totals": {}}
+        if selected_company_id:
+            trial_balance = trial_balance_for_company(
+                session=session, company_id=selected_company_id
+            )
+            income_statement = income_statement_for_company(
+                session=session, company_id=selected_company_id
+            )
+            balance_sheet = balance_sheet_for_company(
+                session=session, company_id=selected_company_id
+            )
+
+    return render_template(
+        "berichte.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        trial_balance=trial_balance,
+        income_statement=income_statement,
+        balance_sheet=balance_sheet,
+    )
+
+
+@main_bp.get("/verwaltung")
+def admin_page():
     tenant_scope = current_tenant_id()
     session_factory = _get_session_factory()
     with session_factory() as session:
@@ -79,91 +321,24 @@ def index():
         if tenant_scope is not None:
             tenant_query = tenant_query.where(Tenant.id == tenant_scope)
         tenants = session.execute(tenant_query).scalars().all()
-        companies = (
-            session.execute(
-                scoped_select(Company, tenant_id=tenant_scope).order_by(Company.name)
+        companies, selected_company_id = _company_context(session)
+        account_count = (
+            len(
+                session.execute(scoped_select(Account, company_id=selected_company_id))
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
-
-        accessible_company_ids = {company.id for company in companies}
-        if selected_company_id is not None and selected_company_id not in accessible_company_ids:
-            selected_company_id = None
-        if selected_company_id is None and companies:
-            selected_company_id = companies[0].id
-
-        account_query = scoped_select(
-            Account,
-            company_id=selected_company_id,
-        ).order_by(Account.code)
-        accounts = session.execute(account_query).scalars().all() if selected_company_id else []
-
-        tax_codes = (
-            session.execute(
-                scoped_select(TaxCode, company_id=selected_company_id)
-                .where(TaxCode.is_active.is_(True))
-                .order_by(TaxCode.code)
-            )
-            .scalars()
-            .all()
             if selected_company_id
-            else []
+            else 0
         )
-
-        trial_balance = (
-            trial_balance_for_company(session=session, company_id=selected_company_id)
-            if selected_company_id
-            else []
-        )
-        income_statement = (
-            income_statement_for_company(session=session, company_id=selected_company_id)
-            if selected_company_id
-            else {"revenues": [], "expenses": [], "totals": {}}
-        )
-        balance_sheet = (
-            balance_sheet_for_company(session=session, company_id=selected_company_id)
-            if selected_company_id
-            else {"assets": [], "liabilities_and_equity": [], "totals": {}}
-        )
-        journal_entries = (
-            session.execute(
-                scoped_select(JournalEntry, company_id=selected_company_id).order_by(
-                    JournalEntry.entry_date.desc(), JournalEntry.id.desc()
-                )
-            )
-            .scalars()
-            .all()
-            if selected_company_id
-            else []
-        )
-        documents = (
-            session.execute(
-                scoped_select(Document, company_id=selected_company_id).order_by(
-                    Document.uploaded_at.desc()
-                )
-            )
-            .scalars()
-            .all()
-            if selected_company_id
-            else []
-        )
-        journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
 
     return render_template(
-        "index.html",
+        "verwaltung.html",
         tenants=tenants,
         companies=companies,
-        accounts=accounts,
-        tax_codes=tax_codes,
         selected_company_id=selected_company_id,
-        trial_balance=trial_balance,
-        income_statement=income_statement,
-        balance_sheet=balance_sheet,
-        journal_entries=journal_entries,
-        documents=documents,
-        journal_entry_labels=journal_entry_labels,
-        today=date.today().isoformat(),
+        account_count=account_count,
+        is_global_admin=tenant_scope is None,
     )
 
 
@@ -171,14 +346,14 @@ def index():
 def create_tenant_and_company():
     if current_tenant_id() is not None:
         flash("Neue Mandanten kann nur ein globaler Administrator anlegen.", "error")
-        return redirect(url_for("main.index"))
+        return redirect(url_for("main.admin_page"))
 
     tenant_name = request.form.get("tenant_name", "").strip()
     company_name = request.form.get("company_name", "").strip()
 
     if not tenant_name or not company_name:
         flash("Mandant und Gesellschaft sind Pflichtfelder.", "error")
-        return redirect(url_for("main.index"))
+        return redirect(url_for("main.admin_page"))
 
     session_factory = _get_session_factory()
     with session_factory() as session:
@@ -191,10 +366,10 @@ def create_tenant_and_company():
         except IntegrityError:
             session.rollback()
             flash("Mandant oder Gesellschaft existiert bereits.", "error")
-            return redirect(url_for("main.index"))
+            return redirect(url_for("main.admin_page"))
 
     flash("Mandant und Gesellschaft wurden angelegt.", "success")
-    return redirect(url_for("main.index"))
+    return redirect(url_for("main.admin_page"))
 
 
 @main_bp.post("/accounts")
@@ -206,7 +381,7 @@ def create_account():
 
     if not company_id or not code or not name or not account_type:
         flash("Alle Felder für das Konto müssen ausgefüllt sein.", "error")
-        return redirect(url_for("main.index"))
+        return redirect(url_for("main.accounts_page"))
 
     session_factory = _get_session_factory()
     with session_factory() as session:
@@ -228,10 +403,10 @@ def create_account():
         except IntegrityError:
             session.rollback()
             flash("Konto mit dieser Nummer existiert bereits.", "error")
-            return redirect(url_for("main.index", company_id=company_id))
+            return redirect(url_for("main.accounts_page", company_id=company_id))
 
     flash("Konto wurde angelegt.", "success")
-    return redirect(url_for("main.index", company_id=company_id))
+    return redirect(url_for("main.accounts_page", company_id=company_id))
 
 
 @main_bp.post("/journal-entries")
@@ -241,13 +416,13 @@ def create_journal_entry_from_form():
     description = request.form.get("description", "").strip()
     if not company_id or not entry_date_raw or not description:
         flash("Gesellschaft, Datum und Beschreibung sind Pflichtfelder.", "error")
-        return redirect(url_for("main.index", company_id=company_id))
+        return redirect(url_for("main.journal_page", company_id=company_id))
 
     try:
         parsed_date = date.fromisoformat(entry_date_raw)
     except ValueError:
         flash("Ungültiges Datum.", "error")
-        return redirect(url_for("main.index", company_id=company_id))
+        return redirect(url_for("main.journal_page", company_id=company_id))
 
     try:
         line_inputs: list[JournalLineInput] = []
@@ -264,7 +439,7 @@ def create_journal_entry_from_form():
             amount_raw = request.form.get("amount", "").strip()
             if not debit_account_id or not credit_account_id:
                 flash("Bitte Soll- und Habenkonto auswählen.", "error")
-                return redirect(url_for("main.index", company_id=company_id))
+                return redirect(url_for("main.journal_page", company_id=company_id))
             amount = parse_decimal(amount_raw)
             line_inputs = [
                 JournalLineInput(
@@ -328,10 +503,10 @@ def create_journal_entry_from_form():
 
     except (JournalEntryCreationError, JournalEntryValidationError) as exc:
         flash(str(exc), "error")
-        return redirect(url_for("main.index", company_id=company_id))
+        return redirect(url_for("main.journal_page", company_id=company_id))
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
-    return redirect(url_for("main.index", company_id=company_id))
+    return redirect(url_for("main.journal_page", company_id=company_id))
 
 
 @main_bp.post("/documents")
@@ -342,12 +517,12 @@ def upload_document():
 
     if not company_id or uploaded_file is None or not uploaded_file.filename:
         flash("Gesellschaft und Datei sind Pflichtfelder.", "error")
-        return redirect(url_for("main.index", company_id=company_id))
+        return redirect(url_for("main.documents_page", company_id=company_id))
 
     original_file_name = secure_filename(uploaded_file.filename)
     if not original_file_name:
         flash("Ungültiger Dateiname.", "error")
-        return redirect(url_for("main.index", company_id=company_id))
+        return redirect(url_for("main.documents_page", company_id=company_id))
 
     session_factory = _get_session_factory()
     with session_factory() as session:
@@ -358,7 +533,7 @@ def upload_document():
             linked_entry = session.get(JournalEntry, journal_entry_id)
             if linked_entry is None or linked_entry.company_id != company.id:
                 flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
-                return redirect(url_for("main.index", company_id=company_id))
+                return redirect(url_for("main.documents_page", company_id=company_id))
 
         unique_name = f"{uuid4().hex}_{original_file_name}"
         tenant_dir = Path(current_app.config["DOCUMENT_UPLOAD_DIR"]) / str(company.tenant_id)
@@ -445,7 +620,7 @@ def upload_document():
                 session.commit()
 
     flash("Beleg wurde hochgeladen.", "success")
-    return redirect(url_for("main.index", company_id=company_id))
+    return redirect(url_for("main.documents_page", company_id=company_id))
 
 
 @main_bp.get("/documents/<int:document_id>/download")
@@ -475,7 +650,7 @@ def download_trial_balance_csv():
     company_id = request.args.get("company_id", type=int)
     if not company_id:
         flash("Gesellschaft für Export fehlt.", "error")
-        return redirect(url_for("main.index"))
+        return redirect(url_for("main.reports_page"))
 
     session_factory = _get_session_factory()
     with session_factory() as session:

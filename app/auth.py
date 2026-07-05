@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import secrets
 from functools import wraps
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
@@ -18,6 +20,11 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from domain.models import User
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+@auth_bp.before_request
+def _protect_auth_posts():
+    validate_csrf()
 
 ROLE_ADMIN = "Admin"
 ROLE_BUCHHALTER = "Buchhalter"
@@ -39,6 +46,26 @@ def current_tenant_id() -> int | None:
     if user is None:
         return None
     return user.get("tenant_id")
+
+
+def ensure_csrf_token() -> str:
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_hex(16)
+        session["_csrf_token"] = token
+    return token
+
+
+def validate_csrf() -> None:
+    """Bricht schreibende Requests ohne gültigen CSRF-Token mit 400 ab."""
+    if not current_app.config.get("CSRF_PROTECT", True):
+        return
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    token = session.get("_csrf_token", "")
+    submitted = request.form.get("_csrf_token", "")
+    if not token or not submitted or not secrets.compare_digest(token, submitted):
+        abort(400, description="CSRF-Token fehlt oder ist ungültig.")
 
 
 def login_required(view):
@@ -63,6 +90,7 @@ def require_ui_login():
         flash("Ihre Rolle erlaubt nur Lesezugriff.", "error")
         return redirect(url_for("main.index"))
 
+    validate_csrf()
     return None
 
 

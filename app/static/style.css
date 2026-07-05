@@ -1,0 +1,370 @@
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --border: #dde3ea;
+  --text: #1f2933;
+  --text-muted: #61707f;
+  --primary: #1f5f8b;
+  --primary-dark: #174868;
+  --success-bg: #e3f5e9;
+  --success-text: #1e6b3a;
+  --error-bg: #fdeaea;
+  --error-text: #a12622;
+  --topbar: #16344a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--primary);
+}
+
+/* Topbar */
+.topbar {
+  background: var(--topbar);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 1.5rem;
+  height: 56px;
+}
+
+.topbar .brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.topbar nav a {
+  color: #cfdce6;
+  text-decoration: none;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.topbar nav a:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.topbar nav a.active {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 600;
+}
+
+.topbar .user-area {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  color: #cfdce6;
+  white-space: nowrap;
+}
+
+.topbar .user-area form {
+  margin: 0;
+}
+
+.topbar .user-area button {
+  background: transparent;
+  color: #cfdce6;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.topbar .user-area button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Company selector bar */
+.company-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.company-bar label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.company-bar select {
+  min-width: 220px;
+}
+
+/* Layout */
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.page-title {
+  margin: 0 0 1rem;
+  font-size: 1.4rem;
+}
+
+section.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+section.card h2,
+section.card h3 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+/* Stat cards */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.stat-card .stat-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: 0.15rem;
+}
+
+.stat-card .stat-value.negative {
+  color: var(--error-text);
+}
+
+/* Forms */
+form.stacked label {
+  display: block;
+  margin: 0.75rem 0 0.2rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+input,
+select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  background: #fff;
+  color: var(--text);
+  max-width: 100%;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid rgba(31, 95, 139, 0.35);
+  border-color: var(--primary);
+}
+
+button[type="submit"],
+button.primary {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+button[type="submit"]:hover,
+button.primary:hover {
+  background: var(--primary-dark);
+}
+
+button.secondary {
+  background: #fff;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  margin-top: 0.75rem;
+}
+
+.journal-line {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 2fr;
+  gap: 0.75rem;
+  align-items: end;
+  padding: 0.6rem 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.journal-line label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid var(--border);
+  padding: 0.5rem 0.6rem;
+}
+
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  vertical-align: top;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.entry-lines td {
+  background: #fafbfc;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+/* Flash messages */
+.flash-list {
+  list-style: none;
+  margin: 1rem auto 0;
+  max-width: 1100px;
+  padding: 0 1.5rem;
+}
+
+.flash-list li {
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.flash-list li.success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.flash-list li.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.badge {
+  display: inline-block;
+  background: #eef2f6;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+/* Login page */
+.login-wrapper {
+  min-height: calc(100vh - 56px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8vh;
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem 2.25rem;
+  width: 380px;
+  box-shadow: 0 8px 24px rgba(22, 52, 74, 0.08);
+}
+
+.login-card h2 {
+  margin-top: 0;
+}
+
+.login-card input {
+  width: 100%;
+}
+
+.login-card button[type="submit"] {
+  width: 100%;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 800px) {
+  .journal-line {
+    grid-template-columns: 1fr 1fr;
+  }
+  .report-grid {
+    grid-template-columns: 1fr;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 0.5rem 1rem;
+  }
+}

@@ -119,6 +119,49 @@ def test_api_requires_bearer_token_when_configured(tmp_path):
     assert health.status_code == 200
 
 
+def test_csrf_protection_blocks_posts_without_token(tmp_path):
+    app = _create_test_app(tmp_path, CSRF_PROTECT=True)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+
+    # Login ohne CSRF-Token wird abgelehnt
+    blocked = client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    assert blocked.status_code == 400
+
+    # Nach GET der Login-Seite liegt ein Token in der Session
+    client.get("/auth/login")
+    with client.session_transaction() as flask_session:
+        token = flask_session["_csrf_token"]
+
+    ok = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "admin123", "_csrf_token": token},
+    )
+    assert ok.status_code == 302
+
+    # Schreibende UI-Requests ohne Token werden ebenfalls abgelehnt
+    blocked_write = client.post(
+        "/tenants", data={"tenant_name": "T", "company_name": "C GmbH"}
+    )
+    assert blocked_write.status_code == 400
+
+    ok_write = client.post(
+        "/tenants",
+        data={"tenant_name": "T", "company_name": "C GmbH", "_csrf_token": token},
+    )
+    assert ok_write.status_code == 302
+
+
 def test_seed_demo_command_creates_demo_data_idempotently(tmp_path):
     app = _create_test_app(tmp_path)
     runner = app.test_cli_runner()

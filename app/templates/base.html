@@ -3,32 +3,60 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OpenBuchhaltung</title>
+    <title>{% block title %}OpenBuchhaltung{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
-    <header>
-      <h1>OpenBuchhaltung</h1>
-      <nav>
-        <a href="{{ url_for('main.index') }}">Start</a>
-        {% if session.get('user') %}
-          <span>Angemeldet: {{ session['user']['username'] }} ({{ session['user']['role'] }})</span>
-          <form method="post" action="{{ url_for('auth.logout') }}" style="display:inline;">
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('main.index') }}">OpenBuchhaltung</a>
+      {% if session.get('user') %}
+        <nav>
+          <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
+          <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.journal_page' %}class="active"{% endif %}>Buchungen</a>
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.accounts_page' %}class="active"{% endif %}>Konten</a>
+          <a href="{{ url_for('main.documents_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.documents_page' %}class="active"{% endif %}>Belege</a>
+          <a href="{{ url_for('main.reports_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.reports_page' %}class="active"{% endif %}>Berichte</a>
+          <a href="{{ url_for('main.admin_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.admin_page' %}class="active"{% endif %}>Verwaltung</a>
+        </nav>
+        <div class="user-area">
+          <span>{{ session['user']['username'] }} <span class="badge">{{ session['user']['role'] }}</span></span>
+          <form method="post" action="{{ url_for('auth.logout') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
             <button type="submit">Logout</button>
           </form>
-        {% else %}
-          <a href="{{ url_for('auth.login_form') }}">Login</a>
-        {% endif %}
-      </nav>
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <ul>
-            {% for category, message in messages %}
-              <li><strong>{{ category }}:</strong> {{ message }}</li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-      {% endwith %}
+        </div>
+      {% endif %}
     </header>
+
+    {% if session.get('user') and companies is defined and companies %}
+      <div class="company-bar">
+        <form method="get" action="{{ request.path }}">
+          <label for="company-select">Gesellschaft:</label>
+          <select id="company-select" name="company_id" onchange="this.form.submit()">
+            {% for company in companies %}
+              <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+    {% endif %}
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash-list">
+          {% for category, message in messages %}
+            <li class="{{ category }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
     <main>
       {% block content %}{% endblock %}
     </main>

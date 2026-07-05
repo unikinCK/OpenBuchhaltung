@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Konten – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Konten</h1>
+
+  <section class="card">
+    <h2>Konto anlegen</h2>
+    {% if selected_company_id %}
+      <form method="post" action="{{ url_for('main.create_account') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="code">Kontonummer</label>
+        <input id="code" name="code" required />
+
+        <label for="name">Kontobezeichnung</label>
+        <input id="name" name="name" required />
+
+        <label for="account_type">Kontotyp</label>
+        <select id="account_type" name="account_type" required>
+          <option value="asset">Aktiva (asset)</option>
+          <option value="liability">Passiva (liability)</option>
+          <option value="equity">Eigenkapital (equity)</option>
+          <option value="income">Ertrag (income)</option>
+          <option value="expense">Aufwand (expense)</option>
+        </select>
+
+        <button type="submit">Konto speichern</button>
+      </form>
+    {% else %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Kontenplan <span class="badge"><strong>Konten:</strong> {{ accounts|length }}</span></h2>
+    {% if accounts %}
+      <table>
+        <thead>
+          <tr>
+            <th>Nummer</th>
+            <th>Bezeichnung</th>
+            <th>Typ</th>
+            <th>Ebene</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account in accounts %}
+            <tr>
+              <td>{{ account.code }}</td>
+              <td>{{ account.name }}</td>
+              <td><span class="badge">{{ account.account_type }}</span></td>
+              <td>{{ account.hierarchy_level }}</td>
+              <td>{{ "aktiv" if account.is_active else "inaktiv" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine Konten vorhanden. SKR03/SKR04 per CLI importieren:
+        <code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
+    {% endif %}
+  </section>
+{% endblock %}

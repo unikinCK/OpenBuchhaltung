@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Verwaltung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Verwaltung</h1>
+
+  <section class="card">
+    <h2>Mandant + Gesellschaft anlegen</h2>
+    {% if is_global_admin %}
+      <form method="post" action="{{ url_for('main.create_tenant_and_company') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="tenant_name">Mandant</label>
+        <input id="tenant_name" name="tenant_name" required />
+
+        <label for="company_name">Gesellschaft</label>
+        <input id="company_name" name="company_name" required />
+
+        <button type="submit">Anlegen</button>
+      </form>
+    {% else %}
+      <p class="muted">Neue Mandanten kann nur ein globaler Administrator anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Stammdaten</h2>
+    <p><strong>Mandanten:</strong> {{ tenants|length }}</p>
+    <p><strong>Gesellschaften:</strong> {{ companies|length }}</p>
+    <p><strong>Konten:</strong> {{ account_count }} <span class="muted">(ausgewählte Gesellschaft)</span></p>
+
+    {% if tenants %}
+      <table>
+        <thead>
+          <tr>
+            <th>Mandant</th>
+            <th>Gesellschaften</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tenant in tenants %}
+            <tr>
+              <td>{{ tenant.name }}</td>
+              <td>
+                {% for company in companies if company.tenant_id == tenant.id %}
+                  {{ company.name }}{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Kontenrahmen &amp; Demo-Daten</h2>
+    <p class="muted">Per CLI verfügbar:</p>
+    <p><code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
+    <p><code>flask --app run.py seed-demo</code></p>
+    <p><code>flask --app run.py create-user --username ... --password ... --role Buchhalter --tenant-id ...</code></p>
+  </section>
+{% endblock %}
