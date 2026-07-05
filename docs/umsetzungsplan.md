@@ -124,6 +124,28 @@ um Wechsel zwischen Engines zu vereinfachen.
 - [x] CSV-Export *(Core-Exports für Journal und Summen-/Saldenliste über API + UI-Downloadlinks umgesetzt)*
 - [x] End-to-End-Tests für Kernflows *(Happy Path + fachliche Negativfälle und CI-Gate mit `pytest -m e2e` ergänzt)*
 
+## Phase 1.5 – Prototyp-Härtung / Sprint C (Stand 2026-07-05)
+
+Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Prototyp machen.
+
+- [x] **P1.5-001 Login-Pflicht durchsetzen**: UI-Routen erfordern Anmeldung; DB-Modell
+      `User` mit Passwort-Hash (werkzeug/scrypt) ersetzt den Platzhalter-Userstore;
+      Rollen (Admin/Buchhalter/Prüfer) werden bei Schreibaktionen geprüft. API optional
+      per `API_AUTH_TOKEN` (Bearer) geschützt; Benutzer-Tokens folgen in Phase 3.
+- [x] **P1.5-002 Tenant-Scoping aktivieren**: Session-Tenant des Benutzers filtert alle
+      UI-Queries; Cross-Tenant-Zugriffe liefern 404; Mandanten anlegen nur als globaler
+      Admin. Tests für Cross-Tenant-Verbot ergänzt.
+- [x] **P1.5-003 Steuercodes in Buchungsmaske**: Standard-Steuercodes (USt19/USt7/VSt19/
+      VSt7/frei) je Gesellschaft, Auswahl je Buchungszeile, automatische USt-/VSt-Teilbuchung
+      (Netto-Erfassung); `TaxCode.vat_account_id` per Migration ergänzt.
+- [x] **P1.5-004 Demo-Seed-Command**: `flask seed-demo` legt Mandant, Gesellschaft,
+      SKR03-Konten, Steuercodes, Benutzer und Beispielbuchungen idempotent an.
+- [x] **P1.5-005 Kleinigkeiten**: Port per `PORT`-ENV konfigurierbar (Default 8000),
+      README auf Port 8000 umgestellt; `create_app` liest jetzt ENV-Variablen
+      (DATABASE_URL, DOCUMENT_LLM_*, MCP_SERVER_URL, SECRET_KEY, API_AUTH_TOKEN) —
+      vorher waren die dokumentierten Exports wirkungslos. Bugfix: GuV/Bilanz erkennen
+      jetzt auch `account_type=income` (SKR-Importe) als Erlöskonten.
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [ ] Jahresabschluss-Workflow (Periodenabschluss, Vortrag)
 - [ ] OPOS-Basis Debitor/Kreditor

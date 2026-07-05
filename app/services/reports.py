@@ -9,6 +9,9 @@ from domain.models import Account, JournalEntry, JournalEntryLine
 
 ZERO = Decimal("0.00")
 
+# SKR-Importe verwenden "income", manuell angelegte Konten häufig "revenue".
+REVENUE_ACCOUNT_TYPES = {"revenue", "income"}
+
 
 def trial_balance_for_company(
     *,
@@ -82,7 +85,7 @@ def income_statement_for_company(*, session: Session, company_id: int) -> dict[s
     expenses: list[dict[str, Decimal | str]] = []
 
     for row in balances:
-        if row["account_type"] == "revenue":
+        if row["account_type"] in REVENUE_ACCOUNT_TYPES:
             amount = row["credit_total"] - row["debit_total"]
             revenues.append({"code": row["code"], "name": row["name"], "amount": amount})
         elif row["account_type"] == "expense":

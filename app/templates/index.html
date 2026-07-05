@@ -131,8 +131,16 @@
               <option value="credit">Haben</option>
             </select>
 
-            <label>Betrag</label>
+            <label>Betrag (netto bei Steuercode)</label>
             <input name="line_amount" placeholder="100.00" required />
+
+            <label>Steuercode (optional)</label>
+            <select name="line_tax_code_id">
+              <option value="">Ohne Steuer</option>
+              {% for tax_code in tax_codes %}
+                <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+              {% endfor %}
+            </select>
 
             <label>Zeilenbeschreibung (optional)</label>
             <input name="line_description" />
@@ -160,8 +168,16 @@
           <option value="credit">Haben</option>
         </select>
 
-        <label>Betrag</label>
+        <label>Betrag (netto bei Steuercode)</label>
         <input name="line_amount" placeholder="100.00" required />
+
+        <label>Steuercode (optional)</label>
+        <select name="line_tax_code_id">
+          <option value="">Ohne Steuer</option>
+          {% for tax_code in tax_codes %}
+            <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+          {% endfor %}
+        </select>
 
         <label>Zeilenbeschreibung (optional)</label>
         <input name="line_description" />

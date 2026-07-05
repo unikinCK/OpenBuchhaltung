@@ -210,9 +210,13 @@ class TaxCode(Base):
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     description: Mapped[str | None] = mapped_column(String(255))
+    vat_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT")
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     company: Mapped[Company] = relationship(back_populates="tax_codes")
+    vat_account: Mapped[Account | None] = relationship(foreign_keys=[vat_account_id])
     journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="tax_code")
 
 
@@ -331,6 +335,24 @@ class Document(Base):
     )
 
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
+
+
+class User(Base):
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(30), nullable=False, default="Buchhalter")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    tenant: Mapped[Tenant | None] = relationship()
 
 
 class AuditLog(Base):

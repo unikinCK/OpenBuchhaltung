@@ -4,22 +4,39 @@ from pathlib import Path
 import pytest
 
 from app import create_app
-from domain.models import Account, Document
+from app.auth import hash_password
+from domain.models import Account, Document, User
 
 
 @pytest.fixture
 def e2e_app(tmp_path: Path):
-    return create_app(
+    app = create_app(
         {
             "TESTING": True,
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_e2e.db'}",
         }
     )
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+    return app
+
+
+def _login(client):
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
 
 
 @pytest.mark.e2e
 def test_e2e_happy_path_core_flow(e2e_app):
     client = e2e_app.test_client()
+    _login(client)
 
     tenant_response = client.post(
         "/tenants",
@@ -75,6 +92,7 @@ def test_e2e_happy_path_core_flow(e2e_app):
 @pytest.mark.e2e
 def test_e2e_negative_journal_entry_unbalanced(e2e_app):
     client = e2e_app.test_client()
+    _login(client)
 
     client.post(
         "/api/v1/tenants",
@@ -111,6 +129,7 @@ def test_e2e_negative_journal_entry_unbalanced(e2e_app):
 @pytest.mark.e2e
 def test_e2e_negative_document_link_to_missing_journal_entry(e2e_app):
     client = e2e_app.test_client()
+    _login(client)
 
     client.post(
         "/tenants",

@@ -7,6 +7,7 @@ from io import StringIO
 from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
+from app.auth import require_api_token
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -26,6 +27,7 @@ from domain.models import Account, Company, JournalEntry, JournalEntryLine, Tena
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 api_bp = Blueprint("api", __name__, url_prefix="/api/v1")
+api_bp.before_request(require_api_token)
 
 
 def _validation_error(message: str, *, details: list[dict[str, str]] | None = None):
@@ -192,12 +194,14 @@ def create_journal_entry_via_api():
                     ],
                 )
             try:
+                raw_tax_code_id = line.get("tax_code_id")
                 lines.append(
                     JournalLineInput(
                         account_id=int(line["account_id"]),
                         debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
                         credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
                         description=(line.get("description") or "").strip() or None,
+                        tax_code_id=int(raw_tax_code_id) if raw_tax_code_id is not None else None,
                     )
                 )
             except KeyError:
