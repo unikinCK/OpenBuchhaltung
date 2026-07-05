@@ -22,5 +22,7 @@ jobs:
         run: pytest
       - name: E2E Kernflows
         run: pytest -m e2e
-      - name: Migrations check (Phase 0 placeholder)
-        run: test -d migrations
+      - name: Migrations check
+        env:
+          DATABASE_URL: sqlite+pysqlite:///migration-check.db
+        run: alembic upgrade head
