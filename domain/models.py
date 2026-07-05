@@ -337,6 +337,42 @@ class Document(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
 
 
+class BankTransaction(Base):
+    __tablename__ = "bank_transaction"
+    __table_args__ = (
+        UniqueConstraint("company_id", "dedup_hash", name="uq_bank_tx_company_hash"),
+        CheckConstraint("amount != 0", name="ck_bank_tx_amount_non_zero"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    booking_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Signiert: positiv = Zahlungseingang, negativ = Zahlungsausgang
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    purpose: Mapped[str] = mapped_column(String(255), nullable=False)
+    counterparty: Mapped[str | None] = mapped_column(String(255))
+    dedup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
 class User(Base):
     __tablename__ = "user"
 
