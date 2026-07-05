@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Dashboard</h1>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p>Noch keine Gesellschaft vorhanden. Legen Sie unter
+        <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> einen Mandanten mit Gesellschaft an
+        oder führen Sie <code>flask --app run.py seed-demo</code> aus.</p>
+    </section>
+  {% else %}
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Umsatzerlöse</div>
+        <div class="stat-value">{{ totals.total_revenue }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Aufwendungen</div>
+        <div class="stat-value">{{ totals.total_expense }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jahresergebnis</div>
+        <div class="stat-value {% if totals.net_income < 0 %}negative{% endif %}">{{ totals.net_income }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Bilanzsumme</div>
+        <div class="stat-value">{{ balance_totals.total_assets }} €</div>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Buchungen</div>
+        <div class="stat-value">{{ stats.journal_entries }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Konten</div>
+        <div class="stat-value">{{ stats.accounts }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Belege</div>
+        <div class="stat-value">{{ stats.documents }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Bilanzgleichheit</div>
+        <div class="stat-value {% if not balance_totals.is_balanced %}negative{% endif %}">
+          {{ "Ja" if balance_totals.is_balanced else "Nein" }}
+        </div>
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>Letzte Buchungen</h2>
+      {% if recent_entries %}
+        <table>
+          <thead>
+            <tr>
+              <th>Beleg-Nr.</th>
+              <th>Datum</th>
+              <th>Beschreibung</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in recent_entries %}
+              <tr>
+                <td>{{ entry.posting_number }}</td>
+                <td>{{ entry.entry_date.isoformat() }}</td>
+                <td>{{ entry.description }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p><a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Alle Buchungen ansehen →</a></p>
+      {% else %}
+        <p class="muted">Noch keine Buchungen vorhanden.
+          <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Erste Buchung erfassen →</a></p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

@@ -146,6 +146,18 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       vorher waren die dokumentierten Exports wirkungslos. Bugfix: GuV/Bilanz erkennen
       jetzt auch `account_type=income` (SKR-Importe) als Erlöskonten.
 
+## Phase 1.6 – UI & Sicherheit / Sprint D (Stand 2026-07-05)
+
+- [x] **P1.6-001 CSRF-Schutz**: Session-basierter Token für alle UI-/Auth-Formulare
+      (ohne neue Dependency); Requests ohne gültigen Token liefern 400.
+      In Tests standardmäßig deaktiviert, dedizierter CSRF-Test vorhanden.
+- [x] **P1.6-002 Mehrseitige UI**: Monolithische Startseite aufgeteilt in Dashboard,
+      Buchungen, Konten, Belege, Berichte und Verwaltung; Topbar-Navigation mit
+      Gesellschaftsauswahl und Login-Status; eigenes CSS (`app/static/style.css`,
+      kein Framework); Dashboard mit Kennzahlen (GuV-Totals, Bilanzsumme,
+      Bilanzgleichheit, Zähler); GuV/Bilanz jetzt mit Einzelpositionen;
+      Kontotyp-Auswahl statt Freitext; gestylte Login-Seite.
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [ ] Jahresabschluss-Workflow (Periodenabschluss, Vortrag)
 - [ ] OPOS-Basis Debitor/Kreditor

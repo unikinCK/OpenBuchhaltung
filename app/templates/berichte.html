@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Berichte – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Berichte</h1>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    <section class="card">
+      <h2>Summen- und Saldenliste</h2>
+      {% if trial_balance %}
+        <table>
+          <thead>
+            <tr>
+              <th>Konto</th>
+              <th>Name</th>
+              <th class="num">Soll</th>
+              <th class="num">Haben</th>
+              <th class="num">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in trial_balance %}
+              <tr>
+                <td>{{ row.code }}</td>
+                <td>{{ row.name }}</td>
+                <td class="num">{{ row.debit_total }}</td>
+                <td class="num">{{ row.credit_total }}</td>
+                <td class="num">{{ row.balance }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Buchungen für diese Gesellschaft.</p>
+      {% endif %}
+      <p>
+        <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id) }}">Summen-/Saldenliste als CSV exportieren</a>
+        ·
+        <a href="{{ url_for('api.export_journal_csv', company_id=selected_company_id) }}">Journal-Export (CSV)</a>
+        ·
+        <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id) }}">SuSa-Export (CSV, API-Format)</a>
+      </p>
+    </section>
+
+    <div class="report-grid">
+      <section class="card">
+        <h2>GuV</h2>
+        <table>
+          <thead>
+            <tr><th>Position</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in income_statement.revenues %}
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Umsätze</strong></td><td class="num"><strong>{{ income_statement.totals.total_revenue }}</strong></td></tr>
+            {% for row in income_statement.expenses %}
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">−{{ row.amount }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Aufwendungen</strong></td><td class="num"><strong>−{{ income_statement.totals.total_expense }}</strong></td></tr>
+            <tr><td><strong>Jahresergebnis</strong></td><td class="num"><strong>{{ income_statement.totals.net_income }}</strong></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Bilanz</h2>
+        <table>
+          <thead>
+            <tr><th>Aktiva</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in balance_sheet.assets %}
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets }}</strong></td></tr>
+          </tbody>
+        </table>
+        <br />
+        <table>
+          <thead>
+            <tr><th>Passiva</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in balance_sheet.liabilities_and_equity %}
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity }}</strong></td></tr>
+          </tbody>
+        </table>
+        <p>
+          Bilanzgleichheit:
+          {% if balance_sheet.totals.is_balanced %}
+            <strong>Ja</strong>
+          {% else %}
+            <strong class="negative">Nein</strong> (Differenz: {{ balance_sheet.totals.difference }})
+          {% endif %}
+        </p>
+      </section>
+    </div>
+  {% endif %}
+{% endblock %}

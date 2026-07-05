@@ -1,11 +1,22 @@
 {% extends "base.html" %}
 
+{% block title %}Anmelden – OpenBuchhaltung{% endblock %}
+
 {% block content %}
-  <h2>Login</h2>
-  <form method="post" action="{{ url_for('auth.login') }}">
-    <label>Benutzername <input name="username" required /></label><br />
-    <label>Passwort <input type="password" name="password" required /></label><br />
-    <button type="submit">Anmelden</button>
-  </form>
-  <p>Demo-Nutzer: admin/admin, buchhalter/buchhalter, pruefer/pruefer.</p>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <h2>Anmelden</h2>
+      <p class="muted">Bitte melden Sie sich mit Ihren Zugangsdaten an.</p>
+      <form method="post" action="{{ url_for('auth.login', next=request.args.get('next', '')) }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="username">Benutzername</label>
+        <input id="username" name="username" autocomplete="username" required autofocus />
+
+        <label for="password">Passwort</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button type="submit">Anmelden</button>
+      </form>
+    </div>
+  </div>
 {% endblock %}

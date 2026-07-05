@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Belege – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Belege</h1>
+
+  <section class="card">
+    <h2>Beleg hochladen</h2>
+    {% if selected_company_id %}
+      <form method="post" action="{{ url_for('main.upload_document') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="journal_entry_id">Buchung (optional)</label>
+        <select id="journal_entry_id" name="journal_entry_id">
+          <option value="">Keine Verknüpfung</option>
+          {% for entry in journal_entries %}
+            <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="document_file">Datei</label>
+        <input id="document_file" name="document_file" type="file" required />
+
+        <button type="submit">Beleg hochladen</button>
+      </form>
+    {% else %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Hochgeladene Belege</h2>
+    {% if documents %}
+      <table>
+        <thead>
+          <tr>
+            <th>Datei</th>
+            <th>Buchung</th>
+            <th>Hochgeladen</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for document in documents %}
+            <tr>
+              <td>{{ document.file_name }}</td>
+              <td>
+                {% if document.journal_entry_id %}
+                  {{ journal_entry_labels.get(document.journal_entry_id, '-') }}
+                {% else %}
+                  <span class="muted">–</span>
+                {% endif %}
+              </td>
+              <td>{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td><a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine Belege vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}

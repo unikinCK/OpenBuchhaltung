@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Buchungen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Buchungen</h1>
+
+  <section class="card">
+    <h2>Buchung erfassen (Soll/Haben)</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% elif not accounts %}
+      <p class="muted">Noch keine Konten vorhanden — zuerst unter
+        <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen oder importieren.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('main.create_journal_entry_from_form') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="entry_date">Datum</label>
+        <input id="entry_date" name="entry_date" type="date" value="{{ today }}" required />
+
+        <label for="description">Beschreibung</label>
+        <input id="description" name="description" required style="min-width: 320px;" />
+
+        <div id="journal-lines">
+          <p><strong>Buchungszeilen</strong> <span class="muted">(mindestens zwei; Betrag gilt bei Steuercode als netto)</span></p>
+          {% for _ in range(2) %}
+            <div class="journal-line">
+              <div>
+                <label>Konto</label>
+                <select name="line_account_id" required>
+                  <option value="">Bitte wählen</option>
+                  {% for account in accounts %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Seite</label>
+                <select name="line_side" required>
+                  <option value="debit">Soll</option>
+                  <option value="credit">Haben</option>
+                </select>
+              </div>
+              <div>
+                <label>Betrag</label>
+                <input name="line_amount" placeholder="100.00" required />
+              </div>
+              <div>
+                <label>Steuercode</label>
+                <select name="line_tax_code_id">
+                  <option value="">Ohne Steuer</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Zeilenbeschreibung</label>
+                <input name="line_description" />
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+        <button type="button" class="secondary" id="add-line-button">+ Weitere Zeile</button>
+        <br />
+        <button type="submit">Buchung speichern</button>
+      </form>
+
+      <template id="journal-line-template">
+        <div class="journal-line">
+          <div>
+            <label>Konto</label>
+            <select name="line_account_id" required>
+              <option value="">Bitte wählen</option>
+              {% for account in accounts %}
+                <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Seite</label>
+            <select name="line_side" required>
+              <option value="debit">Soll</option>
+              <option value="credit">Haben</option>
+            </select>
+          </div>
+          <div>
+            <label>Betrag</label>
+            <input name="line_amount" placeholder="100.00" required />
+          </div>
+          <div>
+            <label>Steuercode</label>
+            <select name="line_tax_code_id">
+              <option value="">Ohne Steuer</option>
+              {% for tax_code in tax_codes %}
+                <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Zeilenbeschreibung</label>
+            <input name="line_description" />
+          </div>
+        </div>
+      </template>
+      <script>
+        (function() {
+          const addLineButton = document.getElementById("add-line-button");
+          const container = document.getElementById("journal-lines");
+          const template = document.getElementById("journal-line-template");
+          if (!addLineButton || !container || !template) return;
+          addLineButton.addEventListener("click", function() {
+            container.appendChild(template.content.cloneNode(true));
+          });
+        })();
+      </script>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Journal</h2>
+    {% if journal_entries %}
+      <table>
+        <thead>
+          <tr>
+            <th>Beleg-Nr.</th>
+            <th>Datum</th>
+            <th>Beschreibung</th>
+            <th>Konto</th>
+            <th class="num">Soll</th>
+            <th class="num">Haben</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in journal_entries %}
+            <tr>
+              <td><strong>{{ entry.posting_number }}</strong></td>
+              <td>{{ entry.entry_date.isoformat() }}</td>
+              <td>{{ entry.description }}</td>
+              <td colspan="3"></td>
+            </tr>
+            {% for line in lines_by_entry.get(entry.id, []) %}
+              <tr class="entry-lines">
+                <td></td>
+                <td></td>
+                <td>{{ line.description or "" }}</td>
+                <td>{{ line.account_code }} – {{ line.account_name }}</td>
+                <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount }}{% endif %}</td>
+                <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount }}{% endif %}</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine Buchungen vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}
