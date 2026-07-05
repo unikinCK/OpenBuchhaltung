@@ -21,6 +21,8 @@
              {% if request.endpoint == 'main.documents_page' %}class="active"{% endif %}>Belege</a>
           <a href="{{ url_for('main.reports_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.reports_page' %}class="active"{% endif %}>Berichte</a>
+          <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.open_items_page' %}class="active"{% endif %}>OPOS</a>
           <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.bank_page' %}class="active"{% endif %}>Bank</a>
           <a href="{{ url_for('main.periods_page', company_id=selected_company_id) }}"

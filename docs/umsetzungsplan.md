@@ -163,7 +163,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Sperren [Schreibrollen] / Entsperren [nur Admin], Geschäftsjahr abschließen
       [nur Admin, sperrt alle Perioden], Buchungssperre für geschlossene Jahre,
       Audit-Events für alle Aktionen; Ergebnisvortrag ins Folgejahr noch offen)*
-- [ ] OPOS-Basis Debitor/Kreditor
+- [x] OPOS-Basis Debitor/Kreditor *(Sprint G: Offene-Posten-Tabelle mit Debitor/
+      Kreditor-Typ, Verknüpfung zu Konto/Buchung, Teil-/Vollausgleich gegen Bankumsatz
+      oder Zahlungsbuchung, UI-Seite und Audit-Events umgesetzt)*
 - [x] Bank-CSV-Import + Matching-Regeln *(Sprint F: CSV-Import mit Header-Aliassen,
       deutschem Zahlen-/Datumsformat und Dedup-Hash; Betrags-Matching schlägt passende
       Buchungen vor; offene Umsätze direkt verbuchbar inkl. Netto-aus-Brutto-Split
