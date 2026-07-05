@@ -50,6 +50,13 @@ flask --app run.py create-user --username maria --password geheim --role Buchhal
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
 
+## Perioden & Jahresabschluss
+
+Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
+(Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin)
+sperrt alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht
+mehr gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
+
 ## Steuercodes (USt/VSt)
 
 `seed-demo` legt Standard-Steuercodes je Gesellschaft an: `USt19`, `USt7`, `VSt19`, `VSt7`, `frei`.

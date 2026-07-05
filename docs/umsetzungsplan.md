@@ -159,7 +159,10 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Kontotyp-Auswahl statt Freitext; gestylte Login-Seite.
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
-- [ ] Jahresabschluss-Workflow (Periodenabschluss, Vortrag)
+- [x] Jahresabschluss-Workflow (Periodenabschluss) *(Sprint E: Perioden-Seite mit
+      Sperren [Schreibrollen] / Entsperren [nur Admin], Geschäftsjahr abschließen
+      [nur Admin, sperrt alle Perioden], Buchungssperre für geschlossene Jahre,
+      Audit-Events für alle Aktionen; Ergebnisvortrag ins Folgejahr noch offen)*
 - [ ] OPOS-Basis Debitor/Kreditor
 - [ ] Bank-CSV-Import + Matching-Regeln
 - [ ] Performance-Profiling großer Journaldaten

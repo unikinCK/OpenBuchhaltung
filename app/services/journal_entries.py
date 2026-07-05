@@ -94,6 +94,10 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         company_id=company.id,
         dt=payload.entry_date,
     )
+    if fiscal_year.is_closed:
+        raise JournalEntryCreationError(
+            "Das Geschäftsjahr ist abgeschlossen. Buchung nicht möglich."
+        )
     period = _get_or_create_period(
         session=session,
         tenant_id=company.tenant_id,
