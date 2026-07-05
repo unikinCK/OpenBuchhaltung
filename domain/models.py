@@ -373,6 +373,53 @@ class BankTransaction(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship()
 
 
+class OpenItem(Base):
+    __tablename__ = "open_item"
+    __table_args__ = (
+        CheckConstraint("original_amount > 0", name="ck_open_item_original_amount_positive"),
+        CheckConstraint("open_amount >= 0", name="ck_open_item_open_amount_non_negative"),
+        CheckConstraint(
+            "item_type IN ('receivable', 'payable')", name="ck_open_item_type_known"
+        ),
+        CheckConstraint("status IN ('open', 'settled')", name="ck_open_item_status_known"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    bank_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_transaction.id", ondelete="SET NULL")
+    )
+    item_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    reference: Mapped[str] = mapped_column(String(120), nullable=False)
+    counterparty: Mapped[str | None] = mapped_column(String(255))
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    open_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settled_by: Mapped[str | None] = mapped_column(String(120))
+
+    account: Mapped[Account] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+    bank_transaction: Mapped[BankTransaction | None] = relationship()
+
+
 class User(Base):
     __tablename__ = "user"
 

@@ -61,6 +61,13 @@ Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
 Gegenkonto wählen, optional Steuercode — der Bruttobetrag wird dann automatisch in
 Netto + Steuer zerlegt. Beispiel-CSV: `data/demo/bank_demo.csv`.
 
+## Offene Posten (OPOS)
+
+Unter **OPOS** lassen sich debitorische und kreditorische offene Posten erfassen,
+optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ein
+Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
+werden; die Aktion wird im Audit-Log protokolliert.
+
 ## Perioden & Jahresabschluss
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren

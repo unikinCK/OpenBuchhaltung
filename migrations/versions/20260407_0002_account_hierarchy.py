@@ -21,14 +21,6 @@ def upgrade() -> None:
     op.add_column("account", sa.Column("level_3", sa.String(length=1), nullable=True))
     op.add_column("account", sa.Column("level_4", sa.String(length=1), nullable=True))
     op.add_column("account", sa.Column("parent_account_id", sa.Integer(), nullable=True))
-    op.create_foreign_key(
-        "fk_account_parent_account_id",
-        "account",
-        "account",
-        ["parent_account_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
 
     bind = op.get_bind()
     account_table = sa.table(
@@ -87,24 +79,34 @@ def upgrade() -> None:
             )
         )
 
-    op.alter_column("account", "hierarchy_level", nullable=False)
-    op.alter_column("account", "level_1", nullable=False)
-    op.alter_column("account", "level_2", nullable=False)
-    op.alter_column("account", "level_3", nullable=False)
-    op.alter_column("account", "level_4", nullable=False)
-    op.create_check_constraint(
-        "ck_account_hierarchy_level_range",
-        "account",
-        "hierarchy_level BETWEEN 1 AND 4",
-    )
+    with op.batch_alter_table("account") as batch_op:
+        batch_op.alter_column(
+            "hierarchy_level", existing_type=sa.Integer(), nullable=False
+        )
+        batch_op.alter_column("level_1", existing_type=sa.String(length=1), nullable=False)
+        batch_op.alter_column("level_2", existing_type=sa.String(length=1), nullable=False)
+        batch_op.alter_column("level_3", existing_type=sa.String(length=1), nullable=False)
+        batch_op.alter_column("level_4", existing_type=sa.String(length=1), nullable=False)
+        batch_op.create_foreign_key(
+            "fk_account_parent_account_id",
+            "account",
+            ["parent_account_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        batch_op.create_check_constraint(
+            "ck_account_hierarchy_level_range",
+            "hierarchy_level BETWEEN 1 AND 4",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_account_hierarchy_level_range", "account", type_="check")
-    op.drop_constraint("fk_account_parent_account_id", "account", type_="foreignkey")
-    op.drop_column("account", "parent_account_id")
-    op.drop_column("account", "level_4")
-    op.drop_column("account", "level_3")
-    op.drop_column("account", "level_2")
-    op.drop_column("account", "level_1")
-    op.drop_column("account", "hierarchy_level")
+    with op.batch_alter_table("account") as batch_op:
+        batch_op.drop_constraint("ck_account_hierarchy_level_range", type_="check")
+        batch_op.drop_constraint("fk_account_parent_account_id", type_="foreignkey")
+        batch_op.drop_column("parent_account_id")
+        batch_op.drop_column("level_4")
+        batch_op.drop_column("level_3")
+        batch_op.drop_column("level_2")
+        batch_op.drop_column("level_1")
+        batch_op.drop_column("hierarchy_level")
