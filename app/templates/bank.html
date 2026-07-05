@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Bank – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Bankumsätze</h1>
+
+  <section class="card">
+    <h2>Kontoumsätze importieren (CSV)</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% elif not bank_accounts %}
+      <p class="muted">Kein Bankkonto (Kontotyp asset) vorhanden — zuerst unter
+        <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('main.bank_import_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="bank_account_id">Bankkonto</label>
+        <select id="bank_account_id" name="bank_account_id" required>
+          {% for account in bank_accounts %}
+            <option value="{{ account.id }}" {% if account.code == '1200' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="bank_csv">CSV-Datei</label>
+        <input id="bank_csv" name="bank_csv" type="file" accept=".csv,text/csv" required />
+        <p class="muted">Erkannte Spalten (Aliasse): Buchungstag/Datum, Betrag (auch 1.234,56), Verwendungszweck, Auftraggeber/Empfänger. Trennzeichen , oder ; — Re-Importe werden dedupliziert.</p>
+
+        <button type="submit">Importieren</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Umsätze</h2>
+    {% if transactions %}
+      <table>
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Verwendungszweck</th>
+            <th>Gegenseite</th>
+            <th class="num">Betrag</th>
+            <th>Status</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tx in transactions %}
+            <tr>
+              <td>{{ tx.booking_date.isoformat() }}</td>
+              <td>{{ tx.purpose }}</td>
+              <td>{{ tx.counterparty or "–" }}</td>
+              <td class="num">{{ tx.amount }}</td>
+              <td>
+                {% if tx.status == 'open' %}
+                  <span class="badge">offen</span>
+                {% elif tx.status == 'matched' %}
+                  <span class="badge">zugeordnet</span>
+                {% else %}
+                  <span class="badge">verbucht</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if tx.status == 'open' %}
+                  {% set suggestions = suggestions_by_tx.get(tx.id, []) %}
+                  {% if suggestions %}
+                    <form method="post" action="{{ url_for('main.bank_match_action', transaction_id=tx.id) }}" style="margin-bottom:0.4rem;">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                      <select name="journal_entry_id" required>
+                        {% for entry in suggestions %}
+                          <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+                        {% endfor %}
+                      </select>
+                      <button type="submit" class="secondary" style="margin:0;">Zuordnen</button>
+                    </form>
+                  {% endif %}
+                  <form method="post" action="{{ url_for('main.bank_book_action', transaction_id=tx.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <select name="contra_account_id" required>
+                      <option value="">Gegenkonto wählen</option>
+                      {% for account in contra_accounts %}
+                        <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="tax_code_id">
+                      <option value="">Ohne Steuer</option>
+                      {% for tax_code in tax_codes %}
+                        <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="secondary" style="margin:0;">Buchen</button>
+                  </form>
+                {% elif tx.journal_entry_id %}
+                  <span class="muted">→ Buchung #{{ tx.journal_entry_id }}</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine Bankumsätze importiert.</p>
+    {% endif %}
+  </section>
+{% endblock %}

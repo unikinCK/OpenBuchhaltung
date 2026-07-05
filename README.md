@@ -50,6 +50,17 @@ flask --app run.py create-user --username maria --password geheim --role Buchhal
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
 
+## Bank-CSV-Import
+
+Unter **Bank** lassen sich Kontoumsätze als CSV importieren (Spalten-Aliasse:
+Buchungstag/Datum, Betrag — auch deutsches Format `1.234,56` —, Verwendungszweck,
+Auftraggeber/Empfänger; Trennzeichen `,` oder `;`). Re-Importe werden dedupliziert.
+
+Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
+(Vorschläge per Betrags-Matching auf dem Bankkonto) oder **direkt verbucht** werden:
+Gegenkonto wählen, optional Steuercode — der Bruttobetrag wird dann automatisch in
+Netto + Steuer zerlegt. Beispiel-CSV: `data/demo/bank_demo.csv`.
+
 ## Perioden & Jahresabschluss
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
