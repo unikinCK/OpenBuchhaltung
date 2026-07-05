@@ -8,7 +8,14 @@ import click
 from flask import Flask
 from sqlalchemy import select
 
-from app.auth import ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, hash_password
+from app.auth import (
+    ROLE_ADMIN,
+    ROLE_BUCHHALTER,
+    ROLE_PRUEFER,
+    generate_api_token,
+    hash_api_token,
+    hash_password,
+)
 from app.services.account_chart_import import import_account_chart_file
 from app.services.journal_entries import (
     JournalEntryInput,
@@ -101,6 +108,25 @@ def register_cli_commands(app: Flask) -> None:
             )
             session.commit()
         click.echo(f"Benutzer {username} ({role}) wurde angelegt.")
+
+    @app.cli.command("set-api-token")
+    @click.option("--username", required=True)
+    def set_api_token(username: str):
+        """Erzeugt/rotiert ein API-Token für einen Benutzer und zeigt es einmalig an."""
+        token = generate_api_token()
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            user = session.execute(
+                select(User).where(User.username == username)
+            ).scalar_one_or_none()
+            if user is None:
+                raise click.ClickException(f"Benutzer {username} wurde nicht gefunden.")
+            user.api_token_hash = hash_api_token(token)
+            user.api_token_last4 = token[-4:]
+            session.commit()
+
+        click.echo(f"API-Token für {username}: {token}")
+        click.echo("Dieses Token wird nur einmal angezeigt.")
 
     @app.cli.command("seed-demo")
     def seed_demo():

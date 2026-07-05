@@ -429,6 +429,8 @@ class User(Base):
     )
     username: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    api_token_hash: Mapped[str | None] = mapped_column(String(255), unique=True)
+    api_token_last4: Mapped[str | None] = mapped_column(String(4))
     role: Mapped[str] = mapped_column(String(30), nullable=False, default="Buchhalter")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
