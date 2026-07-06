@@ -820,14 +820,17 @@ def close_fiscal_year_action(fiscal_year_id: int):
             abort(404)
         _require_company_access(session, fiscal_year.company_id)
         try:
-            fiscal_year = close_fiscal_year(
+            close_result = close_fiscal_year(
                 session=session, fiscal_year_id=fiscal_year_id, changed_by=_changed_by()
             )
         except PeriodActionError as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.periods_page", company_id=company_id))
 
-    flash(f"Geschäftsjahr {fiscal_year.label} wurde abgeschlossen.", "success")
+    message = f"Geschäftsjahr {close_result.fiscal_year.label} wurde abgeschlossen."
+    if close_result.carryforward_entry is not None:
+        message += f" Ergebnisvortrag gebucht ({close_result.carryforward_entry.posting_number})."
+    flash(message, "success")
     return redirect(url_for("main.periods_page", company_id=company_id))
 
 

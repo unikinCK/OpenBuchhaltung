@@ -29,3 +29,4 @@ code,name,account_type
 6200,Abschreibungen auf Sachanlagen,expense
 8400,Erlöse 19 % USt,income
 8300,Erlöse 7 % USt,income
+0860,Gewinnvortrag vor Verwendung,equity

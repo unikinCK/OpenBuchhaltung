@@ -89,8 +89,10 @@ werden; die Aktion wird im Audit-Log protokolliert.
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
 (Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin)
-sperrt alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht
-mehr gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
+bucht zunächst den **Ergebnisvortrag** (die GuV-Konten werden gegen das
+Gewinnvortragskonto glattgestellt — SKR03 `0860`, SKR04 `2970`) und sperrt dann
+alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht mehr
+gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
 
 ## Steuercodes (USt/VSt)
 
