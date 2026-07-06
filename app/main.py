@@ -78,6 +78,9 @@ from domain.services.journal_entry_validation import JournalEntryValidationError
 main_bp = Blueprint("main", __name__)
 main_bp.before_request(require_ui_login)
 
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+ALLOWED_DOCUMENT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+
 
 def _get_session_factory():
     session_factory = current_app.extensions.get("db_session_factory")
@@ -118,6 +121,34 @@ def _company_context(session) -> tuple[list[Company], int | None]:
     if selected_company_id is None and companies:
         selected_company_id = companies[0].id
     return companies, selected_company_id
+
+
+def _uploaded_file_size(uploaded_file) -> int | None:
+    stream = uploaded_file.stream
+    if not hasattr(stream, "tell") or not hasattr(stream, "seek"):
+        return None
+    current_position = stream.tell()
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(current_position)
+    return size
+
+
+def _document_upload_error(uploaded_file, file_name: str) -> str | None:
+    extension = Path(file_name).suffix.lower()
+    if extension not in ALLOWED_DOCUMENT_EXTENSIONS:
+        return "Nur PDF-, JPG- und PNG-Belege dürfen hochgeladen werden."
+
+    mimetype = uploaded_file.mimetype or "application/octet-stream"
+    if mimetype not in ALLOWED_DOCUMENT_MIME_TYPES:
+        return "Der Dateityp des Belegs ist nicht erlaubt."
+
+    max_bytes = current_app.config.get("DOCUMENT_MAX_UPLOAD_BYTES")
+    file_size = _uploaded_file_size(uploaded_file)
+    if max_bytes and file_size is not None and file_size > max_bytes:
+        return "Der Beleg ist zu groß."
+
+    return None
 
 
 @main_bp.get("/")
@@ -980,6 +1011,11 @@ def upload_document():
     original_file_name = secure_filename(uploaded_file.filename)
     if not original_file_name:
         flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    upload_error = _document_upload_error(uploaded_file, original_file_name)
+    if upload_error:
+        flash(upload_error, "error")
         return redirect(url_for("main.documents_page", company_id=company_id))
 
     session_factory = _get_session_factory()

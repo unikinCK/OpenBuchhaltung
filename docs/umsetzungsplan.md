@@ -173,7 +173,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*
-- [ ] Security-Hardening + PenTest-Light
+- [x] Security-Hardening + PenTest-Light *(Sprint I: Security-Header,
+      gehärtete Session-Cookies, Upload-Allowlist/Größenlimit und Tests für
+      Header, Cookies, CSRF/Auth-Scoping sowie Upload-Missbrauch umgesetzt)*
 
 ## Phase 3 – Ökosystem & Automatisierung (6–12 Wochen)
 - [ ] DATEV-kompatiblere Exporte ausbauen
