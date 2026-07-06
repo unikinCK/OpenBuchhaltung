@@ -94,6 +94,21 @@ Gewinnvortragskonto glattgestellt — SKR03 `0860`, SKR04 `2970`) und sperrt dan
 alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht mehr
 gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
 
+## E-Rechnung importieren (XRechnung / ZUGFeRD)
+
+Auf der Seite **E-Rechnung** lässt sich eine strukturierte Rechnung (XML) hochladen
+und direkt als Eingangsrechnung verbuchen. Unterstützt werden beide in Deutschland
+relevanten Syntaxen:
+
+- **XRechnung (UBL)** — `Invoice` im OASIS-UBL-Format
+- **XRechnung (CII) / ZUGFeRD** — `CrossIndustryInvoice` im UN/CEFACT-Format
+
+Der Parser liest Rechnungsnummer, Datum, Lieferant sowie Netto-, Steuer- und
+Bruttobetrag aus und bucht: Netto auf das gewählte Aufwandskonto (Soll), Steuer auf
+das Steuerkonto des gewählten Steuercodes (Soll) und Brutto auf das Kreditorenkonto
+(Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
+Beispieldateien: `data/demo/erechnung_ubl.xml`, `data/demo/erechnung_cii.xml`.
+
 ## DATEV-Export (Buchungsstapel)
 
 Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF)**

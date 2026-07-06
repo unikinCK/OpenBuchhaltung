@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}E-Rechnung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">E-Rechnung importieren</h1>
+
+  <section class="card">
+    <h2>XRechnung / ZUGFeRD (XML) verbuchen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% elif not expense_accounts or not creditor_accounts %}
+      <p class="muted">Es werden ein Aufwandskonto und ein Kreditoren-/Verbindlichkeitskonto benötigt —
+        zuerst unter <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen oder SKR importieren.</p>
+    {% else %}
+      <p class="muted">
+        Die strukturierte Rechnung (XML) wird ausgelesen und als Eingangsrechnung gebucht:
+        Netto auf das Aufwandskonto (Soll), Steuer auf das Steuerkonto (Soll), Brutto auf das
+        Kreditorenkonto (Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
+      </p>
+      <form method="post" action="{{ url_for('main.einvoice_book_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="einvoice_xml">Rechnungs-XML (XRechnung UBL oder ZUGFeRD/CII)</label>
+        <input id="einvoice_xml" name="einvoice_xml" type="file" accept=".xml,text/xml,application/xml" required />
+
+        <label for="expense_account_id">Aufwandskonto (Netto, Soll)</label>
+        <select id="expense_account_id" name="expense_account_id" required>
+          <option value="">Bitte wählen</option>
+          {% for account in expense_accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="tax_code_id">Steuercode (für Vorsteuer)</label>
+        <select id="tax_code_id" name="tax_code_id">
+          <option value="">Ohne Steuer</option>
+          {% for tax_code in tax_codes %}
+            <option value="{{ tax_code.id }}" {% if tax_code.code == 'VSt19' %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+          {% endfor %}
+        </select>
+
+        <label for="creditor_account_id">Kreditoren-/Verbindlichkeitskonto (Brutto, Haben)</label>
+        <select id="creditor_account_id" name="creditor_account_id" required>
+          <option value="">Bitte wählen</option>
+          {% for account in creditor_accounts %}
+            <option value="{{ account.id }}" {% if account.code == '1600' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">E-Rechnung verbuchen</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Unterstützte Formate</h2>
+    <ul>
+      <li><strong>XRechnung (UBL)</strong> — <code>Invoice</code> im OASIS-UBL-Format</li>
+      <li><strong>XRechnung (CII)</strong> und <strong>ZUGFeRD</strong> — <code>CrossIndustryInvoice</code> im UN/CEFACT-Format</li>
+    </ul>
+    <p class="muted">Beispieldateien: <code>data/demo/erechnung_ubl.xml</code>, <code>data/demo/erechnung_cii.xml</code>.
+      Ausgelesen werden Rechnungsnummer, Datum, Lieferant sowie Netto-, Steuer- und Bruttobetrag.</p>
+  </section>
+{% endblock %}
