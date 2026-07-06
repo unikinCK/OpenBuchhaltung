@@ -109,6 +109,13 @@ das Steuerkonto des gewählten Steuercodes (Soll) und Brutto auf das Kreditorenk
 (Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
 Beispieldateien: `data/demo/erechnung_ubl.xml`, `data/demo/erechnung_cii.xml`.
 
+Umgekehrt lässt sich auf derselben Seite eine **Ausgangsrechnung als E-Rechnung
+erzeugen** (Käufer + Positionen erfassen, Format wählen) und als XRechnung (UBL)
+oder ZUGFeRD/CII herunterladen. Die Verkäuferstammdaten stammen aus der Gesellschaft
+und den `SELLER_*`-Umgebungsvariablen (`SELLER_STREET`, `SELLER_POSTAL_CODE`,
+`SELLER_CITY`, `SELLER_VAT_ID`, …). Beträge und Steueraufteilung werden aus den
+Positionen berechnet.
+
 ## DATEV-Export (Buchungsstapel)
 
 Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF)**

@@ -38,6 +38,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             if os.environ.get("DATEV_CLIENT_NUMBER")
             else None
         ),
+        SELLER_STREET=os.environ.get("SELLER_STREET", ""),
+        SELLER_POSTAL_CODE=os.environ.get("SELLER_POSTAL_CODE", ""),
+        SELLER_CITY=os.environ.get("SELLER_CITY", ""),
+        SELLER_COUNTRY_CODE=os.environ.get("SELLER_COUNTRY_CODE", "DE"),
+        SELLER_VAT_ID=os.environ.get("SELLER_VAT_ID", ""),
     )
 
     if test_config:
