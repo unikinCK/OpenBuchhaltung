@@ -32,6 +32,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "0") == "1",
         CSRF_PROTECT=os.environ.get("CSRF_PROTECT", "1") == "1",
+        DATEV_CONSULTANT_NUMBER=int(os.environ.get("DATEV_CONSULTANT_NUMBER", "1000")),
+        DATEV_CLIENT_NUMBER=(
+            int(os.environ["DATEV_CLIENT_NUMBER"])
+            if os.environ.get("DATEV_CLIENT_NUMBER")
+            else None
+        ),
     )
 
     if test_config:

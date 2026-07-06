@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import date
+from datetime import date, datetime, timezone
 from io import StringIO
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -16,6 +16,7 @@ from app.auth import (
     require_api_token,
 )
 from app.services.account_hierarchy import resolve_parent_account_id
+from app.services.datev_export import DatevExportOptions, build_datev_export
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -518,6 +519,39 @@ def export_journal_csv():
     return Response(
         csv_buffer.getvalue(),
         mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/datev.csv")
+def export_datev_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = _api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        options = DatevExportOptions(
+            consultant_number=current_app.config.get("DATEV_CONSULTANT_NUMBER") or 1000,
+            client_number=current_app.config.get("DATEV_CLIENT_NUMBER") or company_id,
+        )
+        content = build_datev_export(
+            session=session,
+            company_id=company_id,
+            options=options,
+            generated_at=datetime.now(timezone.utc),
+        )
+
+    # DATEV erwartet Windows-1252; nicht abbildbare Zeichen werden ersetzt.
+    payload = content.encode("cp1252", errors="replace")
+    file_name = f"EXTF_Buchungsstapel_{company_id}_{date.today().isoformat()}.csv"
+    return Response(
+        payload,
+        content_type="text/csv; charset=windows-1252",
         headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
     )
 

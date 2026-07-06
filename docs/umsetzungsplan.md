@@ -180,7 +180,11 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Header, Cookies, CSRF/Auth-Scoping sowie Upload-Missbrauch umgesetzt)*
 
 ## Phase 3 – Ökosystem & Automatisierung (6–12 Wochen)
-- [ ] DATEV-kompatiblere Exporte ausbauen
+- [x] DATEV-kompatiblere Exporte ausbauen *(Sprint K: DATEV-Buchungsstapel im
+      EXTF-Format [Kopfzeile + Spaltenüberschrift + Buchungssätze, Windows-1252];
+      2-zeilige Buchungen als Konto/Gegenkonto, mehrzeilige als Splitbuchung über
+      Belegfeld 1; API `GET /api/v1/exports/datev.csv` + Download auf Berichte-Seite;
+      Berater-/Mandantennummer konfigurierbar. Nicht zertifiziert, ohne BU-Automatik)*
 - [ ] E-Rechnung Import/Export
 - [ ] OCR-Pipeline für Belege
 - [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
