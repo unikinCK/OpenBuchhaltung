@@ -159,10 +159,12 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Kontotyp-Auswahl statt Freitext; gestylte Login-Seite.
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
-- [x] Jahresabschluss-Workflow (Periodenabschluss) *(Sprint E: Perioden-Seite mit
-      Sperren [Schreibrollen] / Entsperren [nur Admin], Geschäftsjahr abschließen
-      [nur Admin, sperrt alle Perioden], Buchungssperre für geschlossene Jahre,
-      Audit-Events für alle Aktionen; Ergebnisvortrag ins Folgejahr noch offen)*
+- [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
+      Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],
+      Geschäftsjahr abschließen [nur Admin, sperrt alle Perioden], Buchungssperre für
+      geschlossene Jahre, Audit-Events für alle Aktionen. Sprint J: Ergebnisvortrag —
+      der Abschluss bucht die GuV-Konten gegen den Gewinnvortrag [SKR03 0860 / SKR04
+      2970] glatt, bevor die Perioden gesperrt werden)*
 - [x] OPOS-Basis Debitor/Kreditor *(Sprint G: Offene-Posten-Tabelle mit Debitor/
       Kreditor-Typ, Verknüpfung zu Konto/Buchung, Teil-/Vollausgleich gegen Bankumsatz
       oder Zahlungsbuchung, UI-Seite und Audit-Events umgesetzt)*

@@ -326,7 +326,7 @@ def test_seed_demo_command_creates_demo_data_idempotently(tmp_path):
         )
         user_count = len(session.execute(select(User)).scalars().all())
 
-    assert account_count == 30
+    assert account_count == 31
     assert tax_code_count == 5
     assert entry_count == 4
     assert user_count == 3

@@ -28,6 +28,7 @@ from domain.models import (
     Base,
     Company,
     FiscalYear,
+    JournalEntryLine,
     Period,
     PeriodLock,
     Tenant,
@@ -63,7 +64,14 @@ def _seed_company_with_entry(session: Session) -> tuple[Company, FiscalYear, Per
         name="Erlöse",
         account_type="income",
     )
-    session.add_all([bank, revenue])
+    retained = Account(
+        tenant_id=tenant.id,
+        company_id=company.id,
+        code="0860",
+        name="Gewinnvortrag vor Verwendung",
+        account_type="equity",
+    )
+    session.add_all([bank, revenue, retained])
     session.commit()
 
     create_journal_entry(
@@ -109,11 +117,12 @@ def test_lock_and_unlock_period_with_audit(session: Session) -> None:
 def test_close_fiscal_year_locks_all_periods_and_blocks_bookings(session: Session) -> None:
     company, fiscal_year, period = _seed_company_with_entry(session)
 
-    closed = close_fiscal_year(
+    result = close_fiscal_year(
         session=session, fiscal_year_id=fiscal_year.id, changed_by="admin"
     )
-    assert closed.is_closed is True
-    assert session.execute(select(PeriodLock)).scalar_one().period_id == period.id
+    assert result.fiscal_year.is_closed is True
+    locked_period_ids = set(session.execute(select(PeriodLock.period_id)).scalars())
+    assert period.id in locked_period_ids
 
     with pytest.raises(PeriodActionError, match="bereits abgeschlossen"):
         close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="admin")
@@ -121,7 +130,13 @@ def test_close_fiscal_year_locks_all_periods_and_blocks_bookings(session: Sessio
     with pytest.raises(PeriodActionError, match="abgeschlossen"):
         unlock_period(session=session, period_id=period.id, changed_by="admin")
 
-    accounts = session.execute(select(Account.id).order_by(Account.code)).scalars().all()
+    bank_id, revenue_id = (
+        session.execute(
+            select(Account.id).where(Account.code.in_(["1200", "8400"])).order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
     with pytest.raises(JournalEntryCreationError, match="Geschäftsjahr ist abgeschlossen"):
         create_journal_entry(
             session=session,
@@ -131,11 +146,57 @@ def test_close_fiscal_year_locks_all_periods_and_blocks_bookings(session: Sessio
                 description="Nachbuchung",
                 status="posted",
                 lines=[
-                    JournalLineInput(accounts[0], Decimal("50.00"), Decimal("0.00")),
-                    JournalLineInput(accounts[1], Decimal("0.00"), Decimal("50.00")),
+                    JournalLineInput(bank_id, Decimal("50.00"), Decimal("0.00")),
+                    JournalLineInput(revenue_id, Decimal("0.00"), Decimal("50.00")),
                 ],
             ),
         )
+
+
+def test_close_fiscal_year_books_result_carryforward(session: Session) -> None:
+    company, fiscal_year, _ = _seed_company_with_entry(session)
+
+    result = close_fiscal_year(
+        session=session, fiscal_year_id=fiscal_year.id, changed_by="admin"
+    )
+
+    carry = result.carryforward_entry
+    assert carry is not None
+    assert carry.description == "Ergebnisvortrag 2026"
+
+    lines = (
+        session.execute(
+            select(JournalEntryLine)
+            .where(JournalEntryLine.journal_entry_id == carry.id)
+            .order_by(JournalEntryLine.line_number)
+        )
+        .scalars()
+        .all()
+    )
+    by_code = {
+        session.get(Account, line.account_id).code: line for line in lines
+    }
+    # Erlöse (100 Haben) werden im Soll glattgestellt, Gewinnvortrag erhält 100 Haben
+    assert by_code["8400"].debit_amount == Decimal("100.00")
+    assert by_code["0860"].credit_amount == Decimal("100.00")
+
+    # Nach dem Vortrag ist der GuV-Saldo im Geschäftsjahr null
+    from app.services.reports import income_statement_for_company
+
+    totals = income_statement_for_company(session=session, company_id=company.id)["totals"]
+    assert totals["net_income"] == Decimal("0.00")
+
+
+def test_close_fiscal_year_without_retained_account_fails(session: Session) -> None:
+    _, fiscal_year, _ = _seed_company_with_entry(session)
+    retained = session.execute(
+        select(Account).where(Account.code == "0860")
+    ).scalar_one()
+    session.delete(retained)
+    session.commit()
+
+    with pytest.raises(PeriodActionError, match="Gewinnvortragskonto"):
+        close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="admin")
 
 
 def _create_ui_app(tmp_path: Path):
@@ -179,6 +240,15 @@ def _seed_ui_booking(client) -> None:
     client.post(
         "/accounts",
         data={"company_id": "1", "code": "8400", "name": "Erlöse", "account_type": "income"},
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "0860",
+            "name": "Gewinnvortrag vor Verwendung",
+            "account_type": "equity",
+        },
     )
     client.post(
         "/journal-entries",
