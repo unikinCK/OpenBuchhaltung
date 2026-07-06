@@ -94,6 +94,23 @@ Gewinnvortragskonto glattgestellt — SKR03 `0860`, SKR04 `2970`) und sperrt dan
 alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht mehr
 gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
 
+## DATEV-Export (Buchungsstapel)
+
+Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF)**
+zur Verfügung (auch als API: `GET /api/v1/exports/datev.csv?company_id=…`).
+
+Die Datei folgt dem EXTF-Format (Kategorie 21, Buchungsstapel): Kopfzeile mit
+Metadaten, Spaltenüberschriften und Buchungssätze, kodiert in Windows-1252.
+Buchungen mit genau einer Soll- und einer Habenzeile werden als
+Konto/Gegenkonto-Satz exportiert; mehrzeilige Buchungen (z. B. mit USt-Zeile)
+als Splitbuchung — eine Zeile je Position, gruppiert über Belegfeld 1
+(Buchungsnummer). Berater-/Mandantennummer sind über `DATEV_CONSULTANT_NUMBER`
+bzw. `DATEV_CLIENT_NUMBER` konfigurierbar.
+
+Der Export ist DATEV-kompatibel, aber nicht zertifiziert: eine
+Steuerautomatik über BU-Schlüssel wird nicht gesetzt, da die Umsatzsteuer
+bereits als eigene Buchungszeile geführt wird.
+
 ## Steuercodes (USt/VSt)
 
 `seed-demo` legt Standard-Steuercodes je Gesellschaft an: `USt19`, `USt7`, `VSt19`, `VSt7`, `frei`.
