@@ -50,6 +50,23 @@ flask --app run.py create-user --username maria --password geheim --role Buchhal
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
 
+## Sicherheit & Upload-Härtung
+
+Die App setzt Security-Header (`X-Content-Type-Options`, `Referrer-Policy`,
+`Content-Security-Policy`) und nutzt gehärtete Session-Cookie-Defaults
+(`HttpOnly`, `SameSite=Lax`). In HTTPS-Deployments sollte zusätzlich gesetzt werden:
+
+```bash
+export SESSION_COOKIE_SECURE=1
+```
+
+Beleguploads sind auf PDF/JPG/PNG begrenzt. Die maximale Uploadgröße liegt
+standardmäßig bei 10 MiB und kann angepasst werden:
+
+```bash
+export DOCUMENT_MAX_UPLOAD_BYTES=10485760
+```
+
 ## Bank-CSV-Import
 
 Unter **Bank** lassen sich Kontoumsätze als CSV importieren (Spalten-Aliasse:

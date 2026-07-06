@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from flask import Flask
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from .api import api_bp
 from .auth import auth_bp, ensure_csrf_token
@@ -14,12 +15,18 @@ from .main import main_bp
 
 def create_app(test_config: dict | None = None) -> Flask:
     """Application factory for OpenBuchhaltung."""
+    document_max_upload_bytes = int(os.environ.get("DOCUMENT_MAX_UPLOAD_BYTES", "10485760"))
     app = Flask(__name__)
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key-change-me"),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
         DATABASE_URL=os.environ.get("DATABASE_URL"),
         MCP_SERVER_URL=os.environ.get("MCP_SERVER_URL"),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
+        DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
+        MAX_CONTENT_LENGTH=document_max_upload_bytes,
         DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
         DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
@@ -45,5 +52,26 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.context_processor
     def _inject_csrf_token():
         return {"csrf_token": ensure_csrf_token}
+
+    @app.after_request
+    def _add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "img-src 'self' data:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'",
+        )
+        return response
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def _handle_large_upload(exc):
+        del exc
+        return {"error": "Uploaded file is too large."}, 413
 
     return app

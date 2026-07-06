@@ -9,11 +9,12 @@ from app.services.document_llm import DocumentLLMError
 from domain.models import AuditLog, Document, FiscalYear, Period, PeriodLock, User
 
 
-def _create_test_app(tmp_path: Path):
+def _create_test_app(tmp_path: Path, **extra_config):
     app = create_app(
         {
             "TESTING": True,
             "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_app.db'}",
+            **extra_config,
         }
     )
     with app.extensions["db_session_factory"]() as session:
@@ -43,6 +44,32 @@ def test_index_page_loads(tmp_path):
 
     assert response.status_code == 200
     assert b"OpenBuchhaltung" in response.data
+
+
+def test_security_headers_are_set(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = _logged_in_client(app)
+    response = client.get("/")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_session_cookie_defaults_are_hardened(tmp_path):
+    app = _create_test_app(tmp_path, SESSION_COOKIE_SECURE=True)
+
+    client = app.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "admin123"},
+    )
+
+    cookie = response.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert "Secure" in cookie
 
 
 def test_index_redirects_to_login_when_not_authenticated(tmp_path):
@@ -749,7 +776,7 @@ def test_document_download_returns_file(tmp_path):
         "/documents",
         data={
             "company_id": "1",
-            "document_file": (BytesIO(b"testbeleg"), "beleg.txt"),
+            "document_file": (BytesIO(b"testbeleg"), "beleg.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -843,6 +870,84 @@ def test_document_upload_writes_audit_log(tmp_path):
         )
 
     assert any(event.action == "uploaded" for event in audit_events)
+
+
+def test_document_upload_rejects_disallowed_extension(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Upload", "company_name": "Mandant Upload GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_file": (BytesIO(b"kein beleg"), "notiz.txt", "text/plain"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Nur PDF-, JPG- und PNG-Belege" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_disallowed_mimetype(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant MIME", "company_name": "Mandant MIME GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_file": (BytesIO(b"kein pdf"), "rechnung.pdf", "text/plain"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Dateityp des Belegs ist nicht erlaubt" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_oversized_file(tmp_path):
+    app = _create_test_app(tmp_path, DOCUMENT_MAX_UPLOAD_BYTES=8)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Size", "company_name": "Mandant Size GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_file": (BytesIO(b"x" * 16), "gross.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg ist zu gro" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
 
 
 def test_document_upload_calls_configured_llm_endpoint(tmp_path):
