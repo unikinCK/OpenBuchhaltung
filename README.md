@@ -168,6 +168,17 @@ Ausführen der E2E-Suite lokal:
 pytest -m e2e
 ```
 
+## Performance-Baseline
+
+Für einen schnellen Profiling-Smoke-Test mit synthetischen Journaldaten:
+
+```bash
+pytest -m performance
+```
+
+Der Test läuft Reports, OPOS-Liste und Bank-Matching gegen größere Datenmengen und
+schützt die zentralen Query-Pfade vor groben Performance-Regressionen.
+
 
 ## UI-Screenshot Tool
 

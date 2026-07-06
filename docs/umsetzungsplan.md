@@ -170,7 +170,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       deutschem Zahlen-/Datumsformat und Dedup-Hash; Betrags-Matching schlägt passende
       Buchungen vor; offene Umsätze direkt verbuchbar inkl. Netto-aus-Brutto-Split
       bei Steuercode; Audit-Events für Import/Zuordnung/Verbuchung)*
-- [ ] Performance-Profiling großer Journaldaten
+- [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
+      Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
+      Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*
 - [ ] Security-Hardening + PenTest-Light
 
 ## Phase 3 – Ökosystem & Automatisierung (6–12 Wochen)

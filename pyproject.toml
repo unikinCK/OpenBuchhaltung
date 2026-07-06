@@ -10,4 +10,5 @@ pythonpath = ["."]
 
 markers = [
   "e2e: End-to-End Kernflows",
+  "performance: Performance smoke tests with synthetic accounting data",
 ]
