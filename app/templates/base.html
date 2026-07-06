@@ -25,6 +25,8 @@
              {% if request.endpoint == 'main.open_items_page' %}class="active"{% endif %}>OPOS</a>
           <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.bank_page' %}class="active"{% endif %}>Bank</a>
+          <a href="{{ url_for('main.einvoice_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.einvoice_page' %}class="active"{% endif %}>E-Rechnung</a>
           <a href="{{ url_for('main.periods_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.periods_page' %}class="active"{% endif %}>Perioden</a>
           <a href="{{ url_for('main.admin_page', company_id=selected_company_id) }}"

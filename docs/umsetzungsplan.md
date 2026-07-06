@@ -185,7 +185,11 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       2-zeilige Buchungen als Konto/Gegenkonto, mehrzeilige als Splitbuchung über
       Belegfeld 1; API `GET /api/v1/exports/datev.csv` + Download auf Berichte-Seite;
       Berater-/Mandantennummer konfigurierbar. Nicht zertifiziert, ohne BU-Automatik)*
-- [ ] E-Rechnung Import/Export
+- [x] E-Rechnung Import *(Sprint L: Parser für XRechnung [UBL] und ZUGFeRD/XRechnung
+      [CII], namespace-agnostisch; Upload-und-Buchen-Flow bucht die Eingangsrechnung
+      [Netto auf Aufwand, Steuer auf Vorsteuer, Brutto auf Kreditor] und legt das XML als
+      verknüpften Beleg ab; Seite /erechnung, Demo-XMLs, Audit-Event. E-Rechnungs-Export
+      noch offen)*
 - [ ] OCR-Pipeline für Belege
 - [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
       Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende

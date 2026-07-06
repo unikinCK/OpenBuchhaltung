@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import date
+from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from uuid import uuid4
@@ -33,6 +34,7 @@ from app.services.bank_import import (
     suggest_matches,
 )
 from app.services.document_llm import DocumentLLMError, send_document_update
+from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -701,6 +703,185 @@ def bank_book_action(transaction_id: int):
 
     flash("Bankumsatz wurde verbucht.", "success")
     return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.get("/erechnung")
+def einvoice_page():
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = _company_context(session)
+
+        expense_accounts = []
+        creditor_accounts = []
+        tax_codes = []
+        if selected_company_id:
+            accounts = (
+                session.execute(
+                    scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
+                )
+                .scalars()
+                .all()
+            )
+            expense_accounts = [a for a in accounts if a.account_type == "expense"]
+            creditor_accounts = [
+                a for a in accounts if a.account_type in {"liability", "asset"}
+            ]
+            tax_codes = (
+                session.execute(
+                    scoped_select(TaxCode, company_id=selected_company_id)
+                    .where(TaxCode.is_active.is_(True))
+                    .order_by(TaxCode.code)
+                )
+                .scalars()
+                .all()
+            )
+
+    return render_template(
+        "erechnung.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        expense_accounts=expense_accounts,
+        creditor_accounts=creditor_accounts,
+        tax_codes=tax_codes,
+    )
+
+
+@main_bp.post("/erechnung/buchen")
+def einvoice_book_action():
+    company_id = request.form.get("company_id", type=int)
+    expense_account_id = request.form.get("expense_account_id", type=int)
+    creditor_account_id = request.form.get("creditor_account_id", type=int)
+    tax_code_id = request.form.get("tax_code_id", type=int)
+    uploaded_file = request.files.get("einvoice_xml")
+
+    if (
+        not company_id
+        or not expense_account_id
+        or not creditor_account_id
+        or uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        flash("Gesellschaft, Aufwands- und Kreditorenkonto sowie XML-Datei sind Pflicht.", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    xml_bytes = uploaded_file.read()
+    try:
+        invoice = parse_einvoice(xml_bytes)
+    except EInvoiceParseError as exc:
+        flash(f"E-Rechnung konnte nicht gelesen werden: {exc}", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = _require_company_access(session, company_id)
+
+        expense_account = session.get(Account, expense_account_id)
+        creditor_account = session.get(Account, creditor_account_id)
+        for account in (expense_account, creditor_account):
+            if account is None or account.company_id != company.id:
+                flash("Ausgewähltes Konto gehört nicht zur Gesellschaft.", "error")
+                return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+        zero = Decimal("0.00")
+        lines = [
+            JournalLineInput(
+                account_id=expense_account.id,
+                debit_amount=invoice.net_total,
+                credit_amount=zero,
+                description=f"{invoice.seller_name} {invoice.invoice_number}".strip(),
+            )
+        ]
+        if invoice.tax_total > zero:
+            tax_code = session.get(TaxCode, tax_code_id) if tax_code_id else None
+            if tax_code is None or tax_code.company_id != company.id:
+                flash("Für die Steuer bitte einen gültigen Steuercode wählen.", "error")
+                return redirect(url_for("main.einvoice_page", company_id=company_id))
+            if tax_code.vat_account_id is None:
+                flash(f"Steuercode {tax_code.code} hat kein Steuerkonto.", "error")
+                return redirect(url_for("main.einvoice_page", company_id=company_id))
+            # Steuer wird exakt aus der Rechnung übernommen; keine Auto-Expansion
+            # über tax_code_id, damit der Bruttobetrag exakt aufgeht.
+            lines.append(
+                JournalLineInput(
+                    account_id=tax_code.vat_account_id,
+                    debit_amount=invoice.tax_total,
+                    credit_amount=zero,
+                    description=f"Steuer {invoice.primary_tax_rate}%",
+                )
+            )
+        lines.append(
+            JournalLineInput(
+                account_id=creditor_account.id,
+                debit_amount=zero,
+                credit_amount=invoice.grand_total,
+            )
+        )
+
+        try:
+            entry = create_journal_entry(
+                session=session,
+                payload=JournalEntryInput(
+                    company_id=company.id,
+                    entry_date=invoice.issue_date,
+                    description=(
+                        f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})"
+                    ).strip(),
+                    status="posted",
+                    changed_by=_changed_by(),
+                    lines=lines,
+                ),
+            )
+        except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+            flash(f"Buchung fehlgeschlagen: {exc}", "error")
+            return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+        # XML als Beleg speichern und mit der Buchung verknüpfen.
+        safe_name = secure_filename(uploaded_file.filename) or "erechnung.xml"
+        unique_name = f"{uuid4().hex}_{safe_name}"
+        company_dir = (
+            Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
+            / str(company.tenant_id)
+            / str(company.id)
+        )
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        target_path.write_bytes(xml_bytes)
+
+        document = Document(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            journal_entry_id=entry.id,
+            file_name=safe_name,
+            storage_key=str(target_path),
+            mime_type=uploaded_file.mimetype or "application/xml",
+        )
+        session.add(document)
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="einvoice",
+            entity_id=str(entry.id),
+            action="imported",
+            changed_by=_changed_by(),
+            payload={
+                "invoice_number": invoice.invoice_number,
+                "seller": invoice.seller_name,
+                "syntax": invoice.syntax,
+                "grand_total": str(invoice.grand_total),
+                "document_id": document.id,
+            },
+        )
+        session.commit()
+        posting_number = entry.posting_number
+
+    flash(
+        f"E-Rechnung {invoice.invoice_number} verbucht als {posting_number} "
+        f"(brutto {invoice.grand_total} {invoice.currency_code}).",
+        "success",
+    )
+    return redirect(url_for("main.journal_page", company_id=company_id))
 
 
 @main_bp.get("/perioden")
