@@ -34,6 +34,13 @@ from app.services.bank_import import (
     suggest_matches,
 )
 from app.services.document_llm import DocumentLLMError, send_document_update
+from app.services.einvoice_export import (
+    EInvoiceExportError,
+    InvoiceLine,
+    OutgoingInvoice,
+    Party,
+    build_einvoice,
+)
 from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -743,6 +750,7 @@ def einvoice_page():
         expense_accounts=expense_accounts,
         creditor_accounts=creditor_accounts,
         tax_codes=tax_codes,
+        today=date.today().isoformat(),
     )
 
 
@@ -882,6 +890,108 @@ def einvoice_book_action():
         "success",
     )
     return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+@main_bp.post("/erechnung/export")
+def einvoice_export_action():
+    company_id = request.form.get("company_id", type=int)
+    syntax = request.form.get("syntax", "ubl").strip().lower()
+    if syntax not in {"ubl", "cii"}:
+        syntax = "ubl"
+
+    invoice_number = request.form.get("invoice_number", "").strip()
+    issue_date_raw = request.form.get("issue_date", "").strip()
+    buyer_name = request.form.get("buyer_name", "").strip()
+
+    if not company_id or not invoice_number or not issue_date_raw or not buyer_name:
+        flash("Gesellschaft, Rechnungsnummer, Datum und Käufer sind Pflichtfelder.", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    try:
+        issue_date = date.fromisoformat(issue_date_raw)
+    except ValueError:
+        flash("Ungültiges Rechnungsdatum.", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    names = request.form.getlist("line_name")
+    quantities = request.form.getlist("line_quantity")
+    prices = request.form.getlist("line_unit_price")
+    rates = request.form.getlist("line_tax_rate")
+
+    lines: list[InvoiceLine] = []
+    try:
+        for idx in range(max(len(names), len(quantities), len(prices))):
+            name = (names[idx] if idx < len(names) else "").strip()
+            qty_raw = (quantities[idx] if idx < len(quantities) else "").strip()
+            price_raw = (prices[idx] if idx < len(prices) else "").strip()
+            rate_raw = (rates[idx] if idx < len(rates) else "").strip()
+            if not name and not qty_raw and not price_raw:
+                continue
+            if not name or not qty_raw or not price_raw:
+                flash(
+                    f"Position {idx + 1}: Bezeichnung, Menge und Preis sind erforderlich.",
+                    "error",
+                )
+                return redirect(url_for("main.einvoice_page", company_id=company_id))
+            lines.append(
+                InvoiceLine(
+                    name=name,
+                    quantity=Decimal(qty_raw),
+                    unit_price=Decimal(price_raw),
+                    tax_rate=Decimal(rate_raw or "0"),
+                )
+            )
+    except (ArithmeticError, ValueError):
+        flash("Menge, Preis oder Steuersatz sind keine gültigen Zahlen.", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    if not lines:
+        flash("Bitte mindestens eine Rechnungsposition erfassen.", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = _require_company_access(session, company_id)
+        seller = Party(
+            name=company.name,
+            street=current_app.config.get("SELLER_STREET", ""),
+            postal_code=current_app.config.get("SELLER_POSTAL_CODE", ""),
+            city=current_app.config.get("SELLER_CITY", ""),
+            country_code=current_app.config.get("SELLER_COUNTRY_CODE", "DE"),
+            vat_id=current_app.config.get("SELLER_VAT_ID", ""),
+        )
+        currency = company.currency_code
+
+    buyer = Party(
+        name=buyer_name,
+        street=request.form.get("buyer_street", "").strip(),
+        postal_code=request.form.get("buyer_postal_code", "").strip(),
+        city=request.form.get("buyer_city", "").strip(),
+        country_code=request.form.get("buyer_country_code", "DE").strip() or "DE",
+        vat_id=request.form.get("buyer_vat_id", "").strip(),
+    )
+
+    try:
+        invoice = OutgoingInvoice(
+            invoice_number=invoice_number,
+            issue_date=issue_date,
+            seller=seller,
+            buyer=buyer,
+            lines=lines,
+            currency_code=currency,
+            buyer_reference=request.form.get("buyer_reference", "").strip(),
+        )
+        xml = build_einvoice(invoice, syntax=syntax)
+    except EInvoiceExportError as exc:
+        flash(f"E-Rechnung konnte nicht erzeugt werden: {exc}", "error")
+        return redirect(url_for("main.einvoice_page", company_id=company_id))
+
+    safe_number = secure_filename(invoice_number) or "rechnung"
+    file_name = f"XRechnung_{syntax}_{safe_number}.xml"
+    response = make_response(xml)
+    response.headers["Content-Type"] = "application/xml; charset=utf-8"
+    response.headers["Content-Disposition"] = f'attachment; filename="{file_name}"'
+    return response
 
 
 @main_bp.get("/perioden")

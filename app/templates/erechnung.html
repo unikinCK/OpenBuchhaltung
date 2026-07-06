@@ -55,6 +55,111 @@
   </section>
 
   <section class="card">
+    <h2>Ausgangsrechnung als E-Rechnung exportieren</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% else %}
+      <p class="muted">Erzeugt eine XRechnung (UBL) oder ZUGFeRD/CII-Datei zum Download.
+        Die Verkäuferdaten stammen aus der Gesellschaft bzw. der Konfiguration
+        (<code>SELLER_*</code>-Variablen).</p>
+      <form method="post" action="{{ url_for('main.einvoice_export_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="invoice_number">Rechnungsnummer</label>
+        <input id="invoice_number" name="invoice_number" required />
+
+        <label for="issue_date">Rechnungsdatum</label>
+        <input id="issue_date" name="issue_date" type="date" value="{{ today }}" required />
+
+        <label for="buyer_name">Käufer (Name)</label>
+        <input id="buyer_name" name="buyer_name" required />
+
+        <label for="buyer_street">Käufer Straße</label>
+        <input id="buyer_street" name="buyer_street" />
+
+        <label for="buyer_postal_code">Käufer PLZ</label>
+        <input id="buyer_postal_code" name="buyer_postal_code" />
+
+        <label for="buyer_city">Käufer Ort</label>
+        <input id="buyer_city" name="buyer_city" />
+
+        <label for="buyer_vat_id">Käufer USt-IdNr. (optional)</label>
+        <input id="buyer_vat_id" name="buyer_vat_id" />
+
+        <label for="buyer_reference">Leitweg-ID / Käuferreferenz (optional)</label>
+        <input id="buyer_reference" name="buyer_reference" />
+
+        <div id="invoice-lines">
+          <p><strong>Positionen</strong></p>
+          {% for _ in range(2) %}
+            <div class="journal-line">
+              <div>
+                <label>Bezeichnung</label>
+                <input name="line_name" />
+              </div>
+              <div>
+                <label>Menge</label>
+                <input name="line_quantity" placeholder="1" />
+              </div>
+              <div>
+                <label>Einzelpreis netto</label>
+                <input name="line_unit_price" placeholder="100.00" />
+              </div>
+              <div>
+                <label>Steuersatz %</label>
+                <input name="line_tax_rate" placeholder="19" />
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="secondary" id="add-invoice-line">+ Weitere Position</button>
+        <br />
+
+        <label for="syntax">Format</label>
+        <select id="syntax" name="syntax">
+          <option value="ubl">XRechnung (UBL)</option>
+          <option value="cii">ZUGFeRD / XRechnung (CII)</option>
+        </select>
+
+        <button type="submit">E-Rechnung erzeugen &amp; herunterladen</button>
+      </form>
+
+      <template id="invoice-line-template">
+        <div class="journal-line">
+          <div>
+            <label>Bezeichnung</label>
+            <input name="line_name" />
+          </div>
+          <div>
+            <label>Menge</label>
+            <input name="line_quantity" placeholder="1" />
+          </div>
+          <div>
+            <label>Einzelpreis netto</label>
+            <input name="line_unit_price" placeholder="100.00" />
+          </div>
+          <div>
+            <label>Steuersatz %</label>
+            <input name="line_tax_rate" placeholder="19" />
+          </div>
+        </div>
+      </template>
+      <script>
+        (function() {
+          const button = document.getElementById("add-invoice-line");
+          const container = document.getElementById("invoice-lines");
+          const template = document.getElementById("invoice-line-template");
+          if (!button || !container || !template) return;
+          button.addEventListener("click", function() {
+            container.appendChild(template.content.cloneNode(true));
+          });
+        })();
+      </script>
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Unterstützte Formate</h2>
     <ul>
       <li><strong>XRechnung (UBL)</strong> — <code>Invoice</code> im OASIS-UBL-Format</li>
