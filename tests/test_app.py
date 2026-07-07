@@ -763,6 +763,95 @@ def test_can_upload_document_and_link_to_journal_entry(tmp_path):
         assert document.journal_entry_id == 1
 
 
+def test_can_link_and_unlink_document_after_upload(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant HL", "company_name": "Mandant HL GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "1200", "name": "Bank", "account_type": "asset"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "8400", "name": "Erlöse", "account_type": "revenue"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Nachträglich verknüpfen",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/documents",
+        data={"company_id": "1", "document_file": (BytesIO(b"beleg"), "beleg.pdf")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+    link_response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": "1"},
+        follow_redirects=True,
+    )
+    assert link_response.status_code == 200
+    assert "Beleg wurde mit der Buchung verknüpft".encode() in link_response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id == 1
+
+    unlink_response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": ""},
+        follow_redirects=True,
+    )
+    assert unlink_response.status_code == 200
+    assert "Verknüpfung des Belegs wurde entfernt".encode() in unlink_response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+
+def test_link_document_rejects_missing_journal_entry(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant HM", "company_name": "Mandant HM GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/documents",
+        data={"company_id": "1", "document_file": (BytesIO(b"beleg"), "beleg.pdf")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": "999"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Ausgewählte Buchung wurde nicht gefunden".encode() in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+
 def test_document_download_returns_file(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)
