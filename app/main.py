@@ -1411,6 +1411,53 @@ def upload_document():
     return redirect(url_for("main.documents_page", company_id=company_id))
 
 
+@main_bp.post("/documents/<int:document_id>/link")
+def link_document(document_id: int):
+    company_id = request.form.get("company_id", type=int)
+    journal_entry_id = request.form.get("journal_entry_id", type=int)
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        _require_company_access(session, document.company_id)
+
+        linked_entry = None
+        if journal_entry_id is not None:
+            linked_entry = session.get(JournalEntry, journal_entry_id)
+            if linked_entry is None or linked_entry.company_id != document.company_id:
+                flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
+                return redirect(
+                    url_for("main.documents_page", company_id=company_id or document.company_id)
+                )
+
+        previous_journal_entry_id = document.journal_entry_id
+        document.journal_entry_id = linked_entry.id if linked_entry else None
+
+        log_audit_event(
+            session=session,
+            tenant_id=document.tenant_id,
+            company_id=document.company_id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="linked",
+            changed_by=_changed_by(),
+            payload={
+                "previous_journal_entry_id": previous_journal_entry_id,
+                "journal_entry_id": document.journal_entry_id,
+            },
+        )
+        session.commit()
+        redirect_company_id = document.company_id
+
+    if linked_entry:
+        flash("Beleg wurde mit der Buchung verknüpft.", "success")
+    else:
+        flash("Verknüpfung des Belegs wurde entfernt.", "success")
+    return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+
+
 @main_bp.get("/documents/<int:document_id>/download")
 def download_document(document_id: int):
     session_factory = _get_session_factory()

@@ -47,11 +47,17 @@
             <tr>
               <td>{{ document.file_name }}</td>
               <td>
-                {% if document.journal_entry_id %}
-                  {{ journal_entry_labels.get(document.journal_entry_id, '-') }}
-                {% else %}
-                  <span class="muted">–</span>
-                {% endif %}
+                <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                  <select name="journal_entry_id" onchange="this.form.submit()">
+                    <option value="">Keine Verknüpfung</option>
+                    {% for entry in journal_entries %}
+                      <option value="{{ entry.id }}" {% if entry.id == document.journal_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
+                    {% endfor %}
+                  </select>
+                  <noscript><button type="submit">Speichern</button></noscript>
+                </form>
               </td>
               <td>{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
               <td><a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a></td>
