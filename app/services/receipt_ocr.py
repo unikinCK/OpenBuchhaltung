@@ -54,11 +54,33 @@ class ReceiptExtraction:
     confidence: str = "niedrig"
     source: str = "text"  # "text", "pdf" oder "ocr-endpoint"
     warnings: list[str] = field(default_factory=list)
+    # KI-Kontrolle: ob und mit welchem Ergebnis ein LLM gegengeprüft/ergänzt hat.
+    llm_used: bool = False
+    # None | "bestätigt" | "abweichung" | "ergänzt" | "nur_regelbasiert"
+    control_status: str | None = None
 
     @property
     def has_booking_basis(self) -> bool:
         """Ob mindestens der Bruttobetrag für einen Vorschlag vorliegt."""
         return self.gross_amount is not None and self.gross_amount > 0
+
+
+@dataclass(slots=True)
+class LlmReceiptFields:
+    """Von einem LLM strukturiert extrahierte Belegfelder (alle optional)."""
+
+    supplier: str | None = None
+    invoice_number: str | None = None
+    invoice_date: date | None = None
+    net_amount: Decimal | None = None
+    tax_amount: Decimal | None = None
+    gross_amount: Decimal | None = None
+    tax_rate: Decimal | None = None
+    currency_code: str | None = None
+
+
+class ReceiptLLMError(ValueError):
+    """Raised when the structured-extraction LLM cannot be used."""
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +589,177 @@ def _confidence(result: ReceiptExtraction) -> str:
     return "mittel"
 
 
+# ---------------------------------------------------------------------------
+# Stufe 3: LLM als Unterstützung/Fallback und Kontrolle
+# ---------------------------------------------------------------------------
+
+_LLM_INSTRUCTION = (
+    "Du extrahierst Buchungsdaten aus dem Text eines deutschen Belegs "
+    "(Eingangsrechnung/Quittung). Antworte ausschließlich mit einem JSON-Objekt "
+    "ohne weitere Erklärung und mit exakt diesen Feldern: "
+    '{"supplier": string|null, "invoice_number": string|null, '
+    '"invoice_date": "YYYY-MM-DD"|null, "net_amount": number|null, '
+    '"tax_amount": number|null, "gross_amount": number|null, '
+    '"tax_rate": number|null, "currency_code": string|null}. '
+    "Beträge als Dezimalzahl mit Punkt, ohne Währungssymbol. Unbekannte Felder = null."
+)
+
+
+def _to_decimal(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return Decimal(str(value)).quantize(_CENT, rounding=ROUND_HALF_UP)
+        except (InvalidOperation, ValueError):
+            return None
+    if isinstance(value, str):
+        return _parse_amount(value)
+    return None
+
+
+def _to_date(value: object) -> date | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return _find_invoice_date(value)
+
+
+def _parse_llm_json(text: str) -> dict:
+    """Extrahiert das erste JSON-Objekt aus einer LLM-Antwort."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ReceiptLLMError("LLM-Antwort enthält kein JSON-Objekt.")
+    try:
+        data = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as exc:
+        raise ReceiptLLMError(f"LLM-JSON konnte nicht gelesen werden: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ReceiptLLMError("LLM-JSON ist kein Objekt.")
+    return data
+
+
+def extract_receipt_fields_llm(
+    text: str, *, endpoint_url: str, model: str
+) -> LlmReceiptFields:
+    """Lässt ein LLM die Belegfelder strukturiert (als JSON) extrahieren."""
+    if not endpoint_url:
+        raise ReceiptLLMError("LLM-Endpoint ist nicht konfiguriert.")
+    payload = {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": _LLM_INSTRUCTION}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": text[:8000]}],
+            },
+        ],
+        "metadata": {"source": "openbuchhaltung-receipt-fields"},
+    }
+    request = Request(
+        endpoint_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise ReceiptLLMError(f"LLM-Endpoint antwortete mit HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise ReceiptLLMError("LLM-Endpoint ist nicht erreichbar.") from exc
+    except json.JSONDecodeError as exc:
+        raise ReceiptLLMError("LLM-Endpoint lieferte kein gültiges JSON.") from exc
+
+    data = _parse_llm_json(_collect_response_text(body))
+    return LlmReceiptFields(
+        supplier=(data.get("supplier") or None),
+        invoice_number=(str(data["invoice_number"]) if data.get("invoice_number") else None),
+        invoice_date=_to_date(data.get("invoice_date")),
+        net_amount=_to_decimal(data.get("net_amount")),
+        tax_amount=_to_decimal(data.get("tax_amount")),
+        gross_amount=_to_decimal(data.get("gross_amount")),
+        tax_rate=_to_decimal(data.get("tax_rate")),
+        currency_code=(data.get("currency_code") or None),
+    )
+
+
+def apply_llm_control(extraction: ReceiptExtraction, llm: LlmReceiptFields) -> None:
+    """Führt LLM-Ergebnisse als Unterstützung ein und prüft sie als Kontrolle.
+
+    * **Unterstützung/Fallback:** fehlende Felder (Text und Beträge) werden aus dem
+      LLM ergänzt und anschließend rechnerisch konsolidiert.
+    * **Kontrolle:** stimmt der regelbasierte Bruttobetrag mit dem LLM überein, gilt
+      der Vorschlag als bestätigt; weicht er ab, wird gewarnt.
+    """
+    extraction.llm_used = True
+    det_gross = extraction.gross_amount
+
+    # Unterstützung: fehlende Textfelder ergänzen.
+    if not extraction.supplier and llm.supplier:
+        extraction.supplier = llm.supplier.strip()[:120]
+    if not extraction.invoice_number and llm.invoice_number:
+        extraction.invoice_number = llm.invoice_number.strip()
+    if extraction.invoice_date is None and llm.invoice_date is not None:
+        extraction.invoice_date = llm.invoice_date
+    if llm.currency_code and llm.currency_code.strip():
+        extraction.currency_code = llm.currency_code.strip().upper()
+
+    # Unterstützung: fehlende Beträge aus dem LLM übernehmen, dann konsolidieren.
+    net = extraction.net_amount if extraction.net_amount is not None else llm.net_amount
+    tax = extraction.tax_amount if extraction.tax_amount is not None else llm.tax_amount
+    gross = extraction.gross_amount if extraction.gross_amount is not None else llm.gross_amount
+    rate = extraction.tax_rate if extraction.tax_rate is not None else llm.tax_rate
+    net, tax, gross, rate, warns = _reconcile(net, tax, gross, rate)
+    extraction.net_amount = net
+    extraction.tax_amount = tax
+    extraction.gross_amount = gross
+    extraction.tax_rate = rate
+    for warning in warns:
+        if warning not in extraction.warnings:
+            extraction.warnings.append(warning)
+
+    # Kontrolle anhand des Bruttobetrags.
+    if det_gross is not None and llm.gross_amount is not None:
+        if abs(det_gross - llm.gross_amount) <= _CENT:
+            extraction.control_status = "bestätigt"
+        else:
+            extraction.control_status = "abweichung"
+            extraction.warnings.append(
+                f"KI-Kontrolle: Bruttobetrag weicht ab (regelbasiert {det_gross}, "
+                f"KI {llm.gross_amount}). Bitte prüfen."
+            )
+    elif det_gross is None and llm.gross_amount is not None:
+        extraction.control_status = "ergänzt"
+        if "+llm" not in extraction.source:
+            extraction.source = f"{extraction.source}+llm"
+    else:
+        extraction.control_status = "nur_regelbasiert"
+
+    extraction.confidence = _confidence_with_control(extraction)
+
+
+def _confidence_with_control(extraction: ReceiptExtraction) -> str:
+    base = _confidence(extraction)
+    if extraction.control_status == "abweichung":
+        return "niedrig"
+    if (
+        extraction.control_status == "bestätigt"
+        and extraction.invoice_date is not None
+        and not extraction.warnings
+    ):
+        return "hoch"
+    return base
+
+
 def analyze_document(
     *,
     file_bytes: bytes,
@@ -574,8 +767,15 @@ def analyze_document(
     file_name: str,
     ocr_endpoint: str | None = None,
     ocr_model: str = "gpt-4.1-mini",
+    llm_endpoint: str | None = None,
+    llm_model: str = "gpt-4.1-mini",
 ) -> ReceiptExtraction:
-    """Komplette Pipeline: Text gewinnen und analysieren."""
+    """Komplette Pipeline: Text gewinnen, regelbasiert analysieren und – falls ein
+    ``llm_endpoint`` konfiguriert ist – per LLM ergänzen und gegenprüfen.
+
+    LLM-Fehler blockieren die Pipeline nicht; sie werden als Warnung vermerkt, der
+    regelbasierte Vorschlag bleibt erhalten.
+    """
     text, source = extract_document_text(
         file_bytes=file_bytes,
         mime_type=mime_type,
@@ -585,4 +785,14 @@ def analyze_document(
     )
     extraction = analyze_receipt_text(text)
     extraction.source = source
+
+    if llm_endpoint:
+        try:
+            llm_fields = extract_receipt_fields_llm(
+                text, endpoint_url=llm_endpoint, model=llm_model
+            )
+            apply_llm_control(extraction, llm_fields)
+        except ReceiptLLMError as exc:
+            extraction.warnings.append(f"KI-Kontrolle nicht möglich: {exc}")
+
     return extraction

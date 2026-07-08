@@ -35,6 +35,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         RECEIPT_OCR_MODEL=os.environ.get(
             "RECEIPT_OCR_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
         ),
+        # LLM zur Feld-Extraktion (Unterstützung/Fallback) und Kontrolle des
+        # regelbasierten Vorschlags; Fallback-Kette auf den Beleg-LLM-Endpoint.
+        RECEIPT_LLM_ENDPOINT_URL=os.environ.get("RECEIPT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_LLM_MODEL=os.environ.get(
+            "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "0") == "1",
         CSRF_PROTECT=os.environ.get("CSRF_PROTECT", "1") == "1",

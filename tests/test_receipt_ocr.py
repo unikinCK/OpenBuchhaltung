@@ -10,10 +10,14 @@ from app import create_app
 from app.auth import hash_password
 from app.services import receipt_ocr
 from app.services.receipt_ocr import (
+    LlmReceiptFields,
+    ReceiptLLMError,
     ReceiptOCRError,
     analyze_document,
     analyze_receipt_text,
+    apply_llm_control,
     extract_document_text,
+    extract_receipt_fields_llm,
 )
 from domain.models import Account, AuditLog, Company, Document, JournalEntry, TaxCode, Tenant
 
@@ -208,6 +212,148 @@ def test_ocr_endpoint_unreachable_raises(monkeypatch):
             file_name="scan.png",
             ocr_endpoint="https://ocr.example/responses",
         )
+
+
+# ---------------------------------------------------------------------------
+# Stufe 3: LLM als Unterstützung/Fallback und Kontrolle
+# ---------------------------------------------------------------------------
+
+
+def _llm_urlopen(payload_fields: dict):
+    def fake_urlopen(request, timeout=0):
+        return _FakeResponse({"output_text": json.dumps(payload_fields)})
+
+    return fake_urlopen
+
+
+def test_extract_receipt_fields_llm_parses_json(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "urlopen",
+        _llm_urlopen(
+            {
+                "supplier": "ACME AG",
+                "invoice_number": "R-77",
+                "invoice_date": "2026-07-01",
+                "net_amount": 100,
+                "tax_amount": 19,
+                "gross_amount": 119,
+                "tax_rate": 19,
+                "currency_code": "EUR",
+            }
+        ),
+    )
+    fields = extract_receipt_fields_llm(
+        "irgendein text", endpoint_url="https://llm.example/responses", model="m"
+    )
+    assert isinstance(fields, LlmReceiptFields)
+    assert fields.supplier == "ACME AG"
+    assert fields.invoice_number == "R-77"
+    assert fields.invoice_date == date(2026, 7, 1)
+    assert fields.gross_amount == Decimal("119.00")
+    assert fields.tax_rate == Decimal("19.00")
+
+
+def test_extract_receipt_fields_llm_handles_prose_wrapped_json(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "urlopen",
+        lambda request, timeout=0: _FakeResponse(
+            {"output_text": 'Hier das Ergebnis: {"gross_amount": 50.0} — fertig.'}
+        ),
+    )
+    fields = extract_receipt_fields_llm(
+        "text", endpoint_url="https://llm.example/responses", model="m"
+    )
+    assert fields.gross_amount == Decimal("50.00")
+
+
+def test_extract_receipt_fields_llm_invalid_json_raises(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "urlopen",
+        lambda request, timeout=0: _FakeResponse({"output_text": "keine daten hier"}),
+    )
+    with pytest.raises(ReceiptLLMError):
+        extract_receipt_fields_llm(
+            "text", endpoint_url="https://llm.example/responses", model="m"
+        )
+
+
+def test_control_confirms_matching_gross():
+    extraction = analyze_receipt_text(RECEIPT_TEXT)  # gross 238,00 regelbasiert
+    apply_llm_control(extraction, LlmReceiptFields(gross_amount=Decimal("238.00")))
+    assert extraction.llm_used is True
+    assert extraction.control_status == "bestätigt"
+    assert extraction.gross_amount == Decimal("238.00")
+
+
+def test_control_flags_diverging_gross():
+    extraction = analyze_receipt_text(RECEIPT_TEXT)
+    apply_llm_control(extraction, LlmReceiptFields(gross_amount=Decimal("999.00")))
+    assert extraction.control_status == "abweichung"
+    assert extraction.confidence == "niedrig"
+    assert any("KI-Kontrolle" in w for w in extraction.warnings)
+
+
+def test_llm_fills_gaps_when_deterministic_finds_nothing():
+    # Freitext ohne erkennbare Beträge -> regelbasiert keine Basis.
+    extraction = analyze_receipt_text("Belegtext ohne maschinenlesbare Summen")
+    assert not extraction.has_booking_basis
+    apply_llm_control(
+        extraction,
+        LlmReceiptFields(
+            supplier="Fallback GmbH",
+            gross_amount=Decimal("119.00"),
+            tax_rate=Decimal("19"),
+        ),
+    )
+    assert extraction.control_status == "ergänzt"
+    assert extraction.has_booking_basis
+    assert extraction.gross_amount == Decimal("119.00")
+    assert extraction.net_amount == Decimal("100.00")
+    assert extraction.tax_amount == Decimal("19.00")
+    assert extraction.supplier == "Fallback GmbH"
+    assert "+llm" in extraction.source
+
+
+def test_llm_error_is_non_blocking(monkeypatch):
+    def boom(request, timeout=0):
+        raise receipt_ocr.URLError("down")
+
+    monkeypatch.setattr(receipt_ocr, "urlopen", boom)
+    pdf = _pdf_with_text(
+        ["Muster Lieferant GmbH", "Nettobetrag 200,00", "MwSt 19 % 38,00", "Gesamtbetrag 238,00"]
+    )
+    result = analyze_document(
+        file_bytes=pdf,
+        mime_type="application/pdf",
+        file_name="beleg.pdf",
+        llm_endpoint="https://llm.example/responses",
+    )
+    # Regelbasiertes Ergebnis bleibt erhalten, LLM-Fehler nur als Warnung.
+    assert result.gross_amount == Decimal("238.00")
+    assert any("KI-Kontrolle nicht möglich" in w for w in result.warnings)
+
+
+def test_analyze_document_runs_llm_control(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "urlopen",
+        _llm_urlopen({"gross_amount": 238.0}),
+    )
+    pdf = _pdf_with_text(
+        ["Muster Lieferant GmbH", "Nettobetrag 200,00", "MwSt 19 % 38,00", "Gesamtbetrag 238,00"]
+    )
+    result = analyze_document(
+        file_bytes=pdf,
+        mime_type="application/pdf",
+        file_name="beleg.pdf",
+        llm_endpoint="https://llm.example/responses",
+        llm_model="m",
+    )
+    assert result.llm_used is True
+    assert result.control_status == "bestätigt"
 
 
 # ---------------------------------------------------------------------------
