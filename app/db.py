@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
@@ -21,6 +22,13 @@ def _resolve_sqlite_path() -> str:
     return f"sqlite+pysqlite:///{instance_dir / 'openbuchhaltung.db'}"
 
 
+def _alembic_config(engine) -> Config:
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    config.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
+    return config
+
+
 def _alembic_head_revision() -> str | None:
     try:
         config = Config(str(PROJECT_ROOT / "alembic.ini"))
@@ -31,30 +39,66 @@ def _alembic_head_revision() -> str | None:
         return None
 
 
-def _bootstrap_schema(engine) -> None:
-    """Legt das Schema nur für leere Datenbanken an und stampt sie auf den Alembic-Head.
+def _current_revision(engine) -> str | None:
+    with engine.connect() as connection:
+        return connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
 
-    Bestehende Datenbanken werden ausschließlich über `alembic upgrade head`
-    verwaltet — ein create_all würde neue Tabellen an Alembic vorbei anlegen
-    und nachfolgende Migrationen brechen lassen.
+
+def _bootstrap_schema(engine) -> None:
+    """Bringt die Datenbank beim Start auf den aktuellen Stand.
+
+    * **Leere DB:** Schema per ``create_all`` anlegen und auf den Alembic-Head stampen.
+    * **Von der App verwaltete DB** (besitzt ``alembic_version``): ausstehende
+      Migrationen automatisch via ``alembic upgrade head`` nachziehen — damit ein
+      Redeploy gegen eine bestehende Datenbank neue Migrationen selbst anwendet.
+    * **Bestehende DB ohne ``alembic_version``:** unberührt lassen (extern verwaltet);
+      ein ``create_all``/Upgrade würde an Alembic vorbei laufen bzw. bestehende
+      Tabellen kollidieren lassen.
     """
-    if inspect(engine).get_table_names():
+    tables = inspect(engine).get_table_names()
+
+    if not tables:
+        Base.metadata.create_all(engine)
+        head = _alembic_head_revision()
+        if head is None:
+            return
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS alembic_version "
+                    "(version_num VARCHAR(32) NOT NULL)"
+                )
+            )
+            connection.execute(text("DELETE FROM alembic_version"))
+            connection.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:head)"), {"head": head}
+            )
+        logger.info("Neues Schema angelegt und auf Alembic-Revision %s gestampt.", head)
         return
 
-    Base.metadata.create_all(engine)
+    if "alembic_version" not in tables:
+        # Extern verwaltete DB — nicht anfassen.
+        return
 
+    _upgrade_to_head(engine)
+
+
+def _upgrade_to_head(engine) -> None:
+    """Wendet ausstehende Migrationen auf eine verwaltete DB an (Fail-fast bei Fehler)."""
     head = _alembic_head_revision()
     if head is None:
         return
-    with engine.begin() as connection:
-        connection.execute(
-            text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)")
+    current = _current_revision(engine)
+    if current == head:
+        return
+    try:
+        command.upgrade(_alembic_config(engine), "head")
+    except Exception:
+        logger.exception(
+            "Automatische DB-Migration von %s auf %s fehlgeschlagen.", current, head
         )
-        connection.execute(text("DELETE FROM alembic_version"))
-        connection.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:head)"), {"head": head}
-        )
-    logger.info("Neues Schema angelegt und auf Alembic-Revision %s gestampt.", head)
+        raise
+    logger.info("Datenbank von Revision %s auf Head %s migriert.", current, head)
 
 
 def create_session_factory(database_url: str | None = None) -> sessionmaker[Session]:

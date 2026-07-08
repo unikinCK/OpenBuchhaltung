@@ -33,6 +33,23 @@ Optional mit Containern:
 docker compose up --build
 ```
 
+### Datenbank & Migrationen
+
+Beim Start bringt die App die Datenbank automatisch auf den aktuellen Stand:
+- **Leere DB:** Das Schema wird angelegt und auf den Alembic-Head gestampt.
+- **Bestehende, von der App verwaltete DB:** Ausstehende Migrationen werden per
+  `alembic upgrade head` automatisch nachgezogen — ein **Redeploy gegen eine
+  bestehende Datenbank** wendet neue Migrationen also selbst an (kein manueller Schritt
+  nötig). Schlägt eine Migration fehl, bricht der Start bewusst ab (Fail-fast), statt
+  später mit Schema-Fehlern zu laufen.
+- **Bestehende DB ohne Alembic-Verwaltung** (kein `alembic_version`) wird nicht
+  angefasst; hier ist Migration manuell durchzuführen.
+
+Manuell migrieren (z. B. für eine externe DB):
+```bash
+DATABASE_URL="sqlite+pysqlite:///$(pwd)/instance/openbuchhaltung.db" alembic upgrade head
+```
+
 ## Login & Benutzer
 
 Alle UI-Seiten erfordern eine Anmeldung. `seed-demo` legt folgende Benutzer an:
