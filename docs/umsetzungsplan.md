@@ -199,7 +199,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       „Beleg-OCR" zeigt die erkannten Felder und einen editierbaren Eingangsrechnungs-
       Vorschlag [Netto→Aufwand, Vorsteuer→Steuerkonto, Brutto→Kreditor]; nach Freigabe
       wird gebucht und der gespeicherte Beleg verknüpft. Audit-Events ``ocr_analyzed``/
-      ``ocr_booked``)*
+      ``ocr_booked``. Erweiterung: optionaler LLM [``RECEIPT_LLM_ENDPOINT_URL``] als
+      Unterstützung/Fallback [ergänzt fehlende Felder] und als Kontrolle [Cross-Check des
+      Bruttobetrags → ``bestätigt``/``Abweichung``], nicht-blockierend)*
 - [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
       Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende
       API-Endpunkte umgesetzt; weiterer API-Ausbau offen)*

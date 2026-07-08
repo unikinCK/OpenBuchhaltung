@@ -1699,6 +1699,8 @@ def receipt_ocr_suggest():
             file_name=original_file_name,
             ocr_endpoint=current_app.config.get("RECEIPT_OCR_ENDPOINT_URL"),
             ocr_model=current_app.config.get("RECEIPT_OCR_MODEL", "gpt-4.1-mini"),
+            llm_endpoint=current_app.config.get("RECEIPT_LLM_ENDPOINT_URL"),
+            llm_model=current_app.config.get("RECEIPT_LLM_MODEL", "gpt-4.1-mini"),
         )
     except ReceiptOCRError as exc:
         flash(f"OCR nicht möglich: {exc}", "error")
@@ -1717,6 +1719,8 @@ def receipt_ocr_suggest():
             payload={
                 "source": extraction.source,
                 "confidence": extraction.confidence,
+                "llm_used": extraction.llm_used,
+                "control_status": extraction.control_status,
                 "gross_amount": str(extraction.gross_amount)
                 if extraction.gross_amount is not None
                 else None,

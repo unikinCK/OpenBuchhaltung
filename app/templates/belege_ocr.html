@@ -36,6 +36,15 @@
       <p class="muted">
         Quelle: {{ extraction.source }} · Zuverlässigkeit:
         <span class="badge">{{ extraction.confidence }}</span>
+        {% if extraction.llm_used %}
+          · KI-Kontrolle:
+          <span class="badge">
+            {%- if extraction.control_status == 'bestätigt' -%}bestätigt
+            {%- elif extraction.control_status == 'abweichung' -%}Abweichung
+            {%- elif extraction.control_status == 'ergänzt' -%}ergänzt (KI)
+            {%- else -%}nur regelbasiert{%- endif -%}
+          </span>
+        {% endif %}
         {% if document_name %} · Datei: {{ document_name }}{% endif %}
       </p>
 

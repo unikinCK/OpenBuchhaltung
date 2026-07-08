@@ -235,14 +235,34 @@ und als Eingangsrechnung vorbuchen:
    Ohne gesetzte `RECEIPT_OCR_*`-Variablen fällt die OCR auf `DOCUMENT_LLM_ENDPOINT_URL`
    zurück. Ist gar kein Endpoint konfiguriert, funktioniert die Pipeline weiterhin für
    PDFs mit Textebene; Bild-Belege werden verständlich abgewiesen.
-2. **Analyse:** Eine deterministische Heuristik erkennt Bruttobetrag, Nettobetrag,
-   Steuerbetrag und Steuersatz, Rechnungsdatum, Rechnungsnummer und Lieferant und
-   vervollständigt fehlende Beträge rechnerisch (z. B. Netto/Steuer aus Brutto + Satz).
-3. **Vorschlag & Buchung:** Die erkannten Felder werden angezeigt und als editierbarer
-   Buchungsvorschlag vorbelegt (Netto → Aufwandskonto, Vorsteuer → Steuerkonto,
-   Brutto → Kreditor). Nach Freigabe wird gebucht und der gespeicherte Beleg mit der
-   Buchung verknüpft. Alle Schritte werden als Audit-Events (`ocr_analyzed`,
-   `ocr_booked`) protokolliert.
+2. **Analyse (regelbasiert):** Eine deterministische Heuristik erkennt Bruttobetrag,
+   Nettobetrag, Steuerbetrag und Steuersatz, Rechnungsdatum, Rechnungsnummer und
+   Lieferant und vervollständigt fehlende Beträge rechnerisch (z. B. Netto/Steuer aus
+   Brutto + Satz).
+3. **KI-Unterstützung & -Kontrolle (optional):** Ist ein LLM-Endpoint konfiguriert,
+   extrahiert zusätzlich ein Sprachmodell die Belegfelder strukturiert (als JSON):
+
+   ```bash
+   export RECEIPT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
+   export RECEIPT_LLM_MODEL="gpt-4.1-mini"
+   ```
+
+   Das Ergebnis wird zweifach genutzt:
+   - **Unterstützung/Fallback:** Felder, die die Heuristik nicht erkennt, werden aus
+     dem LLM ergänzt und anschließend rechnerisch konsolidiert (Status *ergänzt (KI)*).
+   - **Kontrolle:** Stimmt der regelbasierte Bruttobetrag mit dem LLM überein, gilt der
+     Vorschlag als *bestätigt* (höhere Zuverlässigkeit); weicht er ab, wird eine
+     Warnung angezeigt (*Abweichung*, niedrige Zuverlässigkeit).
+
+   Der LLM-Aufruf ist **nicht-blockierend**: bei Fehlern bleibt der regelbasierte
+   Vorschlag erhalten und der Fehler wird nur als Warnung vermerkt. Ohne gesetzte
+   `RECEIPT_LLM_*`-Variablen fällt die Kontrolle auf `DOCUMENT_LLM_ENDPOINT_URL` zurück;
+   ist gar kein Endpoint konfiguriert, arbeitet die Pipeline rein regelbasiert.
+4. **Vorschlag & Buchung:** Die erkannten Felder werden angezeigt (inkl. KI-Kontroll-
+   Status) und als editierbarer Buchungsvorschlag vorbelegt (Netto → Aufwandskonto,
+   Vorsteuer → Steuerkonto, Brutto → Kreditor). Nach Freigabe wird gebucht und der
+   gespeicherte Beleg mit der Buchung verknüpft. Alle Schritte werden als Audit-Events
+   (`ocr_analyzed` mit `control_status`, `ocr_booked`) protokolliert.
 
 ## End-to-End-Kernflows
 
