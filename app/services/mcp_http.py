@@ -101,8 +101,13 @@ def origin_allowed(origin: str | None, allowed_origins: frozenset[str]) -> bool:
     """DNS-Rebinding-Schutz: Browser-Origins müssen explizit erlaubt sein.
 
     Clients ohne ``Origin``-Header (z. B. Claude Desktop, CLI) sind immer zulässig.
+    Steht ``*`` in der Allowlist, sind alle Origins erlaubt — sinnvoll, wenn der
+    Server bereits hinter einem vertrauenswürdigen Proxy (Tailscale Serve, Caddy)
+    mit eigenem Zugriffsschutz steht.
     """
     if not origin:
+        return True
+    if "*" in allowed_origins:
         return True
     return origin in allowed_origins
 

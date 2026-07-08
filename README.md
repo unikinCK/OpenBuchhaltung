@@ -386,14 +386,16 @@ curl -N -X POST http://127.0.0.1:8080/mcp \
 Der Server bindet standardmäßig nur an `127.0.0.1`. Für browserbasierte Clients lässt sich
 per `MCP_HTTP_ALLOWED_ORIGINS` (kommagetrennt) eine Origin-Allowlist setzen; Requests mit
 nicht erlaubtem `Origin` werden mit 403 abgelehnt (DNS-Rebinding-Schutz). Clients ohne
-`Origin`-Header (Desktop/CLI) sind stets zugelassen.
+`Origin`-Header (Desktop/CLI) sind stets zugelassen. Steht `*` in der Allowlist, sind alle
+Origins erlaubt — sinnvoll hinter einem vertrauenswürdigen Proxy mit eigenem Zugriffsschutz
+(Tailscale Serve, Caddy).
 
 ### Transport 2 in Docker Compose
 
 Der Streamable-HTTP-Transport ist als eigener `mcp`-Service in der `docker-compose.yml`
 enthalten. Er baut dasselbe Image, spricht die App über das Compose-Netz an
 (`OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1`) und ist auf dem Host unter
-**Port 8090** erreichbar (8080 ist von Adminer belegt):
+**Port 8090** (nur an `127.0.0.1` gebunden) erreichbar:
 
 ```bash
 docker compose up mcp        # startet mcp inkl. Abhängigkeit app
@@ -404,8 +406,51 @@ curl -X POST http://localhost:8090/mcp \
 ```
 
 Bei aktiver API-Authentifizierung (`API_REQUIRE_AUTH=1`) wird der Token über die
-Host-Umgebungsvariable `OPENBUCHHALTUNG_API_TOKEN` durchgereicht; browserbasierte
-Origins lassen sich über `MCP_HTTP_ALLOWED_ORIGINS` setzen.
+Host-Umgebungsvariable `OPENBUCHHALTUNG_API_TOKEN` durchgereicht.
+
+### HTTPS-Zugang für Claude-Desktop-Custom-Connectoren
+
+Claude-Desktop-Custom-Connectoren benötigen eine per **HTTPS** mit gültigem Zertifikat
+erreichbare URL. Der `mcp`-Service liefert nur reines HTTP auf `127.0.0.1:8090`; davor
+gehört ein TLS-Terminierer.
+
+**Variante A — Tailscale Serve (für `*.ts.net`-Hostnamen, empfohlen im Tailnet).**
+Tailscale stellt für den Node automatisch ein gültiges Let's-Encrypt-Zertifikat aus
+(vorher in der Tailscale-Admin-Konsole unter *DNS → HTTPS Certificates* aktivieren). Auf
+dem Host, auf dem der `mcp`-Container läuft:
+
+```bash
+# HTTPS auf 443 -> lokaler MCP-Port 8090
+tailscale serve --bg --https=443 http://127.0.0.1:8090
+tailscale serve status        # zeigt die aktive URL
+```
+
+Der Endpunkt ist dann für Geräte im selben Tailnet unter
+`https://<node>.ts.net/mcp` erreichbar (z. B. `https://webbox.tail717550.ts.net/mcp`).
+Da der Zugriff bereits durch das Tailnet geschützt ist, empfiehlt sich am `mcp`-Service
+`MCP_HTTP_ALLOWED_ORIGINS=*` (falls Claude Desktop einen `Origin`-Header sendet). Kein
+Caddy nötig — ein öffentliches Zertifikat für `*.ts.net` lässt sich per HTTP-Challenge
+ohnehin nicht ausstellen.
+
+**Variante B — Caddy (für eine öffentliche Domain mit erreichbaren Ports 80/443).**
+Enthalten als opt-in `caddy`-Service (Profil `proxy`) samt `Caddyfile`. Domain per
+`MCP_DOMAIN` setzen, dann:
+
+```bash
+export MCP_DOMAIN=mcp.example.com     # A/AAAA-Record muss auf den Server zeigen
+docker compose --profile proxy up -d caddy
+```
+
+Caddy holt automatisch ein Let's-Encrypt-Zertifikat und proxyt auf `mcp:8090`; der
+`Origin`-Header wird dabei entfernt. Connector-URL: `https://<MCP_DOMAIN>/mcp`.
+
+> **Sicherheit:** Der MCP-Endpunkt selbst hat keine Authentifizierung — wer die URL
+> erreicht, kann Tools aufrufen (u. a. Buchungen anlegen). Zugriff daher auf das Tailnet
+> bzw. bekannte Client-IPs beschränken (siehe Kommentare im `Caddyfile`) und die
+> App-API zusätzlich per `API_REQUIRE_AUTH=1` + Token absichern.
+
+**Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
+hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.
 
 Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
 ```json
