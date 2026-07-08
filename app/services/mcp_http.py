@@ -57,6 +57,13 @@ def accepts_event_stream(accept_header: str | None) -> bool:
     return bool(accept_header) and "text/event-stream" in accept_header
 
 
+def accepts_json(accept_header: str | None) -> bool:
+    """Ob der Client JSON akzeptiert (fehlender Accept-Header = ja)."""
+    if not accept_header:
+        return True
+    return "application/json" in accept_header or "*/*" in accept_header
+
+
 def process_post(server: MCPServer, raw_body: str, accept_header: str | None) -> HttpResult:
     """Verarbeitet einen POST-Body (einzelne Nachricht oder Batch) transportneutral."""
     try:
@@ -86,7 +93,11 @@ def process_post(server: MCPServer, raw_body: str, accept_header: str | None) ->
     if not responses:
         return HttpResult(status=202, content_type=None)
 
-    if accepts_event_stream(accept_header):
+    # Für eine einzelne Request/Response-Runde bevorzugen wir JSON. SSE nur, wenn der
+    # Client ausschließlich text/event-stream akzeptiert. MCP-Clients (z. B. Claude
+    # Desktop) senden "application/json, text/event-stream" und erwarten dann JSON —
+    # eine SSE-Antwort führt dort zu einem Verbindungsfehler.
+    if accepts_event_stream(accept_header) and not accepts_json(accept_header):
         return HttpResult(status=200, content_type="text/event-stream", body=_sse(responses))
 
     payload = responses if isinstance(parsed, list) else responses[0]
