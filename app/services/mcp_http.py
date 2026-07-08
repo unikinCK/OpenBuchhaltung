@@ -161,7 +161,13 @@ def _make_handler(server: MCPServer, path: str, allowed_origins: frozenset[str])
             self._send(result)
 
         def do_GET(self) -> None:  # noqa: N802
-            # Server-initiierte SSE-Streams werden nicht angeboten.
+            # Unbekannte Pfade (u. a. OAuth-Discovery unter /.well-known/…) sauber mit
+            # 404 beantworten. So erkennt ein MCP-Client, dass der Server keinen
+            # Autorisierungsdienst anbietet, und verbindet ohne OAuth.
+            if self.path.split("?", 1)[0] != path:
+                self._reject(404, "Not found.")
+                return
+            # /mcp selbst bietet keinen server-initiierten SSE-Stream (GET) an.
             self._reject(405, "Method not allowed.")
 
         def log_message(self, *args: Any) -> None:  # Stille Standardausgabe.
