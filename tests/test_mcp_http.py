@@ -42,6 +42,17 @@ def test_process_post_returns_json_by_default() -> None:
     assert len(body["result"]["tools"]) == 11
 
 
+def test_process_post_prefers_json_when_both_accepted() -> None:
+    # MCP-Clients wie Claude Desktop senden "application/json, text/event-stream"
+    # und erwarten für eine einzelne Antwort JSON, nicht SSE.
+    result = process_post(
+        _server(), _tools_list(), accept_header="application/json, text/event-stream"
+    )
+    assert result.status == 200
+    assert result.content_type == "application/json"
+    assert json.loads(result.body)["id"] == 1
+
+
 def test_process_post_returns_sse_when_requested() -> None:
     result = process_post(_server(), _tools_list(), accept_header="text/event-stream")
     assert result.status == 200
