@@ -19,6 +19,8 @@
              {% if request.endpoint == 'main.accounts_page' %}class="active"{% endif %}>Konten</a>
           <a href="{{ url_for('main.documents_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.documents_page' %}class="active"{% endif %}>Belege</a>
+          <a href="{{ url_for('main.receipt_ocr_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.receipt_ocr_page' %}class="active"{% endif %}>Beleg-OCR</a>
           <a href="{{ url_for('main.reports_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.reports_page' %}class="active"{% endif %}>Berichte</a>
           <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}"
