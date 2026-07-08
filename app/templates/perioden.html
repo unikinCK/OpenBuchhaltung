@@ -9,84 +9,144 @@
     <section class="card">
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
     </section>
-  {% elif not fiscal_years %}
-    <section class="card">
-      <p class="muted">Noch keine Geschäftsjahre vorhanden. Geschäftsjahre und Perioden werden
-        automatisch mit der ersten Buchung angelegt.</p>
-    </section>
   {% else %}
-    {% for fiscal_year in fiscal_years %}
-      <section class="card">
-        <h2>
-          Geschäftsjahr {{ fiscal_year.label }}
-          {% if fiscal_year.is_closed %}
-            <span class="badge">abgeschlossen</span>
-          {% else %}
-            <span class="badge">offen</span>
-          {% endif %}
-        </h2>
+    <section class="card">
+      <h2>Geschäftsjahr</h2>
+      <p class="muted">
+        Reguläre Geschäftsjahre werden automatisch mit der ersten Buchung anhand des
+        Beginn-Monats angelegt. Rumpf- und abweichende Jahre können manuell mit freiem
+        Zeitraum erfasst werden. Jedes Geschäftsjahr erhält eine Abschlussperiode (13)
+        für Jahresabschlussbuchungen.
+      </p>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Periode</th>
-              <th>Zeitraum</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for period in periods_by_year.get(fiscal_year.id, []) %}
+      {% if is_admin %}
+        <form method="post" action="{{ url_for('main.set_fiscal_year_start_action', company_id=selected_company_id) }}"
+              style="display:flex; align-items:flex-end; gap:0.75rem; flex-wrap:wrap;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <div>
+            <label for="start_month">Geschäftsjahresbeginn</label>
+            <select id="start_month" name="start_month">
+              {% for name in month_names %}
+                <option value="{{ loop.index }}" {% if loop.index == fiscal_year_start_month %}selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="secondary" style="margin:0;">Speichern</button>
+        </form>
+
+        <h3 style="margin-top:1.5rem;">Geschäftsjahr manuell anlegen (Rumpf-/abweichendes Jahr)</h3>
+        <form method="post" action="{{ url_for('main.create_fiscal_year_action') }}"
+              style="display:flex; align-items:flex-end; gap:0.75rem; flex-wrap:wrap;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <div>
+            <label for="label">Bezeichnung</label>
+            <input id="label" name="label" placeholder="z. B. 2026 (Rumpf)" required />
+          </div>
+          <div>
+            <label for="start_date">Beginn</label>
+            <input id="start_date" name="start_date" type="date" required />
+          </div>
+          <div>
+            <label for="end_date">Ende</label>
+            <input id="end_date" name="end_date" type="date" required />
+          </div>
+          <button type="submit" style="margin:0;">Anlegen</button>
+        </form>
+      {% else %}
+        <p class="muted">Aktueller Beginn:
+          {{ month_names[fiscal_year_start_month - 1] }}.
+          Änderungen und das Anlegen von Geschäftsjahren sind Administratoren vorbehalten.</p>
+      {% endif %}
+    </section>
+
+    {% if not fiscal_years %}
+      <section class="card">
+        <p class="muted">Noch keine Geschäftsjahre vorhanden. Reguläre Jahre werden
+          automatisch mit der ersten Buchung angelegt – oder oben manuell erfassen.</p>
+      </section>
+    {% else %}
+      {% for fiscal_year in fiscal_years %}
+        <section class="card">
+          <h2>
+            Geschäftsjahr {{ fiscal_year.label }}
+            <span class="muted" style="font-weight:normal; font-size:0.85em;">
+              ({{ fiscal_year.start_date.isoformat() }} – {{ fiscal_year.end_date.isoformat() }})
+            </span>
+            {% if fiscal_year.is_closed %}
+              <span class="badge">abgeschlossen</span>
+            {% else %}
+              <span class="badge">offen</span>
+            {% endif %}
+          </h2>
+
+          <table>
+            <thead>
               <tr>
-                <td>{{ period.period_number }}</td>
-                <td>{{ period.start_date.isoformat() }} – {{ period.end_date.isoformat() }}</td>
-                <td>
-                  {% if period.id in locked_period_ids %}
-                    <span class="badge">gesperrt</span>
-                  {% else %}
-                    <span class="badge">offen</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if period.id in locked_period_ids %}
-                    {% if is_admin and not fiscal_year.is_closed %}
-                      <form method="post" action="{{ url_for('main.unlock_period_action', period_id=period.id) }}" style="margin:0;">
+                <th>Periode</th>
+                <th>Zeitraum</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for period in periods_by_year.get(fiscal_year.id, []) %}
+                <tr>
+                  <td>
+                    {{ period.period_number }}
+                    {% if period.is_closing %}
+                      <span class="badge">Abschluss</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ period.start_date.isoformat() }} – {{ period.end_date.isoformat() }}</td>
+                  <td>
+                    {% if period.id in locked_period_ids %}
+                      <span class="badge">gesperrt</span>
+                    {% else %}
+                      <span class="badge">offen</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if period.id in locked_period_ids %}
+                      {% if is_admin and not fiscal_year.is_closed %}
+                        <form method="post" action="{{ url_for('main.unlock_period_action', period_id=period.id) }}" style="margin:0;">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                          <button type="submit" class="secondary" style="margin:0;">Entsperren</button>
+                        </form>
+                      {% endif %}
+                    {% else %}
+                      <form method="post" action="{{ url_for('main.lock_period_action', period_id=period.id) }}" style="margin:0;">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                        <button type="submit" class="secondary" style="margin:0;">Entsperren</button>
+                        <input name="reason" placeholder="Grund (optional)" style="max-width:180px;" />
+                        <button type="submit" class="secondary" style="margin:0;">Sperren</button>
                       </form>
                     {% endif %}
-                  {% else %}
-                    <form method="post" action="{{ url_for('main.lock_period_action', period_id=period.id) }}" style="margin:0;">
-                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                      <input name="reason" placeholder="Grund (optional)" style="max-width:180px;" />
-                      <button type="submit" class="secondary" style="margin:0;">Sperren</button>
-                    </form>
-                  {% endif %}
-                </td>
-              </tr>
-            {% else %}
-              <tr><td colspan="4" class="muted">Keine Perioden in diesem Geschäftsjahr.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4" class="muted">Keine Perioden in diesem Geschäftsjahr.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
 
-        {% if not fiscal_year.is_closed %}
-          {% if is_admin %}
-            <form method="post" action="{{ url_for('main.close_fiscal_year_action', fiscal_year_id=fiscal_year.id) }}"
-                  onsubmit="return confirm('Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.');">
-              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-              <button type="submit">Geschäftsjahr {{ fiscal_year.label }} abschließen</button>
-            </form>
+          {% if not fiscal_year.is_closed %}
+            {% if is_admin %}
+              <form method="post" action="{{ url_for('main.close_fiscal_year_action', fiscal_year_id=fiscal_year.id) }}"
+                    onsubmit="return confirm('Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                <button type="submit">Geschäftsjahr {{ fiscal_year.label }} abschließen</button>
+              </form>
+            {% else %}
+              <p class="muted">Den Jahresabschluss kann nur ein Administrator durchführen.</p>
+            {% endif %}
           {% else %}
-            <p class="muted">Den Jahresabschluss kann nur ein Administrator durchführen.</p>
+            <p class="muted">In abgeschlossene Geschäftsjahre kann nicht mehr gebucht werden.</p>
           {% endif %}
-        {% else %}
-          <p class="muted">In abgeschlossene Geschäftsjahre kann nicht mehr gebucht werden.</p>
-        {% endif %}
-      </section>
-    {% endfor %}
+        </section>
+      {% endfor %}
+    {% endif %}
   {% endif %}
 {% endblock %}

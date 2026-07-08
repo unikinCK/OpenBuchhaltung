@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import func, select
@@ -46,6 +47,83 @@ class JournalEntryInput:
     status: str
     lines: list[JournalLineInput]
     changed_by: str = "system"
+    # Buchung in die Abschlussperiode (Periode 13) statt in die datumsbezogene Monatsperiode.
+    post_to_closing_period: bool = False
+
+
+# Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
+CLOSING_PERIOD_NUMBER = 13
+MAX_REGULAR_PERIODS = 12
+
+
+def _last_day_of_month(year: int, month: int) -> int:
+    return calendar.monthrange(year, month)[1]
+
+
+def fiscal_year_bounds(start_month: int, dt: date) -> tuple[date, date, str]:
+    """Grenzen und Label des regulären Wirtschaftsjahres, das ``dt`` enthält.
+
+    ``start_month`` = 1 entspricht dem Kalenderjahr; jeder andere Wert einem
+    abweichenden Wirtschaftsjahr, das im angegebenen Monat beginnt.
+    """
+    if start_month == 1:
+        return date(dt.year, 1, 1), date(dt.year, 12, 31), str(dt.year)
+
+    start_year = dt.year if dt.month >= start_month else dt.year - 1
+    end_year = start_year + 1
+    end_month = start_month - 1
+    start_date = date(start_year, start_month, 1)
+    end_date = date(end_year, end_month, _last_day_of_month(end_year, end_month))
+    return start_date, end_date, f"{start_year}/{end_year}"
+
+
+def build_periods_for_fiscal_year(fiscal_year: FiscalYear) -> list[Period]:
+    """Erzeugt die Monatsperioden (auf die WJ-Grenzen zugeschnitten) plus Abschlussperiode.
+
+    Für Rumpf- und abweichende Wirtschaftsjahre können die erste und letzte Periode
+    Teilmonate sein. Perioden werden fortlaufend ab 1 nummeriert; die Abschlussperiode
+    erhält immer die Nummer 13.
+    """
+    periods: list[Period] = []
+    number = 1
+    cursor = fiscal_year.start_date
+    while cursor <= fiscal_year.end_date:
+        month_end = date(cursor.year, cursor.month, _last_day_of_month(cursor.year, cursor.month))
+        segment_end = min(month_end, fiscal_year.end_date)
+        periods.append(
+            Period(
+                tenant_id=fiscal_year.tenant_id,
+                fiscal_year_id=fiscal_year.id,
+                period_number=number,
+                start_date=cursor,
+                end_date=segment_end,
+                status="open",
+                is_closing=False,
+            )
+        )
+        number += 1
+        if segment_end >= fiscal_year.end_date:
+            break
+        cursor = month_end + timedelta(days=1)
+
+    if len(periods) > MAX_REGULAR_PERIODS:
+        raise ValueError(
+            "Ein Wirtschaftsjahr darf höchstens 12 Perioden umfassen. "
+            "Bitte den Beginn auf einen Monatsersten legen."
+        )
+
+    periods.append(
+        Period(
+            tenant_id=fiscal_year.tenant_id,
+            fiscal_year_id=fiscal_year.id,
+            period_number=CLOSING_PERIOD_NUMBER,
+            start_date=fiscal_year.end_date,
+            end_date=fiscal_year.end_date,
+            status="open",
+            is_closing=True,
+        )
+    )
+    return periods
 
 
 def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> JournalEntry:
@@ -103,6 +181,7 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         tenant_id=company.tenant_id,
         fiscal_year_id=fiscal_year.id,
         dt=payload.entry_date,
+        closing=payload.post_to_closing_period,
     )
     _ensure_period_is_open(session=session, period_id=period.id)
 
@@ -243,22 +322,39 @@ def _get_or_create_fiscal_year(
     company_id: int,
     dt: date,
 ) -> FiscalYear:
-    label = str(dt.year)
-    fiscal_year = session.execute(
-        select(FiscalYear).where(FiscalYear.company_id == company_id, FiscalYear.label == label)
-    ).scalar_one_or_none()
+    # Zuerst ein bereits vorhandenes (auch manuell angelegtes Rumpf-/abweichendes)
+    # Wirtschaftsjahr suchen, dessen Zeitraum das Buchungsdatum umfasst.
+    fiscal_year = (
+        session.execute(
+            select(FiscalYear).where(
+                FiscalYear.company_id == company_id,
+                FiscalYear.start_date <= dt,
+                FiscalYear.end_date >= dt,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if fiscal_year:
         return fiscal_year
+
+    # Sonst ein reguläres Wirtschaftsjahr anhand des Beginn-Monats der Gesellschaft anlegen.
+    company = session.get(Company, company_id)
+    start_month = company.fiscal_year_start_month if company else 1
+    start_date, end_date, label = fiscal_year_bounds(start_month, dt)
 
     fiscal_year = FiscalYear(
         tenant_id=tenant_id,
         company_id=company_id,
         label=label,
-        start_date=date(dt.year, 1, 1),
-        end_date=date(dt.year, 12, 31),
+        start_date=start_date,
+        end_date=end_date,
         is_closed=False,
     )
     session.add(fiscal_year)
+    session.flush()
+    for period in build_periods_for_fiscal_year(fiscal_year):
+        session.add(period)
     session.flush()
     return fiscal_year
 
@@ -269,29 +365,72 @@ def _get_or_create_period(
     tenant_id: int,
     fiscal_year_id: int,
     dt: date,
+    closing: bool = False,
 ) -> Period:
-    period = session.execute(
-        select(Period).where(
-            Period.fiscal_year_id == fiscal_year_id,
-            Period.period_number == dt.month,
+    if closing:
+        period = (
+            session.execute(
+                select(Period).where(
+                    Period.fiscal_year_id == fiscal_year_id,
+                    Period.is_closing.is_(True),
+                )
+            )
+            .scalars()
+            .first()
         )
-    ).scalar_one_or_none()
+        if period:
+            return period
+        fiscal_year = session.get(FiscalYear, fiscal_year_id)
+        period = Period(
+            tenant_id=tenant_id,
+            fiscal_year_id=fiscal_year_id,
+            period_number=CLOSING_PERIOD_NUMBER,
+            start_date=fiscal_year.end_date,
+            end_date=fiscal_year.end_date,
+            status="open",
+            is_closing=True,
+        )
+        session.add(period)
+        session.flush()
+        return period
+
+    # Reguläre Periode, deren Zeitraum das Buchungsdatum enthält.
+    period = (
+        session.execute(
+            select(Period).where(
+                Period.fiscal_year_id == fiscal_year_id,
+                Period.is_closing.is_(False),
+                Period.start_date <= dt,
+                Period.end_date >= dt,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if period:
         return period
 
-    end_day = 31
-    if dt.month in {4, 6, 9, 11}:
-        end_day = 30
-    if dt.month == 2:
-        end_day = 29 if (dt.year % 4 == 0 and (dt.year % 100 != 0 or dt.year % 400 == 0)) else 28
-
+    # Fallback für Altbestände ohne vollständig generierte Perioden: fehlenden
+    # (Teil-)Monat als nächste fortlaufende Periode ergänzen.
+    fiscal_year = session.get(FiscalYear, fiscal_year_id)
+    max_number = (
+        session.scalar(
+            select(func.max(Period.period_number)).where(
+                Period.fiscal_year_id == fiscal_year_id,
+                Period.is_closing.is_(False),
+            )
+        )
+        or 0
+    )
+    month_end = date(dt.year, dt.month, _last_day_of_month(dt.year, dt.month))
     period = Period(
         tenant_id=tenant_id,
         fiscal_year_id=fiscal_year_id,
-        period_number=dt.month,
-        start_date=date(dt.year, dt.month, 1),
-        end_date=date(dt.year, dt.month, end_day),
+        period_number=max_number + 1,
+        start_date=max(date(dt.year, dt.month, 1), fiscal_year.start_date),
+        end_date=min(month_end, fiscal_year.end_date),
         status="open",
+        is_closing=False,
     )
     session.add(period)
     session.flush()

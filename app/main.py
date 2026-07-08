@@ -59,7 +59,9 @@ from app.services.open_items import (
 from app.services.periods import (
     PeriodActionError,
     close_fiscal_year,
+    create_fiscal_year,
     lock_period,
+    set_fiscal_year_start_month,
     unlock_period,
 )
 from app.services.reports import (
@@ -89,6 +91,21 @@ main_bp.before_request(require_ui_login)
 
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 ALLOWED_DOCUMENT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+
+MONTH_NAMES = [
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+]
 
 
 def _get_session_factory():
@@ -1034,6 +1051,13 @@ def periods_page():
                     ).scalars()
                 )
 
+        selected_company = next(
+            (company for company in companies if company.id == selected_company_id), None
+        )
+        fiscal_year_start_month = (
+            selected_company.fiscal_year_start_month if selected_company else 1
+        )
+
     user = current_user()
     return render_template(
         "perioden.html",
@@ -1042,6 +1066,8 @@ def periods_page():
         fiscal_years=fiscal_years,
         periods_by_year=periods_by_year,
         locked_period_ids=locked_period_ids,
+        fiscal_year_start_month=fiscal_year_start_month,
+        month_names=MONTH_NAMES,
         is_admin=user is not None and user["role"] == ROLE_ADMIN,
     )
 
@@ -1122,6 +1148,70 @@ def close_fiscal_year_action(fiscal_year_id: int):
     if close_result.carryforward_entry is not None:
         message += f" Ergebnisvortrag gebucht ({close_result.carryforward_entry.posting_number})."
     flash(message, "success")
+    return redirect(url_for("main.periods_page", company_id=company_id))
+
+
+@main_bp.post("/geschaeftsjahre")
+def create_fiscal_year_action():
+    company_id = request.form.get("company_id", type=int)
+    user = current_user()
+    if user is None or user["role"] != ROLE_ADMIN:
+        flash("Geschäftsjahre anlegen darf nur ein Administrator.", "error")
+        return redirect(url_for("main.periods_page", company_id=company_id))
+
+    label = request.form.get("label", "").strip()
+    start_raw = request.form.get("start_date", "").strip()
+    end_raw = request.form.get("end_date", "").strip()
+    try:
+        start_date = date.fromisoformat(start_raw)
+        end_date = date.fromisoformat(end_raw)
+    except ValueError:
+        flash("Bitte gültige Start- und Enddaten angeben.", "error")
+        return redirect(url_for("main.periods_page", company_id=company_id))
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        _require_company_access(session, company_id)
+        try:
+            fiscal_year = create_fiscal_year(
+                session=session,
+                company_id=company_id,
+                label=label,
+                start_date=start_date,
+                end_date=end_date,
+                changed_by=_changed_by(),
+            )
+        except PeriodActionError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.periods_page", company_id=company_id))
+
+    flash(f"Geschäftsjahr {fiscal_year.label} wurde angelegt.", "success")
+    return redirect(url_for("main.periods_page", company_id=company_id))
+
+
+@main_bp.post("/gesellschaften/<int:company_id>/wirtschaftsjahresbeginn")
+def set_fiscal_year_start_action(company_id: int):
+    user = current_user()
+    if user is None or user["role"] != ROLE_ADMIN:
+        flash("Den Geschäftsjahresbeginn darf nur ein Administrator ändern.", "error")
+        return redirect(url_for("main.periods_page", company_id=company_id))
+
+    start_month = request.form.get("start_month", type=int)
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        _require_company_access(session, company_id)
+        try:
+            set_fiscal_year_start_month(
+                session=session,
+                company_id=company_id,
+                start_month=start_month or 0,
+                changed_by=_changed_by(),
+            )
+        except PeriodActionError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.periods_page", company_id=company_id))
+
+    flash("Geschäftsjahresbeginn wurde gespeichert.", "success")
     return redirect(url_for("main.periods_page", company_id=company_id))
 
 
@@ -1277,6 +1367,7 @@ def create_journal_entry_from_form():
             status="posted",
             changed_by=_changed_by(),
             lines=line_inputs,
+            post_to_closing_period=bool(request.form.get("post_to_closing_period")),
         )
 
         session_factory = _get_session_factory()

@@ -19,7 +19,9 @@ from app.services.journal_entries import (
 from app.services.periods import (
     PeriodActionError,
     close_fiscal_year,
+    create_fiscal_year,
     lock_period,
+    set_fiscal_year_start_month,
     unlock_period,
 )
 from domain.models import (
@@ -88,8 +90,175 @@ def _seed_company_with_entry(session: Session) -> tuple[Company, FiscalYear, Per
         ),
     )
     fiscal_year = session.execute(select(FiscalYear)).scalar_one()
-    period = session.execute(select(Period)).scalar_one()
+    period = session.execute(
+        select(Period).where(
+            Period.is_closing.is_(False),
+            Period.start_date <= date(2026, 3, 15),
+            Period.end_date >= date(2026, 3, 15),
+        )
+    ).scalar_one()
     return company, fiscal_year, period
+
+
+def _seed_company(session: Session, *, fiscal_year_start_month: int = 1) -> Company:
+    tenant = Tenant(name="WJ Tenant")
+    company = Company(
+        tenant=tenant,
+        name="WJ GmbH",
+        currency_code="EUR",
+        fiscal_year_start_month=fiscal_year_start_month,
+    )
+    session.add_all([tenant, company])
+    session.flush()
+    session.add_all(
+        [
+            Account(
+                tenant_id=tenant.id,
+                company_id=company.id,
+                code="1200",
+                name="Bank",
+                account_type="asset",
+            ),
+            Account(
+                tenant_id=tenant.id,
+                company_id=company.id,
+                code="8400",
+                name="Erlöse",
+                account_type="income",
+            ),
+        ]
+    )
+    session.commit()
+    return company
+
+
+def _book(session: Session, company: Company, entry_date, *, closing: bool = False):
+    bank, revenue = (
+        session.execute(
+            select(Account.id)
+            .where(Account.company_id == company.id, Account.code.in_(["1200", "8400"]))
+            .order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=entry_date,
+            description="Buchung",
+            status="posted",
+            lines=[
+                JournalLineInput(bank, Decimal("100.00"), Decimal("0.00")),
+                JournalLineInput(revenue, Decimal("0.00"), Decimal("100.00")),
+            ],
+            post_to_closing_period=closing,
+        ),
+    )
+
+
+def test_deviating_fiscal_year_auto_created_from_start_month(session: Session) -> None:
+    company = _seed_company(session, fiscal_year_start_month=7)
+
+    _book(session, company, date(2026, 8, 15))
+
+    fiscal_year = session.execute(select(FiscalYear)).scalar_one()
+    assert fiscal_year.start_date == date(2026, 7, 1)
+    assert fiscal_year.end_date == date(2027, 6, 30)
+    assert fiscal_year.label == "2026/2027"
+
+    regular = (
+        session.execute(
+            select(Period)
+            .where(Period.is_closing.is_(False))
+            .order_by(Period.period_number)
+        )
+        .scalars()
+        .all()
+    )
+    assert len(regular) == 12
+    assert regular[0].start_date == date(2026, 7, 1)
+    assert regular[-1].end_date == date(2027, 6, 30)
+
+    closing = session.execute(
+        select(Period).where(Period.is_closing.is_(True))
+    ).scalar_one()
+    assert closing.period_number == 13
+    assert closing.start_date == closing.end_date == date(2027, 6, 30)
+
+    # Ein Datum vor dem Beginn-Monat gehört zum vorangehenden Geschäftsjahr.
+    _book(session, company, date(2026, 3, 1))
+    labels = set(session.execute(select(FiscalYear.label)).scalars())
+    assert labels == {"2026/2027", "2025/2026"}
+
+
+def test_create_short_fiscal_year_and_closing_booking(session: Session) -> None:
+    company = _seed_company(session)
+
+    fiscal_year = create_fiscal_year(
+        session=session,
+        company_id=company.id,
+        label="2026 (Rumpf)",
+        start_date=date(2026, 5, 15),
+        end_date=date(2026, 12, 31),
+        changed_by="admin",
+    )
+
+    regular = (
+        session.execute(
+            select(Period)
+            .where(Period.fiscal_year_id == fiscal_year.id, Period.is_closing.is_(False))
+            .order_by(Period.period_number)
+        )
+        .scalars()
+        .all()
+    )
+    assert len(regular) == 8  # Mai (Teilmonat) bis Dezember
+    assert regular[0].start_date == date(2026, 5, 15)
+    assert regular[0].end_date == date(2026, 5, 31)
+
+    entry = _book(session, company, date(2026, 12, 31), closing=True)
+    booked_period = session.get(Period, entry.period_id)
+    assert booked_period.is_closing is True
+
+    # Eine reguläre Buchung am selben Tag landet in der Dezember-Periode, nicht im Abschluss.
+    regular_entry = _book(session, company, date(2026, 12, 31))
+    assert session.get(Period, regular_entry.period_id).is_closing is False
+
+
+def test_create_fiscal_year_rejects_overlap(session: Session) -> None:
+    company = _seed_company(session)
+    create_fiscal_year(
+        session=session,
+        company_id=company.id,
+        label="2026",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        changed_by="admin",
+    )
+    with pytest.raises(PeriodActionError, match="überschneidet"):
+        create_fiscal_year(
+            session=session,
+            company_id=company.id,
+            label="2026b",
+            start_date=date(2026, 6, 1),
+            end_date=date(2027, 5, 31),
+            changed_by="admin",
+        )
+
+
+def test_set_fiscal_year_start_month_validates_range(session: Session) -> None:
+    company = _seed_company(session)
+    updated = set_fiscal_year_start_month(
+        session=session, company_id=company.id, start_month=4, changed_by="admin"
+    )
+    assert updated.fiscal_year_start_month == 4
+
+    with pytest.raises(PeriodActionError):
+        set_fiscal_year_start_month(
+            session=session, company_id=company.id, start_month=13, changed_by="admin"
+        )
 
 
 def test_lock_and_unlock_period_with_audit(session: Session) -> None:
