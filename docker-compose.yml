@@ -20,6 +20,29 @@ services:
     depends_on:
       - redis
 
+  mcp:
+    build: .
+    # Streamable-HTTP-Transport des OpenBuchhaltung-MCP-Servers (Sprint O/P).
+    command: python -m app.services.mcp_http
+    ports:
+      # Host 8090, da 8080 bereits von Adminer belegt ist.
+      - "8090:8090"
+    volumes:
+      - ./:/app
+    environment:
+      # Der MCP-Server spricht die App-API über das Compose-Netz an.
+      - OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1
+      - OPENBUCHHALTUNG_API_TOKEN=${OPENBUCHHALTUNG_API_TOKEN:-}
+      # 0.0.0.0, damit der gemappte Port aus dem Container heraus erreichbar ist.
+      - MCP_HTTP_HOST=0.0.0.0
+      - MCP_HTTP_PORT=8090
+      - MCP_HTTP_PATH=/mcp
+      # Kommagetrennte erlaubte Browser-Origins (DNS-Rebinding-Schutz); Clients
+      # ohne Origin-Header (Claude Desktop/CLI) sind ohnehin zugelassen.
+      - MCP_HTTP_ALLOWED_ORIGINS=${MCP_HTTP_ALLOWED_ORIGINS:-}
+    depends_on:
+      - app
+
   db:
     image: postgres:17
     environment:
