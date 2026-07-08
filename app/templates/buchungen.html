@@ -23,6 +23,11 @@
         <label for="description">Beschreibung</label>
         <input id="description" name="description" required style="min-width: 320px;" />
 
+        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:normal; margin-top:0.5rem;">
+          <input type="checkbox" name="post_to_closing_period" value="1" style="width:auto;" />
+          Abschlussbuchung (in Abschlussperiode 13 des Geschäftsjahres buchen)
+        </label>
+
         <div id="journal-lines">
           <p><strong>Buchungszeilen</strong> <span class="muted">(mindestens zwei; Betrag gilt bei Steuercode als netto)</span></p>
           {% for _ in range(2) %}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -11,6 +12,7 @@ from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
+    build_periods_for_fiscal_year,
     create_journal_entry,
 )
 from domain.models import (
@@ -126,6 +128,121 @@ def unlock_period(*, session: Session, period_id: int, changed_by: str) -> Perio
     return period
 
 
+def set_fiscal_year_start_month(
+    *, session: Session, company_id: int, start_month: int, changed_by: str
+) -> Company:
+    """Legt den Beginn-Monat des regulären Geschäftsjahres einer Gesellschaft fest."""
+    if not 1 <= start_month <= 12:
+        raise PeriodActionError("Der Geschäftsjahresbeginn muss ein Monat (1–12) sein.")
+
+    company = session.get(Company, company_id)
+    if company is None:
+        raise PeriodActionError("Gesellschaft nicht gefunden.")
+
+    company.fiscal_year_start_month = start_month
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="company",
+        entity_id=str(company.id),
+        action="fiscal_year_start_changed",
+        changed_by=changed_by,
+        payload={"start_month": start_month},
+    )
+    session.commit()
+    session.refresh(company)
+    return company
+
+
+def create_fiscal_year(
+    *,
+    session: Session,
+    company_id: int,
+    label: str,
+    start_date: date,
+    end_date: date,
+    changed_by: str,
+) -> FiscalYear:
+    """Legt ein Geschäftsjahr mit freiem Zeitraum an (z. B. Rumpf- oder abweichendes Jahr)."""
+    company = session.get(Company, company_id)
+    if company is None:
+        raise PeriodActionError("Gesellschaft nicht gefunden.")
+
+    label = (label or "").strip()
+    if not label:
+        raise PeriodActionError("Bitte eine Bezeichnung für das Geschäftsjahr angeben.")
+    if start_date >= end_date:
+        raise PeriodActionError("Das Startdatum muss vor dem Enddatum liegen.")
+    if (end_date - start_date).days > 366:
+        raise PeriodActionError("Ein Geschäftsjahr darf höchstens 12 Monate umfassen.")
+
+    overlap = (
+        session.execute(
+            select(FiscalYear.id).where(
+                FiscalYear.company_id == company_id,
+                FiscalYear.start_date <= end_date,
+                FiscalYear.end_date >= start_date,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if overlap:
+        raise PeriodActionError(
+            "Der Zeitraum überschneidet sich mit einem bestehenden Geschäftsjahr."
+        )
+
+    duplicate_label = (
+        session.execute(
+            select(FiscalYear.id).where(
+                FiscalYear.company_id == company_id, FiscalYear.label == label
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if duplicate_label:
+        raise PeriodActionError("Diese Bezeichnung ist bereits vergeben.")
+
+    fiscal_year = FiscalYear(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        label=label,
+        start_date=start_date,
+        end_date=end_date,
+        is_closed=False,
+    )
+    session.add(fiscal_year)
+    session.flush()
+
+    try:
+        periods = build_periods_for_fiscal_year(fiscal_year)
+    except ValueError as exc:
+        session.rollback()
+        raise PeriodActionError(str(exc)) from exc
+    for period in periods:
+        session.add(period)
+
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="fiscal_year",
+        entity_id=str(fiscal_year.id),
+        action="created",
+        changed_by=changed_by,
+        payload={
+            "label": label,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        },
+    )
+    session.commit()
+    session.refresh(fiscal_year)
+    return fiscal_year
+
+
 def _find_retained_earnings_account(session: Session, company_id: int) -> Account | None:
     account = session.execute(
         select(Account).where(
@@ -209,6 +326,7 @@ def _create_carryforward_entry(
                 status="posted",
                 changed_by=changed_by,
                 lines=lines,
+                post_to_closing_period=True,
             ),
         )
     except JournalEntryCreationError as exc:

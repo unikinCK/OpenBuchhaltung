@@ -38,7 +38,13 @@ class Tenant(Base):
 
 class Company(Base):
     __tablename__ = "company"
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_company_tenant_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_company_tenant_name"),
+        CheckConstraint(
+            "fiscal_year_start_month BETWEEN 1 AND 12",
+            name="ck_company_fiscal_year_start_month",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
@@ -46,6 +52,8 @@ class Company(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Erster Monat des Wirtschaftsjahres (1 = Januar = Kalenderjahr, sonst abweichendes WJ).
+    fiscal_year_start_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -108,6 +116,8 @@ class Period(Base):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Abschlussperiode (Periode 13) fuer Jahresabschlussbuchungen; nicht datumsbasiert bebucht.
+    is_closing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     fiscal_year: Mapped[FiscalYear] = relationship(back_populates="periods")
     locks: Mapped[list[PeriodLock]] = relationship(back_populates="period", cascade="all, delete")
