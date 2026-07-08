@@ -272,6 +272,41 @@ curl -X POST http://localhost:8000/api/v1/mcp/call \
   -d '{"id":"1","method":"tools/list","params":{}}'
 ```
 
+## MCP-Server (API als Tools)
+
+Zusätzlich zum Bridge-Endpunkt gibt es einen eigenständigen **MCP-Server**, der jeden
+REST-Endpunkt aus `/api/v1` als MCP-Tool bereitstellt (`health`, `list_companies`,
+`create_tenant_with_company`, `create_account`, `create_journal_entry`,
+`get_trial_balance`, `get_income_statement`, `get_balance_sheet` sowie die drei
+CSV-Exporte). So können MCP-fähige Clients (z. B. Claude Desktop) direkt buchen und
+auswerten. Der Server spricht JSON-RPC 2.0 über stdio und benötigt keine zusätzlichen
+Abhängigkeiten.
+
+Er ist ein HTTP-Client der laufenden OpenBuchhaltung-Instanz; Basis-URL und Token werden
+per Umgebungsvariable gesetzt:
+
+```bash
+export OPENBUCHHALTUNG_API_URL="http://localhost:8000/api/v1"   # Standard: http://localhost:5000/api/v1
+export OPENBUCHHALTUNG_API_TOKEN="obk_..."                       # optional, falls API-Auth aktiv
+python -m app.services.mcp_server
+```
+
+Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "openbuchhaltung": {
+      "command": "python",
+      "args": ["-m", "app.services.mcp_server"],
+      "env": {
+        "OPENBUCHHALTUNG_API_URL": "http://localhost:8000/api/v1",
+        "OPENBUCHHALTUNG_API_TOKEN": "obk_..."
+      }
+    }
+  }
+}
+```
+
 ## Kontenrahmenimport (SKR03/SKR04)
 
 CSV-Import per Flask-CLI (idempotent, Duplikate werden uebersprungen).
