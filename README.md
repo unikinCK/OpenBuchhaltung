@@ -291,6 +291,40 @@ export OPENBUCHHALTUNG_API_TOKEN="obk_..."                       # optional, fal
 python -m app.services.mcp_server
 ```
 
+### Transport 1: stdio
+
+Für Clients, die den MCP-Server als Subprozess starten (z. B. Claude Desktop, siehe
+Beispiel unten), spricht `python -m app.services.mcp_server` JSON-RPC über stdio.
+
+### Transport 2: Streamable HTTP
+
+Alternativ steht derselbe Server über HTTP bereit (`POST /mcp`). Je nach `Accept`-Header
+antwortet er mit `application/json` oder als `text/event-stream` (SSE):
+
+```bash
+export MCP_HTTP_HOST=127.0.0.1     # Standard 127.0.0.1
+export MCP_HTTP_PORT=8080          # Standard 8080
+export MCP_HTTP_PATH=/mcp          # Standard /mcp
+python -m app.services.mcp_http
+```
+
+```bash
+# JSON-Antwort
+curl -X POST http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# SSE-Stream
+curl -N -X POST http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_companies","arguments":{}}}'
+```
+
+Der Server bindet standardmäßig nur an `127.0.0.1`. Für browserbasierte Clients lässt sich
+per `MCP_HTTP_ALLOWED_ORIGINS` (kommagetrennt) eine Origin-Allowlist setzen; Requests mit
+nicht erlaubtem `Origin` werden mit 403 abgelehnt (DNS-Rebinding-Schutz). Clients ohne
+`Origin`-Header (Desktop/CLI) sind stets zugelassen.
+
 Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
 ```json
 {
