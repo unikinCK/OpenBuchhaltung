@@ -25,15 +25,16 @@ services:
     # Streamable-HTTP-Transport des OpenBuchhaltung-MCP-Servers (Sprint O/P).
     command: python -m app.services.mcp_http
     ports:
-      # Host 8090, da 8080 bereits von Adminer belegt ist.
-      - "8090:8090"
+      # Nur an localhost gebunden: von außen erfolgt der Zugriff über den HTTPS-
+      # Proxy (caddy). Lokaler Test auf dem Host: curl http://localhost:8090/mcp
+      - "127.0.0.1:8090:8090"
     volumes:
       - ./:/app
     environment:
       # Der MCP-Server spricht die App-API über das Compose-Netz an.
       - OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1
       - OPENBUCHHALTUNG_API_TOKEN=${OPENBUCHHALTUNG_API_TOKEN:-}
-      # 0.0.0.0, damit der gemappte Port aus dem Container heraus erreichbar ist.
+      # 0.0.0.0, damit der Port aus dem Container heraus erreichbar ist.
       - MCP_HTTP_HOST=0.0.0.0
       - MCP_HTTP_PORT=8090
       - MCP_HTTP_PATH=/mcp
@@ -42,6 +43,25 @@ services:
       - MCP_HTTP_ALLOWED_ORIGINS=${MCP_HTTP_ALLOWED_ORIGINS:-}
     depends_on:
       - app
+
+  caddy:
+    image: caddy:2
+    # Opt-in: startet nur mit `docker compose --profile proxy up -d caddy`.
+    # HTTPS-Reverse-Proxy vor den MCP-Server für Claude-Desktop-Custom-Connectoren.
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"     # HTTP-01-Challenge / Redirect auf HTTPS
+      - "443:443"   # HTTPS (automatisches Let's-Encrypt-Zertifikat)
+    environment:
+      # Öffentliche Domain, die auf diesen Server zeigt (A/AAAA-Record).
+      - MCP_DOMAIN=${MCP_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mcp
 
   db:
     image: postgres:17
@@ -68,3 +88,5 @@ services:
 
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:

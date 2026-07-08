@@ -94,6 +94,13 @@ def test_origin_allowed() -> None:
     assert origin_allowed("http://evil.example", frozenset()) is False
 
 
+def test_origin_allowed_wildcard() -> None:
+    wildcard = frozenset({"*"})
+    assert origin_allowed("https://webbox.tail717550.ts.net", wildcard) is True
+    assert origin_allowed("http://anything.example", wildcard) is True
+    assert origin_allowed(None, wildcard) is True
+
+
 def _run_server(httpd):
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
