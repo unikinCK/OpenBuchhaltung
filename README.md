@@ -371,6 +371,25 @@ per `MCP_HTTP_ALLOWED_ORIGINS` (kommagetrennt) eine Origin-Allowlist setzen; Req
 nicht erlaubtem `Origin` werden mit 403 abgelehnt (DNS-Rebinding-Schutz). Clients ohne
 `Origin`-Header (Desktop/CLI) sind stets zugelassen.
 
+### Transport 2 in Docker Compose
+
+Der Streamable-HTTP-Transport ist als eigener `mcp`-Service in der `docker-compose.yml`
+enthalten. Er baut dasselbe Image, spricht die App über das Compose-Netz an
+(`OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1`) und ist auf dem Host unter
+**Port 8090** erreichbar (8080 ist von Adminer belegt):
+
+```bash
+docker compose up mcp        # startet mcp inkl. Abhängigkeit app
+# Test vom Host aus:
+curl -X POST http://localhost:8090/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Bei aktiver API-Authentifizierung (`API_REQUIRE_AUTH=1`) wird der Token über die
+Host-Umgebungsvariable `OPENBUCHHALTUNG_API_TOKEN` durchgereicht; browserbasierte
+Origins lassen sich über `MCP_HTTP_ALLOWED_ORIGINS` setzen.
+
 Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
 ```json
 {
