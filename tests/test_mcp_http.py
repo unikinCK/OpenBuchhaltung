@@ -150,12 +150,22 @@ def test_http_server_end_to_end() -> None:
             text = response.read().decode()
         assert "event: message" in text and "data: " in text
 
-        # GET wird nicht unterstützt.
+        # GET auf /mcp wird nicht unterstützt (kein server-initiierter SSE-Stream).
         try:
             urlopen(Request(f"{base}/mcp", method="GET"), timeout=5)
             raise AssertionError("GET should not be allowed")
         except HTTPError as exc:
             assert exc.code == 405
+
+        # OAuth-Discovery / unbekannte GET-Pfade -> 404 (Client erkennt: kein OAuth).
+        try:
+            urlopen(
+                Request(f"{base}/.well-known/oauth-authorization-server", method="GET"),
+                timeout=5,
+            )
+            raise AssertionError("well-known should 404")
+        except HTTPError as exc:
+            assert exc.code == 404
 
         # Unbekannter Pfad -> 404.
         try:
