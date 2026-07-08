@@ -218,6 +218,32 @@ export DOCUMENT_LLM_MODEL="gpt-4.1-mini"
 
 Bei LLM-Fehlern bleibt der Upload erfolgreich; der Fehler wird als Audit-Event protokolliert.
 
+## Beleg-OCR & Buchungsvorschlag
+
+Unter **Beleg-OCR** lässt sich ein Beleg (PDF/JPG/PNG) hochladen, automatisch auslesen
+und als Eingangsrechnung vorbuchen:
+
+1. **Textgewinnung:** PDFs mit Textebene werden lokal ausgelesen (ohne Fremdbibliothek,
+   nur `zlib`), reine Textdateien direkt dekodiert. Für Bild-Belege und gescannte PDFs
+   ohne Textebene wird – falls konfiguriert – ein externer OCR-Endpoint verwendet:
+
+   ```bash
+   export RECEIPT_OCR_ENDPOINT_URL="http://localhost:11434/v1/responses"
+   export RECEIPT_OCR_MODEL="gpt-4.1-mini"
+   ```
+
+   Ohne gesetzte `RECEIPT_OCR_*`-Variablen fällt die OCR auf `DOCUMENT_LLM_ENDPOINT_URL`
+   zurück. Ist gar kein Endpoint konfiguriert, funktioniert die Pipeline weiterhin für
+   PDFs mit Textebene; Bild-Belege werden verständlich abgewiesen.
+2. **Analyse:** Eine deterministische Heuristik erkennt Bruttobetrag, Nettobetrag,
+   Steuerbetrag und Steuersatz, Rechnungsdatum, Rechnungsnummer und Lieferant und
+   vervollständigt fehlende Beträge rechnerisch (z. B. Netto/Steuer aus Brutto + Satz).
+3. **Vorschlag & Buchung:** Die erkannten Felder werden angezeigt und als editierbarer
+   Buchungsvorschlag vorbelegt (Netto → Aufwandskonto, Vorsteuer → Steuerkonto,
+   Brutto → Kreditor). Nach Freigabe wird gebucht und der gespeicherte Beleg mit der
+   Buchung verknüpft. Alle Schritte werden als Audit-Events (`ocr_analyzed`,
+   `ocr_booked`) protokolliert.
+
 ## End-to-End-Kernflows
 
 Ausführen der E2E-Suite lokal:

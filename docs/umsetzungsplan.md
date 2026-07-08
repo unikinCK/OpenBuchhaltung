@@ -191,7 +191,15 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       legt das XML als verknüpften Beleg ab. Sprint M: Export erzeugt Ausgangsrechnungen
       als XRechnung [UBL] und ZUGFeRD/CII zum Download; Verkäuferstammdaten über
       `SELLER_*`-Config, Round-Trip gegen den Import-Parser getestet)*
-- [ ] OCR-Pipeline für Belege
+- [x] OCR-Pipeline für Belege *(Sprint Q: Beleg-OCR mit Buchungsvorschlag —
+      Textgewinnung aus Belegen [``text/plain`` direkt, PDF-Textebene via ``zlib``,
+      Bilder/Scan-PDFs über optionalen OCR-Endpoint ``RECEIPT_OCR_ENDPOINT_URL``] und
+      deterministische Heuristik-Analyse [Brutto/Netto/Steuer/Steuersatz, Rechnungs-
+      datum/-nummer, Lieferant] mit rechnerischer Vervollständigung. Upload-Seite
+      „Beleg-OCR" zeigt die erkannten Felder und einen editierbaren Eingangsrechnungs-
+      Vorschlag [Netto→Aufwand, Vorsteuer→Steuerkonto, Brutto→Kreditor]; nach Freigabe
+      wird gebucht und der gespeicherte Beleg verknüpft. Audit-Events ``ocr_analyzed``/
+      ``ocr_booked``)*
 - [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
       Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende
       API-Endpunkte umgesetzt; weiterer API-Ausbau offen)*

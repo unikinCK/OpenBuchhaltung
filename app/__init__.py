@@ -29,6 +29,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         MAX_CONTENT_LENGTH=document_max_upload_bytes,
         DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
         DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
+        # OCR-Pipeline: fällt auf den Beleg-LLM-Endpoint zurück, wenn nicht separat gesetzt.
+        RECEIPT_OCR_ENDPOINT_URL=os.environ.get("RECEIPT_OCR_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_OCR_MODEL=os.environ.get(
+            "RECEIPT_OCR_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "0") == "1",
         CSRF_PROTECT=os.environ.get("CSRF_PROTECT", "1") == "1",

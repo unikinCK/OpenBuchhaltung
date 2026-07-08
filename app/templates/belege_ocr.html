@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Beleg-OCR – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Beleg-OCR &amp; Buchungsvorschlag</h1>
+
+  <section class="card">
+    <h2>Beleg hochladen und auslesen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% else %}
+      <p class="muted">
+        Der Beleg (PDF, JPG oder PNG) wird gespeichert und ausgelesen. Aus dem erkannten
+        Text schlägt OpenBuchhaltung eine Eingangsrechnungsbuchung vor
+        (Netto auf Aufwand, Vorsteuer auf Steuerkonto, Brutto auf Kreditor). PDFs mit
+        Textebene werden lokal ausgelesen; für Scans/Bilder wird – falls konfiguriert –
+        ein OCR-Endpoint verwendet.
+      </p>
+      <form method="post" action="{{ url_for('main.receipt_ocr_suggest') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="document_file">Beleg (PDF/JPG/PNG)</label>
+        <input id="document_file" name="document_file" type="file"
+               accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required />
+
+        <button type="submit">Beleg auslesen</button>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if extraction %}
+    <section class="card">
+      <h2>Erkannte Belegdaten</h2>
+      <p class="muted">
+        Quelle: {{ extraction.source }} · Zuverlässigkeit:
+        <span class="badge">{{ extraction.confidence }}</span>
+        {% if document_name %} · Datei: {{ document_name }}{% endif %}
+      </p>
+
+      {% if extraction.warnings %}
+        <ul class="flash-list">
+          {% for warning in extraction.warnings %}
+            <li class="error">{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      <table>
+        <tbody>
+          <tr><th>Lieferant</th><td>{{ extraction.supplier or '–' }}</td></tr>
+          <tr><th>Rechnungsnummer</th><td>{{ extraction.invoice_number or '–' }}</td></tr>
+          <tr><th>Rechnungsdatum</th><td>{{ extraction.invoice_date.isoformat() if extraction.invoice_date else '–' }}</td></tr>
+          <tr><th>Netto</th><td>{{ extraction.net_amount if extraction.net_amount is not none else '–' }}</td></tr>
+          <tr><th>Steuer{% if extraction.tax_rate is not none %} ({{ extraction.tax_rate }}%){% endif %}</th><td>{{ extraction.tax_amount if extraction.tax_amount is not none else '–' }}</td></tr>
+          <tr><th>Brutto</th><td>{{ extraction.gross_amount if extraction.gross_amount is not none else '–' }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    {% if extraction.has_booking_basis and expense_accounts and creditor_accounts %}
+      <section class="card">
+        <h2>Buchungsvorschlag prüfen und verbuchen</h2>
+        <p class="muted">Beträge und Konten können vor dem Verbuchen angepasst werden.</p>
+        <form method="post" action="{{ url_for('main.receipt_ocr_book') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <input type="hidden" name="document_id" value="{{ document_id }}" />
+
+          <label for="entry_date">Buchungsdatum</label>
+          <input id="entry_date" name="entry_date" type="date"
+                 value="{{ extraction.invoice_date.isoformat() if extraction.invoice_date else today }}" required />
+
+          <label for="description">Buchungstext</label>
+          <input id="description" name="description"
+                 value="{{ (extraction.supplier ~ ' ' ~ (extraction.invoice_number or '')).strip() if extraction.supplier else '' }}" />
+
+          <label for="expense_account_id">Aufwandskonto (Netto, Soll)</label>
+          <select id="expense_account_id" name="expense_account_id" required>
+            <option value="">Bitte wählen</option>
+            {% for account in expense_accounts %}
+              <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="net_amount">Nettobetrag</label>
+          <input id="net_amount" name="net_amount" type="text" inputmode="decimal"
+                 value="{{ extraction.net_amount if extraction.net_amount is not none else '0.00' }}" required />
+
+          <label for="tax_code_id">Steuercode (für Vorsteuer)</label>
+          <select id="tax_code_id" name="tax_code_id">
+            <option value="">Ohne Steuer</option>
+            {% for tax_code in tax_codes %}
+              <option value="{{ tax_code.id }}"
+                {% if extraction.tax_rate is not none and tax_code.rate == extraction.tax_rate and 'VSt' in tax_code.code %}selected{% endif %}>
+                {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+            {% endfor %}
+          </select>
+
+          <label for="tax_amount">Steuerbetrag</label>
+          <input id="tax_amount" name="tax_amount" type="text" inputmode="decimal"
+                 value="{{ extraction.tax_amount if extraction.tax_amount is not none else '0.00' }}" required />
+
+          <label for="creditor_account_id">Kreditoren-/Verbindlichkeitskonto (Brutto, Haben)</label>
+          <select id="creditor_account_id" name="creditor_account_id" required>
+            <option value="">Bitte wählen</option>
+            {% for account in creditor_accounts %}
+              <option value="{{ account.id }}" {% if account.code == '1600' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+            {% endfor %}
+          </select>
+
+          <button type="submit">Beleg verbuchen</button>
+        </form>
+      </section>
+    {% elif extraction.has_booking_basis %}
+      <section class="card">
+        <p class="muted">Für den Buchungsvorschlag werden ein Aufwands- und ein
+          Kreditoren-/Verbindlichkeitskonto benötigt — zuerst unter
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a>
+          anlegen oder einen SKR importieren.</p>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}
