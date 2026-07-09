@@ -244,26 +244,30 @@ def create_journal_entry_via_api():
                         }
                     ],
                 )
-            try:
-                raw_tax_code_id = line.get("tax_code_id")
-                lines.append(
-                    JournalLineInput(
-                        account_id=int(line["account_id"]),
-                        debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
-                        credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
-                        description=(line.get("description") or "").strip() or None,
-                        tax_code_id=int(raw_tax_code_id) if raw_tax_code_id is not None else None,
-                    )
-                )
-            except KeyError:
+            raw_account_id = line.get("account_id")
+            raw_account_code = line.get("account_code")
+            has_account_code = raw_account_code is not None and str(raw_account_code).strip() != ""
+            if raw_account_id is None and not has_account_code:
                 return _validation_error(
                     "Validation failed.",
                     details=[
                         {
                             "field": f"lines[{idx}].account_id",
-                            "message": "account_id is required.",
+                            "message": "account_id or account_code is required.",
                         }
                     ],
+                )
+            try:
+                raw_tax_code_id = line.get("tax_code_id")
+                lines.append(
+                    JournalLineInput(
+                        account_id=int(raw_account_id) if raw_account_id is not None else None,
+                        account_code=str(raw_account_code).strip() if has_account_code else None,
+                        debit_amount=parse_decimal(str(line.get("debit_amount", "0.00"))),
+                        credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
+                        description=(line.get("description") or "").strip() or None,
+                        tax_code_id=int(raw_tax_code_id) if raw_tax_code_id is not None else None,
+                    )
                 )
             except (TypeError, ValueError) as exc:
                 return _validation_error(

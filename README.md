@@ -208,7 +208,9 @@ curl -X POST http://localhost:8000/api/v1/tenants \
   -d '{"tenant_name":"Mandant A","company_name":"Mandant A GmbH","currency_code":"EUR"}'
 ```
 
-Journalbuchung (mehrzeilig, optional mit `tax_code_id` je Zeile für automatische USt-Buchung):
+Journalbuchung (mehrzeilig, optional mit `tax_code_id` je Zeile für automatische USt-Buchung).
+Das Konto je Zeile wird entweder über die interne `account_id` **oder** über die Kontonummer
+`account_code` (z. B. `"1200"`) angegeben – die Nummer wird serverseitig zur ID aufgelöst:
 ```bash
 curl -X POST http://localhost:8000/api/v1/journal-entries \
   -H "Content-Type: application/json" \
@@ -218,9 +220,9 @@ curl -X POST http://localhost:8000/api/v1/journal-entries \
     "description": "Rechnung 1001",
     "status": "posted",
     "lines": [
-      {"account_id": 1, "debit_amount": "80.00", "credit_amount": "0.00", "description": "Teilbetrag"},
-      {"account_id": 2, "debit_amount": "20.00", "credit_amount": "0.00", "description": "Nebenkosten"},
-      {"account_id": 3, "debit_amount": "0.00", "credit_amount": "100.00", "description": "Umsatzerlös"}
+      {"account_code": "1200", "debit_amount": "80.00", "description": "Teilbetrag"},
+      {"account_code": "1200", "debit_amount": "20.00", "description": "Nebenkosten"},
+      {"account_code": "8400", "credit_amount": "100.00", "description": "Umsatzerlös"}
     ]
   }'
 ```

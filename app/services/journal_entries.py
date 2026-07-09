@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
@@ -32,11 +32,14 @@ class JournalEntryCreationError(ValueError):
 
 @dataclass(slots=True)
 class JournalLineInput:
-    account_id: int
-    debit_amount: Decimal
-    credit_amount: Decimal
+    # Konto entweder direkt per interner ID oder per Kontonummer (``account_code``)
+    # angeben. Ist nur die Nummer gesetzt, löst der Service sie zur ID auf.
+    account_id: int | None = None
+    debit_amount: Decimal = Decimal("0.00")
+    credit_amount: Decimal = Decimal("0.00")
     description: str | None = None
     tax_code_id: int | None = None
+    account_code: str | None = None
 
 
 @dataclass(slots=True)
@@ -131,7 +134,8 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
     if company is None:
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
-    lines = _expand_tax_lines(session=session, company=company, lines=payload.lines)
+    lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
+    lines = _expand_tax_lines(session=session, company=company, lines=lines)
 
     JournalEntryValidator.validate(
         JournalEntryDraft(
@@ -240,6 +244,54 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
     session.commit()
     session.refresh(entry)
     return entry
+
+
+def _resolve_account_codes(
+    *,
+    session: Session,
+    company: Company,
+    lines: list[JournalLineInput],
+) -> list[JournalLineInput]:
+    """Ersetzt Kontonummern (``account_code``) durch die interne Konto-ID.
+
+    Zeilen mit gesetzter ``account_id`` bleiben unverändert. Für Zeilen, die nur
+    eine Kontonummer tragen, wird das Konto der Gesellschaft anhand der eindeutigen
+    Kontonummer nachgeschlagen.
+    """
+    codes_needed = {
+        line.account_code.strip()
+        for line in lines
+        if line.account_id is None and line.account_code and line.account_code.strip()
+    }
+    id_by_code: dict[str, int] = {}
+    if codes_needed:
+        id_by_code = {
+            code: account_id
+            for account_id, code in session.execute(
+                select(Account.id, Account.code).where(
+                    Account.company_id == company.id,
+                    Account.code.in_(codes_needed),
+                )
+            ).all()
+        }
+
+    resolved: list[JournalLineInput] = []
+    for line in lines:
+        if line.account_id is not None:
+            resolved.append(line)
+            continue
+        code = (line.account_code or "").strip()
+        if not code:
+            raise JournalEntryCreationError(
+                "Buchungszeile ohne Konto: account_id oder account_code angeben."
+            )
+        account_id = id_by_code.get(code)
+        if account_id is None:
+            raise JournalEntryCreationError(
+                f"Konto mit Nummer {code} in dieser Gesellschaft nicht gefunden."
+            )
+        resolved.append(replace(line, account_id=account_id, account_code=code))
+    return resolved
 
 
 def _expand_tax_lines(

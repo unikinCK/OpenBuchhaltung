@@ -482,6 +482,76 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert len(payload["rows"]) == 2
 
 
+def test_api_create_journal_entry_by_account_code(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Code Mandant", "company_name": "Code GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    # Buchung ausschließlich über Kontonummern statt interner IDs.
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Buchung per Kontonummer",
+            "status": "posted",
+            "lines": [
+                {"account_code": "1200", "debit_amount": "250.00"},
+                {"account_code": "8400", "credit_amount": "250.00"},
+            ],
+        },
+    )
+    assert create_response.status_code == 201
+
+    report = client.get("/api/v1/trial-balance", query_string={"company_id": 1}).get_json()
+    codes = {row["code"] for row in report["rows"]}
+    assert {"1200", "8400"} <= codes
+
+    # Unbekannte Kontonummer -> Validierungsfehler (422).
+    unknown = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Falsche Kontonummer",
+            "status": "posted",
+            "lines": [
+                {"account_code": "9999", "debit_amount": "10.00"},
+                {"account_code": "8400", "credit_amount": "10.00"},
+            ],
+        },
+    )
+    assert unknown.status_code == 422
+
+    # Weder account_id noch account_code -> Validierungsfehler (422).
+    missing = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Kein Konto",
+            "status": "posted",
+            "lines": [
+                {"debit_amount": "10.00"},
+                {"account_code": "8400", "credit_amount": "10.00"},
+            ],
+        },
+    )
+    assert missing.status_code == 422
+
+
 def test_api_income_statement_respects_date_range(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)
