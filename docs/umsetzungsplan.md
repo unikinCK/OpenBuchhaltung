@@ -45,7 +45,7 @@ GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HG
 - Offene-Posten-Logik Debitor/Kreditor
 - Zahlungsabgleich (CSV-Import Bankumsätze)
 - Mahnstufen (Basis)
-- Anlagenverzeichnis (Basis)
+- [x] Anlagenverzeichnis + Anlagenbuchhaltung (siehe Sprint N)
 
 ### V2
 - E-Rechnung (XRechnung/ZUGFeRD Import/Export)
@@ -157,6 +157,27 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       kein Framework); Dashboard mit Kennzahlen (GuV-Totals, Bilanzsumme,
       Bilanzgleichheit, Zähler); GuV/Bilanz jetzt mit Einzelpositionen;
       Kontotyp-Auswahl statt Freitext; gestylte Login-Seite.
+
+## Phase 1.7 – Anlagenbuchhaltung / Sprint N (Stand 2026-07-09)
+
+- [x] **P1.7-001 Anlagenbuchhaltung mit allen HGB-/steuerlichen AfA-Verfahren**:
+      Reine Abschreibungs-Engine (`domain/services/depreciation.py`) mit
+      **linearer AfA** (§ 7 Abs. 1 EStG, im Zugangsjahr zeitanteilig/monatsgenau
+      nach § 7 Abs. 1 S. 4 EStG), **geometrisch-degressiver AfA** (§ 7 Abs. 2
+      EStG) inkl. automatischem **Übergang zur linearen AfA**, **Leistungs-AfA**
+      (§ 7 Abs. 1 S. 6 EStG, nach Jahresmengen), **GWG-Sofortabschreibung**
+      (§ 6 Abs. 2 EStG), **Sammelposten/Poolabschreibung** über 5 Jahre
+      (§ 6 Abs. 2a EStG) sowie Verfahren „manuell"; Restwert und Erinnerungswert
+      (1,00 €) als Buchwert-Untergrenze. Domänenmodelle `FixedAsset` /
+      `DepreciationEntry` (Migration 0009), Service `app/services/fixed_assets.py`
+      (Anlage anlegen, Plan rechnen, planmäßige AfA je Wirtschaftsjahr als
+      Direktabschreibung „Soll Abschreibungen an Anlagekonto" verbuchen,
+      außerplanmäßige Abschreibung/AfaA nach § 253 Abs. 3 HGB, Anlagenabgang mit
+      Ausbuchung des Restbuchwerts). REST-Endpunkte (`/api/v1/fixed-assets`,
+      `.../schedule`, `.../depreciation`), MCP-Tools (`create_fixed_asset`,
+      `list_fixed_assets`, `get_depreciation_schedule`, `post_depreciation`) und
+      UI-Seite „Anlagen" (Anlagenverzeichnis, Buchwertsumme, Abschreibungsplan,
+      AfA-/Abwertungs-/Abgangsbuchung). Audit-Events für alle Aktionen.
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:

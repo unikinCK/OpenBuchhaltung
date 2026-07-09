@@ -322,6 +322,135 @@ TOOLS: list[ToolSpec] = [
         path="/exports/datev.csv",
         arg_location="query",
     ),
+    ToolSpec(
+        name="create_fixed_asset",
+        description=(
+            "Legt ein Anlagegut in der Anlagenbuchhaltung an und wählt das AfA-Verfahren. "
+            "method: 'linear' (lineare AfA, zeitanteilig im Zugangsjahr), 'degressive' "
+            "(geometrisch-degressiv mit Übergang zur linearen AfA, benötigt degressive_rate), "
+            "'leistung' (Leistungs-AfA, benötigt total_units), 'gwg' (Sofortabschreibung "
+            "≤ 800 €), 'sammelposten' (Poolabschreibung über 5 Jahre) oder 'manuell'. "
+            "Anlage- und Abschreibungskonto per interner ID oder Kontonummer (z. B. '0400'/'4830')."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "asset_number": {"type": "string", "description": "Inventarnummer (eindeutig)."},
+                "name": {"type": "string", "description": "Bezeichnung des Anlageguts."},
+                "acquisition_date": {
+                    "type": "string",
+                    "description": "Anschaffungsdatum (JJJJ-MM-TT).",
+                },
+                "in_service_date": {
+                    "type": "string",
+                    "description": "Inbetriebnahme = AfA-Beginn (JJJJ-MM-TT, Std.: Anschaffung).",
+                },
+                "acquisition_cost": {
+                    "type": "string",
+                    "description": "Anschaffungs-/Herstellungskosten, z. B. '12000.00'.",
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["linear", "degressive", "leistung", "gwg", "sammelposten", "manuell"],
+                    "description": "AfA-Verfahren.",
+                },
+                "useful_life_months": {
+                    "type": "integer",
+                    "description": "Nutzungsdauer in Monaten (für linear/degressiv).",
+                },
+                "degressive_rate": {
+                    "type": "string",
+                    "description": "Degressiver Prozentsatz p. a., z. B. '20' (nur degressive).",
+                },
+                "total_units": {
+                    "type": "string",
+                    "description": "Gesamtleistung (nur leistung), z. B. '100000'.",
+                },
+                "residual_value": {
+                    "type": "string",
+                    "description": "Restwert am Ende der Nutzung, Standard '0.00'.",
+                },
+                "keep_memo_value": {
+                    "type": "boolean",
+                    "description": "Erinnerungswert 1,00 € stehen lassen (Standard false).",
+                },
+                "asset_account_code": {
+                    "type": "string",
+                    "description": "Kontonummer des Anlagekontos, z. B. '0400'.",
+                },
+                "depreciation_account_code": {
+                    "type": "string",
+                    "description": "Kontonummer des Abschreibungskontos, z. B. '4830'.",
+                },
+            },
+            "required": [
+                "company_id",
+                "asset_number",
+                "name",
+                "acquisition_date",
+                "acquisition_cost",
+                "method",
+            ],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fixed-assets",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_fixed_assets",
+        description=(
+            "Listet die Anlagegüter einer Gesellschaft inkl. aktuellem Buchwert, Verfahren "
+            "und Status."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/fixed-assets",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_depreciation_schedule",
+        description=(
+            "Liefert den vollständigen Abschreibungsplan (Buchwertverlauf je Jahr) eines "
+            "Anlageguts."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+            },
+            "required": ["asset_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/fixed-assets/{asset_id}/schedule",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="post_depreciation",
+        description=(
+            "Verbucht die planmäßige Abschreibung (AfA) eines Anlageguts für ein "
+            "Wirtschaftsjahr (Soll Abschreibungsaufwand an Anlagekonto). Bei Leistungs-AfA "
+            "ist 'units' (Jahresleistung) anzugeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+                "fiscal_year": {"type": "integer", "description": "Wirtschaftsjahr, z. B. 2026."},
+                "units": {
+                    "type": "string",
+                    "description": "Jahresleistung (nur Leistungs-AfA), z. B. '25000'.",
+                },
+            },
+            "required": ["asset_id", "fiscal_year"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fixed-assets/{asset_id}/depreciation",
+        arg_location="json",
+    ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}
@@ -444,11 +573,21 @@ class MCPServer:
         return _tool_result(text, is_error=not response.ok)
 
     def _request_for_tool(self, tool: ToolSpec, arguments: dict[str, Any]) -> ApiResponse:
+        # Pfad-Platzhalter wie {asset_id} aus den Argumenten füllen; die dafür
+        # verbrauchten Werte nicht zusätzlich als Query/Body senden.
+        path = tool.path
+        remaining = dict(arguments)
+        if "{" in path:
+            for key in list(remaining):
+                placeholder = "{" + key + "}"
+                if placeholder in path:
+                    path = path.replace(placeholder, str(remaining.pop(key)))
+
         if tool.arg_location == "query":
-            return self.http.call(tool.http_method, tool.path, params=arguments)
+            return self.http.call(tool.http_method, path, params=remaining)
         if tool.arg_location == "json":
-            return self.http.call(tool.http_method, tool.path, json_body=arguments)
-        return self.http.call(tool.http_method, tool.path)
+            return self.http.call(tool.http_method, path, json_body=remaining)
+        return self.http.call(tool.http_method, path)
 
 
 @dataclass(slots=True)
