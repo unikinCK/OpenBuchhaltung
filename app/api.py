@@ -207,6 +207,45 @@ def create_account():
         )
 
 
+@api_bp.get("/accounts")
+def list_accounts():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    include_inactive = request.args.get("include_inactive", "").lower() in {"1", "true", "yes"}
+
+    session_factory = _get_session_factory()
+    with session_factory() as session:
+        company = _api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        stmt = scoped_select(Account, company_id=company.id)
+        if not include_inactive:
+            stmt = stmt.where(Account.is_active.is_(True))
+        accounts = session.execute(stmt.order_by(Account.code)).scalars().all()
+
+    return (
+        jsonify(
+            {
+                "company_id": company_id,
+                "accounts": [
+                    {
+                        "id": account.id,
+                        "code": account.code,
+                        "name": account.name,
+                        "account_type": account.account_type,
+                        "is_active": account.is_active,
+                    }
+                    for account in accounts
+                ],
+            }
+        ),
+        200,
+    )
+
+
 @api_bp.post("/journal-entries")
 def create_journal_entry_via_api():
     if not _api_can_write():

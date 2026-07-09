@@ -11,7 +11,7 @@ from app.services.mcp_http import (
     origin_allowed,
     process_post,
 )
-from app.services.mcp_server import ApiResponse, MCPServer
+from app.services.mcp_server import TOOLS, ApiResponse, MCPServer
 
 
 class RecordingHttp:
@@ -39,7 +39,7 @@ def test_process_post_returns_json_by_default() -> None:
     assert result.content_type == "application/json"
     body = json.loads(result.body)
     assert body["id"] == 1
-    assert len(body["result"]["tools"]) == 11
+    assert len(body["result"]["tools"]) == len(TOOLS)
 
 
 def test_process_post_prefers_json_when_both_accepted() -> None:
@@ -136,7 +136,7 @@ def test_http_server_end_to_end() -> None:
             assert response.status == 200
             assert "application/json" in response.headers.get("Content-Type", "")
             body = json.loads(response.read())
-        assert len(body["result"]["tools"]) == 11
+        assert len(body["result"]["tools"]) == len(TOOLS)
 
         # SSE-Antwort, wenn text/event-stream akzeptiert wird.
         sse_request = Request(

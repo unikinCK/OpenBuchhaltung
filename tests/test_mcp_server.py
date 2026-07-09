@@ -18,6 +18,7 @@ EXPECTED_TOOL_NAMES = {
     "list_companies",
     "create_tenant_with_company",
     "create_account",
+    "list_accounts",
     "create_journal_entry",
     "get_trial_balance",
     "get_income_statement",

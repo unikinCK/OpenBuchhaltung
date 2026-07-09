@@ -186,6 +186,7 @@ Basis-Endpunkte:
 - `POST /api/v1/tenants` (legt Mandant + Gesellschaft an)
 - `GET /api/v1/companies`
 - `POST /api/v1/accounts`
+- `GET /api/v1/accounts` — Konten einer Gesellschaft (`company_id`; optional `include_inactive=true`)
 - `POST /api/v1/journal-entries` (mehrzeilige Buchung, Validierung mit 422-Details)
 - `GET /api/v1/trial-balance` — optional `date_from`/`date_to` (JJJJ-MM-TT)
 - `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
@@ -353,7 +354,7 @@ curl -X POST http://localhost:8000/api/v1/mcp/call \
 
 Zusätzlich zum Bridge-Endpunkt gibt es einen eigenständigen **MCP-Server**, der jeden
 REST-Endpunkt aus `/api/v1` als MCP-Tool bereitstellt (`health`, `list_companies`,
-`create_tenant_with_company`, `create_account`, `create_journal_entry`,
+`create_tenant_with_company`, `create_account`, `list_accounts`, `create_journal_entry`,
 `get_trial_balance`, `get_income_statement`, `get_balance_sheet` sowie die drei
 CSV-Exporte). So können MCP-fähige Clients (z. B. Claude Desktop) direkt buchen und
 auswerten. Der Server spricht JSON-RPC 2.0 über stdio und benötigt keine zusätzlichen

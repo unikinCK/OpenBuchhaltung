@@ -173,6 +173,30 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_accounts",
+        description=(
+            "Listet die Sachkonten einer Gesellschaft mit interner ID, Kontonummer (code), "
+            "Bezeichnung und Kontoart. Nützlich, um Kontonummern zu finden bzw. IDs "
+            "aufzulösen. Standardmäßig nur aktive Konten; include_inactive=true zeigt alle."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch inaktive Konten einschließen (Standard: false).",
+                    "default": False,
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/accounts",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="create_journal_entry",
         description=(
             "Erfasst eine Buchung mit mindestens zwei Zeilen. Soll- und Haben-Summe "
