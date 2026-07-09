@@ -86,6 +86,42 @@ def test_query_tool_forwards_arguments_as_query_params() -> None:
     assert http.calls[-1] == ("GET", "/balance-sheet", {"company_id": 7}, None)
 
 
+def test_income_statement_forwards_date_range_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "get_income_statement",
+                "arguments": {
+                    "company_id": 1,
+                    "date_from": "2026-01-01",
+                    "date_to": "2026-03-31",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/income-statement",
+        {"company_id": 1, "date_from": "2026-01-01", "date_to": "2026-03-31"},
+        None,
+    )
+
+
+def test_report_tools_expose_date_parameters() -> None:
+    by_name = {tool.name: tool for tool in TOOLS}
+    period_props = by_name["get_income_statement"].input_schema["properties"]
+    assert "date_from" in period_props and "date_to" in period_props
+    assert "date_from" in by_name["get_trial_balance"].input_schema["properties"]
+    # Bilanz ist Stichtag: date_to, aber kein date_from.
+    balance_props = by_name["get_balance_sheet"].input_schema["properties"]
+    assert "date_to" in balance_props and "date_from" not in balance_props
+
+
 def test_json_tool_forwards_arguments_as_body() -> None:
     http = RecordingHttp(
         ApiResponse(status=201, text='{"id": 1}', content_type="application/json", json={"id": 1})

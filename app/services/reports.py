@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -13,12 +14,30 @@ ZERO = Decimal("0.00")
 REVENUE_ACCOUNT_TYPES = {"revenue", "income"}
 
 
+def _apply_date_filter(stmt, *, date_from: date | None, date_to: date | None):
+    """Beschränkt die Auswertung auf Buchungen mit ``entry_date`` im Zeitraum."""
+    if date_from is not None:
+        stmt = stmt.where(JournalEntry.entry_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(JournalEntry.entry_date <= date_to)
+    return stmt
+
+
+def _period(date_from: date | None, date_to: date | None) -> dict[str, str | None]:
+    return {
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+    }
+
+
 def trial_balance_for_company(
     *,
     session: Session,
     company_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict[str, Decimal | str]]:
-    rows = session.execute(
+    stmt = (
         select(
             Account.code,
             Account.name,
@@ -30,6 +49,9 @@ def trial_balance_for_company(
         .where(JournalEntry.company_id == company_id)
         .group_by(Account.id, Account.code, Account.name)
         .order_by(Account.code)
+    )
+    rows = session.execute(
+        _apply_date_filter(stmt, date_from=date_from, date_to=date_to)
     ).all()
 
     report: list[dict[str, Decimal | str]] = []
@@ -50,9 +72,13 @@ def trial_balance_for_company(
 
 
 def account_balances_by_type(
-    *, session: Session, company_id: int
+    *,
+    session: Session,
+    company_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[dict[str, Decimal | str]]:
-    rows = session.execute(
+    stmt = (
         select(
             Account.code,
             Account.name,
@@ -65,6 +91,9 @@ def account_balances_by_type(
         .where(JournalEntry.company_id == company_id)
         .group_by(Account.id, Account.code, Account.name, Account.account_type)
         .order_by(Account.code)
+    )
+    rows = session.execute(
+        _apply_date_filter(stmt, date_from=date_from, date_to=date_to)
     ).all()
 
     return [
@@ -79,8 +108,16 @@ def account_balances_by_type(
     ]
 
 
-def income_statement_for_company(*, session: Session, company_id: int) -> dict[str, object]:
-    balances = account_balances_by_type(session=session, company_id=company_id)
+def income_statement_for_company(
+    *,
+    session: Session,
+    company_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict[str, object]:
+    balances = account_balances_by_type(
+        session=session, company_id=company_id, date_from=date_from, date_to=date_to
+    )
     revenues: list[dict[str, Decimal | str]] = []
     expenses: list[dict[str, Decimal | str]] = []
 
@@ -97,6 +134,7 @@ def income_statement_for_company(*, session: Session, company_id: int) -> dict[s
     net_income = total_revenue - total_expense
 
     return {
+        "period": _period(date_from, date_to),
         "revenues": revenues,
         "expenses": expenses,
         "totals": {
@@ -107,8 +145,17 @@ def income_statement_for_company(*, session: Session, company_id: int) -> dict[s
     }
 
 
-def balance_sheet_for_company(*, session: Session, company_id: int) -> dict[str, object]:
-    balances = account_balances_by_type(session=session, company_id=company_id)
+def balance_sheet_for_company(
+    *,
+    session: Session,
+    company_id: int,
+    date_to: date | None = None,
+) -> dict[str, object]:
+    # Die Bilanz ist eine Stichtagsbetrachtung: alle Buchungen bis einschließlich
+    # ``date_to`` (Stichtag). Ohne ``date_to`` werden alle Buchungen berücksichtigt.
+    balances = account_balances_by_type(
+        session=session, company_id=company_id, date_to=date_to
+    )
     assets: list[dict[str, Decimal | str]] = []
     liabilities_and_equity: list[dict[str, Decimal | str]] = []
 
@@ -128,7 +175,9 @@ def balance_sheet_for_company(*, session: Session, company_id: int) -> dict[str,
                 }
             )
 
-    income_statement = income_statement_for_company(session=session, company_id=company_id)
+    income_statement = income_statement_for_company(
+        session=session, company_id=company_id, date_to=date_to
+    )
     net_income = income_statement["totals"]["net_income"]
     if net_income != ZERO:
         liabilities_and_equity.append(
@@ -144,6 +193,7 @@ def balance_sheet_for_company(*, session: Session, company_id: int) -> dict[str,
     total_liabilities_equity = sum((row["amount"] for row in liabilities_and_equity), ZERO)
 
     return {
+        "period": {"as_of": date_to.isoformat() if date_to else None},
         "assets": assets,
         "liabilities_and_equity": liabilities_and_equity,
         "totals": {

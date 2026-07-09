@@ -310,11 +310,34 @@ def create_journal_entry_via_api():
     )
 
 
+class _DateArgError(ValueError):
+    """Raised when a date query parameter is not ISO-formatted."""
+
+
+def _date_arg(name: str) -> date | None:
+    """Liest einen optionalen Datums-Query-Parameter (Format JJJJ-MM-TT)."""
+    raw = request.args.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return date.fromisoformat(raw.strip())
+    except ValueError as exc:
+        raise _DateArgError(
+            f"{name} must be an ISO date (YYYY-MM-DD), got {raw!r}."
+        ) from exc
+
+
 @api_bp.get("/trial-balance")
 def get_trial_balance():
     company_id = request.args.get("company_id", type=int)
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
+
+    try:
+        date_from = _date_arg("date_from")
+        date_to = _date_arg("date_to")
+    except _DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     session_factory = _get_session_factory()
     with session_factory() as session:
@@ -322,12 +345,18 @@ def get_trial_balance():
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
-        rows = trial_balance_for_company(session=session, company_id=company_id)
+        rows = trial_balance_for_company(
+            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+        )
 
     return (
         jsonify(
             {
                 "company_id": company_id,
+                "period": {
+                    "date_from": date_from.isoformat() if date_from else None,
+                    "date_to": date_to.isoformat() if date_to else None,
+                },
                 "rows": [
                     {
                         "code": row["code"],
@@ -350,18 +379,27 @@ def get_income_statement():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
 
+    try:
+        date_from = _date_arg("date_from")
+        date_to = _date_arg("date_to")
+    except _DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     session_factory = _get_session_factory()
     with session_factory() as session:
         company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
-        report = income_statement_for_company(session=session, company_id=company_id)
+        report = income_statement_for_company(
+            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+        )
 
     return (
         jsonify(
             {
                 "company_id": company_id,
+                "period": report["period"],
                 "revenues": [
                     {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
                     for row in report["revenues"]
@@ -383,19 +421,28 @@ def get_balance_sheet():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
 
+    # Bilanz ist eine Stichtagsbetrachtung: date_to (bzw. Alias as_of) = Stichtag.
+    try:
+        date_to = _date_arg("date_to") or _date_arg("as_of")
+    except _DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     session_factory = _get_session_factory()
     with session_factory() as session:
         company = _api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
-        report = balance_sheet_for_company(session=session, company_id=company_id)
+        report = balance_sheet_for_company(
+            session=session, company_id=company_id, date_to=date_to
+        )
 
     totals = report["totals"]
     return (
         jsonify(
             {
                 "company_id": company_id,
+                "period": report["period"],
                 "assets": [
                     {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
                     for row in report["assets"]

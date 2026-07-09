@@ -482,6 +482,89 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert len(payload["rows"]) == 2
 
 
+def test_api_income_statement_respects_date_range(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Zeitraum Mandant", "company_name": "Zeitraum GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "4200", "name": "Miete", "account_type": "expense"},
+    )
+    # Erlös im Januar, Aufwand im Februar.
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-01-15",
+            "description": "Erlös Januar",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-02-15",
+            "description": "Miete Februar",
+            "status": "posted",
+            "lines": [
+                {"account_id": 3, "debit_amount": "40.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "40.00"},
+            ],
+        },
+    )
+
+    # Ohne Zeitraum: beide Buchungen.
+    full = client.get("/api/v1/income-statement", query_string={"company_id": 1}).get_json()
+    assert full["period"] == {"date_from": None, "date_to": None}
+    assert full["totals"]["total_revenue"] == "100.00"
+    assert full["totals"]["total_expense"] == "40.00"
+    assert full["totals"]["net_income"] == "60.00"
+
+    # Nur Februar: kein Erlös, nur Aufwand.
+    feb = client.get(
+        "/api/v1/income-statement",
+        query_string={"company_id": 1, "date_from": "2026-02-01", "date_to": "2026-02-28"},
+    ).get_json()
+    assert feb["period"] == {"date_from": "2026-02-01", "date_to": "2026-02-28"}
+    assert feb["totals"]["total_revenue"] == "0.00"
+    assert feb["totals"]["total_expense"] == "40.00"
+    assert feb["totals"]["net_income"] == "-40.00"
+
+    # Bilanz-Stichtag 31.01.: Miete (Februar) noch nicht enthalten.
+    jan_bs = client.get(
+        "/api/v1/balance-sheet",
+        query_string={"company_id": 1, "date_to": "2026-01-31"},
+    ).get_json()
+    assert jan_bs["period"] == {"as_of": "2026-01-31"}
+    # Bank = 100 (nur Januar-Erlös), Jahresergebnis = 100.
+    bank = next(row for row in jan_bs["assets"] if row["code"] == "1200")
+    assert bank["amount"] == "100.00"
+
+    # Ungültiges Datum -> 400.
+    bad = client.get(
+        "/api/v1/income-statement",
+        query_string={"company_id": 1, "date_from": "01.02.2026"},
+    )
+    assert bad.status_code == 400
+
+
 def test_api_income_statement_and_balance_sheet(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)

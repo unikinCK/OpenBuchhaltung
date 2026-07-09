@@ -76,6 +76,42 @@ def _company_id_schema() -> dict[str, Any]:
     }
 
 
+def _period_report_schema() -> dict[str, Any]:
+    """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
+    return {
+        "type": "object",
+        "properties": {
+            "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            "date_from": {
+                "type": "string",
+                "description": "Zeitraum-Beginn (Format JJJJ-MM-TT, optional).",
+            },
+            "date_to": {
+                "type": "string",
+                "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
+            },
+        },
+        "required": ["company_id"],
+        "additionalProperties": False,
+    }
+
+
+def _asof_report_schema() -> dict[str, Any]:
+    """Schema für Stichtags-Reports (Bilanz)."""
+    return {
+        "type": "object",
+        "properties": {
+            "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            "date_to": {
+                "type": "string",
+                "description": "Stichtag: Buchungen bis einschließlich (JJJJ-MM-TT, optional).",
+            },
+        },
+        "required": ["company_id"],
+        "additionalProperties": False,
+    }
+
+
 # Ein Tool je REST-Endpunkt unter /api/v1 (ohne den rekursiven /mcp/call-Proxy).
 TOOLS: list[ToolSpec] = [
     ToolSpec(
@@ -189,24 +225,34 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="get_trial_balance",
-        description="Liefert die Summen- und Saldenliste einer Gesellschaft.",
-        input_schema=_company_id_schema(),
+        description=(
+            "Liefert die Summen- und Saldenliste einer Gesellschaft, optional für einen "
+            "Zeitraum (date_from/date_to, Format JJJJ-MM-TT)."
+        ),
+        input_schema=_period_report_schema(),
         http_method="GET",
         path="/trial-balance",
         arg_location="query",
     ),
     ToolSpec(
         name="get_income_statement",
-        description="Liefert die Gewinn- und Verlustrechnung einer Gesellschaft.",
-        input_schema=_company_id_schema(),
+        description=(
+            "Liefert die Gewinn- und Verlustrechnung (GuV) einer Gesellschaft, optional für "
+            "einen Zeitraum (date_from/date_to, Format JJJJ-MM-TT). Ohne Angabe: alle Buchungen. "
+            "Der ausgewertete Zeitraum steht im Feld 'period' der Antwort."
+        ),
+        input_schema=_period_report_schema(),
         http_method="GET",
         path="/income-statement",
         arg_location="query",
     ),
     ToolSpec(
         name="get_balance_sheet",
-        description="Liefert die Bilanz einer Gesellschaft.",
-        input_schema=_company_id_schema(),
+        description=(
+            "Liefert die Bilanz einer Gesellschaft zum Stichtag date_to (Format JJJJ-MM-TT, "
+            "optional; ohne Angabe alle Buchungen). Der Stichtag steht im Feld 'period.as_of'."
+        ),
+        input_schema=_asof_report_schema(),
         http_method="GET",
         path="/balance-sheet",
         arg_location="query",
