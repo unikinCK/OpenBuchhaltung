@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
@@ -433,6 +434,21 @@ def _get_or_create_period(
         if period:
             return period
         fiscal_year = session.get(FiscalYear, fiscal_year_id)
+        # Altbestände können die Nummer 13 versehentlich als reguläre Periode
+        # belegen; dann würde der Insert am UNIQUE-Constraint
+        # uq_period_fiscal_year_number scheitern.
+        number_taken = session.execute(
+            select(Period.id).where(
+                Period.fiscal_year_id == fiscal_year_id,
+                Period.period_number == CLOSING_PERIOD_NUMBER,
+            )
+        ).first()
+        if number_taken:
+            raise JournalEntryCreationError(
+                "Die Abschlussperiode kann nicht angelegt werden: Die Periodennummer "
+                f"{CLOSING_PERIOD_NUMBER} ist bereits durch eine reguläre Periode belegt. "
+                "Bitte die Perioden des Wirtschaftsjahres korrigieren."
+            )
         period = Period(
             tenant_id=tenant_id,
             fiscal_year_id=fiscal_year_id,
@@ -442,8 +458,23 @@ def _get_or_create_period(
             status="open",
             is_closing=True,
         )
-        session.add(period)
-        session.flush()
+        if _insert_period(session=session, period=period):
+            return period
+        # Wettlauf: Abschlussperiode wurde parallel angelegt — erneut nachschlagen.
+        period = (
+            session.execute(
+                select(Period).where(
+                    Period.fiscal_year_id == fiscal_year_id,
+                    Period.is_closing.is_(True),
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if period is None:
+            raise JournalEntryCreationError(
+                "Die Abschlussperiode konnte nicht angelegt werden. Bitte erneut versuchen."
+            )
         return period
 
     # Reguläre Periode, deren Zeitraum das Buchungsdatum enthält.
@@ -463,18 +494,38 @@ def _get_or_create_period(
         return period
 
     # Fallback für Altbestände ohne vollständig generierte Perioden: fehlenden
-    # (Teil-)Monat als reguläre Periode ergänzen. Die Periodennummer ergibt sich
-    # – wie in build_periods_for_fiscal_year – deterministisch aus dem
-    # Monatsabstand zum WJ-Beginn und bleibt damit im Bereich 1..12 (das
-    # Buchungsdatum liegt garantiert innerhalb der WJ-Grenzen). Ein fortlaufendes
-    # max_number + 1 könnte dagegen über 13 hinauslaufen und den CHECK-Constraint
-    # ck_period_number_range verletzen.
+    # (Teil-)Monat als reguläre Periode ergänzen. Bevorzugt wird – wie in
+    # build_periods_for_fiscal_year – die deterministische Nummer aus dem
+    # Monatsabstand zum WJ-Beginn. Bei Altbeständen kann diese Nummer jedoch
+    # bereits durch eine anders zugeschnittene Periode belegt sein (frühere
+    # Versionen nummerierten in Buchungsreihenfolge per max + 1); dann wird die
+    # kleinste freie Nummer 1..12 verwendet, damit der UNIQUE-Constraint
+    # uq_period_fiscal_year_number nicht verletzt wird.
     fiscal_year = session.get(FiscalYear, fiscal_year_id)
-    period_number = (
+    taken_numbers = set(
+        session.execute(
+            select(Period.period_number).where(Period.fiscal_year_id == fiscal_year_id)
+        ).scalars()
+    )
+    preferred_number = (
         (dt.year - fiscal_year.start_date.year) * 12
         + (dt.month - fiscal_year.start_date.month)
         + 1
     )
+    period_number = next(
+        (
+            number
+            for number in [preferred_number, *range(1, MAX_REGULAR_PERIODS + 1)]
+            if 1 <= number <= MAX_REGULAR_PERIODS and number not in taken_numbers
+        ),
+        None,
+    )
+    if period_number is None:
+        raise JournalEntryCreationError(
+            "Für das Buchungsdatum existiert keine passende Periode und alle "
+            "Periodennummern 1–12 sind bereits vergeben. Bitte die Perioden des "
+            "Wirtschaftsjahres in der Periodenverwaltung prüfen."
+        )
     month_end = date(dt.year, dt.month, _last_day_of_month(dt.year, dt.month))
     period = Period(
         tenant_id=tenant_id,
@@ -485,9 +536,41 @@ def _get_or_create_period(
         status="open",
         is_closing=False,
     )
-    session.add(period)
-    session.flush()
+    if _insert_period(session=session, period=period):
+        return period
+    # Wettlauf: Eine parallele Buchung hat die Periode inzwischen angelegt —
+    # erneut nach dem Zeitraum suchen.
+    period = (
+        session.execute(
+            select(Period).where(
+                Period.fiscal_year_id == fiscal_year_id,
+                Period.is_closing.is_(False),
+                Period.start_date <= dt,
+                Period.end_date >= dt,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if period is None:
+        raise JournalEntryCreationError(
+            "Die Buchungsperiode konnte nicht angelegt werden. Bitte erneut versuchen."
+        )
     return period
+
+
+def _insert_period(*, session: Session, period: Period) -> bool:
+    """Legt eine Periode über einen Savepoint an.
+
+    Gibt ``False`` zurück, wenn der UNIQUE-Constraint verletzt wurde (die Periode
+    wurde parallel angelegt); die Session bleibt dabei benutzbar.
+    """
+    try:
+        with session.begin_nested():
+            session.add(period)
+    except IntegrityError:
+        return False
+    return True
 
 
 def _next_posting_number(*, session: Session, company_id: int, year: int) -> str:

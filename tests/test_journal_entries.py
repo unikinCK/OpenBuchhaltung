@@ -279,3 +279,164 @@ def test_create_journal_entry_fallback_period_number_stays_in_range(session: Ses
     # August ist der 8. Monat des Kalender-WJ – deterministisch, nicht max+1.
     assert period.period_number == 8
     assert 1 <= period.period_number <= 13
+
+
+def _seed_fiscal_year(session: Session, company: Company) -> FiscalYear:
+    fiscal_year = FiscalYear(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        label="2026",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        is_closed=False,
+    )
+    session.add(fiscal_year)
+    session.flush()
+    return fiscal_year
+
+
+def _balanced_lines(account_ids: list[int]) -> list[JournalLineInput]:
+    return [
+        JournalLineInput(
+            account_id=account_ids[0],
+            debit_amount=Decimal("50.00"),
+            credit_amount=Decimal("0.00"),
+        ),
+        JournalLineInput(
+            account_id=account_ids[1],
+            debit_amount=Decimal("0.00"),
+            credit_amount=Decimal("50.00"),
+        ),
+    ]
+
+
+def test_fallback_uses_free_number_when_deterministic_number_is_taken(
+    session: Session,
+) -> None:
+    """Altbestand mit Buchungsreihenfolge-Nummerierung (max+1) darf nicht kollidieren.
+
+    Reproduziert den Produktionsfehler ``UNIQUE constraint failed:
+    period.fiscal_year_id, period.period_number``: Eine Legacy-Periode trägt die
+    Nummer 8, deckt aber den Oktober ab. Eine August-Buchung berechnet
+    deterministisch ebenfalls Nummer 8 und lief damit in den UNIQUE-Constraint.
+    """
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+    fiscal_year = _seed_fiscal_year(session, company)
+
+    # Legacy-Periode: Nummer 8 wurde in Buchungsreihenfolge vergeben und
+    # umfasst den Oktober – nicht den August.
+    session.add(
+        Period(
+            tenant_id=company.tenant_id,
+            fiscal_year_id=fiscal_year.id,
+            period_number=8,
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 31),
+            status="open",
+            is_closing=False,
+        )
+    )
+    session.commit()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 8, 15),
+            description="August-Buchung trotz Legacy-Nummerierung",
+            status="posted",
+            changed_by="pytest",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+
+    period = session.get(Period, entry.period_id)
+    assert period is not None
+    assert period.start_date == date(2026, 8, 1)
+    assert period.end_date == date(2026, 8, 31)
+    # Nummer 8 ist belegt – es muss eine freie Nummer im Bereich 1..12 sein.
+    assert 1 <= period.period_number <= 12
+    assert period.period_number != 8
+
+
+def test_fallback_raises_clear_error_when_no_period_number_is_free(
+    session: Session,
+) -> None:
+    """Sind alle Nummern 1..12 belegt, aber keine Periode passt zum Datum,
+    muss eine verständliche Fehlermeldung statt eines DB-Fehlers erscheinen."""
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+    fiscal_year = _seed_fiscal_year(session, company)
+
+    # Inkonsistenter Altbestand: 12 Perioden, alle im Januar – keine deckt den August ab.
+    for number in range(1, 13):
+        session.add(
+            Period(
+                tenant_id=company.tenant_id,
+                fiscal_year_id=fiscal_year.id,
+                period_number=number,
+                start_date=date(2026, 1, 1),
+                end_date=date(2026, 1, 31),
+                status="open",
+                is_closing=False,
+            )
+        )
+    session.commit()
+
+    with pytest.raises(JournalEntryCreationError, match="Periodennummern 1–12"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 8, 15),
+                description="August-Buchung ohne freie Periodennummer",
+                status="posted",
+                changed_by="pytest",
+                lines=_balanced_lines(account_ids),
+            ),
+        )
+
+
+def test_closing_period_creation_fails_cleanly_when_number_13_is_taken(
+    session: Session,
+) -> None:
+    """Belegt eine reguläre Legacy-Periode die Nummer 13, darf die Buchung in die
+    Abschlussperiode nicht mit einem UNIQUE-Fehler crashen (betrifft u. a. die
+    AfA-Buchungen der Anlagenbuchhaltung und den Jahresabschluss)."""
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+    fiscal_year = _seed_fiscal_year(session, company)
+
+    session.add(
+        Period(
+            tenant_id=company.tenant_id,
+            fiscal_year_id=fiscal_year.id,
+            period_number=13,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            status="open",
+            is_closing=False,
+        )
+    )
+    session.commit()
+
+    with pytest.raises(JournalEntryCreationError, match="Abschlussperiode"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 12, 31),
+                description="Abschlussbuchung",
+                status="posted",
+                changed_by="pytest",
+                post_to_closing_period=True,
+                lines=_balanced_lines(account_ids),
+            ),
+        )

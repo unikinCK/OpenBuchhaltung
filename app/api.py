@@ -357,6 +357,11 @@ def create_journal_entry_via_api():
         )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid payload format."}), 400
+    except IntegrityError:
+        return (
+            jsonify({"error": "Conflict while saving the journal entry. Please retry."}),
+            409,
+        )
 
     return (
         jsonify(

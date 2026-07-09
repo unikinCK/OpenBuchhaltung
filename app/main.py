@@ -1645,6 +1645,9 @@ def create_journal_entry_from_form():
     except (JournalEntryCreationError, JournalEntryValidationError) as exc:
         flash(str(exc), "error")
         return redirect(url_for("main.journal_page", company_id=company_id))
+    except IntegrityError:
+        flash("Die Buchung konnte nicht gespeichert werden. Bitte erneut versuchen.", "error")
+        return redirect(url_for("main.journal_page", company_id=company_id))
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
     return redirect(url_for("main.journal_page", company_id=company_id))
