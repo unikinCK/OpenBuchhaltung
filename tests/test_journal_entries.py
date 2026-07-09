@@ -102,6 +102,52 @@ def test_create_journal_entry_writes_audit_log(session: Session) -> None:
     assert audit_log.payload["posting_number"] == entry.posting_number
 
 
+def test_create_journal_entry_resolves_account_codes(session: Session) -> None:
+    company = _seed_company_and_accounts(session)
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 4, 4),
+            description="Buchung per Kontonummer",
+            status="posted",
+            lines=[
+                JournalLineInput(account_code="1200", debit_amount=Decimal("100.00")),
+                JournalLineInput(account_code="8400", credit_amount=Decimal("100.00")),
+            ],
+        ),
+    )
+
+    id_by_code = {
+        account.code: account.id
+        for account in session.scalars(
+            select(Account).where(Account.company_id == company.id)
+        ).all()
+    }
+    booked_account_ids = {line.account_id for line in entry.lines}
+    assert booked_account_ids == {id_by_code["1200"], id_by_code["8400"]}
+
+
+def test_create_journal_entry_rejects_unknown_account_code(session: Session) -> None:
+    company = _seed_company_and_accounts(session)
+
+    with pytest.raises(JournalEntryCreationError, match="9999"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 4, 4),
+                description="Unbekannte Kontonummer",
+                status="posted",
+                lines=[
+                    JournalLineInput(account_code="9999", debit_amount=Decimal("100.00")),
+                    JournalLineInput(account_code="8400", credit_amount=Decimal("100.00")),
+                ],
+            ),
+        )
+
+
 def test_create_journal_entry_rejects_locked_period(session: Session) -> None:
     company = _seed_company_and_accounts(session)
     account_ids = session.scalars(

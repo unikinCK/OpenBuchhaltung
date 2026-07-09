@@ -176,7 +176,9 @@ TOOLS: list[ToolSpec] = [
         name="create_journal_entry",
         description=(
             "Erfasst eine Buchung mit mindestens zwei Zeilen. Soll- und Haben-Summe "
-            "müssen ausgeglichen sein."
+            "müssen ausgeglichen sein. Das Konto je Zeile wird entweder über die interne "
+            "'account_id' ODER über die Kontonummer 'account_code' (z. B. '1200') angegeben "
+            "– die Kontonummer wird serverseitig zur ID aufgelöst."
         ),
         input_schema={
             "type": "object",
@@ -198,7 +200,19 @@ TOOLS: list[ToolSpec] = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "account_id": {"type": "integer"},
+                            "account_id": {
+                                "type": "integer",
+                                "description": (
+                                    "Interne Konto-ID. Alternativ 'account_code' angeben."
+                                ),
+                            },
+                            "account_code": {
+                                "type": "string",
+                                "description": (
+                                    "Kontonummer (z. B. '1200'). Alternative zu 'account_id'; "
+                                    "genau eines von beiden angeben."
+                                ),
+                            },
                             "debit_amount": {
                                 "type": "string",
                                 "description": "Sollbetrag als Dezimalzahl, z. B. '100.00'.",
@@ -210,7 +224,10 @@ TOOLS: list[ToolSpec] = [
                             "description": {"type": "string"},
                             "tax_code_id": {"type": "integer"},
                         },
-                        "required": ["account_id"],
+                        "anyOf": [
+                            {"required": ["account_id"]},
+                            {"required": ["account_code"]},
+                        ],
                         "additionalProperties": False,
                     },
                     "minItems": 2,
