@@ -187,7 +187,19 @@ Basis-Endpunkte:
 - `GET /api/v1/companies`
 - `POST /api/v1/accounts`
 - `POST /api/v1/journal-entries` (mehrzeilige Buchung, Validierung mit 422-Details)
-- `GET /api/v1/trial-balance`
+- `GET /api/v1/trial-balance` — optional `date_from`/`date_to` (JJJJ-MM-TT)
+- `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
+- `GET /api/v1/balance-sheet` — optional `date_to` (Stichtag; Alias `as_of`)
+
+Die Report-Endpunkte akzeptieren einen **Zeitraum**: GuV und Summen-/Saldenliste
+werten Buchungen mit `entry_date` in `[date_from, date_to]` aus, die Bilanz als
+Stichtagsbetrachtung bis einschließlich `date_to`. Ohne Angabe werden alle Buchungen
+berücksichtigt. Der ausgewertete Zeitraum steht im Feld `period` der Antwort. Dieselben
+Parameter stehen auch als MCP-Tool-Argumente (`date_from`/`date_to`) zur Verfügung.
+
+```bash
+curl "http://localhost:8000/api/v1/income-statement?company_id=1&date_from=2026-01-01&date_to=2026-03-31"
+```
 
 Beispiel:
 ```bash
