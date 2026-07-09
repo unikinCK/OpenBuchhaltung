@@ -552,6 +552,40 @@ def test_api_create_journal_entry_by_account_code(tmp_path):
     assert missing.status_code == 422
 
 
+def test_api_list_accounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Konten Mandant", "company_name": "Konten GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    # company_id ist Pflicht.
+    assert client.get("/api/v1/accounts").status_code == 400
+
+    response = client.get("/api/v1/accounts", query_string={"company_id": 1})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["company_id"] == 1
+    # Nach Kontonummer sortiert, mit interner ID und Kontoart.
+    codes = [account["code"] for account in payload["accounts"]]
+    assert codes == ["1200", "8400"]
+    bank = payload["accounts"][0]
+    assert bank["name"] == "Bank"
+    assert bank["account_type"] == "asset"
+    assert bank["is_active"] is True
+    assert isinstance(bank["id"], int)
+
+
 def test_api_income_statement_respects_date_range(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)
