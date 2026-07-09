@@ -430,6 +430,112 @@ class OpenItem(Base):
     bank_transaction: Mapped[BankTransaction | None] = relationship()
 
 
+class FixedAsset(Base):
+    """Anlagegut der Anlagenbuchhaltung (Sachanlage) inkl. AfA-Parametern."""
+
+    __tablename__ = "fixed_asset"
+    __table_args__ = (
+        UniqueConstraint("company_id", "asset_number", name="uq_fixed_asset_company_number"),
+        CheckConstraint("acquisition_cost > 0", name="ck_fixed_asset_cost_positive"),
+        CheckConstraint("residual_value >= 0", name="ck_fixed_asset_residual_non_negative"),
+        CheckConstraint(
+            "method IN ('linear', 'degressive', 'leistung', 'gwg', 'sammelposten', 'manuell')",
+            name="ck_fixed_asset_method_known",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'disposed', 'fully_depreciated')",
+            name="ck_fixed_asset_status_known",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_number: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    acquisition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Datum der Inbetriebnahme = Beginn der AfA (§ 7 Abs. 1 Satz 4 EStG).
+    in_service_date: Mapped[date] = mapped_column(Date, nullable=False)
+    acquisition_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    useful_life_months: Mapped[int | None] = mapped_column(Integer)
+    degressive_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    total_units: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    residual_value: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    keep_memo_value: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Bilanzkonto (Sachanlage) und Aufwandskonto (Abschreibungen).
+    asset_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    depreciation_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    disposal_date: Mapped[date | None] = mapped_column(Date)
+    disposal_proceeds: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    notes: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship()
+    asset_account: Mapped[Account] = relationship(foreign_keys=[asset_account_id])
+    depreciation_account: Mapped[Account] = relationship(foreign_keys=[depreciation_account_id])
+    depreciation_entries: Mapped[list[DepreciationEntry]] = relationship(
+        back_populates="fixed_asset", cascade="all, delete-orphan"
+    )
+
+
+class DepreciationEntry(Base):
+    """Verbuchte Abschreibungszeile eines Anlageguts für ein Wirtschaftsjahr."""
+
+    __tablename__ = "depreciation_entry"
+    __table_args__ = (
+        UniqueConstraint(
+            "fixed_asset_id", "fiscal_year", "kind", name="uq_depreciation_asset_year_kind"
+        ),
+        CheckConstraint("amount > 0", name="ck_depreciation_amount_positive"),
+        CheckConstraint(
+            "kind IN ('planmaessig', 'ausserplanmaessig', 'abgang')",
+            name="ck_depreciation_kind_known",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fixed_asset_id: Mapped[int] = mapped_column(
+        ForeignKey("fixed_asset.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    depreciation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # planmaessig (laut Plan), ausserplanmaessig (AfaA/§ 253 Abs. 3 HGB), abgang (Restbuchwert).
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="planmaessig")
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    book_value_before: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    book_value_after: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    fixed_asset: Mapped[FixedAsset] = relationship(back_populates="depreciation_entries")
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
 class User(Base):
     __tablename__ = "user"
 

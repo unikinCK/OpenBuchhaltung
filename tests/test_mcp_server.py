@@ -26,6 +26,10 @@ EXPECTED_TOOL_NAMES = {
     "export_trial_balance_csv",
     "export_journal_csv",
     "export_datev_csv",
+    "create_fixed_asset",
+    "list_fixed_assets",
+    "get_depreciation_schedule",
+    "post_depreciation",
 }
 
 
@@ -85,6 +89,29 @@ def test_query_tool_forwards_arguments_as_query_params() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/balance-sheet", {"company_id": 7}, None)
+
+
+def test_path_placeholder_filled_from_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "tools/call",
+            "params": {
+                "name": "post_depreciation",
+                "arguments": {"asset_id": 5, "fiscal_year": 2026},
+            },
+        }
+    )
+    # asset_id landet im Pfad, nicht im Body.
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/depreciation",
+        None,
+        {"fiscal_year": 2026},
+    )
 
 
 def test_income_statement_forwards_date_range_as_query() -> None:

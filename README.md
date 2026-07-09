@@ -102,6 +102,31 @@ optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ei
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
 werden; die Aktion wird im Audit-Log protokolliert.
 
+## Anlagenbuchhaltung (Anlagenverzeichnis & AfA)
+
+Unter **Anlagen** werden Anlagegüter mit den in HGB und Steuerrecht üblichen
+Abschreibeverfahren geführt:
+
+| Verfahren | Rechtsgrundlage | Besonderheit |
+|-----------|-----------------|--------------|
+| `linear` | § 7 Abs. 1 EStG, § 253 Abs. 3 HGB | im Zugangsjahr zeitanteilig/monatsgenau (§ 7 Abs. 1 S. 4 EStG) |
+| `degressive` | § 7 Abs. 2 EStG | geometrisch-degressiv mit automatischem Übergang zur linearen AfA |
+| `leistung` | § 7 Abs. 1 S. 6 EStG | Abschreibung nach tatsächlicher Jahresleistung |
+| `gwg` | § 6 Abs. 2 EStG | Sofortabschreibung geringwertiger Wirtschaftsgüter (≤ 800 €) |
+| `sammelposten` | § 6 Abs. 2a EStG | Poolabschreibung gleichmäßig über 5 Jahre (20 % p. a.) |
+| `manuell` | – | kein automatischer Plan, nur außerplanmäßige Buchung |
+
+Restwert und Erinnerungswert (1,00 €) bilden die Buchwert-Untergrenze. Die Seite
+zeigt das Anlagenverzeichnis mit aktuellem Buchwert und den vollständigen
+**Abschreibungsplan** (Buchwertverlauf je Jahr). Die planmäßige AfA je
+Wirtschaftsjahr wird als Direktabschreibung gebucht
+(*Soll Abschreibungen an Anlagekonto*); zusätzlich gibt es die **außerplanmäßige
+Abschreibung/AfaA** (§ 253 Abs. 3 HGB, § 7 Abs. 1 S. 7 EStG) und den
+**Anlagenabgang** (Ausbuchung des Restbuchwerts). Alle Aktionen laufen ins
+Audit-Log. REST: `POST/GET /api/v1/fixed-assets`,
+`GET /api/v1/fixed-assets/<id>/schedule`,
+`POST /api/v1/fixed-assets/<id>/depreciation`.
+
 ## Perioden & Jahresabschluss
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
@@ -355,6 +380,7 @@ curl -X POST http://localhost:8000/api/v1/mcp/call \
 Zusätzlich zum Bridge-Endpunkt gibt es einen eigenständigen **MCP-Server**, der jeden
 REST-Endpunkt aus `/api/v1` als MCP-Tool bereitstellt (`health`, `list_companies`,
 `create_tenant_with_company`, `create_account`, `list_accounts`, `create_journal_entry`,
+`create_fixed_asset`, `list_fixed_assets`, `get_depreciation_schedule`, `post_depreciation`,
 `get_trial_balance`, `get_income_statement`, `get_balance_sheet` sowie die drei
 CSV-Exporte). So können MCP-fähige Clients (z. B. Claude Desktop) direkt buchen und
 auswerten. Der Server spricht JSON-RPC 2.0 über stdio und benötigt keine zusätzlichen

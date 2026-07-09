@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Anlagen – OpenBuchhaltung{% endblock %}
+
+{% set method_labels = {
+  "linear": "Linear (§ 7 Abs. 1 EStG)",
+  "degressive": "Degressiv (§ 7 Abs. 2 EStG)",
+  "leistung": "Leistung (§ 7 Abs. 1 S. 6 EStG)",
+  "gwg": "GWG-Sofortabschreibung (§ 6 Abs. 2 EStG)",
+  "sammelposten": "Sammelposten/Pool (§ 6 Abs. 2a EStG)",
+  "manuell": "Manuell / nur außerplanmäßig"
+} %}
+
+{% block content %}
+  <h1 class="page-title">Anlagenbuchhaltung</h1>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Anlagegüter</div>
+      <div class="stat-value">{{ asset_views|length }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Summe Buchwerte (aktiv)</div>
+      <div class="stat-value">{{ "%.2f"|format(total_book_value) }}</div>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>Anlagegut erfassen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% elif not accounts %}
+      <p class="muted">Bitte zuerst ein Anlagekonto (z. B. 0400 Maschinen) und ein Abschreibungskonto (z. B. 4830) anlegen.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('main.create_fixed_asset_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="asset_number">Inventarnummer</label>
+        <input id="asset_number" name="asset_number" placeholder="A-001" required />
+
+        <label for="name">Bezeichnung</label>
+        <input id="name" name="name" placeholder="Drehmaschine" required />
+
+        <label for="method">AfA-Verfahren</label>
+        <select id="method" name="method" required>
+          {% for method in methods %}
+            <option value="{{ method }}">{{ method_labels[method] }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="acquisition_date">Anschaffungsdatum</label>
+        <input id="acquisition_date" name="acquisition_date" type="date" value="{{ today }}" required />
+
+        <label for="in_service_date">Inbetriebnahme / AfA-Beginn (optional)</label>
+        <input id="in_service_date" name="in_service_date" type="date" />
+
+        <label for="acquisition_cost">Anschaffungskosten</label>
+        <input id="acquisition_cost" name="acquisition_cost" inputmode="decimal" placeholder="12000.00" required />
+
+        <label for="useful_life_months">Nutzungsdauer (Monate) – linear/degressiv</label>
+        <input id="useful_life_months" name="useful_life_months" inputmode="numeric" placeholder="60" />
+
+        <label for="degressive_rate">Degressiver Satz % p. a. (nur degressiv)</label>
+        <input id="degressive_rate" name="degressive_rate" inputmode="decimal" placeholder="20" />
+
+        <label for="total_units">Gesamtleistung (nur Leistungs-AfA)</label>
+        <input id="total_units" name="total_units" inputmode="decimal" placeholder="100000" />
+
+        <label for="residual_value">Restwert (optional)</label>
+        <input id="residual_value" name="residual_value" inputmode="decimal" placeholder="0.00" />
+
+        <label class="inline">
+          <input type="checkbox" name="keep_memo_value" value="1" /> Erinnerungswert 1,00 € stehen lassen
+        </label>
+
+        <label for="asset_account_id">Anlagekonto (Bilanz)</label>
+        <select id="asset_account_id" name="asset_account_id" required>
+          {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="depreciation_account_id">Abschreibungskonto (Aufwand)</label>
+        <select id="depreciation_account_id" name="depreciation_account_id" required>
+          {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">Anlagegut speichern</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>
+      Anlagenverzeichnis
+      <span class="badge"><strong>Anzahl:</strong> {{ asset_views|length }}</span>
+    </h2>
+    {% if asset_views %}
+      <table>
+        <thead>
+          <tr>
+            <th>Inventar-Nr.</th>
+            <th>Bezeichnung</th>
+            <th>Verfahren</th>
+            <th>AfA-Beginn</th>
+            <th class="num">AHK</th>
+            <th class="num">Buchwert</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for view in asset_views %}
+            {% set asset = view.asset %}
+            <tr>
+              <td>{{ asset.asset_number }}</td>
+              <td>{{ asset.name }}</td>
+              <td>{{ method_labels.get(asset.method, asset.method) }}</td>
+              <td>{{ asset.in_service_date.isoformat() }}</td>
+              <td class="num">{{ asset.acquisition_cost }}</td>
+              <td class="num">{{ "%.2f"|format(view.book_value) }}</td>
+              <td>
+                {% if asset.status == "active" %}<span class="badge">aktiv</span>
+                {% elif asset.status == "fully_depreciated" %}<span class="badge">abgeschrieben</span>
+                {% else %}<span class="badge">Abgang</span>{% endif %}
+              </td>
+              <td>
+                <a href="{{ url_for('main.fixed_assets_page', company_id=selected_company_id, asset_id=asset.id) }}">Details</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine Anlagegüter erfasst.</p>
+    {% endif %}
+  </section>
+
+  {% if selected_asset %}
+    <section class="card">
+      <h2>Abschreibungsplan: {{ selected_asset.asset_number }} – {{ selected_asset.name }}</h2>
+      <p class="muted">
+        {{ method_labels.get(selected_asset.method, selected_asset.method) }} ·
+        AHK {{ selected_asset.acquisition_cost }}
+        {% if selected_asset.useful_life_months %} · Nutzungsdauer {{ selected_asset.useful_life_months }} Monate{% endif %}
+        {% if selected_asset.degressive_rate %} · Satz {{ selected_asset.degressive_rate }} %{% endif %}
+        {% if selected_asset.residual_value and selected_asset.residual_value > 0 %} · Restwert {{ selected_asset.residual_value }}{% endif %}
+      </p>
+
+      {% if schedule %}
+        <table>
+          <thead>
+            <tr>
+              <th>Jahr</th>
+              <th class="num">Monate</th>
+              <th class="num">Buchwert Anfang</th>
+              <th class="num">AfA</th>
+              <th class="num">Buchwert Ende</th>
+              <th>Hinweis</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in schedule %}
+              <tr>
+                <td>{{ row.year }}</td>
+                <td class="num">{{ row.months if row.months else "–" }}</td>
+                <td class="num">{{ row.book_value_start }}</td>
+                <td class="num">{{ row.depreciation }}</td>
+                <td class="num">{{ row.book_value_end }}</td>
+                <td class="muted">{{ row.note }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Für dieses Verfahren wird kein automatischer Mehrjahresplan berechnet (Leistungs-AfA benötigt Jahresmengen, „manuell“ nur außerplanmäßig).</p>
+      {% endif %}
+
+      {% if selected_asset.status != "disposed" %}
+        <div class="action-row">
+          <form method="post" action="{{ url_for('main.depreciate_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <strong>Planmäßige AfA buchen:</strong>
+            <input name="fiscal_year" inputmode="numeric" value="{{ current_year }}" style="width:6rem;" />
+            {% if selected_asset.method == "leistung" %}
+              <input name="units" inputmode="decimal" placeholder="Jahresleistung" style="width:9rem;" />
+            {% endif %}
+            <button type="submit" class="secondary">AfA buchen</button>
+          </form>
+
+          <form method="post" action="{{ url_for('main.impair_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <strong>Außerplanmäßig (AfaA):</strong>
+            <input name="fiscal_year" inputmode="numeric" value="{{ current_year }}" style="width:6rem;" />
+            <input name="amount" inputmode="decimal" placeholder="Betrag" style="width:8rem;" />
+            <button type="submit" class="secondary">Abwertung buchen</button>
+          </form>
+
+          <form method="post" action="{{ url_for('main.dispose_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <strong>Abgang:</strong>
+            <input name="disposal_date" type="date" value="{{ today }}" />
+            <input name="proceeds" inputmode="decimal" placeholder="Erlös (optional)" style="width:9rem;" />
+            <button type="submit" class="secondary">Abgang buchen</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="muted">Abgegangen am {{ selected_asset.disposal_date.isoformat() }}{% if selected_asset.disposal_proceeds %}, Erlös {{ selected_asset.disposal_proceeds }}{% endif %}.</p>
+      {% endif %}
+
+      {% if selected_asset.depreciation_entries %}
+        <h3>Verbuchte Abschreibungen</h3>
+        <table>
+          <thead>
+            <tr><th>Jahr</th><th>Art</th><th class="num">Betrag</th><th class="num">Buchwert danach</th><th>Buchung</th></tr>
+          </thead>
+          <tbody>
+            {% for entry in selected_asset.depreciation_entries|sort(attribute="fiscal_year") %}
+              <tr>
+                <td>{{ entry.fiscal_year }}</td>
+                <td>{{ entry.kind }}</td>
+                <td class="num">{{ entry.amount }}</td>
+                <td class="num">{{ entry.book_value_after }}</td>
+                <td class="muted">{{ entry.journal_entry_id or "–" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}
