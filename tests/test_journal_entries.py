@@ -210,3 +210,72 @@ def test_create_journal_entry_rejects_locked_period(session: Session) -> None:
                 ],
             ),
         )
+
+
+def test_create_journal_entry_fallback_period_number_stays_in_range(session: Session) -> None:
+    """Fehlt für einen Monat die Periode, darf der Fallback keine Nummer > 13 vergeben.
+
+    Reproduziert den Produktionsfehler ``CHECK constraint failed:
+    ck_period_number_range``: Ein Altbestand mit einer bereits als Nummer 13
+    angelegten regulären Periode führte beim Buchen eines späteren Monats zu
+    ``max_number + 1 == 14`` und damit zum Constraint-Verstoß.
+    """
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+
+    fiscal_year = FiscalYear(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        label="2026",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        is_closed=False,
+    )
+    session.add(fiscal_year)
+    session.flush()
+
+    # Unvollständiger Altbestand: nur der Juli existiert, versehentlich als
+    # reguläre Periode mit der höchsten zulässigen Nummer 13.
+    session.add(
+        Period(
+            tenant_id=company.tenant_id,
+            fiscal_year_id=fiscal_year.id,
+            period_number=13,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            status="open",
+            is_closing=False,
+        )
+    )
+    session.commit()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 8, 15),
+            description="August-Buchung",
+            status="posted",
+            changed_by="pytest",
+            lines=[
+                JournalLineInput(
+                    account_id=account_ids[0],
+                    debit_amount=Decimal("50.00"),
+                    credit_amount=Decimal("0.00"),
+                ),
+                JournalLineInput(
+                    account_id=account_ids[1],
+                    debit_amount=Decimal("0.00"),
+                    credit_amount=Decimal("50.00"),
+                ),
+            ],
+        ),
+    )
+
+    period = session.get(Period, entry.period_id)
+    assert period is not None
+    # August ist der 8. Monat des Kalender-WJ – deterministisch, nicht max+1.
+    assert period.period_number == 8
+    assert 1 <= period.period_number <= 13

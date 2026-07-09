@@ -463,22 +463,23 @@ def _get_or_create_period(
         return period
 
     # Fallback für Altbestände ohne vollständig generierte Perioden: fehlenden
-    # (Teil-)Monat als nächste fortlaufende Periode ergänzen.
+    # (Teil-)Monat als reguläre Periode ergänzen. Die Periodennummer ergibt sich
+    # – wie in build_periods_for_fiscal_year – deterministisch aus dem
+    # Monatsabstand zum WJ-Beginn und bleibt damit im Bereich 1..12 (das
+    # Buchungsdatum liegt garantiert innerhalb der WJ-Grenzen). Ein fortlaufendes
+    # max_number + 1 könnte dagegen über 13 hinauslaufen und den CHECK-Constraint
+    # ck_period_number_range verletzen.
     fiscal_year = session.get(FiscalYear, fiscal_year_id)
-    max_number = (
-        session.scalar(
-            select(func.max(Period.period_number)).where(
-                Period.fiscal_year_id == fiscal_year_id,
-                Period.is_closing.is_(False),
-            )
-        )
-        or 0
+    period_number = (
+        (dt.year - fiscal_year.start_date.year) * 12
+        + (dt.month - fiscal_year.start_date.month)
+        + 1
     )
     month_end = date(dt.year, dt.month, _last_day_of_month(dt.year, dt.month))
     period = Period(
         tenant_id=tenant_id,
         fiscal_year_id=fiscal_year_id,
-        period_number=max_number + 1,
+        period_number=period_number,
         start_date=max(date(dt.year, dt.month, 1), fiscal_year.start_date),
         end_date=min(month_end, fiscal_year.end_date),
         status="open",
