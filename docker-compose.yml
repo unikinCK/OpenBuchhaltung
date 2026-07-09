@@ -25,9 +25,11 @@ services:
     # Streamable-HTTP-Transport des OpenBuchhaltung-MCP-Servers (Sprint O/P).
     command: python -m app.services.mcp_http
     ports:
-      # Nur an localhost gebunden: von außen erfolgt der Zugriff über den HTTPS-
-      # Proxy (caddy). Lokaler Test auf dem Host: curl http://localhost:8090/mcp
-      - "127.0.0.1:8090:8090"
+      # Bind-Host über MCP_BIND_HOST steuerbar. Default 0.0.0.0 = im LAN erreichbar
+      # (z. B. http://<host-ip>:8090/mcp). Für „nur lokal" MCP_BIND_HOST=127.0.0.1
+      # setzen (dann Zugriff nur über Tailscale/Caddy-Proxy).
+      # ACHTUNG: Auf 0.0.0.0 ist der MCP-Endpunkt ohne Auth im Netz erreichbar.
+      - "${MCP_BIND_HOST:-0.0.0.0}:8090:8090"
     volumes:
       - ./:/app
     environment:
