@@ -14,6 +14,7 @@ from app.web import (  # noqa: F401
     documents,
     einvoice,
     fixed_assets,
+    income_taxes,
     journal,
     open_items,
     payroll,

@@ -15,6 +15,7 @@ from app.api import (  # noqa: F401
     elster,
     exports,
     fixed_assets,
+    income_taxes,
     journal,
     mcp,
     open_items,

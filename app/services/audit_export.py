@@ -27,6 +27,7 @@ from domain.models import (
     ElsterSubmission,
     FiscalYear,
     FixedAsset,
+    IncomeTaxReturn,
     JournalEntry,
     JournalEntryLine,
     OpenItem,
@@ -196,6 +197,17 @@ def build_audit_export_package(
                 VatReturn.date_to >= date_from if date_from is not None else None,
                 VatReturn.date_from <= date_to if date_to is not None else None,
                 order_by=(VatReturn.date_from, VatReturn.id),
+            )
+        ],
+        "income_tax_returns": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                IncomeTaxReturn,
+                IncomeTaxReturn.company_id == company.id,
+                IncomeTaxReturn.date_to >= date_from if date_from is not None else None,
+                IncomeTaxReturn.date_from <= date_to if date_to is not None else None,
+                order_by=(IncomeTaxReturn.date_from, IncomeTaxReturn.id),
             )
         ],
         "elster_submissions": [

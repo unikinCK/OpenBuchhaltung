@@ -364,10 +364,19 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       explizite Jahreserklärungs-Endpunkte, UI kennzeichnet
       UStVA/Jahreserklärung; produktive amtliche Nutzung erfordert weiterhin
       lokale ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.)*
-- [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung
-      (inkl. Hinzurechnungen/Kürzungen §§ 8, 9 GewStG)
-- [ ] **Körperschaftsteuer**: Vorauszahlung + KSt-Erklärung (inkl. E-Bilanz-
-      Taxonomie als Voraussetzung für die Übermittlung des Jahresabschlusses)
+- [x] **Gewerbesteuer** *(Sprint AC: GewSt-Erklärung und
+      Vorauszahlungsanpassung als festhaltbare Ertragsteuer-Snapshots.
+      Berechnung startet beim GuV-Jahresergebnis, nimmt strukturierte
+      Hinzurechnungen/Kürzungen (GewStG §§ 8, 9), Verlustvortrag,
+      Gewerbesteuer-Messzahl 3,5 %, gemeindlichen Hebesatz, Vorauszahlungen
+      und Prüferexport auf. UI/API/MCP umgesetzt; amtliche ELSTER-Formularlogik
+      bleibt Folgeausbau.)*
+- [x] **Körperschaftsteuer** *(Sprint AC: KSt-Erklärung und
+      Vorauszahlungsanpassung als festhaltbare Ertragsteuer-Snapshots.
+      Berechnung startet beim GuV-Jahresergebnis, nimmt steuerliche
+      Hinzurechnungen/Kürzungen, Verlustvortrag, KSt 15 %, SolZ 5,5 % auf die
+      KSt, Vorauszahlungen und Prüferexport auf. UI/API/MCP umgesetzt;
+      E-Bilanz-Taxonomie/amtliche Übermittlung bleibt Folgeausbau.)*
 - [x] **Lohnbuchhaltung-MVP** *(Sprint Z: Mitarbeiterstamm mit Lohn-/Verbindlichkeits-
       konten, konfigurierbare Abzugsraten, Lohnlauf-Entwurf je Zeitraum,
       automatische FiBu-Buchung [Brutto- und AG-SV-Aufwand an Netto-, Lohnsteuer-

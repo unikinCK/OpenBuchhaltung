@@ -73,6 +73,9 @@ class Company(Base):
     payroll_runs: Mapped[list[PayrollRun]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    income_tax_returns: Mapped[list[IncomeTaxReturn]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
 
 
 class FiscalYear(Base):
@@ -654,6 +657,55 @@ class ElsterSubmission(Base):
 
     company: Mapped[Company] = relationship()
     vat_return: Mapped[VatReturn] = relationship(back_populates="elster_submissions")
+
+
+class IncomeTaxReturn(Base):
+    """Festgehaltener KSt-/GewSt-Snapshot fuer Erklaerung oder Vorauszahlung."""
+
+    __tablename__ = "income_tax_return"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "tax_type",
+            "declaration_type",
+            "period_label",
+            name="uq_income_tax_return_scope",
+        ),
+        CheckConstraint(
+            "tax_type IN ('corporate_income', 'trade_tax')",
+            name="ck_income_tax_return_tax_type_known",
+        ),
+        CheckConstraint(
+            "declaration_type IN ('declaration', 'prepayment_adjustment')",
+            name="ck_income_tax_return_declaration_type_known",
+        ),
+        CheckConstraint(
+            "status IN ('erstellt', 'uebermittelt')",
+            name="ck_income_tax_return_status_known",
+        ),
+        CheckConstraint("date_from <= date_to", name="ck_income_tax_return_date_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    tax_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    declaration_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    period_label: Mapped[str] = mapped_column(String(20), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    calculation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship(back_populates="income_tax_returns")
 
 
 class PayrollEmployee(Base):
