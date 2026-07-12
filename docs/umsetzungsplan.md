@@ -367,6 +367,12 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       automatische FiBu-Buchung [Brutto- und AG-SV-Aufwand an Netto-, Lohnsteuer-
       und SV-Verbindlichkeiten], UI/API/MCP und Prüferexport-Tabellen. Keine
       amtliche ELStAM/PAP-/DEÜV-Berechnung.)*
+- [x] **Payroll-PAP-Brücke** *(Sprint AA: Mitarbeiterstamm um PAP-/ELStAM-
+      Eingabemerkmale [Geburtsdatum, Steuerklasse, Kinderfreibeträge, Bundesland,
+      Haupt-/Nebenarbeitgeber] erweitert; lokaler `PAYROLL_PAP_COMMAND`-Runner
+      kann Lohnsteuer/Kirchensteuer/Soli per JSON berechnen und überschreibt die
+      manuellen Steuer-Raten; Payroll-Readiness zeigt fehlende PAP-, ELStAM- und
+      DEÜV/SV-Runner transparent in API/UI/MCP.)*
 - [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
       LSt-Bescheinigungen *(setzt amtliche Lohnsteuerberechnung und ELSTER-
       Verfahren auf dem Lohnbuchhaltung-MVP voraus)*

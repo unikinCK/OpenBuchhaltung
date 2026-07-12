@@ -1316,6 +1316,17 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="get_payroll_readiness",
+        description=(
+            "Prueft Payroll-Compliance-Voraussetzungen fuer PAP, ELStAM und "
+            "DEUEV/SV-Runner."
+        ),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/payroll/readiness",
+        arg_location="none",
+    ),
+    ToolSpec(
         name="create_payroll_employee",
         description=(
             "Legt Mitarbeiter-Stammdaten fuer das Lohnbuchhaltungs-MVP an. "
@@ -1332,6 +1343,24 @@ TOOLS: list[ToolSpec] = [
                 "employment_start": {
                     "type": "string",
                     "description": "Eintrittsdatum JJJJ-MM-TT.",
+                },
+                "birth_date": {
+                    "type": "string",
+                    "description": "Geburtsdatum JJJJ-MM-TT fuer PAP/ELStAM.",
+                },
+                "tax_id": {"type": "string", "description": "Steuerliche Identifikationsnummer."},
+                "tax_class": {"type": "integer", "description": "Steuerklasse 1 bis 6."},
+                "child_allowances": {
+                    "type": "string",
+                    "description": "Kinderfreibetraege, z. B. '1.0'.",
+                },
+                "federal_state": {
+                    "type": "string",
+                    "description": "Bundesland-Kuerzel fuer Kirchensteuer, z. B. NW.",
+                },
+                "main_employment": {
+                    "type": "boolean",
+                    "description": "Hauptarbeitgeber ja/nein.",
                 },
                 "gross_monthly_salary": {
                     "type": "string",

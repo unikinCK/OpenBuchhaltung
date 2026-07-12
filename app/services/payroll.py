@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -22,6 +23,7 @@ from app.services.journal_entries import (
     create_journal_entry,
     parse_decimal,
 )
+from app.services.payroll_pap import PayrollPapError, calculate_pap_wage_tax
 from domain.models import Account, Company, PayrollEmployee, PayrollRun, PayrollRunLine
 
 
@@ -50,6 +52,11 @@ class PayrollEmployeeInput:
     employment_end: date | None = None
     status: str = "active"
     tax_id: str | None = None
+    birth_date: date | None = None
+    tax_class: int = 1
+    child_allowances: Decimal = Decimal("0.0")
+    federal_state: str | None = None
+    main_employment: bool = True
     social_security_number: str | None = None
     wage_tax_rate: Decimal = Decimal("0.00")
     church_tax_rate: Decimal = Decimal("0.00")
@@ -66,6 +73,7 @@ class PayrollRunInput:
     payment_date: date
     employee_ids: list[int] | None = None
     changed_by: str = "system"
+    config: Mapping[str, object] | None = None
 
 
 MONEY = Decimal("0.01")
@@ -98,7 +106,12 @@ def create_payroll_employee(
         employment_start=payload.employment_start,
         employment_end=payload.employment_end,
         status=payload.status,
+        birth_date=payload.birth_date,
         tax_id=(payload.tax_id or "").strip() or None,
+        tax_class=_tax_class(payload.tax_class),
+        child_allowances=Decimal(payload.child_allowances),
+        federal_state=(payload.federal_state or "").strip().upper()[:2] or None,
+        main_employment=payload.main_employment,
         social_security_number=(payload.social_security_number or "").strip() or None,
         gross_monthly_salary=gross_salary,
         wage_tax_rate=_rate(payload.wage_tax_rate),
@@ -210,7 +223,12 @@ def create_payroll_run(*, session: Session, payload: PayrollRunInput) -> Payroll
         "net": Decimal("0.00"),
     }
     for employee in employees:
-        line_values = calculate_payroll_line(employee)
+        line_values = calculate_payroll_line(
+            employee,
+            payment_date=payload.payment_date,
+            period_label=period_label,
+            config=payload.config,
+        )
         session.add(
             PayrollRunLine(
                 tenant_id=company.tenant_id,
@@ -341,11 +359,45 @@ def get_payroll_run(*, session: Session, payroll_run_id: int) -> PayrollRun | No
     )
 
 
-def calculate_payroll_line(employee: PayrollEmployee) -> dict[str, object]:
+def calculate_payroll_line(
+    employee: PayrollEmployee,
+    *,
+    payment_date: date | None = None,
+    period_label: str | None = None,
+    config: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     gross = _money(employee.gross_monthly_salary)
-    wage_tax = _money(gross * Decimal(employee.wage_tax_rate))
-    church_tax = _money(gross * Decimal(employee.church_tax_rate))
-    solidarity = _money(gross * Decimal(employee.solidarity_surcharge_rate))
+    pap_result = None
+    if config is not None and payment_date is not None and period_label is not None:
+        try:
+            pap_result = calculate_pap_wage_tax(
+                employee=employee,
+                gross_pay=gross,
+                payment_date=payment_date,
+                period_label=period_label,
+                config=config,
+            )
+        except PayrollPapError as exc:
+            raise PayrollError(str(exc)) from exc
+    if pap_result is not None:
+        wage_tax = _money(pap_result.wage_tax)
+        church_tax = _money(pap_result.church_tax)
+        solidarity = _money(pap_result.solidarity_surcharge)
+        tax_calculation = {
+            "mode": "pap_command",
+            "version": pap_result.version,
+            "protocol": pap_result.protocol,
+        }
+    else:
+        wage_tax = _money(gross * Decimal(employee.wage_tax_rate))
+        church_tax = _money(gross * Decimal(employee.church_tax_rate))
+        solidarity = _money(gross * Decimal(employee.solidarity_surcharge_rate))
+        tax_calculation = {
+            "mode": "manual_rates",
+            "wage_tax_rate": str(employee.wage_tax_rate),
+            "church_tax_rate": str(employee.church_tax_rate),
+            "solidarity_surcharge_rate": str(employee.solidarity_surcharge_rate),
+        }
     employee_sv = _money(gross * Decimal(employee.employee_social_security_rate))
     employer_sv = _money(gross * Decimal(employee.employer_social_security_rate))
     net = _money(gross - wage_tax - church_tax - solidarity - employee_sv)
@@ -363,9 +415,7 @@ def calculate_payroll_line(employee: PayrollEmployee) -> dict[str, object]:
         "net_pay": net,
         "employer_total": _money(gross + employer_sv),
         "calculation": {
-            "wage_tax_rate": str(employee.wage_tax_rate),
-            "church_tax_rate": str(employee.church_tax_rate),
-            "solidarity_surcharge_rate": str(employee.solidarity_surcharge_rate),
+            "tax": tax_calculation,
             "employee_social_security_rate": str(employee.employee_social_security_rate),
             "employer_social_security_rate": str(employee.employer_social_security_rate),
         },
@@ -492,6 +542,13 @@ def _rate(value: Decimal) -> Decimal:
         raise PayrollError("Raten dürfen nicht negativ sein.")
     if value > Decimal("1.00"):
         raise PayrollError("Raten werden als Dezimalwert zwischen 0 und 1 erwartet.")
+    return value
+
+
+def _tax_class(value: int) -> int:
+    value = int(value)
+    if value < 1 or value > 6:
+        raise PayrollError("Steuerklasse muss zwischen 1 und 6 liegen.")
     return value
 
 

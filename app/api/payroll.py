@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from app.api.blueprint import api_bp
@@ -27,6 +27,7 @@ from app.services.payroll import (
     list_payroll_runs,
     post_payroll_run,
 )
+from app.services.payroll_pap import payroll_compliance_readiness
 from domain.models import PayrollRun
 
 
@@ -46,7 +47,12 @@ def _employee_dict(employee) -> dict[str, object]:
         if employee.employment_end
         else None,
         "status": employee.status,
+        "birth_date": employee.birth_date.isoformat() if employee.birth_date else None,
         "tax_id": employee.tax_id,
+        "tax_class": employee.tax_class,
+        "child_allowances": str(employee.child_allowances),
+        "federal_state": employee.federal_state,
+        "main_employment": employee.main_employment,
         "social_security_number": employee.social_security_number,
         "gross_monthly_salary": str(employee.gross_monthly_salary),
         "wage_tax_rate": str(employee.wage_tax_rate),
@@ -125,7 +131,14 @@ def create_payroll_employee_via_api():
                 else None
             ),
             status=(payload.get("status") or "active").strip(),
+            birth_date=(
+                date.fromisoformat(payload["birth_date"]) if payload.get("birth_date") else None
+            ),
             tax_id=payload.get("tax_id"),
+            tax_class=int(payload.get("tax_class") or 1),
+            child_allowances=decimal_from_payload(payload.get("child_allowances"), "0.0"),
+            federal_state=payload.get("federal_state"),
+            main_employment=bool(payload.get("main_employment", True)),
             social_security_number=payload.get("social_security_number"),
             gross_monthly_salary=decimal_from_payload(payload.get("gross_monthly_salary")),
             wage_tax_rate=decimal_from_payload(payload.get("wage_tax_rate")),
@@ -176,6 +189,11 @@ def create_payroll_employee_via_api():
         return jsonify(_employee_dict(employee)), 201
 
 
+@api_bp.get("/payroll/readiness")
+def get_payroll_readiness_via_api():
+    return jsonify(payroll_compliance_readiness(current_app.config)), 200
+
+
 @api_bp.get("/payroll/employees")
 def list_payroll_employees_via_api():
     company_id = request.args.get("company_id", type=int)
@@ -213,6 +231,7 @@ def create_payroll_run_via_api():
             payment_date=date.fromisoformat(payload.get("payment_date")),
             employee_ids=[int(item) for item in employee_ids] if employee_ids else None,
             changed_by=_api_changed_by(),
+            config=current_app.config,
         )
     except (TypeError, ValueError):
         return jsonify({"error": "valid payroll run payload is required."}), 400

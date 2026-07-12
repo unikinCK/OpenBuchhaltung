@@ -6,6 +6,33 @@
   <h1 class="page-title">Lohnbuchhaltung</h1>
 
   <section class="card">
+    <h2>Payroll-Compliance</h2>
+    <p>
+      <strong>Status:</strong>
+      <span class="badge">{{ "vollständig bereit" if payroll_readiness.full_payroll_ready else "Runner fehlen" }}</span>
+      <span class="muted">Parameter {{ payroll_readiness.parameter_version }}</span>
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Status</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for check in payroll_readiness.checks %}
+          <tr>
+            <td>{{ check.label }}</td>
+            <td>{{ "ok" if check.ok else "offen" }}</td>
+            <td class="muted">{{ check.detail }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
     <h2>Mitarbeiter anlegen</h2>
     {% if not selected_company_id %}
       <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
@@ -20,6 +47,22 @@
           <label>Nachname <input name="last_name" required /></label>
           <label>Steuer-ID <input name="tax_id" /></label>
           <label>SV-Nummer <input name="social_security_number" /></label>
+          <label>Geburtsdatum <input name="birth_date" type="date" /></label>
+          <label>Steuerklasse
+            <select name="tax_class">
+              {% for klass in range(1, 7) %}
+                <option value="{{ klass }}">{{ klass }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Kinderfreibeträge <input name="child_allowances" inputmode="decimal" value="0.0" /></label>
+          <label>Bundesland <input name="federal_state" maxlength="2" placeholder="NW" /></label>
+          <label>Arbeitsverhältnis
+            <select name="main_employment">
+              <option value="1">Hauptarbeitgeber</option>
+              <option value="0">Nebenarbeitgeber</option>
+            </select>
+          </label>
           <label>Bruttogehalt <input name="gross_monthly_salary" inputmode="decimal" required /></label>
           <label>Lohnsteuer-Rate <input name="wage_tax_rate" inputmode="decimal" value="0.00" /></label>
           <label>Kirchensteuer-Rate <input name="church_tax_rate" inputmode="decimal" value="0.00" /></label>
@@ -80,6 +123,7 @@
               <th>Nr.</th>
               <th>Name</th>
               <th>Status</th>
+              <th>StKl</th>
               <th class="num">Brutto</th>
               <th class="num">LSt</th>
               <th class="num">AN-SV</th>
@@ -92,6 +136,7 @@
                 <td>{{ employee.employee_number }}</td>
                 <td>{{ employee.first_name }} {{ employee.last_name }}</td>
                 <td>{{ employee.status }}</td>
+                <td>{{ employee.tax_class }}</td>
                 <td class="num">{{ employee.gross_monthly_salary }}</td>
                 <td class="num">{{ employee.wage_tax_rate }}</td>
                 <td class="num">{{ employee.employee_social_security_rate }}</td>

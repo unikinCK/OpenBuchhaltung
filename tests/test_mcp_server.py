@@ -41,6 +41,7 @@ EXPECTED_TOOL_NAMES = {
     "preflight_vat_return_elster",
     "get_elster_readiness",
     "submit_vat_return_elster",
+    "get_payroll_readiness",
     "create_payroll_employee",
     "list_payroll_employees",
     "create_payroll_run",
@@ -593,6 +594,16 @@ def test_income_statement_forwards_date_range_as_query() -> None:
 def test_payroll_tools_forward_arguments() -> None:
     http = RecordingHttp()
     server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3281,
+            "method": "tools/call",
+            "params": {"name": "get_payroll_readiness", "arguments": {}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/readiness", None, None)
+
     server.handle(
         {
             "jsonrpc": "2.0",

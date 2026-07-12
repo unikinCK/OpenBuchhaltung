@@ -66,8 +66,9 @@ Wichtig zur Einordnung:
   Übermittlung benötigt eine lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und
   einen passenden Runner.
 - Lohnbuchhaltung ist als technisches MVP umgesetzt; amtliche Lohnsteuer-/
-  Sozialversicherungsmeldungen, ELStAM und PAP-Berechnung sind noch nicht
-  enthalten.
+  Sozialversicherungsmeldungen, ELStAM und DEÜV sind noch nicht enthalten. Für
+  die Lohnsteuerberechnung kann ein lokaler `PAYROLL_PAP_COMMAND`-Runner
+  angebunden werden; ohne Runner nutzt das MVP manuelle Abzugsraten.
 
 ## Planung & Dokumentation
 
