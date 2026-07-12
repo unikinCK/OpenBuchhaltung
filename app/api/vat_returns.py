@@ -21,6 +21,7 @@ from app.services.vat_returns import (
     list_vat_returns,
     period_bounds,
     save_vat_return,
+    vat_return_kind_from_label,
 )
 
 
@@ -29,6 +30,18 @@ def _rows_payload(rows) -> list[dict[str, str]]:
         {"kennziffer": row.kennziffer, "label": row.label, "amount": str(row.amount)}
         for row in rows
     ]
+
+
+def _vat_return_payload(vat_return) -> dict[str, object]:
+    return {
+        "id": vat_return.id,
+        "period_label": vat_return.period_label,
+        "declaration_type": vat_return_kind_from_label(vat_return.period_label),
+        "date_from": vat_return.date_from.isoformat(),
+        "date_to": vat_return.date_to.isoformat(),
+        "status": vat_return.status,
+        "kennzahlen": vat_return.kennzahlen,
+    }
 
 
 @api_bp.get("/vat-return")
@@ -71,6 +84,9 @@ def get_vat_return():
             {
                 "company_id": company_id,
                 "period": period_label or None,
+                "declaration_type": (
+                    vat_return_kind_from_label(period_label) if period_label else "custom"
+                ),
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
                 "kennzahlen": _rows_payload(rows),
@@ -99,6 +115,9 @@ def list_vat_returns_via_api():
                         {
                             "id": item.id,
                             "period_label": item.period_label,
+                            "declaration_type": vat_return_kind_from_label(
+                                item.period_label
+                            ),
                             "date_from": item.date_from.isoformat(),
                             "date_to": item.date_to.isoformat(),
                             "status": item.status,
@@ -140,14 +159,72 @@ def create_vat_return_via_api():
             return validation_error(str(exc))
         return (
             jsonify(
-                {
-                    "id": vat_return.id,
-                    "period_label": vat_return.period_label,
-                    "date_from": vat_return.date_from.isoformat(),
-                    "date_to": vat_return.date_to.isoformat(),
-                    "status": vat_return.status,
-                    "kennzahlen": vat_return.kennzahlen,
-                }
+                _vat_return_payload(vat_return)
             ),
             201,
         )
+
+
+@api_bp.get("/vat-annual-return")
+def get_vat_annual_return():
+    company_id = request.args.get("company_id", type=int)
+    year = request.args.get("year", type=int)
+    if not company_id or not year:
+        return jsonify({"error": "company_id and year are required."}), 400
+
+    try:
+        date_from, date_to, period_label = period_bounds(str(year))
+    except VatReturnError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        rows = compute_vat_return(
+            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+        )
+
+    return (
+        jsonify(
+            {
+                "company_id": company_id,
+                "year": year,
+                "period": period_label,
+                "declaration_type": "annual",
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "kennzahlen": _rows_payload(rows),
+            }
+        ),
+        200,
+    )
+
+
+@api_bp.post("/vat-annual-returns")
+def create_vat_annual_return_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    company_id = payload.get("company_id")
+    year = payload.get("year")
+    if not company_id or not year:
+        return jsonify({"error": "company_id and year are required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, int(company_id)) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            vat_return = save_vat_return(
+                session=session,
+                company_id=int(company_id),
+                period_label=str(int(year)),
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except (TypeError, ValueError):
+            return jsonify({"error": "year must be an integer."}), 400
+        except VatReturnError as exc:
+            return validation_error(str(exc))
+        return jsonify(_vat_return_payload(vat_return)), 201

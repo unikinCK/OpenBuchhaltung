@@ -33,14 +33,18 @@ EXPECTED_TOOL_NAMES = {
     "get_vat_return",
     "list_vat_returns",
     "create_vat_return",
+    "get_vat_annual_return",
+    "create_vat_annual_return",
     "list_elster_submissions",
     "get_elster_submission_summary",
     "get_elster_submission",
     "download_elster_payload",
     "retry_elster_submission",
     "preflight_vat_return_elster",
+    "preflight_vat_annual_return_elster",
     "get_elster_readiness",
     "submit_vat_return_elster",
+    "submit_vat_annual_return_elster",
     "get_payroll_readiness",
     "create_payroll_employee",
     "list_payroll_employees",
@@ -1525,3 +1529,44 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         call_tool("list_vat_returns", {"company_id": company_id})["content"][0]["text"]
     )
     assert [item["period_label"] for item in listed["vat_returns"]] == ["2026-03"]
+
+    annual = json.loads(
+        call_tool("get_vat_annual_return", {"company_id": company_id, "year": 2026})[
+            "content"
+        ][0]["text"]
+    )
+    assert annual["period"] == "2026"
+    assert annual["declaration_type"] == "annual"
+
+    saved_annual = call_tool(
+        "create_vat_annual_return", {"company_id": company_id, "year": 2026}
+    )
+    assert saved_annual["isError"] is False
+    saved_annual_payload = json.loads(saved_annual["content"][0]["text"])
+    assert saved_annual_payload["period_label"] == "2026"
+
+    annual_preflight = call_tool(
+        "preflight_vat_annual_return_elster",
+        {
+            "vat_return_id": saved_annual_payload["id"],
+            "environment": "test",
+            "transport": "mock",
+        },
+    )
+    assert annual_preflight["isError"] is False
+    assert json.loads(annual_preflight["content"][0]["text"])["payload"][
+        "procedure"
+    ] == "ust_jahreserklaerung"
+
+    annual_submit = call_tool(
+        "submit_vat_annual_return_elster",
+        {
+            "vat_return_id": saved_annual_payload["id"],
+            "environment": "test",
+            "transport": "mock",
+        },
+    )
+    assert annual_submit["isError"] is False
+    assert json.loads(annual_submit["content"][0]["text"])[
+        "procedure"
+    ] == "ust_jahreserklaerung"

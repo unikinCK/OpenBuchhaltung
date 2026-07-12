@@ -33,6 +33,8 @@ from app.services.vat_returns import (
     list_vat_returns,
     period_bounds,
     save_vat_return,
+    vat_return_display_name,
+    vat_return_kind_from_label,
 )
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -113,6 +115,10 @@ def vat_returns_page():
                 {
                     "id": item.id,
                     "period_label": item.period_label,
+                    "declaration_display_name": vat_return_display_name(
+                        item.period_label
+                    ),
+                    "declaration_type": vat_return_kind_from_label(item.period_label),
                     "date_from": item.date_from,
                     "date_to": item.date_to,
                     "status": item.status,
@@ -131,6 +137,7 @@ def vat_returns_page():
         companies=companies,
         selected_company_id=selected_company_id,
         period_label=period_label,
+        declaration_display_name=vat_return_display_name(period_label),
         period_error=period_error,
         date_from=date_from,
         date_to=date_to,
@@ -169,7 +176,8 @@ def save_vat_return_action():
                 url_for("main.vat_returns_page", company_id=company_id, period=period_label)
             )
 
-    flash(f"UStVA {vat_return.period_label} wurde festgehalten.", "success")
+    display_name = vat_return_display_name(vat_return.period_label)
+    flash(f"{display_name} {vat_return.period_label} wurde festgehalten.", "success")
     return redirect(
         url_for("main.vat_returns_page", company_id=company_id, period=vat_return.period_label)
     )

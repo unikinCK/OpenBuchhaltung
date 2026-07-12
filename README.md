@@ -8,7 +8,8 @@ Der Fokus liegt auf der doppelten Buchführung für Kapitalgesellschaften
 (UG, GmbH, gGmbH), sauberer Mandantentrennung, prüfbaren Buchungsprozessen und
 offenen Schnittstellen. Die Anwendung verbindet klassische Buchhaltungsabläufe
 mit modernen Workflows: Belege hochladen, Buchungen erfassen, Bankumsätze
-abgleichen, Umsatzsteuer vorbereiten, Reports erzeugen und Daten per API oder
+abgleichen, Umsatzsteuer vorbereiten und per ELSTER-Bridge übergeben, Reports
+erzeugen und Daten per API oder
 MCP weiterverarbeiten.
 
 OpenBuchhaltung versteht sich als transparentes Werkzeug statt als Blackbox:
@@ -20,7 +21,8 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten, Steuercodes,
   mehrzeilige Journalbuchungen, Storno und Festschreibung.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
-  UStVA-Berechnung und festhaltbare Voranmeldungs-Snapshots.
+  UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
+  Testübermittlung und ERiC-Runner-Kante.
 - **Belege & E-Rechnung:** Uploads mit SHA-256-Hash und Versionierung,
   optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
   E-Rechnungs-Export.

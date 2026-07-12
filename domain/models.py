@@ -610,7 +610,10 @@ class ElsterSubmission(Base):
 
     __tablename__ = "elster_submission"
     __table_args__ = (
-        CheckConstraint("procedure IN ('ustva')", name="ck_elster_submission_procedure_known"),
+        CheckConstraint(
+            "procedure IN ('ustva', 'ust_jahreserklaerung')",
+            name="ck_elster_submission_procedure_known",
+        ),
         CheckConstraint(
             "environment IN ('test', 'production')",
             name="ck_elster_submission_environment_known",
