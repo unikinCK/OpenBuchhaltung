@@ -334,8 +334,8 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
 - [ ] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
       Test-/Produktionsumgebung, Mock-Transport, Transport-Adapter,
-      Readiness-Prüfung, Übermittlungsprotokolle + Audit); echte ERiC-Anbindung
-      (Bibliothek, Zertifikate) offen.
+      Readiness-Prüfung, UI-Historie, Übermittlungsprotokolle + Audit); echte
+      ERiC-Anbindung (Bibliothek, Zertifikate) offen.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung

@@ -331,6 +331,29 @@ tr.entry-lines td {
   font-size: 0.78rem;
 }
 
+.submission-history {
+  margin-top: 0.35rem;
+}
+
+.submission-history summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.submission-history-item {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--border);
+}
+
+.submission-history pre {
+  margin: 0.35rem 0 0;
+  max-width: 34rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+}
+
 /* Login page */
 .login-wrapper {
   min-height: calc(100vh - 56px);
