@@ -38,6 +38,9 @@ EXPECTED_TOOL_NAMES = {
     "upload_document",
     "link_document",
     "download_document",
+    "list_open_items",
+    "create_open_item",
+    "settle_open_item",
     "list_audit_log",
     "create_fixed_asset",
     "list_fixed_assets",
@@ -400,6 +403,76 @@ def test_document_tools_forward_arguments() -> None:
     assert http.calls[-1] == ("GET", "/documents/3/content", {}, None)
 
 
+def test_open_item_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "list_open_items",
+                "arguments": {"company_id": 7, "include_settled": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/open-items",
+        {"company_id": 7, "include_settled": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "create_open_item",
+                "arguments": {
+                    "company_id": 7,
+                    "account_id": 2,
+                    "item_type": "receivable",
+                    "reference": "RE-1",
+                    "amount": "1190.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/open-items",
+        None,
+        {
+            "company_id": 7,
+            "account_id": 2,
+            "item_type": "receivable",
+            "reference": "RE-1",
+            "amount": "1190.00",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 44,
+            "method": "tools/call",
+            "params": {
+                "name": "settle_open_item",
+                "arguments": {"open_item_id": 3, "amount": "100.00"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/open-items/3/settle",
+        None,
+        {"amount": "100.00"},
+    )
+
+
 def test_json_tool_forwards_arguments_as_body() -> None:
     http = RecordingHttp(
         ApiResponse(status=201, text='{"id": 1}', content_type="application/json", json={"id": 1})
@@ -550,6 +623,7 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
 
     for code, name, account_type in [
         ("1200", "Bank", "asset"),
+        ("1400", "Forderungen", "receivable"),
         ("8400", "Erlöse", "income"),
     ]:
         result = call_tool(
@@ -559,8 +633,8 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         assert result["isError"] is False
 
     companies = json.loads(call_tool("list_companies", {})["content"][0]["text"])
-    # Konten werden der Reihe nach angelegt, daher sind die IDs 1 (Bank) und 2 (Erlöse).
-    bank_id, revenue_id = 1, 2
+    # Konten werden der Reihe nach angelegt.
+    bank_id, receivable_id, revenue_id = 1, 2, 3
 
     entry = call_tool(
         "create_journal_entry",
@@ -620,6 +694,31 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         call_tool("download_document", {"document_id": document_id})["content"][0]["text"]
     )
     assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
+
+    open_item = call_tool(
+        "create_open_item",
+        {
+            "company_id": company_id,
+            "account_id": receivable_id,
+            "journal_entry_id": entry_id,
+            "item_type": "receivable",
+            "reference": "MCP-RE-1",
+            "counterparty": "MCP Kunde",
+            "entry_date": "2026-03-15",
+            "amount": "100.00",
+        },
+    )
+    assert open_item["isError"] is False
+    open_item_id = json.loads(open_item["content"][0]["text"])["id"]
+
+    open_items = json.loads(
+        call_tool("list_open_items", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [item["reference"] for item in open_items["open_items"]] == ["MCP-RE-1"]
+
+    settled_item = call_tool("settle_open_item", {"open_item_id": open_item_id})
+    assert settled_item["isError"] is False
+    assert json.loads(settled_item["content"][0]["text"])["status"] == "settled"
 
     # GoBD: Festschreiben und Storno über MCP.
     batch = call_tool(

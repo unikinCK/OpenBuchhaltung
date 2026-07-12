@@ -13,6 +13,7 @@ from app.api import (  # noqa: F401
     fixed_assets,
     journal,
     mcp,
+    open_items,
     reports,
     system,
     tenants,

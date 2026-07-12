@@ -257,3 +257,62 @@ def test_open_items_ui_create_and_settle(tmp_path: Path) -> None:
         item = session.get(OpenItem, 1)
         assert item.status == "settled"
         assert item.open_amount == Decimal("0.00")
+
+
+def test_open_items_api_create_list_and_settle(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "OPOS API", "company_name": "OPOS API GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "1400",
+            "name": "Forderungen",
+            "account_type": "receivable",
+        },
+    )
+
+    create_response = client.post(
+        "/api/v1/open-items",
+        json={
+            "company_id": 1,
+            "account_id": 1,
+            "item_type": "receivable",
+            "reference": "RE-API-1",
+            "counterparty": "Kunde API",
+            "entry_date": "2026-07-01",
+            "due_date": "2026-07-15",
+            "amount": "1190.00",
+        },
+    )
+    assert create_response.status_code == 201
+    item_id = create_response.get_json()["id"]
+
+    list_response = client.get("/api/v1/open-items", query_string={"company_id": 1})
+    assert list_response.status_code == 200
+    assert list_response.get_json()["open_items"][0]["reference"] == "RE-API-1"
+
+    partial_response = client.post(
+        f"/api/v1/open-items/{item_id}/settle",
+        json={"amount": "190.00"},
+    )
+    assert partial_response.status_code == 200
+    assert partial_response.get_json()["status"] == "open"
+    assert partial_response.get_json()["open_amount"] == "1000.00"
+
+    settle_response = client.post(f"/api/v1/open-items/{item_id}/settle", json={})
+    assert settle_response.status_code == 200
+    assert settle_response.get_json()["status"] == "settled"
+    assert settle_response.get_json()["open_amount"] == "0.00"
+
+    include_settled = client.get(
+        "/api/v1/open-items",
+        query_string={"company_id": 1, "include_settled": "true"},
+    )
+    assert include_settled.status_code == 200
+    assert include_settled.get_json()["open_items"][0]["status"] == "settled"
