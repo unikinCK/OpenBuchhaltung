@@ -11,6 +11,7 @@ from flask import current_app, flash, redirect, render_template, request, url_fo
 from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
+from app.services.documents import document_file_metadata
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -129,6 +130,7 @@ def receipt_ocr_suggest():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -136,6 +138,8 @@ def receipt_ocr_suggest():
             file_name=original_file_name,
             storage_key=str(target_path),
             mime_type=mime_type,
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
         )
         session.add(document)
         session.flush()

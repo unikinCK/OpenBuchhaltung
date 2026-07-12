@@ -37,6 +37,8 @@
         <thead>
           <tr>
             <th>Datei</th>
+            <th>Version</th>
+            <th>Hash</th>
             <th>Buchung</th>
             <th>Hochgeladen</th>
             <th></th>
@@ -45,7 +47,14 @@
         <tbody>
           {% for document in documents %}
             <tr>
-              <td>{{ document.file_name }}</td>
+              <td>
+                {{ document.file_name }}
+                {% if not document.is_current %}
+                  <span class="badge">ersetzt</span>
+                {% endif %}
+              </td>
+              <td>v{{ document.version_number }}</td>
+              <td><code>{{ document.file_sha256[:12] }}</code></td>
               <td>
                 <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -60,7 +69,16 @@
                 </form>
               </td>
               <td>{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
-              <td><a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a></td>
+              <td>
+                <a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a>
+                {% if document.is_current %}
+                  <form method="post" action="{{ url_for('main.replace_document', document_id=document.id) }}" enctype="multipart/form-data" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input name="document_file" type="file" required />
+                    <button type="submit">Ersetzen</button>
+                  </form>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

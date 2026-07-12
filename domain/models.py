@@ -357,11 +357,20 @@ class Document(Base):
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    replaces_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document.id", ondelete="SET NULL")
+    )
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
+    replaces_document: Mapped[Document | None] = relationship(remote_side="Document.id")
 
 
 class BankTransaction(Base):

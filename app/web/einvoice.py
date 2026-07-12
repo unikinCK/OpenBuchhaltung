@@ -19,6 +19,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
+from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
     EInvoiceExportError,
     InvoiceLine,
@@ -187,6 +188,7 @@ def einvoice_book_action():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(xml_bytes)
+        metadata = document_file_metadata(xml_bytes)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -195,6 +197,8 @@ def einvoice_book_action():
             file_name=safe_name,
             storage_key=str(target_path),
             mime_type=uploaded_file.mimetype or "application/xml",
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
         )
         session.add(document)
         session.flush()

@@ -626,6 +626,30 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="replace_document",
+        description=(
+            "Ersetzt einen aktuellen Beleg append-only durch eine neue Version. "
+            "Der alte Beleg bleibt im Versionsverlauf erhalten."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "integer", "description": "ID des aktuellen Belegs."},
+                "file_name": {"type": "string", "description": "Originaler Dateiname."},
+                "mime_type": {
+                    "type": "string",
+                    "description": "MIME-Type, z. B. application/pdf.",
+                },
+                "content_base64": {"type": "string", "description": "Dateiinhalt als Base64."},
+            },
+            "required": ["document_id", "file_name", "mime_type", "content_base64"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/documents/{document_id}/replace",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="download_document",
         description=(
             "Liefert Beleg-Metadaten plus Dateiinhalt als Base64-JSON. Für direkten "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
+from app.services.documents import document_file_metadata, verify_document_file
 from app.services.scoping import scoped_select
 from app.web.helpers import ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_DOCUMENT_MIME_TYPES
 from domain.models import Document, JournalEntry
@@ -31,6 +33,13 @@ def _document_dict(document: Document) -> dict[str, object]:
         "journal_entry_id": document.journal_entry_id,
         "file_name": document.file_name,
         "mime_type": document.mime_type,
+        "file_sha256": document.file_sha256,
+        "file_size_bytes": document.file_size_bytes,
+        "version_number": document.version_number,
+        "is_current": document.is_current,
+        "replaces_document_id": document.replaces_document_id,
+        "replaced_at": document.replaced_at.isoformat() if document.replaced_at else None,
+        "delete_protected": True,
         "uploaded_at": document.uploaded_at.isoformat(),
     }
 
@@ -166,6 +175,7 @@ def upload_document_via_api():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(content)
+        metadata = document_file_metadata(content)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -174,6 +184,8 @@ def upload_document_via_api():
             file_name=file_name,
             storage_key=str(target_path),
             mime_type=mime_type,
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
         )
         session.add(document)
         session.flush()
@@ -189,6 +201,9 @@ def upload_document_via_api():
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
                 "mime_type": document.mime_type,
+                "file_sha256": document.file_sha256,
+                "file_size_bytes": document.file_size_bytes,
+                "version_number": document.version_number,
             },
         )
         session.commit()
@@ -239,6 +254,91 @@ def link_document_via_api(document_id: int):
         return jsonify(_document_dict(document)), 200
 
 
+@api_bp.post("/documents/<int:document_id>/replace")
+def replace_document_via_api(document_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    upload, error_response, status_code = _load_upload_payload()
+    if error_response is not None:
+        return error_response, status_code
+
+    file_name = upload["file_name"]
+    if not file_name:
+        return jsonify({"error": "file_name is required."}), 400
+    mime_type = upload["mime_type"]
+    content = upload["content"]
+    validation_error = _validate_document_file(
+        file_name=file_name, mime_type=mime_type, content=content
+    )
+    if validation_error:
+        return jsonify({"error": validation_error}), 422
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        previous = session.get(Document, document_id)
+        if previous is None or api_scoped_company(session, previous.company_id) is None:
+            return jsonify({"error": "Document not found."}), 404
+        if not previous.is_current:
+            return jsonify({"error": "Only current document versions can be replaced."}), 409
+
+        unique_name = f"{uuid4().hex}_{file_name}"
+        company_dir = (
+            Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
+            / str(previous.tenant_id)
+            / str(previous.company_id)
+        )
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        target_path.write_bytes(content)
+        metadata = document_file_metadata(content)
+
+        replacement = Document(
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            journal_entry_id=previous.journal_entry_id,
+            file_name=file_name,
+            storage_key=str(target_path),
+            mime_type=mime_type,
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
+            version_number=previous.version_number + 1,
+            replaces_document_id=previous.id,
+        )
+        previous.is_current = False
+        previous.replaced_at = datetime.now(timezone.utc)
+        session.add(replacement)
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            entity_type="document",
+            entity_id=str(previous.id),
+            action="replaced",
+            changed_by=_api_changed_by(),
+            payload={
+                "replacement_document_id": replacement.id,
+                "previous_file_sha256": previous.file_sha256,
+                "replacement_file_sha256": replacement.file_sha256,
+                "previous_version_number": previous.version_number,
+                "replacement_version_number": replacement.version_number,
+            },
+        )
+        session.commit()
+        return jsonify(_document_dict(replacement)), 201
+
+
+@api_bp.delete("/documents/<int:document_id>")
+def delete_document_via_api(document_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None or api_scoped_company(session, document.company_id) is None:
+            return jsonify({"error": "Document not found."}), 404
+    return jsonify({"error": "Documents are append-only and cannot be deleted."}), 409
+
+
 @api_bp.get("/documents/<int:document_id>/download")
 def download_document_via_api(document_id: int):
     session_factory = get_session_factory()
@@ -271,6 +371,7 @@ def get_document_content_via_api(document_id: int):
             jsonify(
                 {
                     **_document_dict(document),
+                    "integrity": verify_document_file(document),
                     "content_base64": base64.b64encode(document_path.read_bytes()).decode("ascii"),
                 }
             ),

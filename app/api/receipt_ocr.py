@@ -16,6 +16,7 @@ from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
+from app.services.documents import document_file_metadata
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -140,6 +141,7 @@ def create_receipt_ocr_suggestion_via_api():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(content)
+        metadata = document_file_metadata(content)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -147,6 +149,8 @@ def create_receipt_ocr_suggestion_via_api():
             file_name=file_name,
             storage_key=str(target_path),
             mime_type=mime_type,
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
         )
         session.add(document)
         session.flush()
