@@ -246,7 +246,8 @@ UI, REST-API und MCP angeboten und gepflegt.
       (`GET /journal-entries` umgesetzt), Festschreibelauf
       (`POST /journal-entries/finalize-until` umgesetzt), Belege (Upload/Verknüpfen/
       Download/Liste umgesetzt), Beleg-OCR, E-Rechnung (Import/Export), Bank (Import/
-      Zuordnen/Buchen/Liste), Offene Posten, Anlagen (AfaA/Abgang),
+      Zuordnen/Buchen/Liste), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
+      Anlagen (AfaA/Abgang),
       Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
       WJ-Beginn) — jeweils REST-Endpoint + MCP-Tool.
 - [x] **P1.11-003 Audit-Log einsehbar machen**: UI-Seite „Audit",

@@ -522,6 +522,85 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_open_items",
+        description=(
+            "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_settled": {
+                    "type": "boolean",
+                    "description": "Auch ausgeglichene Posten einschließen.",
+                    "default": False,
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/open-items",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_open_item",
+        description="Legt einen offenen Posten (Debitor/Kreditor) an.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "account_id": {"type": "integer", "description": "OPOS-Konto-ID."},
+                "journal_entry_id": {
+                    "type": "integer",
+                    "description": "Optional verknüpfte Buchung.",
+                },
+                "item_type": {
+                    "type": "string",
+                    "enum": ["receivable", "payable"],
+                    "description": "Debitorisch oder kreditorisch.",
+                },
+                "reference": {"type": "string", "description": "Referenz/Rechnungsnummer."},
+                "counterparty": {"type": "string", "description": "Kunde/Lieferant."},
+                "entry_date": {"type": "string", "description": "Datum JJJJ-MM-TT."},
+                "due_date": {"type": "string", "description": "Fälligkeitsdatum JJJJ-MM-TT."},
+                "amount": {"type": "string", "description": "Betrag, z. B. '1190.00'."},
+            },
+            "required": ["company_id", "account_id", "item_type", "reference", "amount"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-items",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="settle_open_item",
+        description=(
+            "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
+            "volle offene Betrag verwendet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "open_item_id": {"type": "integer", "description": "ID des offenen Postens."},
+                "amount": {"type": "string", "description": "Optionaler Ausgleichsbetrag."},
+                "bank_transaction_id": {
+                    "type": "integer",
+                    "description": "Optional verknüpfter Bankumsatz.",
+                },
+                "journal_entry_id": {
+                    "type": "integer",
+                    "description": "Optional verknüpfte Ausgleichsbuchung.",
+                },
+            },
+            "required": ["open_item_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-items/{open_item_id}/settle",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_audit_log",
         description=(
             "Listet Audit-Log-Einträge im Zugriffsbereich des API-Tokens. Optional nach "
