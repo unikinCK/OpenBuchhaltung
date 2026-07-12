@@ -1,8 +1,69 @@
 # OpenBuchhaltung
-Webbasierte Open Source Buchhaltungssoftware.
 
-## Planung
+OpenBuchhaltung ist eine webbasierte Open-Source-Buchhaltung für deutsche
+Unternehmen, die ihre Finanzdaten nachvollziehbar, automatisierbar und ohne
+Blackbox verwalten möchten.
+
+Der Fokus liegt auf der doppelten Buchführung für Kapitalgesellschaften
+(UG, GmbH, gGmbH), sauberer Mandantentrennung, prüfbaren Buchungsprozessen und
+offenen Schnittstellen. Die Anwendung verbindet klassische Buchhaltungsabläufe
+mit modernen Workflows: Belege hochladen, Buchungen erfassen, Bankumsätze
+abgleichen, Umsatzsteuer vorbereiten, Reports erzeugen und Daten per API oder
+MCP weiterverarbeiten.
+
+OpenBuchhaltung versteht sich als transparentes Werkzeug statt als Blackbox:
+Teams, Entwicklerinnen, Gründer und Steuerkanzleien sollen nachvollziehen
+können, was gebucht, exportiert und protokolliert wird.
+
+## Was kann OpenBuchhaltung?
+
+- **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten, Steuercodes,
+  mehrzeilige Journalbuchungen, Storno und Festschreibung.
+- **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
+  UStVA-Berechnung und festhaltbare Voranmeldungs-Snapshots.
+- **Belege & E-Rechnung:** Uploads, optionale OCR-/LLM-Unterstützung,
+  XRechnung/ZUGFeRD-Import und E-Rechnungs-Export.
+- **Bank & OPOS:** CSV-Bankimport, Deduplizierung, Matching,
+  offene Posten und Zahlungsausgleich.
+- **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
+  außerplanmäßige Abschreibung und Anlagenabgang.
+- **Auswertungen & Exporte:** Summen-/Saldenliste, GuV, Bilanz,
+  Journalexporte und DATEV-kompatibler Buchungsstapel.
+- **Schnittstellen:** REST API mit Token-Auth, MCP-Server für agentische
+  Workflows und ein ELSTER-Bridge-Konzept über lokalen ERiC-Runner.
+- **Nachvollziehbarkeit:** Rollen, Tenant-Scoping, Audit-Log,
+  Security-Header und Migrationsstrategie für reproduzierbare Deployments.
+
+## Für wen ist das interessant?
+
+- kleine Kapitalgesellschaften, die eine nachvollziehbare eigene Buchhaltung
+  aufbauen oder verstehen möchten
+- Steuerkanzleien und Buchhaltungsteams, die offene Schnittstellen und
+  reproduzierbare Exporte brauchen
+- Entwicklerinnen und Automatisierer, die Buchhaltungsprozesse per API/MCP
+  in eigene Workflows einbinden wollen
+- Open-Source-Beitragende mit Interesse an deutscher Buchhaltung,
+  Compliance-Basisarbeit und praktischer Finanzsoftware
+
+## Projektstatus
+
+OpenBuchhaltung ist ein aktives Entwicklungsprojekt. Viele Kernflows sind
+bereits umgesetzt und automatisiert getestet, trotzdem ersetzt das Projekt noch
+keine fachliche Prüfung durch Steuerberatung oder Wirtschaftsprüfung.
+
+Wichtig zur Einordnung:
+
+- DATEV-Export ist kompatibel angelegt, aber nicht DATEV-zertifiziert.
+- GoBD-Funktionen sind als technische Basis umgesetzt, aber keine formale
+  GoBD-/IDW-PS-880-Zertifizierung.
+- ELSTER ist app-seitig vorbereitet; produktive Übermittlung benötigt eine
+  lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und einen passenden Runner.
+
+## Planung & Dokumentation
+
 - Umsetzungsplan: `docs/umsetzungsplan.md`
+- Compliance-Dokumente: `docs/compliance/`
+- Architekturentscheidungen: `docs/adr/`
 
 ## Schnellstart
 1. Virtuelle Umgebung erstellen und aktivieren
