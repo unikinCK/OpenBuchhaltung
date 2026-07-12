@@ -725,6 +725,8 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert "Übermittlungen:" in html
+    assert "ok 2" in html
     assert "2 Übermittlungen" in html
     assert "ELSTER mock transport accepted UStVA 2026-05" in html
     assert html.count("MOCK-USTVA-2026-05-") == 3
@@ -735,6 +737,75 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert download.status_code == 200
     assert download.content_type == "application/xml; charset=utf-8"
     assert b"<Period>2026-05</Period>" in download.data
+
+
+def test_elster_submission_history_filters_and_retries_failed(tmp_path: Path) -> None:
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        company = _seed(session)
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        vat_return = save_vat_return(
+            session=session,
+            company_id=company.id,
+            period_label="2026-05",
+            changed_by="pytest",
+        )
+        with pytest.raises(ElsterError, match="recorded as failed"):
+            submit_vat_return(
+                session=session,
+                vat_return_id=vat_return.id,
+                environment="production",
+                transport="eric",
+                changed_by="pytest",
+                config={},
+            )
+        company_id = company.id
+        failed_submission_id = list_elster_submissions(
+            session=session, company_id=company.id
+        )[0].id
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    response = client.get(
+        "/ustva",
+        query_string={
+            "company_id": company_id,
+            "elster_status": "failed",
+            "elster_transport": "eric",
+            "elster_environment": "production",
+        },
+    )
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "fehlgeschlagen 1" in html
+    assert "failed" in html
+    assert "Retry" in html
+    assert "production" in html
+    assert "eric" in html
+
+    retry = client.post(
+        f"/ustva/elster-submissions/{failed_submission_id}/retry",
+        follow_redirects=False,
+    )
+    assert retry.status_code == 302
+
+    with app.extensions["db_session_factory"]() as session:
+        failed_submissions = list_elster_submissions(
+            session=session,
+            company_id=company_id,
+            status="failed",
+            transport="eric",
+            environment="production",
+        )
+        assert len(failed_submissions) == 2
 
 
 def test_elster_readiness_api(tmp_path: Path) -> None:
