@@ -191,6 +191,26 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Routen und Endpoints sind unverändert — Templates und API-Clients sind
       nicht betroffen. Rein mechanisches Refactoring ohne Verhaltensänderung.
 
+## Phase 1.9 – GoBD-Härtung / Sprint S (Stand 2026-07-12)
+
+- [x] **P1.9-001 Festschreibung & Storno (GoBD)**: `JournalEntry` um
+      `is_finalized`/`finalized_at`/`finalized_by` und `reversal_of_id`
+      (Migration 0010) erweitert. Festschreiben einzeln oder als
+      Festschreibelauf („alle Buchungen bis Datum", Service
+      `finalize_journal_entries_until`); doppeltes Festschreiben wird
+      abgewiesen. Storno ausschließlich über Gegenbuchung
+      (`reverse_journal_entry`): Original bleibt unverändert, die Stornobuchung
+      spiegelt alle Zeilen (Soll/Haben getauscht, keine erneute
+      Steuer-Auto-Expansion), trägt `source="storno"`, verweist auf das
+      Original (unique — kein Doppelstorno) und wird sofort festgeschrieben;
+      Storno von Stornobuchungen ist verboten, Periodensperren gelten auch für
+      das Stornodatum. UI: Status-/Aktionsspalte im Journal (🔒 festgeschrieben,
+      „Storno zu …"/„storniert durch …", Buttons Festschreiben/Stornieren,
+      Festschreibelauf-Formular). API: `POST /journal-entries/<id>/finalize`
+      und `/reverse`. DATEV-Export setzt das Festschreibekennzeichen im
+      EXTF-Header auf 1, wenn alle Buchungen des Stapels festgeschrieben sind.
+      Audit-Events `finalized`/`reversed` für alle Aktionen.
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
       Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],

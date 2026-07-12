@@ -127,6 +127,17 @@
 
   <section class="card">
     <h2>Journal</h2>
+
+    {% if selected_company_id and journal_entries %}
+      <form method="post" action="{{ url_for('main.finalize_journal_entries_action') }}" class="inline-form" style="margin-bottom: 1rem;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="up_to_date">Festschreibelauf bis einschließlich</label>
+        <input id="up_to_date" name="up_to_date" type="date" value="{{ today }}" required style="width:auto;" />
+        <button type="submit" onclick="return confirm('Alle Buchungen bis zu diesem Datum unwiderruflich festschreiben?');">Festschreiben</button>
+      </form>
+    {% endif %}
+
     {% if journal_entries %}
       <table>
         <thead>
@@ -137,6 +148,8 @@
             <th>Konto</th>
             <th class="num">Soll</th>
             <th class="num">Haben</th>
+            <th>Status</th>
+            <th>Aktionen</th>
           </tr>
         </thead>
         <tbody>
@@ -146,6 +159,28 @@
               <td>{{ entry.entry_date.isoformat() }}</td>
               <td>{{ entry.description }}</td>
               <td colspan="3"></td>
+              <td>
+                {% if entry.is_finalized %}<span title="Festgeschrieben">🔒 festgeschrieben</span>{% else %}<span class="muted">offen</span>{% endif %}
+                {% if entry.reversal_of_id %}<br /><span class="muted">Storno zu {{ posting_number_by_id.get(entry.reversal_of_id, "?") }}</span>{% endif %}
+                {% if reversed_by_entry.get(entry.id) %}<br /><span class="muted">storniert durch {{ reversed_by_entry.get(entry.id) }}</span>{% endif %}
+              </td>
+              <td>
+                {% if not entry.is_finalized %}
+                  <form method="post" action="{{ url_for('main.finalize_journal_entry_action', journal_entry_id=entry.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <button type="submit" class="secondary">Festschreiben</button>
+                  </form>
+                {% endif %}
+                {% if not entry.reversal_of_id and not reversed_by_entry.get(entry.id) %}
+                  <form method="post" action="{{ url_for('main.reverse_journal_entry_action', journal_entry_id=entry.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <input type="hidden" name="reversal_date" value="{{ today }}" />
+                    <button type="submit" class="secondary" onclick="return confirm('Buchung {{ entry.posting_number }} per Gegenbuchung stornieren?');">Stornieren</button>
+                  </form>
+                {% endif %}
+              </td>
             </tr>
             {% for line in lines_by_entry.get(entry.id, []) %}
               <tr class="entry-lines">
@@ -155,6 +190,7 @@
                 <td>{{ line.account_code }} – {{ line.account_name }}</td>
                 <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount }}{% endif %}</td>
                 <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount }}{% endif %}</td>
+                <td colspan="2"></td>
               </tr>
             {% endfor %}
           {% endfor %}

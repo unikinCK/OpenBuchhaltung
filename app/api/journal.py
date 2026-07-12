@@ -15,13 +15,17 @@ from app.api.helpers import (
     get_session_factory,
     validation_error,
 )
+from app.auth import current_api_user
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    finalize_journal_entry,
     parse_decimal,
+    reverse_journal_entry,
 )
+from domain.models import JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -135,3 +139,81 @@ def create_journal_entry_via_api():
         ),
         201,
     )
+
+
+def _api_changed_by() -> str:
+    return (current_api_user() or {}).get("username", "api")
+
+
+@api_bp.post("/journal-entries/<int:journal_entry_id>/finalize")
+def finalize_journal_entry_via_api(journal_entry_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = session.get(JournalEntry, journal_entry_id)
+        if entry is None or api_scoped_company(session, entry.company_id) is None:
+            return jsonify({"error": "Journal entry not found."}), 404
+        try:
+            entry = finalize_journal_entry(
+                session=session,
+                journal_entry_id=journal_entry_id,
+                changed_by=_api_changed_by(),
+            )
+        except JournalEntryCreationError as exc:
+            return validation_error(str(exc))
+        return (
+            jsonify(
+                {
+                    "id": entry.id,
+                    "posting_number": entry.posting_number,
+                    "is_finalized": entry.is_finalized,
+                    "finalized_at": entry.finalized_at.isoformat(),
+                    "finalized_by": entry.finalized_by,
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.post("/journal-entries/<int:journal_entry_id>/reverse")
+def reverse_journal_entry_via_api(journal_entry_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    reversal_date_raw = (payload.get("reversal_date") or "").strip()
+    try:
+        reversal_date = (
+            date.fromisoformat(reversal_date_raw) if reversal_date_raw else date.today()
+        )
+    except ValueError:
+        return jsonify({"error": "reversal_date must be an ISO date (YYYY-MM-DD)."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = session.get(JournalEntry, journal_entry_id)
+        if entry is None or api_scoped_company(session, entry.company_id) is None:
+            return jsonify({"error": "Journal entry not found."}), 404
+        try:
+            reversal = reverse_journal_entry(
+                session=session,
+                journal_entry_id=journal_entry_id,
+                reversal_date=reversal_date,
+                changed_by=_api_changed_by(),
+            )
+        except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+            return validation_error(str(exc))
+        return (
+            jsonify(
+                {
+                    "id": reversal.id,
+                    "posting_number": reversal.posting_number,
+                    "reversal_of_id": reversal.reversal_of_id,
+                    "entry_date": reversal.entry_date.isoformat(),
+                    "is_finalized": reversal.is_finalized,
+                }
+            ),
+            201,
+        )

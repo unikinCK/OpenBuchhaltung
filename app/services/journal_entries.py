@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import func, select
@@ -53,6 +53,10 @@ class JournalEntryInput:
     changed_by: str = "system"
     # Buchung in die Abschlussperiode (Periode 13) statt in die datumsbezogene Monatsperiode.
     post_to_closing_period: bool = False
+    # Herkunft der Buchung (z. B. "manual", "storno").
+    source: str = "manual"
+    # Gesetzt auf Stornobuchungen: ID der stornierten Originalbuchung.
+    reversal_of_id: int | None = None
 
 
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
@@ -204,7 +208,8 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         posting_number=posting_number,
         entry_date=payload.entry_date,
         description=payload.description,
-        source="manual",
+        source=payload.source,
+        reversal_of_id=payload.reversal_of_id,
     )
     session.add(entry)
     session.flush()
@@ -587,3 +592,177 @@ def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
     locked = session.execute(select(PeriodLock.id).where(PeriodLock.period_id == period_id)).first()
     if locked:
         raise JournalEntryCreationError("Die Periode ist gesperrt. Buchung nicht möglich.")
+
+
+def finalize_journal_entry(
+    *,
+    session: Session,
+    journal_entry_id: int,
+    changed_by: str,
+) -> JournalEntry:
+    """Schreibt eine Buchung fest (GoBD): danach ist sie unveränderbar.
+
+    Korrekturen an festgeschriebenen Buchungen sind nur noch über
+    ``reverse_journal_entry`` (Stornobuchung) möglich.
+    """
+    entry = session.get(JournalEntry, journal_entry_id)
+    if entry is None:
+        raise JournalEntryCreationError("Buchung nicht gefunden.")
+    if entry.is_finalized:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} ist bereits festgeschrieben."
+        )
+
+    entry.is_finalized = True
+    entry.finalized_at = datetime.now(timezone.utc)
+    entry.finalized_by = changed_by
+
+    log_audit_event(
+        session=session,
+        tenant_id=entry.tenant_id,
+        company_id=entry.company_id,
+        entity_type="journal_entry",
+        entity_id=str(entry.id),
+        action="finalized",
+        changed_by=changed_by,
+        payload={"posting_number": entry.posting_number},
+    )
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def finalize_journal_entries_until(
+    *,
+    session: Session,
+    company_id: int,
+    up_to_date: date,
+    changed_by: str,
+) -> int:
+    """Festschreibelauf: schreibt alle offenen Buchungen bis einschließlich Datum fest.
+
+    Gibt die Anzahl der festgeschriebenen Buchungen zurück.
+    """
+    entries = (
+        session.execute(
+            select(JournalEntry)
+            .where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.is_finalized.is_(False),
+                JournalEntry.entry_date <= up_to_date,
+            )
+            .order_by(JournalEntry.entry_date, JournalEntry.id)
+        )
+        .scalars()
+        .all()
+    )
+    if not entries:
+        return 0
+
+    finalized_at = datetime.now(timezone.utc)
+    for entry in entries:
+        entry.is_finalized = True
+        entry.finalized_at = finalized_at
+        entry.finalized_by = changed_by
+        log_audit_event(
+            session=session,
+            tenant_id=entry.tenant_id,
+            company_id=entry.company_id,
+            entity_type="journal_entry",
+            entity_id=str(entry.id),
+            action="finalized",
+            changed_by=changed_by,
+            payload={
+                "posting_number": entry.posting_number,
+                "bulk_up_to_date": up_to_date.isoformat(),
+            },
+        )
+    session.commit()
+    return len(entries)
+
+
+def reverse_journal_entry(
+    *,
+    session: Session,
+    journal_entry_id: int,
+    reversal_date: date,
+    changed_by: str,
+) -> JournalEntry:
+    """Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip).
+
+    Die Originalbuchung bleibt unverändert; die Stornobuchung spiegelt alle
+    Zeilen (Soll/Haben vertauscht) und verweist über ``reversal_of_id`` auf das
+    Original. Die Stornobuchung wird sofort festgeschrieben.
+    """
+    original = session.get(JournalEntry, journal_entry_id)
+    if original is None:
+        raise JournalEntryCreationError("Buchung nicht gefunden.")
+    if original.reversal_of_id is not None:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
+            "und kann nicht storniert werden."
+        )
+    already_reversed = session.execute(
+        select(JournalEntry.posting_number).where(
+            JournalEntry.reversal_of_id == original.id
+        )
+    ).first()
+    if already_reversed:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} wurde bereits storniert "
+            f"({already_reversed.posting_number})."
+        )
+
+    original_period = session.get(Period, original.period_id)
+
+    # Zeilen gespiegelt übernehmen. Kein tax_code_id auf den Stornozeilen:
+    # die Steuerzeilen des Originals sind bereits enthalten und würden sonst
+    # über die Auto-Expansion doppelt erzeugt.
+    mirrored_lines = [
+        JournalLineInput(
+            account_id=line.account_id,
+            debit_amount=line.credit_amount,
+            credit_amount=line.debit_amount,
+            description=line.description,
+        )
+        for line in sorted(original.lines, key=lambda line: line.line_number)
+    ]
+
+    reversal = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=original.company_id,
+            entry_date=reversal_date,
+            description=f"Storno {original.posting_number}: {original.description}",
+            status="posted",
+            changed_by=changed_by,
+            lines=mirrored_lines,
+            post_to_closing_period=bool(original_period and original_period.is_closing),
+            source="storno",
+            reversal_of_id=original.id,
+        ),
+    )
+
+    # Stornobuchungen sind Korrekturbelege und werden sofort festgeschrieben.
+    reversal.is_finalized = True
+    reversal.finalized_at = datetime.now(timezone.utc)
+    reversal.finalized_by = changed_by
+
+    log_audit_event(
+        session=session,
+        tenant_id=original.tenant_id,
+        company_id=original.company_id,
+        entity_type="journal_entry",
+        entity_id=str(original.id),
+        action="reversed",
+        changed_by=changed_by,
+        payload={
+            "posting_number": original.posting_number,
+            "reversal_posting_number": reversal.posting_number,
+            "reversal_entry_id": reversal.id,
+            "reversal_date": reversal_date.isoformat(),
+        },
+    )
+    session.commit()
+    session.refresh(reversal)
+    return reversal

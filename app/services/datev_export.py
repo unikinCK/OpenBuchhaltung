@@ -87,6 +87,7 @@ def _header_row(
     fiscal_year_start: date,
     date_from: date | None,
     date_to: date | None,
+    finalized: bool,
 ) -> str:
     fields = [
         _quote("EXTF"),
@@ -109,7 +110,8 @@ def _header_row(
         "",  # Diktatkürzel
         "1",  # Buchungstyp: 1 = Finanzbuchführung
         "0",  # Rechnungslegungszweck
-        "0",  # Festschreibung: 0 = nicht festgeschrieben
+        # Festschreibung: 1, wenn alle Buchungen des Stapels festgeschrieben sind.
+        "1" if finalized else "0",
         _quote("EUR"),
     ]
     return ";".join(fields)
@@ -195,6 +197,7 @@ def build_datev_export(
             fiscal_year_start=fiscal_year_start,
             date_from=min(dates) if dates else None,
             date_to=max(dates) if dates else None,
+            finalized=bool(entries) and all(entry.is_finalized for entry in entries),
         )
     )
     buffer.write("\r\n")
