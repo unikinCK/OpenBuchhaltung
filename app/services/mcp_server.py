@@ -1112,6 +1112,17 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_elster_submission_summary",
+        description=(
+            "Zählt ELSTER-Übermittlungen einer Gesellschaft nach Status, "
+            "Transport und Umgebung."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/elster/submissions/summary",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_elster_submission",
         description=(
             "Ruft eine einzelne ELSTER-Übermittlung inklusive XML-Nutzlast und "

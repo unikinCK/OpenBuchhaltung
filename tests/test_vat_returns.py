@@ -17,6 +17,7 @@ from app.services.elster import (
     EricElsterTransport,
     MockElsterTransport,
     elster_readiness,
+    elster_submission_summary,
     list_elster_submissions,
     submit_vat_return,
 )
@@ -561,6 +562,12 @@ def test_elster_failed_submission_is_recorded(session: Session) -> None:
         )
         == []
     )
+    summary = elster_submission_summary(session=session, company_id=company.id)
+    assert summary["total"] == 1
+    assert summary["by_status"]["failed"] == 1
+    assert summary["by_transport"]["eric"] == 1
+    assert summary["by_environment"]["production"] == 1
+    assert summary["latest"]["id"] == failed.id
 
     audit_actions = {
         item.action
@@ -642,6 +649,18 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     )
     assert filtered.status_code == 200
     assert [item["id"] for item in filtered.get_json()["submissions"]] == [payload["id"]]
+
+    summary_response = client.get(
+        "/api/v1/elster/submissions/summary",
+        query_string={"company_id": payload["company_id"]},
+    )
+    assert summary_response.status_code == 200
+    summary = summary_response.get_json()
+    assert summary["total"] == 1
+    assert summary["by_status"]["transmitted"] == 1
+    assert summary["by_transport"]["mock"] == 1
+    assert summary["by_environment"]["test"] == 1
+    assert summary["latest"]["id"] == payload["id"]
 
     invalid_filter = client.get(
         "/api/v1/elster/submissions",
