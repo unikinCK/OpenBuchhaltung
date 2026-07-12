@@ -223,7 +223,9 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       (Zahllast/Überschuss, centgenau aus der Buchhaltung); Stornos
       neutralisieren sich automatisch (Stornozeilen behalten den Steuercode,
       `expand_tax_lines=False` verhindert doppelte Steuer-Expansion).
-      Voranmeldungszeiträume Monat ("JJJJ-MM") und Quartal ("JJJJ-Qn").
+      Meldezeiträume Monat ("JJJJ-MM"), Quartal ("JJJJ-Qn"), Halbjahr
+      ("JJJJ-Hn") und Jahr ("JJJJ") — wiederverwendbar für weitere
+      Steuerarten (ELSTER, Phase 3.5).
       `VatReturn`-Modell (Migration 0011) hält Voranmeldungen als
       unveränderlichen Kennziffern-Snapshot fest (unique je Gesellschaft und
       Zeitraum, Status erstellt/uebermittelt, Audit-Event). UI-Seite „UStVA"

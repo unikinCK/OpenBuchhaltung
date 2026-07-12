@@ -35,8 +35,8 @@ def _rows_payload(rows) -> list[dict[str, str]]:
 def get_vat_return():
     """Berechnet die UStVA-Kennziffern für einen Zeitraum (ohne zu speichern).
 
-    Zeitraum entweder als ``period`` (JJJJ-MM oder JJJJ-Qn) oder als
-    ``date_from``/``date_to``.
+    Zeitraum entweder als ``period`` (JJJJ-MM, JJJJ-Qn, JJJJ-Hn oder JJJJ)
+    oder als ``date_from``/``date_to``.
     """
     company_id = request.args.get("company_id", type=int)
     if not company_id:
