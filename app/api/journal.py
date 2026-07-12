@@ -25,6 +25,7 @@ from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    finalize_journal_entries_until,
     finalize_journal_entry,
     parse_decimal,
     reverse_journal_entry,
@@ -250,6 +251,43 @@ def create_journal_entry_via_api():
 
 def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
+
+
+@api_bp.post("/journal-entries/finalize-until")
+def finalize_journal_entries_until_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        up_to_date = date.fromisoformat(payload.get("up_to_date"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id and valid up_to_date are required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            count = finalize_journal_entries_until(
+                session=session,
+                company_id=company_id,
+                up_to_date=up_to_date,
+                changed_by=_api_changed_by(),
+            )
+        except JournalEntryCreationError as exc:
+            return validation_error(str(exc))
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "up_to_date": up_to_date.isoformat(),
+                    "finalized_count": count,
+                }
+            ),
+            200,
+        )
 
 
 @api_bp.post("/journal-entries/<int:journal_entry_id>/finalize")
