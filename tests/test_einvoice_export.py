@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -151,3 +152,40 @@ def test_export_endpoint_rejects_missing_fields(tmp_path):
     )
     assert response.status_code == 200
     assert b"Pflichtfelder" in response.data
+
+
+def test_einvoice_api_export_returns_base64_xml(tmp_path):
+    app = _ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "M", "company_name": "M GmbH"})
+
+    response = client.post(
+        "/api/v1/einvoices/export",
+        json={
+            "company_id": 1,
+            "syntax": "ubl",
+            "invoice_number": "AR-2026-0008",
+            "issue_date": "2026-07-06",
+            "buyer_name": "Kunde AG",
+            "buyer_city": "Köln",
+            "lines": [
+                {
+                    "name": "Beratung",
+                    "quantity": "2",
+                    "unit_price": "150.00",
+                    "tax_rate": "19",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["file_name"] == "XRechnung_ubl_AR-2026-0008.xml"
+    assert payload["totals"]["grand_total"] == "357.00"
+
+    xml = base64.b64decode(payload["content_base64"])
+    parsed = parse_einvoice(xml)
+    assert parsed.invoice_number == "AR-2026-0008"
+    assert parsed.seller_name == "M GmbH"
+    assert parsed.net_total == Decimal("300.00")

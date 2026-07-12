@@ -9,6 +9,7 @@ from app.api import (  # noqa: F401
     accounts,
     audit_log,
     documents,
+    einvoice,
     exports,
     fixed_assets,
     journal,

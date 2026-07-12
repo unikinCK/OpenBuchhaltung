@@ -576,6 +576,79 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="import_einvoice",
+        description=(
+            "Importiert eine E-Rechnung (XRechnung/ZUGFeRD XML), bucht sie und "
+            "speichert das XML als Beleg."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "expense_account_id": {"type": "integer", "description": "Aufwandskonto."},
+                "creditor_account_id": {"type": "integer", "description": "Kreditorenkonto."},
+                "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
+                "file_name": {"type": "string", "description": "Originaler XML-Dateiname."},
+                "mime_type": {
+                    "type": "string",
+                    "description": "MIME-Type, z. B. application/xml.",
+                },
+                "content_base64": {"type": "string", "description": "XML-Inhalt als Base64."},
+            },
+            "required": [
+                "company_id",
+                "expense_account_id",
+                "creditor_account_id",
+                "file_name",
+                "content_base64",
+            ],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/einvoices/import",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="export_einvoice",
+        description="Erzeugt eine E-Rechnung als XML und liefert sie als Base64-JSON zurück.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "syntax": {"type": "string", "description": "ubl oder cii."},
+                "invoice_number": {"type": "string", "description": "Rechnungsnummer."},
+                "issue_date": {"type": "string", "description": "Rechnungsdatum JJJJ-MM-TT."},
+                "buyer_name": {"type": "string", "description": "Name des Käufers."},
+                "buyer_street": {"type": "string", "description": "Straße des Käufers."},
+                "buyer_postal_code": {"type": "string", "description": "PLZ des Käufers."},
+                "buyer_city": {"type": "string", "description": "Ort des Käufers."},
+                "buyer_country_code": {"type": "string", "description": "Land, z. B. DE."},
+                "buyer_vat_id": {"type": "string", "description": "USt-IdNr. des Käufers."},
+                "buyer_reference": {"type": "string", "description": "Leitweg-ID optional."},
+                "lines": {
+                    "type": "array",
+                    "description": "Rechnungspositionen.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "quantity": {"type": "string"},
+                            "unit_price": {"type": "string"},
+                            "tax_rate": {"type": "string"},
+                        },
+                        "required": ["name", "quantity", "unit_price"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["company_id", "invoice_number", "issue_date", "buyer_name", "lines"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/einvoices/export",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."
