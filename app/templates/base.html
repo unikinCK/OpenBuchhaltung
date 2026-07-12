@@ -35,6 +35,8 @@
              {% if request.endpoint == 'main.vat_returns_page' %}class="active"{% endif %}>UStVA</a>
           <a href="{{ url_for('main.periods_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.periods_page' %}class="active"{% endif %}>Perioden</a>
+          <a href="{{ url_for('main.audit_log_page') }}"
+             {% if request.endpoint == 'main.audit_log_page' %}class="active"{% endif %}>Audit</a>
           <a href="{{ url_for('main.admin_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.admin_page' %}class="active"{% endif %}>Verwaltung</a>
         </nav>

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Audit-Log – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Audit-Log</h1>
+
+  <section class="card">
+    <form method="get" action="{{ url_for('main.audit_log_page') }}" class="inline-form">
+      <label for="audit-company">Gesellschaft</label>
+      <select id="audit-company" name="company_id">
+        <option value="">Alle</option>
+        {% for company in companies %}
+          <option value="{{ company.id }}" {% if company.id == company_filter_id %}selected{% endif %}>{{ company.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="entity_type">Objekt</label>
+      <input id="entity_type" name="entity_type" value="{{ entity_type }}" placeholder="journal_entry" />
+
+      <label for="action">Aktion</label>
+      <input id="action" name="action" value="{{ action }}" placeholder="created" />
+
+      <label for="limit">Limit</label>
+      <input id="limit" name="limit" type="number" min="1" max="500" value="{{ limit }}" />
+
+      <button type="submit">Filtern</button>
+    </form>
+  </section>
+
+  <section class="card">
+    {% if entries %}
+      <table>
+        <thead>
+          <tr>
+            <th>Zeitpunkt</th>
+            <th>Gesellschaft</th>
+            <th>Objekt</th>
+            <th>ID</th>
+            <th>Aktion</th>
+            <th>Benutzer</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td>{{ entry.changed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ entry.company_id or "–" }}</td>
+              <td>{{ entry.entity_type }}</td>
+              <td>{{ entry.entity_id }}</td>
+              <td><span class="badge">{{ entry.action }}</span></td>
+              <td>{{ entry.changed_by }}</td>
+              <td>
+                {% if entry.payload %}
+                  <code>{{ entry.payload }}</code>
+                {% else %}
+                  <span class="muted">–</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Keine Audit-Log-Einträge gefunden.</p>
+    {% endif %}
+  </section>
+{% endblock %}
