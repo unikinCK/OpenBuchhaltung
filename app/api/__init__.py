@@ -12,6 +12,7 @@ from app.api import (  # noqa: F401
     bank,
     documents,
     einvoice,
+    elster,
     exports,
     fixed_assets,
     journal,

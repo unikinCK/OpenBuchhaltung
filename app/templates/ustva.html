@@ -88,7 +88,9 @@
               <th>Bis</th>
               <th>Status</th>
               <th class="num">Kz 83</th>
+              <th>ELSTER</th>
               <th>Festgehalten</th>
+              <th>Aktion</th>
             </tr>
           </thead>
           <tbody>
@@ -101,7 +103,21 @@
                 <td class="num">
                   {% for kz in item.kennzahlen %}{% if kz.kennziffer == "83" %}{{ kz.amount }}{% endif %}{% endfor %}
                 </td>
+                <td>
+                  {% if item.latest_elster_submission %}
+                    <span class="badge">{{ item.latest_elster_submission.environment }}</span>
+                    {{ item.latest_elster_submission.transfer_ticket }}
+                  {% else %}
+                    <span class="muted">nicht übermittelt</span>
+                  {% endif %}
+                </td>
                 <td>{{ item.created_at.strftime("%Y-%m-%d %H:%M") }} ({{ item.created_by }})</td>
+                <td>
+                  <form method="post" action="{{ url_for('main.submit_vat_return_elster_test_action', vat_return_id=item.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit">ELSTER-Test</button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
           </tbody>

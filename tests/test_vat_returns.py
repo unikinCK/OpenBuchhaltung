@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
+from app import create_app
+from app.auth import hash_password
+from app.services.elster import ElsterError, list_elster_submissions, submit_vat_return
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -22,7 +26,7 @@ from app.services.vat_returns import (
     period_bounds,
     save_vat_return,
 )
-from domain.models import Account, AuditLog, Base, Company, TaxCode, Tenant
+from domain.models import Account, AuditLog, Base, Company, TaxCode, Tenant, User, VatReturn
 
 
 @pytest.fixture()
@@ -109,6 +113,15 @@ def _seed(session: Session) -> Company:
     )
     session.commit()
     return company
+
+
+def _create_test_app(tmp_path: Path):
+    return create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_elster.db'}",
+        }
+    )
 
 
 def _account_id(session: Session, company: Company, code: str) -> int:
@@ -429,3 +442,88 @@ def test_save_vat_return_half_year_and_year_snapshots(session: Session) -> None:
         save_vat_return(
             session=session, company_id=company.id, period_label="2026-H1", changed_by="pytest"
         )
+
+
+def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026-05", changed_by="pytest"
+    )
+
+    submission = submit_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        changed_by="pytest",
+    )
+    assert submission.status == "transmitted"
+    assert submission.transfer_ticket.startswith("MOCK-USTVA-2026-05-")
+    assert len(submission.payload_hash) == 64
+    assert "<Period>2026-05</Period>" in submission.payload_xml
+    assert session.get(VatReturn, vat_return.id).status == "uebermittelt"
+
+    submissions = list_elster_submissions(session=session, company_id=company.id)
+    assert [item.id for item in submissions] == [submission.id]
+    audit_actions = {
+        audit.action
+        for audit in session.execute(select(AuditLog).where(AuditLog.company_id == company.id))
+        .scalars()
+        .all()
+    }
+    assert {"transmitted", "elster_transmitted"}.issubset(audit_actions)
+
+
+def test_elster_mock_rejects_production(session: Session) -> None:
+    company = _seed(session)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026-05", changed_by="pytest"
+    )
+
+    with pytest.raises(ElsterError, match="test environment"):
+        submit_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="production",
+            transport="mock",
+            changed_by="pytest",
+        )
+
+
+def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        company = _seed(session)
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        vat_return = save_vat_return(
+            session=session,
+            company_id=company.id,
+            period_label="2026-05",
+            changed_by="pytest",
+        )
+        vat_return_id = vat_return.id
+
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/elster/ustva/submit",
+        json={"vat_return_id": vat_return_id, "environment": "test", "transport": "mock"},
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["status"] == "transmitted"
+    assert payload["transfer_ticket"].startswith("MOCK-USTVA-2026-05-")
+
+    listed = client.get(
+        "/api/v1/elster/submissions",
+        query_string={"company_id": payload["company_id"], "vat_return_id": vat_return_id},
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.get_json()["submissions"]] == [payload["id"]]

@@ -33,6 +33,8 @@ EXPECTED_TOOL_NAMES = {
     "get_vat_return",
     "list_vat_returns",
     "create_vat_return",
+    "list_elster_submissions",
+    "submit_vat_return_elster",
     "get_trial_balance",
     "get_income_statement",
     "get_balance_sheet",
@@ -407,6 +409,50 @@ def test_vat_return_tools_forward_arguments() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/vat-returns", {"company_id": 7}, None)
+
+
+def test_elster_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 321,
+            "method": "tools/call",
+            "params": {
+                "name": "list_elster_submissions",
+                "arguments": {"company_id": 7, "vat_return_id": 8},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/elster/submissions",
+        {"company_id": 7, "vat_return_id": 8},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 322,
+            "method": "tools/call",
+            "params": {
+                "name": "submit_vat_return_elster",
+                "arguments": {
+                    "vat_return_id": 8,
+                    "environment": "test",
+                    "transport": "mock",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/elster/ustva/submit",
+        None,
+        {"vat_return_id": 8, "environment": "test", "transport": "mock"},
+    )
 
 
 def test_income_statement_forwards_date_range_as_query() -> None:
