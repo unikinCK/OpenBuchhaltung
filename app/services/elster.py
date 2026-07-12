@@ -266,6 +266,11 @@ def elster_payload_filename(submission: ElsterSubmission) -> str:
     return f"elster-{submission.procedure}-{period_label}-{submission.id}.xml"
 
 
+def elster_payload_hash_matches(submission: ElsterSubmission) -> bool:
+    payload_hash = hashlib.sha256(submission.payload_xml.encode("utf-8")).hexdigest()
+    return payload_hash == submission.payload_hash
+
+
 def _transport_adapter(
     *, transport: str, certificate_alias: str | None, config: Mapping[str, object]
 ) -> ElsterTransport:

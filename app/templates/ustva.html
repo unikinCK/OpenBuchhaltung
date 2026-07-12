@@ -131,6 +131,7 @@
                         <div class="submission-history-item">
                           <strong>{{ submission.created_at.strftime("%Y-%m-%d %H:%M") }}</strong>
                           <span class="badge">{{ submission.status }}</span>
+                          <span class="badge">{{ "Hash ok" if submission.payload_hash_valid else "Hash abweichend" }}</span>
                           <div class="muted">
                             {{ submission.transport }} · {{ submission.procedure }} · Hash {{ submission.payload_hash[:12] }}
                           </div>

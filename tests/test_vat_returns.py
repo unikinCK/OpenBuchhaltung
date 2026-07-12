@@ -566,6 +566,7 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     payload = response.get_json()
     assert payload["status"] == "transmitted"
     assert payload["transfer_ticket"].startswith("MOCK-USTVA-2026-05-")
+    assert payload["payload_hash_valid"] is True
 
     listed = client.get(
         "/api/v1/elster/submissions",
@@ -579,6 +580,7 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     detail_payload = detail.get_json()
     assert detail_payload["id"] == payload["id"]
     assert detail_payload["payload_hash"] == payload["payload_hash"]
+    assert detail_payload["payload_hash_valid"] is True
     assert "<Period>2026-05</Period>" in detail_payload["payload_xml"]
 
     payload_download = client.get(f"/api/v1/elster/submissions/{payload['id']}/payload.xml")
@@ -632,6 +634,7 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert "2 Übermittlungen" in html
     assert "ELSTER mock transport accepted UStVA 2026-05" in html
     assert html.count("MOCK-USTVA-2026-05-") == 3
+    assert "Hash ok" in html
     assert "Payload-XML" in html
 
     download = client.get(f"/ustva/elster-submissions/{submission_id}/payload.xml")
