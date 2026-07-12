@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -11,7 +12,7 @@ from sqlalchemy import select
 from app import create_app
 from app.auth import hash_password
 from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
-from domain.models import Account, Document, JournalEntry, JournalEntryLine, User
+from domain.models import Account, AuditLog, Document, JournalEntry, JournalEntryLine, User
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "data" / "demo"
 
@@ -183,3 +184,47 @@ def test_einvoice_upload_rejects_broken_xml(tmp_path):
     assert "konnte nicht gelesen".encode() in response.data
     with app.extensions["db_session_factory"]() as session:
         assert session.execute(select(JournalEntry)).first() is None
+
+
+def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    _setup_company(client)
+
+    with app.extensions["db_session_factory"]() as session:
+        expense_id = session.execute(select(Account.id).where(Account.code == "4200")).scalar_one()
+        creditor_id = session.execute(
+            select(Account.id).where(Account.code == "1600")
+        ).scalar_one()
+        from domain.models import TaxCode
+
+        tax_code_id = session.execute(select(TaxCode.id)).scalar_one()
+
+    xml_bytes = (DEMO_DIR / "erechnung_cii.xml").read_bytes()
+    response = client.post(
+        "/api/v1/einvoices/import",
+        json={
+            "company_id": 1,
+            "expense_account_id": expense_id,
+            "creditor_account_id": creditor_id,
+            "tax_code_id": tax_code_id,
+            "file_name": "rechnung.xml",
+            "mime_type": "application/xml",
+            "content_base64": base64.b64encode(xml_bytes).decode("ascii"),
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["invoice"]["invoice_number"] == "RE-2026-0815"
+    assert payload["invoice"]["grand_total"] == "1190.00"
+
+    with app.extensions["db_session_factory"]() as session:
+        entry = session.execute(select(JournalEntry)).scalar_one()
+        document = session.execute(select(Document)).scalar_one()
+        assert payload["journal_entry_id"] == entry.id
+        assert payload["document_id"] == document.id
+        assert document.journal_entry_id == entry.id
+        assert entry.entry_date == date(2026, 6, 15)
+        audit = session.execute(select(AuditLog).where(AuditLog.entity_type == "einvoice"))
+        assert audit.scalar_one().action == "imported"

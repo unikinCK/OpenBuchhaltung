@@ -40,6 +40,8 @@ EXPECTED_TOOL_NAMES = {
     "download_document",
     "create_receipt_ocr_suggestion",
     "book_receipt_ocr_suggestion",
+    "import_einvoice",
+    "export_einvoice",
     "list_open_items",
     "create_open_item",
     "settle_open_item",
@@ -517,6 +519,86 @@ def test_receipt_ocr_tools_forward_arguments() -> None:
             "creditor_account_id": 5,
             "net_amount": "100.00",
             "tax_amount": "19.00",
+        },
+    )
+
+
+def test_einvoice_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {
+                "name": "import_einvoice",
+                "arguments": {
+                    "company_id": 7,
+                    "expense_account_id": 4,
+                    "creditor_account_id": 5,
+                    "file_name": "rechnung.xml",
+                    "content_base64": "PEludm9pY2UvPg==",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/einvoices/import",
+        None,
+        {
+            "company_id": 7,
+            "expense_account_id": 4,
+            "creditor_account_id": 5,
+            "file_name": "rechnung.xml",
+            "content_base64": "PEludm9pY2UvPg==",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "tools/call",
+            "params": {
+                "name": "export_einvoice",
+                "arguments": {
+                    "company_id": 7,
+                    "syntax": "ubl",
+                    "invoice_number": "AR-1",
+                    "issue_date": "2026-07-12",
+                    "buyer_name": "Kunde AG",
+                    "lines": [
+                        {
+                            "name": "Beratung",
+                            "quantity": "1",
+                            "unit_price": "100.00",
+                            "tax_rate": "19.00",
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/einvoices/export",
+        None,
+        {
+            "company_id": 7,
+            "syntax": "ubl",
+            "invoice_number": "AR-1",
+            "issue_date": "2026-07-12",
+            "buyer_name": "Kunde AG",
+            "lines": [
+                {
+                    "name": "Beratung",
+                    "quantity": "1",
+                    "unit_price": "100.00",
+                    "tax_rate": "19.00",
+                }
+            ],
         },
     )
 
