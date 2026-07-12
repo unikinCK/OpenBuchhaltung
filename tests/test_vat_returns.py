@@ -236,10 +236,18 @@ def test_period_bounds() -> None:
     assert period_bounds("2026-05") == (date(2026, 5, 1), date(2026, 5, 31), "2026-05")
     assert period_bounds("2026-q2") == (date(2026, 4, 1), date(2026, 6, 30), "2026-Q2")
     assert period_bounds("2026-12") == (date(2026, 12, 1), date(2026, 12, 31), "2026-12")
+    assert period_bounds("2026-h1") == (date(2026, 1, 1), date(2026, 6, 30), "2026-H1")
+    assert period_bounds("2026-H2") == (date(2026, 7, 1), date(2026, 12, 31), "2026-H2")
+    assert period_bounds("2026") == (date(2026, 1, 1), date(2026, 12, 31), "2026")
+    assert period_bounds(" 2026 ") == (date(2026, 1, 1), date(2026, 12, 31), "2026")
     with pytest.raises(VatReturnError):
         period_bounds("2026-13")
     with pytest.raises(VatReturnError):
         period_bounds("2026-Q5")
+    with pytest.raises(VatReturnError):
+        period_bounds("2026-H3")
+    with pytest.raises(VatReturnError):
+        period_bounds("2026-H0")
     with pytest.raises(VatReturnError):
         period_bounds("Mai 2026")
 
@@ -360,3 +368,64 @@ def test_save_vat_return_normalizes_label(session: Session) -> None:
         session=session, company_id=company.id, period_label="2026-q2", changed_by="pytest"
     )
     assert vat_return.period_label == "2026-Q2"
+
+
+def test_compute_vat_return_half_year_and_year(session: Session) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+
+    # H1 (Jan–Jun) enthält Mai- und Juni-Buchungen: 1000,50 + 100 = 1100 (abgerundet).
+    date_from, date_to, label = period_bounds("2026-H1")
+    amounts = _amounts_by_kz(
+        compute_vat_return(
+            session=session, company_id=company.id, date_from=date_from, date_to=date_to
+        )
+    )
+    assert label == "2026-H1"
+    assert amounts["81"] == Decimal("1100")
+    assert amounts["83"] == Decimal("128.10")
+
+    # H2 (Jul–Dez) ist leer.
+    date_from, date_to, _ = period_bounds("2026-H2")
+    amounts_h2 = _amounts_by_kz(
+        compute_vat_return(
+            session=session, company_id=company.id, date_from=date_from, date_to=date_to
+        )
+    )
+    assert amounts_h2["81"] == Decimal("0")
+    assert amounts_h2["83"] == Decimal("0.00")
+
+    # Jahr = H1 + H2.
+    date_from, date_to, label = period_bounds("2026")
+    amounts_year = _amounts_by_kz(
+        compute_vat_return(
+            session=session, company_id=company.id, date_from=date_from, date_to=date_to
+        )
+    )
+    assert label == "2026"
+    assert amounts_year["81"] == amounts["81"]
+    assert amounts_year["83"] == amounts["83"]
+
+
+def test_save_vat_return_half_year_and_year_snapshots(session: Session) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+
+    half = save_vat_return(
+        session=session, company_id=company.id, period_label="2026-h1", changed_by="pytest"
+    )
+    assert half.period_label == "2026-H1"
+    assert (half.date_from, half.date_to) == (date(2026, 1, 1), date(2026, 6, 30))
+
+    year = save_vat_return(
+        session=session, company_id=company.id, period_label="2026", changed_by="pytest"
+    )
+    assert year.period_label == "2026"
+    assert (year.date_from, year.date_to) == (date(2026, 1, 1), date(2026, 12, 31))
+
+    # Halbjahr und Jahr sind eigenständige Zeiträume — kein Unique-Konflikt,
+    # aber dasselbe Label erneut festhalten ist verboten.
+    with pytest.raises(VatReturnError, match="bereits eine UStVA"):
+        save_vat_return(
+            session=session, company_id=company.id, period_label="2026-H1", changed_by="pytest"
+        )

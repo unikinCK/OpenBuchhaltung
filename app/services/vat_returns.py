@@ -59,24 +59,45 @@ ZERO = Decimal("0.00")
 
 
 def period_bounds(period_label: str) -> tuple[date, date, str]:
-    """Zeitraumgrenzen und kanonisches Label für "JJJJ-MM" oder "JJJJ-Qn"."""
+    """Zeitraumgrenzen und kanonisches Label für einen Meldezeitraum.
+
+    Unterstützte Formate (auch für andere Steuerarten wiederverwendbar):
+    * "JJJJ-MM" — Monat
+    * "JJJJ-Qn" — Quartal (Q1–Q4)
+    * "JJJJ-Hn" — Halbjahr (H1–H2)
+    * "JJJJ"    — Kalenderjahr
+    """
     try:
-        year_raw, part = period_label.strip().upper().split("-", 1)
-        year = int(year_raw)
-        if part.startswith("Q"):
-            quarter = int(part[1:])
-            if quarter not in {1, 2, 3, 4}:
-                raise ValueError
-            start = date(year, 3 * quarter - 2, 1)
-            end_month = 3 * quarter
-            canonical = f"{year}-Q{quarter}"
+        raw = period_label.strip().upper()
+        if "-" not in raw:
+            year = int(raw)
+            start = date(year, 1, 1)
+            end_month = 12
+            canonical = f"{year}"
         else:
-            month = int(part)
-            if month not in range(1, 13):
-                raise ValueError
-            start = date(year, month, 1)
-            end_month = month
-            canonical = f"{year}-{month:02d}"
+            year_raw, part = raw.split("-", 1)
+            year = int(year_raw)
+            if part.startswith("Q"):
+                quarter = int(part[1:])
+                if quarter not in {1, 2, 3, 4}:
+                    raise ValueError
+                start = date(year, 3 * quarter - 2, 1)
+                end_month = 3 * quarter
+                canonical = f"{year}-Q{quarter}"
+            elif part.startswith("H"):
+                half = int(part[1:])
+                if half not in {1, 2}:
+                    raise ValueError
+                start = date(year, 6 * half - 5, 1)
+                end_month = 6 * half
+                canonical = f"{year}-H{half}"
+            else:
+                month = int(part)
+                if month not in range(1, 13):
+                    raise ValueError
+                start = date(year, month, 1)
+                end_month = month
+                canonical = f"{year}-{month:02d}"
         if end_month == 12:
             end = date(year, 12, 31)
         else:
@@ -84,8 +105,8 @@ def period_bounds(period_label: str) -> tuple[date, date, str]:
         return start, end, canonical
     except (ValueError, IndexError):
         raise VatReturnError(
-            f"Ungültiger Voranmeldungszeitraum {period_label!r} "
-            "(erwartet JJJJ-MM oder JJJJ-Qn)."
+            f"Ungültiger Meldezeitraum {period_label!r} "
+            "(erwartet JJJJ-MM, JJJJ-Qn, JJJJ-Hn oder JJJJ)."
         ) from None
 
 

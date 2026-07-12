@@ -12,17 +12,31 @@
     {% else %}
       <form method="get" action="{{ url_for('main.vat_returns_page') }}" class="inline-form">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-        <label for="period">Voranmeldungszeitraum</label>
+        <label for="period">Meldezeitraum</label>
         <select id="period" name="period" style="width:auto;">
           {% for year in [current_year, current_year - 1] %}
-            {% for month in range(1, 13) %}
-              {% set label = "%d-%02d"|format(year, month) %}
+            <optgroup label="{{ year }} – Monate">
+              {% for month in range(1, 13) %}
+                {% set label = "%d-%02d"|format(year, month) %}
+                <option value="{{ label }}" {% if label == period_label %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="{{ year }} – Quartale">
+              {% for quarter in range(1, 5) %}
+                {% set label = "%d-Q%d"|format(year, quarter) %}
+                <option value="{{ label }}" {% if label == period_label %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="{{ year }} – Halbjahre">
+              {% for half in range(1, 3) %}
+                {% set label = "%d-H%d"|format(year, half) %}
+                <option value="{{ label }}" {% if label == period_label %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="{{ year }} – Jahr">
+              {% set label = "%d"|format(year) %}
               <option value="{{ label }}" {% if label == period_label %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-            {% for quarter in range(1, 5) %}
-              {% set label = "%d-Q%d"|format(year, quarter) %}
-              <option value="{{ label }}" {% if label == period_label %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
+            </optgroup>
           {% endfor %}
         </select>
         <button type="submit">Anzeigen</button>
