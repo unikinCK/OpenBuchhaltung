@@ -601,6 +601,94 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_fiscal_years",
+        description="Listet Geschäftsjahre und Perioden einer Gesellschaft.",
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/fiscal-years",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_fiscal_year",
+        description="Legt ein Geschäftsjahr samt Perioden an.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "label": {"type": "string", "description": "Bezeichnung, z. B. 2026."},
+                "start_date": {"type": "string", "description": "Startdatum JJJJ-MM-TT."},
+                "end_date": {"type": "string", "description": "Enddatum JJJJ-MM-TT."},
+            },
+            "required": ["company_id", "label", "start_date", "end_date"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fiscal-years",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="lock_period",
+        description="Sperrt eine Periode gegen weitere Buchungen.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "period_id": {"type": "integer", "description": "ID der Periode."},
+                "reason": {"type": "string", "description": "Optionaler Sperrgrund."},
+            },
+            "required": ["period_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/periods/{period_id}/lock",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="unlock_period",
+        description="Entsperrt eine Periode, sofern das Geschäftsjahr nicht abgeschlossen ist.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "period_id": {"type": "integer", "description": "ID der Periode."},
+            },
+            "required": ["period_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/periods/{period_id}/unlock",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="close_fiscal_year",
+        description="Schließt ein Geschäftsjahr ab und sperrt seine Perioden.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "fiscal_year_id": {"type": "integer", "description": "ID des Geschäftsjahres."},
+            },
+            "required": ["fiscal_year_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fiscal-years/{fiscal_year_id}/close",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_fiscal_year_start",
+        description="Setzt den Beginnmonat des regulären Geschäftsjahres einer Gesellschaft.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "start_month": {"type": "integer", "description": "Monat 1 bis 12."},
+            },
+            "required": ["company_id", "start_month"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/fiscal-year-start",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_audit_log",
         description=(
             "Listet Audit-Log-Einträge im Zugriffsbereich des API-Tokens. Optional nach "

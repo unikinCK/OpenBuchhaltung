@@ -249,7 +249,7 @@ UI, REST-API und MCP angeboten und gepflegt.
       Zuordnen/Buchen/Liste), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
       Anlagen (AfaA/Abgang umgesetzt),
       Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
-      WJ-Beginn) — jeweils REST-Endpoint + MCP-Tool.
+      WJ-Beginn umgesetzt) — jeweils REST-Endpoint + MCP-Tool.
 - [x] **P1.11-003 Audit-Log einsehbar machen**: UI-Seite „Audit",
       `GET /api/v1/audit-log` mit Tenant-/Company-/Objekt-/Aktionsfiltern und
       MCP-Tool `list_audit_log`.
