@@ -6,6 +6,7 @@ Die Modul-Importe registrieren die Routen am Blueprint (Import-Seiteneffekt).
 from __future__ import annotations
 
 from app.api import (  # noqa: F401
+    account_chart,
     accounts,
     audit_log,
     bank,

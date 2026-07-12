@@ -173,6 +173,28 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="import_account_chart",
+        description=(
+            "Importiert SKR03/SKR04 oder eine eigene Kontenrahmen-CSV für eine Gesellschaft. "
+            "Für eigene CSVs content_base64, file_name und optional mime_type senden."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "chart": {"type": "string", "description": "Optional: skr03 oder skr04."},
+                "file_name": {"type": "string", "description": "Originaler CSV-Dateiname."},
+                "mime_type": {"type": "string", "description": "MIME-Type, z. B. text/csv."},
+                "content_base64": {"type": "string", "description": "CSV-Inhalt als Base64."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/account-chart/import",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_accounts",
         description=(
             "Listet die Sachkonten einer Gesellschaft mit interner ID, Kontonummer (code), "

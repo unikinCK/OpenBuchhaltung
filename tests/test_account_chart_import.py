@@ -4,7 +4,8 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from app import create_app
-from domain.models import Account
+from app.auth import hash_password
+from domain.models import Account, User
 
 CSV_CONTENT = """Kontonummer,Bezeichnung,Kontoart
 1000,Kasse,asset
@@ -78,3 +79,55 @@ def test_import_account_chart_csv_success_duplicate_and_invalid_row(tmp_path):
     assert second_report.duplicate_rows == 3
     assert second_report.error_rows == 1
     assert account_count == 2
+
+
+def test_account_chart_api_imports_bundled_chart(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _create_company(app)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/v1/account-chart/import",
+        json={"company_id": company_id, "chart": "skr03"},
+    )
+    assert response.status_code == 201
+    report = response.get_json()["report"]
+    assert report["imported_rows"] > 0
+    assert report["error_rows"] == 0
+
+    with app.extensions["db_session_factory"]() as session:
+        account_count = session.scalar(
+            select(func.count(Account.id)).where(Account.company_id == company_id)
+        )
+    assert account_count == report["imported_rows"]
+
+
+def test_account_chart_ui_imports_bundled_chart(tmp_path):
+    app = _create_test_app(tmp_path)
+    _create_company(app)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    response = client.post(
+        "/accounts/import-chart",
+        data={"company_id": "1", "chart": "skr04"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Kontenrahmen-Import" in response.data
+
+    with app.extensions["db_session_factory"]() as session:
+        account_count = session.scalar(
+            select(func.count(Account.id)).where(Account.company_id == 1)
+        )
+    assert account_count > 0

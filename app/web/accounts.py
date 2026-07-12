@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from io import StringIO
+
 from flask import flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
+from app.services.account_chart_import import (
+    BUNDLED_ACCOUNT_CHART_FILES,
+    import_account_chart_csv,
+    import_bundled_account_chart,
+)
 from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
@@ -32,6 +39,7 @@ def accounts_page():
         companies=companies,
         selected_company_id=selected_company_id,
         accounts=accounts,
+        bundled_charts=sorted(BUNDLED_ACCOUNT_CHART_FILES),
     )
 
 
@@ -69,4 +77,49 @@ def create_account():
             return redirect(url_for("main.accounts_page", company_id=company_id))
 
     flash("Konto wurde angelegt.", "success")
+    return redirect(url_for("main.accounts_page", company_id=company_id))
+
+
+@main_bp.post("/accounts/import-chart")
+def import_account_chart_action():
+    company_id = request.form.get("company_id", type=int)
+    chart = (request.form.get("chart") or "").strip().lower()
+    uploaded_file = request.files.get("account_chart_csv")
+    has_chart = bool(chart)
+    has_upload = uploaded_file is not None and bool(uploaded_file.filename)
+
+    if not company_id:
+        flash("Bitte zuerst eine Gesellschaft auswählen.", "error")
+        return redirect(url_for("main.accounts_page"))
+    if has_chart == has_upload:
+        flash("Bitte entweder SKR03/SKR04 wählen oder eine CSV-Datei hochladen.", "error")
+        return redirect(url_for("main.accounts_page", company_id=company_id))
+    if has_chart and chart not in BUNDLED_ACCOUNT_CHART_FILES:
+        flash("Unbekannter Kontenrahmen.", "error")
+        return redirect(url_for("main.accounts_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            if has_chart:
+                report = import_bundled_account_chart(
+                    session=session, company_id=company.id, chart=chart
+                )
+            else:
+                csv_text = uploaded_file.read().decode("utf-8-sig")
+                report = import_account_chart_csv(
+                    session=session,
+                    company_id=company.id,
+                    csv_stream=StringIO(csv_text),
+                )
+        except (UnicodeDecodeError, ValueError) as exc:
+            flash(f"Kontenrahmen-Import fehlgeschlagen: {exc}", "error")
+            return redirect(url_for("main.accounts_page", company_id=company_id))
+
+    flash(
+        f"Kontenrahmen-Import: {report.imported_rows} neu, "
+        f"{report.duplicate_rows} Duplikate, {report.error_rows} Fehler.",
+        "success" if report.error_rows == 0 else "error",
+    )
     return redirect(url_for("main.accounts_page", company_id=company_id))
