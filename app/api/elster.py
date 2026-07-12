@@ -10,6 +10,7 @@ from app.auth import current_api_user
 from app.services.elster import (
     ElsterError,
     elster_payload_filename,
+    elster_payload_hash_matches,
     elster_readiness,
     get_elster_submission,
     list_elster_submissions,
@@ -36,6 +37,7 @@ def _submission_dict(
         "transport": submission.transport,
         "certificate_alias": submission.certificate_alias,
         "payload_hash": submission.payload_hash,
+        "payload_hash_valid": elster_payload_hash_matches(submission),
         "response_protocol": submission.response_protocol,
         "transfer_ticket": submission.transfer_ticket,
         "created_at": submission.created_at.isoformat(),

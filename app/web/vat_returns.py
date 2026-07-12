@@ -18,6 +18,7 @@ from flask import (
 from app.services.elster import (
     ElsterError,
     elster_payload_filename,
+    elster_payload_hash_matches,
     elster_readiness,
     get_elster_submission,
     list_elster_submissions,
@@ -78,6 +79,7 @@ def vat_returns_page():
             )
             submissions_by_return = {}
             for submission in submissions:
+                submission.payload_hash_valid = elster_payload_hash_matches(submission)
                 submissions_by_return.setdefault(submission.vat_return_id, []).append(
                     submission
                 )
