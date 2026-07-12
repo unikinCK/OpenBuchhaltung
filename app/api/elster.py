@@ -12,6 +12,7 @@ from app.services.elster import (
     elster_payload_filename,
     elster_payload_hash_matches,
     elster_readiness,
+    elster_submission_summary,
     get_elster_submission,
     list_elster_submissions,
     submit_vat_return,
@@ -96,6 +97,19 @@ def list_elster_submissions_via_api():
             ),
             200,
         )
+
+
+@api_bp.get("/elster/submissions/summary")
+def get_elster_submission_summary_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        return jsonify(elster_submission_summary(session=session, company_id=company_id)), 200
 
 
 @api_bp.get("/elster/submissions/<int:submission_id>")

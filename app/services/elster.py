@@ -328,6 +328,37 @@ def list_elster_submissions(
     return session.execute(stmt).scalars().all()
 
 
+def elster_submission_summary(*, session: Session, company_id: int) -> dict[str, object]:
+    submissions = list_elster_submissions(session=session, company_id=company_id)
+    by_status = {status: 0 for status in sorted(ELSTER_STATUSES)}
+    by_transport = {transport: 0 for transport in sorted(ELSTER_TRANSPORTS)}
+    by_environment = {environment: 0 for environment in sorted(ELSTER_ENVIRONMENTS)}
+    for submission in submissions:
+        by_status[submission.status] = by_status.get(submission.status, 0) + 1
+        by_transport[submission.transport] = by_transport.get(submission.transport, 0) + 1
+        by_environment[submission.environment] = (
+            by_environment.get(submission.environment, 0) + 1
+        )
+
+    latest = submissions[0] if submissions else None
+    return {
+        "company_id": company_id,
+        "total": len(submissions),
+        "by_status": by_status,
+        "by_transport": by_transport,
+        "by_environment": by_environment,
+        "latest": {
+            "id": latest.id,
+            "status": latest.status,
+            "transport": latest.transport,
+            "environment": latest.environment,
+            "created_at": latest.created_at.isoformat(),
+        }
+        if latest is not None
+        else None,
+    }
+
+
 def get_elster_submission(
     *, session: Session, submission_id: int
 ) -> ElsterSubmission | None:
