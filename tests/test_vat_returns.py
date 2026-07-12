@@ -546,6 +546,21 @@ def test_elster_failed_submission_is_recorded(session: Session) -> None:
     assert failed.submitted_at is None
     assert "ERiC library" in failed.response_protocol
     assert "<Period>2026-05</Period>" in failed.payload_xml
+    assert list_elster_submissions(
+        session=session,
+        company_id=company.id,
+        status="failed",
+        transport="eric",
+        environment="production",
+    ) == [failed]
+    assert (
+        list_elster_submissions(
+            session=session,
+            company_id=company.id,
+            status="transmitted",
+        )
+        == []
+    )
 
     audit_actions = {
         item.action
@@ -614,6 +629,26 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     )
     assert listed.status_code == 200
     assert [item["id"] for item in listed.get_json()["submissions"]] == [payload["id"]]
+    assert listed.get_json()["filters"]["vat_return_id"] == vat_return_id
+
+    filtered = client.get(
+        "/api/v1/elster/submissions",
+        query_string={
+            "company_id": payload["company_id"],
+            "status": "transmitted",
+            "transport": "mock",
+            "environment": "test",
+        },
+    )
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.get_json()["submissions"]] == [payload["id"]]
+
+    invalid_filter = client.get(
+        "/api/v1/elster/submissions",
+        query_string={"company_id": payload["company_id"], "status": "bogus"},
+    )
+    assert invalid_filter.status_code == 400
+    assert "status must" in invalid_filter.get_json()["error"]
 
     detail = client.get(f"/api/v1/elster/submissions/{payload['id']}")
     assert detail.status_code == 200

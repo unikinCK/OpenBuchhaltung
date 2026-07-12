@@ -62,18 +62,35 @@ def list_elster_submissions_via_api():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
     vat_return_id = request.args.get("vat_return_id", type=int)
+    status = (request.args.get("status") or "").strip() or None
+    transport = (request.args.get("transport") or "").strip() or None
+    environment = (request.args.get("environment") or "").strip() or None
 
     session_factory = get_session_factory()
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
-        submissions = list_elster_submissions(
-            session=session, company_id=company_id, vat_return_id=vat_return_id
-        )
+        try:
+            submissions = list_elster_submissions(
+                session=session,
+                company_id=company_id,
+                vat_return_id=vat_return_id,
+                status=status,
+                transport=transport,
+                environment=environment,
+            )
+        except ElsterError as exc:
+            return jsonify({"error": str(exc)}), 400
         return (
             jsonify(
                 {
                     "company_id": company_id,
+                    "filters": {
+                        "vat_return_id": vat_return_id,
+                        "status": status,
+                        "transport": transport,
+                        "environment": environment,
+                    },
                     "submissions": [_submission_dict(item) for item in submissions],
                 }
             ),

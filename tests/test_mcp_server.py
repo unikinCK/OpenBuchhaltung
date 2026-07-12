@@ -424,14 +424,26 @@ def test_elster_tools_forward_arguments() -> None:
             "method": "tools/call",
             "params": {
                 "name": "list_elster_submissions",
-                "arguments": {"company_id": 7, "vat_return_id": 8},
+                "arguments": {
+                    "company_id": 7,
+                    "vat_return_id": 8,
+                    "status": "failed",
+                    "transport": "eric",
+                    "environment": "production",
+                },
             },
         }
     )
     assert http.calls[-1] == (
         "GET",
         "/elster/submissions",
-        {"company_id": 7, "vat_return_id": 8},
+        {
+            "company_id": 7,
+            "vat_return_id": 8,
+            "status": "failed",
+            "transport": "eric",
+            "environment": "production",
+        },
         None,
     )
 
