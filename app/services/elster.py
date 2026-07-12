@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Mapping
 from xml.etree import ElementTree as ET
 
 from sqlalchemy import select
@@ -31,6 +33,43 @@ class ElsterTransportResult:
     status: str
     transfer_ticket: str
     response_protocol: str
+
+
+def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
+    environment = str(config.get("ELSTER_ENVIRONMENT") or "test").strip().lower()
+    eric_library_path = str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "").strip()
+    certificate_path = str(config.get("ELSTER_CERTIFICATE_PATH") or "").strip()
+    certificate_alias = str(config.get("ELSTER_CERTIFICATE_ALIAS") or "").strip()
+
+    eric_library_exists = bool(eric_library_path and Path(eric_library_path).exists())
+    certificate_exists = bool(certificate_path and Path(certificate_path).exists())
+    eric_configured = eric_library_exists and certificate_exists
+    warnings: list[str] = []
+    if environment not in ELSTER_ENVIRONMENTS:
+        warnings.append("ELSTER_ENVIRONMENT must be 'test' or 'production'.")
+    if not eric_library_path:
+        warnings.append("ELSTER_ERIC_LIBRARY_PATH is not configured.")
+    elif not eric_library_exists:
+        warnings.append("ELSTER_ERIC_LIBRARY_PATH does not exist.")
+    if not certificate_path:
+        warnings.append("ELSTER_CERTIFICATE_PATH is not configured.")
+    elif not certificate_exists:
+        warnings.append("ELSTER_CERTIFICATE_PATH does not exist.")
+    if environment == "production" and not eric_configured:
+        warnings.append("Production ELSTER requires ERiC library and certificate.")
+
+    return {
+        "environment": environment,
+        "mock_transport_available": True,
+        "eric_transport_available": eric_configured,
+        "production_ready": environment == "production" and eric_configured,
+        "eric_library_path": eric_library_path or None,
+        "eric_library_exists": eric_library_exists,
+        "certificate_path": certificate_path or None,
+        "certificate_exists": certificate_exists,
+        "certificate_alias": certificate_alias or None,
+        "warnings": warnings,
+    }
 
 
 def build_ustva_payload(vat_return: VatReturn) -> str:

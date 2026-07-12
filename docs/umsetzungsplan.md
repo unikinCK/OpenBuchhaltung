@@ -315,8 +315,9 @@ Datenmodell + Kennziffern-/Formularlogik, XML-Erzeugung nach amtlichem Schema,
 Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
 - [ ] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
-      Test-/Produktionsumgebung, Mock-Transport, Übermittlungsprotokolle + Audit);
-      echte ERiC-Anbindung (Bibliothek, Zertifikate) offen.
+      Test-/Produktionsumgebung, Mock-Transport, Readiness-Prüfung,
+      Übermittlungsprotokolle + Audit); echte ERiC-Anbindung (Bibliothek,
+      Zertifikate) offen.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung

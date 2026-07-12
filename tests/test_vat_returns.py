@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from app import create_app
 from app.auth import hash_password
-from app.services.elster import ElsterError, list_elster_submissions, submit_vat_return
+from app.services.elster import (
+    ElsterError,
+    elster_readiness,
+    list_elster_submissions,
+    submit_vat_return,
+)
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -491,6 +496,26 @@ def test_elster_mock_rejects_production(session: Session) -> None:
         )
 
 
+def test_elster_readiness_reports_configured_production(tmp_path: Path) -> None:
+    eric_library = tmp_path / "libericapi.dylib"
+    certificate = tmp_path / "certificate.pfx"
+    eric_library.write_text("fake", encoding="utf-8")
+    certificate.write_text("fake", encoding="utf-8")
+
+    readiness = elster_readiness(
+        {
+            "ELSTER_ENVIRONMENT": "production",
+            "ELSTER_ERIC_LIBRARY_PATH": str(eric_library),
+            "ELSTER_CERTIFICATE_PATH": str(certificate),
+            "ELSTER_CERTIFICATE_ALIAS": "prod-cert",
+        }
+    )
+    assert readiness["production_ready"] is True
+    assert readiness["eric_transport_available"] is True
+    assert readiness["certificate_alias"] == "prod-cert"
+    assert readiness["warnings"] == []
+
+
 def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     app = _create_test_app(tmp_path)
     with app.extensions["db_session_factory"]() as session:
@@ -527,3 +552,21 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     )
     assert listed.status_code == 200
     assert [item["id"] for item in listed.get_json()["submissions"]] == [payload["id"]]
+
+
+def test_elster_readiness_api(tmp_path: Path) -> None:
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_elster_ready.db'}",
+            "ELSTER_ENVIRONMENT": "production",
+        }
+    )
+    client = app.test_client()
+
+    response = client.get("/api/v1/elster/readiness")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["environment"] == "production"
+    assert payload["production_ready"] is False
+    assert "Production ELSTER requires ERiC library and certificate." in payload["warnings"]

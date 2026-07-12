@@ -1100,6 +1100,14 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_elster_readiness",
+        description="Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek und Zertifikat.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/elster/readiness",
+        arg_location="none",
+    ),
+    ToolSpec(
         name="submit_vat_return_elster",
         description=(
             "Übermittelt eine festgehaltene UStVA über die ELSTER-Transportkante. "
