@@ -575,6 +575,51 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     assert [item["id"] for item in listed.get_json()["submissions"]] == [payload["id"]]
 
 
+def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> None:
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        company = _seed(session)
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        vat_return = save_vat_return(
+            session=session,
+            company_id=company.id,
+            period_label="2026-05",
+            changed_by="pytest",
+        )
+        submit_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="test",
+            transport="mock",
+            changed_by="pytest",
+        )
+        submit_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="test",
+            transport="mock",
+            changed_by="pytest",
+        )
+        company_id = company.id
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    response = client.get("/ustva", query_string={"company_id": company_id})
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "2 Übermittlungen" in html
+    assert "ELSTER mock transport accepted UStVA 2026-05" in html
+    assert html.count("MOCK-USTVA-2026-05-") == 3
+
+
 def test_elster_readiness_api(tmp_path: Path) -> None:
     app = create_app(
         {

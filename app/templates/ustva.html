@@ -121,9 +121,26 @@
                   {% for kz in item.kennzahlen %}{% if kz.kennziffer == "83" %}{{ kz.amount }}{% endif %}{% endfor %}
                 </td>
                 <td>
-                  {% if item.latest_elster_submission %}
-                    <span class="badge">{{ item.latest_elster_submission.environment }}</span>
-                    {{ item.latest_elster_submission.transfer_ticket }}
+                  {% if item.elster_submissions %}
+                    {% set latest = item.elster_submissions[0] %}
+                    <span class="badge">{{ latest.environment }}</span>
+                    {{ latest.transfer_ticket }}
+                    <details class="submission-history">
+                      <summary>{{ item.elster_submissions|length }} Übermittlung{% if item.elster_submissions|length != 1 %}en{% endif %}</summary>
+                      {% for submission in item.elster_submissions %}
+                        <div class="submission-history-item">
+                          <strong>{{ submission.created_at.strftime("%Y-%m-%d %H:%M") }}</strong>
+                          <span class="badge">{{ submission.status }}</span>
+                          <div class="muted">
+                            {{ submission.transport }} · {{ submission.procedure }} · Hash {{ submission.payload_hash[:12] }}
+                          </div>
+                          <details>
+                            <summary>Protokoll</summary>
+                            <pre>{{ submission.response_protocol }}</pre>
+                          </details>
+                        </div>
+                      {% endfor %}
+                    </details>
                   {% else %}
                     <span class="muted">nicht übermittelt</span>
                   {% endif %}

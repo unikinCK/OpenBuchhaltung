@@ -65,9 +65,11 @@ def vat_returns_page():
             submissions = list_elster_submissions(
                 session=session, company_id=selected_company_id
             )
-            latest_submission_by_return = {}
+            submissions_by_return = {}
             for submission in submissions:
-                latest_submission_by_return.setdefault(submission.vat_return_id, submission)
+                submissions_by_return.setdefault(submission.vat_return_id, []).append(
+                    submission
+                )
             # Kennzahlen der Snapshots für die Anzeige vorab laden.
             saved_views = [
                 {
@@ -79,7 +81,7 @@ def vat_returns_page():
                     "created_at": item.created_at,
                     "created_by": item.created_by,
                     "kennzahlen": item.kennzahlen,
-                    "latest_elster_submission": latest_submission_by_return.get(item.id),
+                    "elster_submissions": submissions_by_return.get(item.id, []),
                 }
                 for item in saved_returns
             ]
