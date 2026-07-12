@@ -338,8 +338,9 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       UI-Historie, archivfähiger Detailabruf, Payload-XML-Download,
       Payload-Hash-Verifikation, Übermittlungsprotokolle inkl. fehlgeschlagener
       Versuche, Protokollfilter/-übersicht, UI-Monitoring, Retry-Aktion und
-      API-/MCP-Retry + Audit); echte ERiC-Anbindung (Bibliothek, Zertifikate)
-      offen.
+      API-/MCP-Retry + Audit, externer `ELSTER_ERIC_COMMAND`-Runner als
+      ERiC-Bridge); produktive amtliche Nutzung erfordert lokale
+      ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung

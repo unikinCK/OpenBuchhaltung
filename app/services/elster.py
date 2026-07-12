@@ -1,13 +1,18 @@
 """ELSTER-Grundlage: Payloads, Transportkante und Übermittlungsprotokolle.
 
 Der erste Transport ist bewusst ein deterministischer Mock für die Testumgebung.
-Die echte ERiC-Anbindung kann später hinter derselben Servicefunktion ergänzt
-werden, ohne API/UI und Buchhaltungslogik umzubauen.
+Die ERiC-Anbindung läuft über einen konfigurierbaren lokalen Command-Runner,
+damit die amtliche ERiC-Bibliothek außerhalb der App-Prozesse gekapselt werden
+kann.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,17 +78,80 @@ class EricElsterTransport:
     eric_library_path: str | None
     certificate_path: str | None
     certificate_alias: str | None = None
+    eric_command: str | None = None
+    timeout_seconds: int = 60
     name: str = "eric"
 
     def transmit(
         self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
     ) -> ElsterTransportResult:
-        del payload_xml, payload_hash, vat_return
         if not self.eric_library_path or not Path(self.eric_library_path).exists():
             raise ElsterError("ERiC library is not configured.")
         if not self.certificate_path or not Path(self.certificate_path).exists():
             raise ElsterError("ELSTER certificate is not configured.")
-        raise ElsterError("ERiC transport adapter is not implemented yet.")
+        if not self.eric_command or not Path(self.eric_command).exists():
+            raise ElsterError("ERiC command is not configured.")
+
+        with tempfile.TemporaryDirectory(prefix="openbuchhaltung-elster-") as tmp_dir:
+            payload_path = Path(tmp_dir) / "payload.xml"
+            response_path = Path(tmp_dir) / "response.json"
+            payload_path.write_text(payload_xml, encoding="utf-8")
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "ELSTER_PAYLOAD_XML": str(payload_path),
+                    "ELSTER_RESPONSE_JSON": str(response_path),
+                    "ELSTER_PAYLOAD_SHA256": payload_hash,
+                    "ELSTER_ERIC_LIBRARY_PATH": self.eric_library_path,
+                    "ELSTER_CERTIFICATE_PATH": self.certificate_path,
+                    "ELSTER_CERTIFICATE_ALIAS": self.certificate_alias or "",
+                    "ELSTER_VAT_RETURN_ID": str(vat_return.id),
+                    "ELSTER_PERIOD_LABEL": vat_return.period_label,
+                }
+            )
+            try:
+                completed = subprocess.run(
+                    [self.eric_command],
+                    cwd=tmp_dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ElsterError("ERiC command timed out.") from exc
+
+            if completed.returncode != 0:
+                output = (completed.stderr or completed.stdout).strip()
+                detail = f": {output}" if output else ""
+                raise ElsterError(
+                    f"ERiC command failed with exit code {completed.returncode}{detail}"
+                )
+            if not response_path.exists():
+                raise ElsterError("ERiC command did not produce a response.")
+
+            try:
+                response = json.loads(response_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ElsterError("ERiC command produced invalid JSON.") from exc
+
+        status = str(response.get("status") or "transmitted")
+        transfer_ticket = str(response.get("transfer_ticket") or "").strip()
+        if status not in {"transmitted", "failed"}:
+            raise ElsterError("ERiC command returned invalid status.")
+        if status == "transmitted" and not transfer_ticket:
+            raise ElsterError("ERiC command returned no transfer ticket.")
+
+        response_protocol = str(
+            response.get("response_protocol") or completed.stdout or "ERiC command completed."
+        )
+        return ElsterTransportResult(
+            status=status,
+            transfer_ticket=transfer_ticket,
+            response_protocol=response_protocol,
+        )
 
 
 def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
@@ -91,10 +159,12 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
     eric_library_path = str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "").strip()
     certificate_path = str(config.get("ELSTER_CERTIFICATE_PATH") or "").strip()
     certificate_alias = str(config.get("ELSTER_CERTIFICATE_ALIAS") or "").strip()
+    eric_command = str(config.get("ELSTER_ERIC_COMMAND") or "").strip()
 
     eric_library_exists = bool(eric_library_path and Path(eric_library_path).exists())
     certificate_exists = bool(certificate_path and Path(certificate_path).exists())
-    eric_configured = eric_library_exists and certificate_exists
+    eric_command_exists = bool(eric_command and Path(eric_command).exists())
+    eric_configured = eric_library_exists and certificate_exists and eric_command_exists
     warnings: list[str] = []
     if environment not in ELSTER_ENVIRONMENTS:
         warnings.append("ELSTER_ENVIRONMENT must be 'test' or 'production'.")
@@ -106,8 +176,12 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         warnings.append("ELSTER_CERTIFICATE_PATH is not configured.")
     elif not certificate_exists:
         warnings.append("ELSTER_CERTIFICATE_PATH does not exist.")
+    if not eric_command:
+        warnings.append("ELSTER_ERIC_COMMAND is not configured.")
+    elif not eric_command_exists:
+        warnings.append("ELSTER_ERIC_COMMAND does not exist.")
     if environment == "production" and not eric_configured:
-        warnings.append("Production ELSTER requires ERiC library and certificate.")
+        warnings.append("Production ELSTER requires ERiC library, certificate and command.")
 
     return {
         "environment": environment,
@@ -119,6 +193,8 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         "certificate_path": certificate_path or None,
         "certificate_exists": certificate_exists,
         "certificate_alias": certificate_alias or None,
+        "eric_command": eric_command or None,
+        "eric_command_exists": eric_command_exists,
         "warnings": warnings,
     }
 
@@ -165,6 +241,7 @@ def submit_vat_return(
     certificate_alias: str | None = None,
     config: Mapping[str, object] | None = None,
 ) -> ElsterSubmission:
+    config = config or {}
     environment = environment.strip().lower()
     transport = transport.strip().lower()
     if environment not in ELSTER_ENVIRONMENTS:
@@ -180,8 +257,11 @@ def submit_vat_return(
 
     payload_xml = build_ustva_payload(vat_return)
     payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
+    effective_certificate_alias = (
+        certificate_alias or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "") or None
+    )
     transport_adapter = _transport_adapter(
-        transport=transport, certificate_alias=certificate_alias, config=config or {}
+        transport=transport, certificate_alias=effective_certificate_alias, config=config
     )
     try:
         result = transport_adapter.transmit(
@@ -193,7 +273,7 @@ def submit_vat_return(
             vat_return=vat_return,
             environment=environment,
             transport=transport,
-            certificate_alias=certificate_alias,
+            certificate_alias=effective_certificate_alias,
             payload_hash=payload_hash,
             payload_xml=payload_xml,
             status="failed",
@@ -210,7 +290,7 @@ def submit_vat_return(
         vat_return=vat_return,
         environment=environment,
         transport=transport,
-        certificate_alias=certificate_alias,
+        certificate_alias=effective_certificate_alias,
         payload_hash=payload_hash,
         payload_xml=payload_xml,
         status=result.status,
@@ -218,6 +298,11 @@ def submit_vat_return(
         transfer_ticket=result.transfer_ticket,
         changed_by=changed_by,
     )
+    if result.status != "transmitted":
+        session.commit()
+        session.refresh(submission)
+        return submission
+
     vat_return.status = "uebermittelt"
     session.flush()
 
@@ -515,4 +600,6 @@ def _transport_adapter(
         certificate_alias=certificate_alias
         or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "")
         or None,
+        eric_command=str(config.get("ELSTER_ERIC_COMMAND") or "") or None,
+        timeout_seconds=int(config.get("ELSTER_ERIC_TIMEOUT_SECONDS") or 60),
     )

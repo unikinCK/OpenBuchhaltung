@@ -1181,7 +1181,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="get_elster_readiness",
-        description="Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek und Zertifikat.",
+        description=(
+            "Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek, Zertifikat "
+            "und lokalen ERiC-Command."
+        ),
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         http_method="GET",
         path="/elster/readiness",
@@ -1191,7 +1194,8 @@ TOOLS: list[ToolSpec] = [
         name="submit_vat_return_elster",
         description=(
             "Übermittelt eine festgehaltene UStVA über die ELSTER-Transportkante. "
-            "Aktuell unterstützt ist transport=mock in environment=test."
+            "Unterstützt transport=mock in environment=test und transport=eric "
+            "über den konfigurierten lokalen ERiC-Command."
         ),
         input_schema={
             "type": "object",
@@ -1204,7 +1208,7 @@ TOOLS: list[ToolSpec] = [
                 },
                 "transport": {
                     "type": "string",
-                    "description": "mock oder eric; aktuell ist mock implementiert.",
+                    "description": "mock oder eric.",
                     "default": "mock",
                 },
                 "certificate_alias": {
