@@ -664,6 +664,7 @@ class PayrollEmployee(Base):
         ),
         CheckConstraint("gross_monthly_salary >= 0", name="ck_payroll_employee_salary_nonneg"),
         CheckConstraint("wage_tax_rate >= 0", name="ck_payroll_employee_wage_tax_nonneg"),
+        CheckConstraint("tax_class BETWEEN 1 AND 6", name="ck_payroll_employee_tax_class"),
         CheckConstraint(
             "employee_social_security_rate >= 0",
             name="ck_payroll_employee_employee_sv_nonneg",
@@ -687,7 +688,12 @@ class PayrollEmployee(Base):
     employment_start: Mapped[date] = mapped_column(Date, nullable=False)
     employment_end: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    birth_date: Mapped[date | None] = mapped_column(Date)
     tax_id: Mapped[str | None] = mapped_column(String(40))
+    tax_class: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    child_allowances: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False, default=0)
+    federal_state: Mapped[str | None] = mapped_column(String(2))
+    main_employment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     social_security_number: Mapped[str | None] = mapped_column(String(40))
     gross_monthly_salary: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     wage_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)

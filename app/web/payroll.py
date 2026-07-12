@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from app.services.payroll import (
@@ -18,9 +18,15 @@ from app.services.payroll import (
     list_payroll_runs,
     post_payroll_run,
 )
+from app.services.payroll_pap import payroll_compliance_readiness
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
-from app.web.helpers import changed_by, company_context, get_session_factory, require_company_access
+from app.web.helpers import (
+    changed_by,
+    company_context,
+    get_session_factory,
+    require_company_access,
+)
 from domain.models import Account, PayrollRun
 
 
@@ -55,6 +61,7 @@ def payroll_page():
         accounts=accounts,
         employees=employees,
         runs=runs,
+        payroll_readiness=payroll_compliance_readiness(current_app.config),
         default_period=f"{today.year}-{today.month:02d}",
         today=today.isoformat(),
     )
@@ -79,6 +86,17 @@ def create_payroll_employee_action():
             gross_monthly_salary=decimal_from_payload(
                 request.form.get("gross_monthly_salary")
             ),
+            birth_date=(
+                date.fromisoformat(request.form.get("birth_date", "").strip())
+                if request.form.get("birth_date", "").strip()
+                else None
+            ),
+            tax_class=int(request.form.get("tax_class", "1")),
+            child_allowances=decimal_from_payload(
+                request.form.get("child_allowances"), "0.0"
+            ),
+            federal_state=request.form.get("federal_state", "").strip() or None,
+            main_employment=request.form.get("main_employment", "1") == "1",
             wage_tax_rate=decimal_from_payload(request.form.get("wage_tax_rate")),
             church_tax_rate=decimal_from_payload(request.form.get("church_tax_rate")),
             solidarity_surcharge_rate=decimal_from_payload(
@@ -144,6 +162,7 @@ def create_payroll_run_action():
             period_label=request.form.get("period_label", "").strip(),
             payment_date=date.fromisoformat(request.form.get("payment_date", "").strip()),
             changed_by=changed_by(),
+            config=current_app.config,
         )
     except ValueError:
         flash("Zeitraum oder Zahlungsdatum ist ungültig.", "error")

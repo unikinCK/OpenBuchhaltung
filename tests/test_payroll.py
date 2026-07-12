@@ -20,6 +20,7 @@ from app.services.payroll import (
     create_payroll_run,
     post_payroll_run,
 )
+from app.services.payroll_pap import payroll_compliance_readiness
 from domain.models import (
     Account,
     AuditLog,
@@ -73,6 +74,11 @@ def _employee_input(company: Company) -> PayrollEmployeeInput:
         first_name="Ada",
         last_name="Lovelace",
         employment_start=date(2026, 1, 1),
+        birth_date=date(1990, 1, 1),
+        tax_id="01234567890",
+        tax_class=1,
+        child_allowances=Decimal("0.0"),
+        federal_state="NW",
         gross_monthly_salary=Decimal("4000.00"),
         wage_tax_rate=Decimal("0.20"),
         church_tax_rate=Decimal("0.01"),
@@ -109,6 +115,7 @@ def test_payroll_run_posts_balanced_journal_entry() -> None:
         assert run.employee_social_security_total == Decimal("800.00")
         assert run.employer_social_security_total == Decimal("800.00")
         assert run.net_total == Decimal("2360.00")
+        assert run.lines[0].calculation["tax"]["mode"] == "manual_rates"
 
         posted = post_payroll_run(
             session=session, payroll_run_id=run.id, changed_by="pytest"
@@ -177,6 +184,11 @@ def test_payroll_api_create_employee_and_auto_post_run(tmp_path: Path) -> None:
             "first_name": "Ada",
             "last_name": "Lovelace",
             "employment_start": "2026-01-01",
+            "birth_date": "1990-01-01",
+            "tax_id": "01234567890",
+            "tax_class": 1,
+            "child_allowances": "0.0",
+            "federal_state": "NW",
             "gross_monthly_salary": "4000.00",
             "wage_tax_rate": "0.20",
             "church_tax_rate": "0.01",
@@ -190,6 +202,7 @@ def test_payroll_api_create_employee_and_auto_post_run(tmp_path: Path) -> None:
         },
     )
     assert employee.status_code == 201
+    assert employee.get_json()["tax_class"] == 1
 
     run_response = client.post(
         "/api/v1/payroll/runs",
@@ -229,6 +242,11 @@ def test_payroll_ui_and_audit_export_include_runs(tmp_path: Path) -> None:
             "first_name": "Ada",
             "last_name": "Lovelace",
             "employment_start": "2026-01-01",
+            "birth_date": "1990-01-01",
+            "tax_id": "01234567890",
+            "tax_class": "1",
+            "child_allowances": "0.0",
+            "federal_state": "NW",
             "gross_monthly_salary": "4000.00",
             "wage_tax_rate": "0.20",
             "church_tax_rate": "0.01",
@@ -271,3 +289,53 @@ def test_payroll_ui_and_audit_export_include_runs(tmp_path: Path) -> None:
         assert manifest["table_counts"]["payroll_employees"] == 1
         assert manifest["table_counts"]["payroll_runs"] == 1
         assert manifest["table_counts"]["payroll_run_lines"] == 1
+
+
+def test_payroll_run_uses_configured_pap_command(tmp_path: Path) -> None:
+    command = tmp_path / "pap_runner.py"
+    command.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "payload = json.loads(sys.stdin.read())\n"
+        "assert payload['employee']['tax_class'] == 1\n"
+        "print(json.dumps({\n"
+        "  'wage_tax': '700.00',\n"
+        "  'church_tax': '63.00',\n"
+        "  'solidarity_surcharge': '0.00',\n"
+        "  'version': 'PAP-2026-test',\n"
+        "  'protocol': 'fake pap ok'\n"
+        "}))\n",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        company, _ = _seed(session)
+        create_payroll_employee(session=session, payload=_employee_input(company))
+        readiness = payroll_compliance_readiness(
+            {
+                "PAYROLL_PAP_COMMAND": str(command),
+                "PAYROLL_PARAMETER_VERSION": "2026-test",
+            }
+        )
+        assert readiness["pap_available"] is True
+        assert readiness["full_payroll_ready"] is False
+
+        run = create_payroll_run(
+            session=session,
+            payload=PayrollRunInput(
+                company_id=company.id,
+                period_label="2026-05",
+                payment_date=date(2026, 5, 31),
+                changed_by="pytest",
+                config={"PAYROLL_PAP_COMMAND": str(command)},
+            ),
+        )
+
+        assert run.wage_tax_total == Decimal("700.00")
+        assert run.church_tax_total == Decimal("63.00")
+        assert run.net_total == Decimal("2437.00")
+        assert run.lines[0].calculation["tax"]["mode"] == "pap_command"
+        assert run.lines[0].calculation["tax"]["version"] == "PAP-2026-test"
