@@ -265,6 +265,57 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="finalize_journal_entry",
+        description=(
+            "Schreibt eine Buchung fest (GoBD): danach ist sie unveränderbar; Korrekturen "
+            "sind nur noch über eine Stornobuchung (reverse_journal_entry) möglich."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "journal_entry_id": {
+                    "type": "integer",
+                    "description": "ID der festzuschreibenden Buchung.",
+                },
+            },
+            "required": ["journal_entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-entries/{journal_entry_id}/finalize",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="reverse_journal_entry",
+        description=(
+            "Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip): Das "
+            "Original bleibt unverändert, die Stornobuchung spiegelt alle Zeilen "
+            "(Soll/Haben getauscht) und wird sofort festgeschrieben. Eine Buchung kann "
+            "nur einmal storniert werden; Stornobuchungen selbst sind nicht stornierbar."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "journal_entry_id": {
+                    "type": "integer",
+                    "description": "ID der zu stornierenden Buchung.",
+                },
+                "reversal_date": {
+                    "type": "string",
+                    "description": (
+                        "Stornodatum im Format JJJJ-MM-TT (optional, Standard heute); "
+                        "muss in einer offenen Periode liegen."
+                    ),
+                },
+            },
+            "required": ["journal_entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-entries/{journal_entry_id}/reverse",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_trial_balance",
         description=(
             "Liefert die Summen- und Saldenliste einer Gesellschaft, optional für einen "
@@ -321,6 +372,78 @@ TOOLS: list[ToolSpec] = [
         http_method="GET",
         path="/exports/datev.csv",
         arg_location="query",
+    ),
+    ToolSpec(
+        name="get_vat_return",
+        description=(
+            "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "
+            "Meldezeitraum aus den Journaldaten, ohne sie zu speichern. Kennziffern: "
+            "Kz 81/86 (Bemessungsgrundlagen 19 %/7 %, volle Euro), Kz 48 (steuerfrei), "
+            "Kz 66 (Vorsteuer), Kz 83 (Zahllast/Überschuss)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period": {
+                    "type": "string",
+                    "description": (
+                        "Meldezeitraum: Monat 'JJJJ-MM', Quartal 'JJJJ-Qn', Halbjahr "
+                        "'JJJJ-Hn' oder Jahr 'JJJJ'. Alternativ date_from/date_to."
+                    ),
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Zeitraumbeginn JJJJ-MM-TT (alternativ zu period).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Zeitraumende JJJJ-MM-TT (alternativ zu period).",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/vat-return",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="list_vat_returns",
+        description=(
+            "Listet die festgehaltenen Umsatzsteuer-Voranmeldungen (Kennziffern-Snapshots) "
+            "einer Gesellschaft."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/vat-returns",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_vat_return",
+        description=(
+            "Hält die Umsatzsteuer-Voranmeldung für einen Meldezeitraum als "
+            "unveränderlichen Kennziffern-Snapshot fest (einmalig je Gesellschaft und "
+            "Zeitraum)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period": {
+                    "type": "string",
+                    "description": (
+                        "Meldezeitraum: Monat 'JJJJ-MM', Quartal 'JJJJ-Qn', Halbjahr "
+                        "'JJJJ-Hn' oder Jahr 'JJJJ'."
+                    ),
+                },
+            },
+            "required": ["company_id", "period"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/vat-returns",
+        arg_location="json",
     ),
     ToolSpec(
         name="create_fixed_asset",
