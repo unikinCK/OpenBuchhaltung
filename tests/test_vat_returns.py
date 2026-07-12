@@ -472,6 +472,21 @@ def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -
     assert preflight["period_label"] == "2026-05"
     assert len(preflight["payload_hash"]) == 64
     assert preflight["payload_size"] > 0
+    assert preflight["payload"]["root_tag"] == "OpenBuchhaltungElster"
+    assert preflight["payload"]["version"] == "1"
+    assert preflight["payload"]["procedure"] == "ustva"
+    assert preflight["payload"]["kennzahlen_count"] > 0
+    assert "83" in preflight["payload"]["kennzahl_codes"]
+
+    oversized = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        config={"ELSTER_MAX_PAYLOAD_BYTES": 1},
+    )
+    assert oversized["ok"] is False
+    assert "ELSTER payload exceeds ELSTER_MAX_PAYLOAD_BYTES." in oversized["errors"]
 
     submission = submit_vat_return(
         session=session,
@@ -485,6 +500,14 @@ def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -
     assert len(submission.payload_hash) == 64
     assert "<Period>2026-05</Period>" in submission.payload_xml
     assert session.get(VatReturn, vat_return.id).status == "uebermittelt"
+    repeated_preflight = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        config={},
+    )
+    assert "UStVA was already transmitted." in repeated_preflight["warnings"]
 
     submissions = list_elster_submissions(session=session, company_id=company.id)
     assert [item.id for item in submissions] == [submission.id]
@@ -659,6 +682,8 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     assert preflight_payload["ok"] is True
     assert preflight_payload["period_label"] == "2026-05"
     assert len(preflight_payload["payload_hash"]) == 64
+    assert preflight_payload["payload"]["procedure"] == "ustva"
+    assert "83" in preflight_payload["payload"]["kennzahl_codes"]
 
     failed_preflight = client.post(
         "/api/v1/elster/ustva/preflight",

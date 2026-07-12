@@ -21,6 +21,9 @@ from app.services.audit_log import log_audit_event
 from domain.models import ElsterSubmission, VatReturn
 
 ELSTER_ENVIRONMENTS = {"test", "production"}
+ELSTER_PAYLOAD_ROOT = "OpenBuchhaltungElster"
+ELSTER_PAYLOAD_VERSION = "1"
+ELSTER_PROCEDURE_USTVA = "ustva"
 ELSTER_STATUSES = {"created", "transmitted", "failed"}
 ELSTER_TRANSPORTS = {"mock", "eric"}
 
@@ -128,10 +131,10 @@ def build_ustva_payload(vat_return: VatReturn) -> str:
     """
 
     root = ET.Element(
-        "OpenBuchhaltungElster",
+        ELSTER_PAYLOAD_ROOT,
         {
-            "version": "1",
-            "procedure": "ustva",
+            "version": ELSTER_PAYLOAD_VERSION,
+            "procedure": ELSTER_PROCEDURE_USTVA,
         },
     )
     declaration = ET.SubElement(root, "VatReturn")
@@ -275,23 +278,50 @@ def preflight_vat_return(
         }
 
     payload_xml = build_ustva_payload(vat_return)
+    payload_bytes = payload_xml.encode("utf-8")
+    payload = _payload_diagnostics(payload_xml)
     readiness = elster_readiness(config or {})
+    warnings = list(readiness["warnings"])
+    max_payload_bytes = int((config or {}).get("ELSTER_MAX_PAYLOAD_BYTES") or 0)
     if transport == "eric" and not readiness["eric_transport_available"]:
         errors.append("ERiC transport is not configured.")
     if environment == "production" and not readiness["production_ready"]:
         errors.append("Production ELSTER is not ready.")
+    if environment != readiness["environment"]:
+        warnings.append("Requested ELSTER environment differs from configured environment.")
+    if vat_return.status == "uebermittelt":
+        warnings.append("UStVA was already transmitted.")
+    if payload["root_tag"] != ELSTER_PAYLOAD_ROOT:
+        errors.append("ELSTER payload root is invalid.")
+    if payload["version"] != ELSTER_PAYLOAD_VERSION:
+        errors.append("ELSTER payload version is invalid.")
+    if payload["procedure"] != ELSTER_PROCEDURE_USTVA:
+        errors.append("ELSTER payload procedure is invalid.")
+    if payload["period_label"] != vat_return.period_label:
+        errors.append("ELSTER payload period does not match the UStVA.")
+    if payload["date_from"] != vat_return.date_from.isoformat():
+        errors.append("ELSTER payload start date does not match the UStVA.")
+    if payload["date_to"] != vat_return.date_to.isoformat():
+        errors.append("ELSTER payload end date does not match the UStVA.")
+    if payload["kennzahlen_count"] == 0:
+        errors.append("ELSTER payload contains no Kennzahlen.")
+    if "83" not in payload["kennzahl_codes"]:
+        errors.append("ELSTER payload must contain Kennzahl 83.")
+    if max_payload_bytes and len(payload_bytes) > max_payload_bytes:
+        errors.append("ELSTER payload exceeds ELSTER_MAX_PAYLOAD_BYTES.")
 
     return {
         "ok": not errors,
         "errors": errors,
-        "warnings": readiness["warnings"],
+        "warnings": warnings,
         "vat_return_id": vat_return.id,
         "environment": environment,
         "transport": transport,
         "certificate_alias": certificate_alias
         or readiness.get("certificate_alias"),
-        "payload_hash": hashlib.sha256(payload_xml.encode("utf-8")).hexdigest(),
-        "payload_size": len(payload_xml.encode("utf-8")),
+        "payload": payload,
+        "payload_hash": hashlib.sha256(payload_bytes).hexdigest(),
+        "payload_size": len(payload_bytes),
         "period_label": vat_return.period_label,
         "readiness": readiness,
     }
@@ -455,6 +485,23 @@ def elster_payload_filename(submission: ElsterSubmission) -> str:
 def elster_payload_hash_matches(submission: ElsterSubmission) -> bool:
     payload_hash = hashlib.sha256(submission.payload_xml.encode("utf-8")).hexdigest()
     return payload_hash == submission.payload_hash
+
+
+def _payload_diagnostics(payload_xml: str) -> dict[str, object]:
+    root = ET.fromstring(payload_xml)
+    declaration = root.find("VatReturn")
+    kennzahlen = declaration.find("Kennzahlen") if declaration is not None else None
+    kennzahl_items = list(kennzahlen) if kennzahlen is not None else []
+    return {
+        "root_tag": root.tag,
+        "version": root.attrib.get("version"),
+        "procedure": root.attrib.get("procedure"),
+        "period_label": declaration.findtext("Period") if declaration is not None else None,
+        "date_from": declaration.findtext("DateFrom") if declaration is not None else None,
+        "date_to": declaration.findtext("DateTo") if declaration is not None else None,
+        "kennzahlen_count": len(kennzahl_items),
+        "kennzahl_codes": [str(item.attrib.get("code")) for item in kennzahl_items],
+    }
 
 
 def _transport_adapter(
