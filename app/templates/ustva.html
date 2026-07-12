@@ -138,6 +138,7 @@
                             <summary>Protokoll</summary>
                             <pre>{{ submission.response_protocol }}</pre>
                           </details>
+                          <a href="{{ url_for('main.download_elster_payload_action', submission_id=submission.id) }}">Payload-XML</a>
                         </div>
                       {% endfor %}
                     </details>
