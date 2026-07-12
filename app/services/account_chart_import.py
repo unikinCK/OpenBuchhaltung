@@ -15,6 +15,10 @@ from domain.models import Account, Company
 logger = logging.getLogger(__name__)
 
 
+BUNDLED_ACCOUNT_CHART_FILES = {
+    "skr03": Path(__file__).resolve().parents[2] / "data" / "kontenrahmen" / "skr03.csv",
+    "skr04": Path(__file__).resolve().parents[2] / "data" / "kontenrahmen" / "skr04.csv",
+}
 REQUIRED_FIELDS = ("code", "name", "account_type")
 CSV_FIELD_ALIASES = {
     "code": ("code", "konto", "kontonummer", "konto_nr", "account_code"),
@@ -109,6 +113,15 @@ def import_account_chart_file(
         return import_account_chart_csv(
             session=session, company_id=company_id, csv_stream=csv_stream
         )
+
+
+def import_bundled_account_chart(
+    *, session: Session, company_id: int, chart: str
+) -> AccountChartImportReport:
+    csv_path = BUNDLED_ACCOUNT_CHART_FILES.get(chart)
+    if csv_path is None:
+        raise ValueError(f"Unknown bundled account chart: {chart}")
+    return import_account_chart_file(session=session, company_id=company_id, csv_path=csv_path)
 
 
 def _resolve_header_mapping(field_names: list[str]) -> dict[str, str]:

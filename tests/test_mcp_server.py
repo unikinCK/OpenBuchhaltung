@@ -19,6 +19,7 @@ EXPECTED_TOOL_NAMES = {
     "list_companies",
     "create_tenant_with_company",
     "create_account",
+    "import_account_chart",
     "list_accounts",
     "create_journal_entry",
     "list_journal_entries",
@@ -121,6 +122,28 @@ def test_query_tool_forwards_arguments_as_query_params() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/balance-sheet", {"company_id": 7}, None)
+
+
+def test_account_chart_tool_forwards_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {
+                "name": "import_account_chart",
+                "arguments": {"company_id": 7, "chart": "skr03"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/account-chart/import",
+        None,
+        {"company_id": 7, "chart": "skr03"},
+    )
 
 
 def test_path_placeholder_filled_from_arguments() -> None:

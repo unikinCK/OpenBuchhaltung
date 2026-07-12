@@ -37,6 +37,31 @@
   </section>
 
   <section class="card">
+    <h2>Kontenrahmen importieren</h2>
+    {% if selected_company_id %}
+      <form method="post" action="{{ url_for('main.import_account_chart_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="chart">Vorgebundener Kontenrahmen</label>
+        <select id="chart" name="chart">
+          <option value="">CSV-Datei verwenden</option>
+          {% for chart in bundled_charts %}
+            <option value="{{ chart }}">{{ chart|upper }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="account_chart_csv">CSV-Datei</label>
+        <input id="account_chart_csv" name="account_chart_csv" type="file" accept=".csv,text/csv" />
+
+        <button type="submit">Kontenrahmen importieren</button>
+      </form>
+    {% else %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Kontenplan <span class="badge"><strong>Konten:</strong> {{ accounts|length }}</span></h2>
     {% if accounts %}
       <table>
@@ -62,8 +87,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">Noch keine Konten vorhanden. SKR03/SKR04 per CLI importieren:
-        <code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
+      <p class="muted">Noch keine Konten vorhanden.</p>
     {% endif %}
   </section>
 {% endblock %}
