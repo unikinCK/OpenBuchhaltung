@@ -18,6 +18,7 @@ from app.web import (  # noqa: F401
     periods,
     receipt_ocr,
     reports,
+    vat_returns,
 )
 from app.web.blueprint import main_bp
 

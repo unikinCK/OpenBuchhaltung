@@ -57,6 +57,10 @@ class JournalEntryInput:
     source: str = "manual"
     # Gesetzt auf Stornobuchungen: ID der stornierten Originalbuchung.
     reversal_of_id: int | None = None
+    # Automatische USt-/VSt-Teilbuchung für Zeilen mit Steuercode. Stornos
+    # schalten das ab: sie spiegeln die bereits expandierten Zeilen 1:1 und
+    # behalten die Steuercodes nur als Kennzeichnung (z. B. für die UStVA).
+    expand_tax_lines: bool = True
 
 
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
@@ -140,7 +144,8 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
     lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
-    lines = _expand_tax_lines(session=session, company=company, lines=lines)
+    if payload.expand_tax_lines:
+        lines = _expand_tax_lines(session=session, company=company, lines=lines)
 
     JournalEntryValidator.validate(
         JournalEntryDraft(
@@ -715,15 +720,16 @@ def reverse_journal_entry(
 
     original_period = session.get(Period, original.period_id)
 
-    # Zeilen gespiegelt übernehmen. Kein tax_code_id auf den Stornozeilen:
-    # die Steuerzeilen des Originals sind bereits enthalten und würden sonst
-    # über die Auto-Expansion doppelt erzeugt.
+    # Zeilen gespiegelt übernehmen (inkl. Steuercode als Kennzeichnung).
+    # Die Steuerzeilen des Originals sind bereits enthalten; die Auto-Expansion
+    # wird deshalb über expand_tax_lines=False abgeschaltet.
     mirrored_lines = [
         JournalLineInput(
             account_id=line.account_id,
             debit_amount=line.credit_amount,
             credit_amount=line.debit_amount,
             description=line.description,
+            tax_code_id=line.tax_code_id,
         )
         for line in sorted(original.lines, key=lambda line: line.line_number)
     ]
@@ -740,6 +746,7 @@ def reverse_journal_entry(
             post_to_closing_period=bool(original_period and original_period.is_closing),
             source="storno",
             reversal_of_id=original.id,
+            expand_tax_lines=False,
         ),
     )
 
