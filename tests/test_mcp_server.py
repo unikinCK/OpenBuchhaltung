@@ -47,6 +47,7 @@ EXPECTED_TOOL_NAMES = {
     "export_trial_balance_csv",
     "export_journal_csv",
     "export_datev_csv",
+    "export_audit_package",
     "list_documents",
     "upload_document",
     "link_document",
@@ -1318,6 +1319,16 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         call_tool("download_document", {"document_id": document_id})["content"][0]["text"]
     )
     assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
+
+    audit_export = json.loads(
+        call_tool(
+            "export_audit_package",
+            {"company_id": company_id, "manifest_only": True},
+        )["content"][0]["text"]
+    )
+    assert audit_export["company"]["id"] == company_id
+    assert audit_export["table_counts"]["documents"] == 1
+    assert audit_export["totals"]["document_file_count"] == 1
 
     open_item = call_tool(
         "create_open_item",

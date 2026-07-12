@@ -46,6 +46,8 @@
         <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id) }}">SuSa-Export (CSV, API-Format)</a>
         ·
         <a href="{{ url_for('api.export_datev_csv', company_id=selected_company_id) }}">DATEV-Buchungsstapel (EXTF)</a>
+        ·
+        <a href="{{ url_for('api.export_audit_package', company_id=selected_company_id) }}">Prüferexport (ZIP)</a>
       </p>
     </section>
 
