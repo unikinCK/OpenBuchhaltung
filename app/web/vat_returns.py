@@ -6,6 +6,7 @@ from datetime import date
 
 from flask import flash, redirect, render_template, request, url_for
 
+from app.services.elster import ElsterError, list_elster_submissions, submit_vat_return
 from app.services.vat_returns import (
     VatReturnError,
     compute_vat_return,
@@ -56,6 +57,12 @@ def vat_returns_page():
             except VatReturnError as exc:
                 period_error = str(exc)
             saved_returns = list_vat_returns(session=session, company_id=selected_company_id)
+            submissions = list_elster_submissions(
+                session=session, company_id=selected_company_id
+            )
+            latest_submission_by_return = {}
+            for submission in submissions:
+                latest_submission_by_return.setdefault(submission.vat_return_id, submission)
             # Kennzahlen der Snapshots für die Anzeige vorab laden.
             saved_views = [
                 {
@@ -67,6 +74,7 @@ def vat_returns_page():
                     "created_at": item.created_at,
                     "created_by": item.created_by,
                     "kennzahlen": item.kennzahlen,
+                    "latest_elster_submission": latest_submission_by_return.get(item.id),
                 }
                 for item in saved_returns
             ]
@@ -116,3 +124,34 @@ def save_vat_return_action():
     return redirect(
         url_for("main.vat_returns_page", company_id=company_id, period=vat_return.period_label)
     )
+
+
+@main_bp.post("/ustva/<int:vat_return_id>/elster-test")
+def submit_vat_return_elster_test_action(vat_return_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        from domain.models import VatReturn
+
+        vat_return = session.get(VatReturn, vat_return_id)
+        if vat_return is None:
+            flash("UStVA wurde nicht gefunden.", "error")
+            return redirect(url_for("main.vat_returns_page"))
+        require_company_access(session, vat_return.company_id)
+        company_id = vat_return.company_id
+        period_label = vat_return.period_label
+        try:
+            submission = submit_vat_return(
+                session=session,
+                vat_return_id=vat_return.id,
+                environment="test",
+                transport="mock",
+                changed_by=changed_by(),
+            )
+        except ElsterError as exc:
+            flash(f"ELSTER-Testübermittlung fehlgeschlagen: {exc}", "error")
+            return redirect(
+                url_for("main.vat_returns_page", company_id=company_id, period=period_label)
+            )
+
+    flash(f"ELSTER-Testübermittlung protokolliert: {submission.transfer_ticket}", "success")
+    return redirect(url_for("main.vat_returns_page", company_id=company_id, period=period_label))

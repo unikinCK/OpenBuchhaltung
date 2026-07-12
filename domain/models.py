@@ -585,6 +585,57 @@ class VatReturn(Base):
     created_by: Mapped[str] = mapped_column(String(120), nullable=False)
 
     company: Mapped[Company] = relationship()
+    elster_submissions: Mapped[list[ElsterSubmission]] = relationship(
+        back_populates="vat_return", cascade="all, delete-orphan"
+    )
+
+
+class ElsterSubmission(Base):
+    """Protokollierte ELSTER-Übermittlung bzw. Testübermittlung."""
+
+    __tablename__ = "elster_submission"
+    __table_args__ = (
+        CheckConstraint("procedure IN ('ustva')", name="ck_elster_submission_procedure_known"),
+        CheckConstraint(
+            "environment IN ('test', 'production')",
+            name="ck_elster_submission_environment_known",
+        ),
+        CheckConstraint(
+            "status IN ('created', 'transmitted', 'failed')",
+            name="ck_elster_submission_status_known",
+        ),
+        CheckConstraint(
+            "transport IN ('mock', 'eric')", name="ck_elster_submission_transport_known"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    vat_return_id: Mapped[int] = mapped_column(
+        ForeignKey("vat_return.id", ondelete="CASCADE"), nullable=False
+    )
+    procedure: Mapped[str] = mapped_column(String(20), nullable=False, default="ustva")
+    environment: Mapped[str] = mapped_column(String(20), nullable=False, default="test")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    transport: Mapped[str] = mapped_column(String(20), nullable=False, default="mock")
+    certificate_alias: Mapped[str | None] = mapped_column(String(120))
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_xml: Mapped[str] = mapped_column(Text, nullable=False)
+    response_protocol: Mapped[str | None] = mapped_column(Text)
+    transfer_ticket: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship()
+    vat_return: Mapped[VatReturn] = relationship(back_populates="elster_submissions")
 
 
 class User(Base):

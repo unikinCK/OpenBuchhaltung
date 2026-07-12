@@ -1,0 +1,178 @@
+"""ELSTER-Grundlage: Payloads, Transportkante und Übermittlungsprotokolle.
+
+Der erste Transport ist bewusst ein deterministischer Mock für die Testumgebung.
+Die echte ERiC-Anbindung kann später hinter derselben Servicefunktion ergänzt
+werden, ohne API/UI und Buchhaltungslogik umzubauen.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from xml.etree import ElementTree as ET
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.services.audit_log import log_audit_event
+from domain.models import ElsterSubmission, VatReturn
+
+ELSTER_ENVIRONMENTS = {"test", "production"}
+ELSTER_TRANSPORTS = {"mock", "eric"}
+
+
+class ElsterError(ValueError):
+    """Raised when an ELSTER submission cannot be created or transmitted."""
+
+
+@dataclass(frozen=True, slots=True)
+class ElsterTransportResult:
+    status: str
+    transfer_ticket: str
+    response_protocol: str
+
+
+def build_ustva_payload(vat_return: VatReturn) -> str:
+    """Erzeugt eine interne, versionierte UStVA-XML-Nutzlast.
+
+    Diese XML ist noch kein amtliches ELSTER-ERiC-Transferformat. Sie ist der
+    stabile Übergabepunkt für den späteren ERiC-Adapter.
+    """
+
+    root = ET.Element(
+        "OpenBuchhaltungElster",
+        {
+            "version": "1",
+            "procedure": "ustva",
+        },
+    )
+    declaration = ET.SubElement(root, "VatReturn")
+    ET.SubElement(declaration, "TenantId").text = str(vat_return.tenant_id)
+    ET.SubElement(declaration, "CompanyId").text = str(vat_return.company_id)
+    ET.SubElement(declaration, "VatReturnId").text = str(vat_return.id)
+    ET.SubElement(declaration, "Period").text = vat_return.period_label
+    ET.SubElement(declaration, "DateFrom").text = vat_return.date_from.isoformat()
+    ET.SubElement(declaration, "DateTo").text = vat_return.date_to.isoformat()
+
+    values = ET.SubElement(declaration, "Kennzahlen")
+    for row in vat_return.kennzahlen:
+        item = ET.SubElement(values, "Kennzahl", {"code": str(row["kennziffer"])})
+        ET.SubElement(item, "Label").text = str(row["label"])
+        ET.SubElement(item, "Amount").text = str(row["amount"])
+
+    ET.indent(root)
+    return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def submit_vat_return(
+    *,
+    session: Session,
+    vat_return_id: int,
+    environment: str,
+    transport: str,
+    changed_by: str,
+    certificate_alias: str | None = None,
+) -> ElsterSubmission:
+    environment = environment.strip().lower()
+    transport = transport.strip().lower()
+    if environment not in ELSTER_ENVIRONMENTS:
+        raise ElsterError("environment must be 'test' or 'production'.")
+    if transport not in ELSTER_TRANSPORTS:
+        raise ElsterError("transport must be 'mock' or 'eric'.")
+    if transport == "mock" and environment != "test":
+        raise ElsterError("Mock transport is only allowed for the test environment.")
+    if transport == "eric":
+        raise ElsterError("ERiC transport is not configured yet.")
+
+    vat_return = session.get(VatReturn, vat_return_id)
+    if vat_return is None:
+        raise ElsterError("UStVA not found.")
+
+    payload_xml = build_ustva_payload(vat_return)
+    payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
+    result = _mock_transmit(payload_hash=payload_hash, vat_return=vat_return)
+
+    submission = ElsterSubmission(
+        tenant_id=vat_return.tenant_id,
+        company_id=vat_return.company_id,
+        vat_return_id=vat_return.id,
+        procedure="ustva",
+        environment=environment,
+        status=result.status,
+        transport=transport,
+        certificate_alias=certificate_alias,
+        payload_hash=payload_hash,
+        payload_xml=payload_xml,
+        response_protocol=result.response_protocol,
+        transfer_ticket=result.transfer_ticket,
+        submitted_at=datetime.now(timezone.utc),
+        created_by=changed_by,
+    )
+    session.add(submission)
+    vat_return.status = "uebermittelt"
+    session.flush()
+
+    log_audit_event(
+        session=session,
+        tenant_id=submission.tenant_id,
+        company_id=submission.company_id,
+        entity_type="elster_submission",
+        entity_id=str(submission.id),
+        action="transmitted",
+        changed_by=changed_by,
+        payload={
+            "procedure": submission.procedure,
+            "environment": submission.environment,
+            "transport": submission.transport,
+            "status": submission.status,
+            "vat_return_id": vat_return.id,
+            "period_label": vat_return.period_label,
+            "payload_hash": submission.payload_hash,
+            "transfer_ticket": submission.transfer_ticket,
+        },
+    )
+    log_audit_event(
+        session=session,
+        tenant_id=vat_return.tenant_id,
+        company_id=vat_return.company_id,
+        entity_type="vat_return",
+        entity_id=str(vat_return.id),
+        action="elster_transmitted",
+        changed_by=changed_by,
+        payload={
+            "submission_id": submission.id,
+            "environment": submission.environment,
+            "transport": submission.transport,
+            "transfer_ticket": submission.transfer_ticket,
+        },
+    )
+    session.commit()
+    session.refresh(submission)
+    return submission
+
+
+def list_elster_submissions(
+    *, session: Session, company_id: int, vat_return_id: int | None = None
+) -> list[ElsterSubmission]:
+    stmt = (
+        select(ElsterSubmission)
+        .where(ElsterSubmission.company_id == company_id)
+        .order_by(ElsterSubmission.created_at.desc(), ElsterSubmission.id.desc())
+    )
+    if vat_return_id is not None:
+        stmt = stmt.where(ElsterSubmission.vat_return_id == vat_return_id)
+    return session.execute(stmt).scalars().all()
+
+
+def _mock_transmit(*, payload_hash: str, vat_return: VatReturn) -> ElsterTransportResult:
+    ticket = f"MOCK-USTVA-{vat_return.period_label}-{payload_hash[:12].upper()}"
+    protocol = (
+        "ELSTER mock transport accepted UStVA "
+        f"{vat_return.period_label}; payload_sha256={payload_hash}; ticket={ticket}"
+    )
+    return ElsterTransportResult(
+        status="transmitted",
+        transfer_ticket=ticket,
+        response_protocol=protocol,
+    )

@@ -314,8 +314,9 @@ Elektronische Übermittlung an die Finanzverwaltung über die ELSTER-Schnittstel
 Datenmodell + Kennziffern-/Formularlogik, XML-Erzeugung nach amtlichem Schema,
 Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
-- [ ] **ELSTER-Grundlage**: ERiC-Anbindung (Bibliothek, Zertifikate,
-      Test-/Produktionsumgebung, Übermittlungsprotokolle + Audit)
+- [ ] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
+      Test-/Produktionsumgebung, Mock-Transport, Übermittlungsprotokolle + Audit);
+      echte ERiC-Anbindung (Bibliothek, Zertifikate) offen.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung

@@ -1081,6 +1081,57 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_elster_submissions",
+        description="Listet ELSTER-Test-/Übermittlungsprotokolle einer Gesellschaft.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "vat_return_id": {
+                    "type": "integer",
+                    "description": "Optional: nur Protokolle dieser UStVA.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/elster/submissions",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="submit_vat_return_elster",
+        description=(
+            "Übermittelt eine festgehaltene UStVA über die ELSTER-Transportkante. "
+            "Aktuell unterstützt ist transport=mock in environment=test."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "vat_return_id": {"type": "integer", "description": "ID der UStVA."},
+                "environment": {
+                    "type": "string",
+                    "description": "test oder production; aktuell mock nur mit test.",
+                    "default": "test",
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "mock oder eric; aktuell ist mock implementiert.",
+                    "default": "mock",
+                },
+                "certificate_alias": {
+                    "type": "string",
+                    "description": "Optionaler Zertifikats-/Schlüssel-Alias.",
+                },
+            },
+            "required": ["vat_return_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/elster/ustva/submit",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="create_fixed_asset",
         description=(
             "Legt ein Anlagegut in der Anlagenbuchhaltung an und wählt das AfA-Verfahren. "
