@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 from pathlib import Path
@@ -33,6 +34,10 @@ EXPECTED_TOOL_NAMES = {
     "export_trial_balance_csv",
     "export_journal_csv",
     "export_datev_csv",
+    "list_documents",
+    "upload_document",
+    "link_document",
+    "download_document",
     "list_audit_log",
     "create_fixed_asset",
     "list_fixed_assets",
@@ -317,6 +322,84 @@ def test_audit_log_tool_forwards_filters_as_query() -> None:
     )
 
 
+def test_document_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "list_documents",
+                "arguments": {"company_id": 7, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/documents",
+        {"company_id": 7, "journal_entry_id": 9},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 39,
+            "method": "tools/call",
+            "params": {
+                "name": "upload_document",
+                "arguments": {
+                    "company_id": 7,
+                    "file_name": "beleg.pdf",
+                    "mime_type": "application/pdf",
+                    "content_base64": "JVBERi0xLjQK",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/documents",
+        None,
+        {
+            "company_id": 7,
+            "file_name": "beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": "JVBERi0xLjQK",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 40,
+            "method": "tools/call",
+            "params": {
+                "name": "link_document",
+                "arguments": {"document_id": 3, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/documents/3/link",
+        None,
+        {"journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "download_document", "arguments": {"document_id": 3}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/documents/3/content", {}, None)
+
+
 def test_json_tool_forwards_arguments_as_body() -> None:
     http = RecordingHttp(
         ApiResponse(status=201, text='{"id": 1}', content_type="application/json", json={"id": 1})
@@ -492,6 +575,7 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         },
     )
     assert entry["isError"] is False
+    entry_id = json.loads(entry["content"][0]["text"])["id"]
 
     journal = json.loads(
         call_tool("list_journal_entries", {"company_id": company_id})["content"][0]["text"]
@@ -509,8 +593,35 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     assert "posting_number" in csv_result["content"][0]["text"]
     assert company_id == companies[0]["id"]
 
+    document_upload = call_tool(
+        "upload_document",
+        {
+            "company_id": company_id,
+            "file_name": "mcp-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(b"%PDF-1.4\n%%EOF\n").decode("ascii"),
+        },
+    )
+    assert document_upload["isError"] is False
+    document_id = json.loads(document_upload["content"][0]["text"])["id"]
+
+    linked_document = call_tool(
+        "link_document", {"document_id": document_id, "journal_entry_id": entry_id}
+    )
+    assert linked_document["isError"] is False
+    assert json.loads(linked_document["content"][0]["text"])["journal_entry_id"] == entry_id
+
+    listed_documents = json.loads(
+        call_tool("list_documents", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [document["id"] for document in listed_documents["documents"]] == [document_id]
+
+    downloaded_document = json.loads(
+        call_tool("download_document", {"document_id": document_id})["content"][0]["text"]
+    )
+    assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
+
     # GoBD: Festschreiben und Storno über MCP.
-    entry_id = json.loads(entry["content"][0]["text"])["id"]
     batch = call_tool(
         "finalize_journal_entries_until",
         {"company_id": company_id, "up_to_date": "2026-03-15"},
