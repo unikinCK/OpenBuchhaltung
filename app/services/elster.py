@@ -255,6 +255,12 @@ def list_elster_submissions(
     return session.execute(stmt).scalars().all()
 
 
+def get_elster_submission(
+    *, session: Session, submission_id: int
+) -> ElsterSubmission | None:
+    return session.get(ElsterSubmission, submission_id)
+
+
 def _transport_adapter(
     *, transport: str, certificate_alias: str | None, config: Mapping[str, object]
 ) -> ElsterTransport:

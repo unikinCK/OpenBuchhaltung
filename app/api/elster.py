@@ -10,6 +10,7 @@ from app.auth import current_api_user
 from app.services.elster import (
     ElsterError,
     elster_readiness,
+    get_elster_submission,
     list_elster_submissions,
     submit_vat_return,
 )
@@ -20,8 +21,10 @@ def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
 
 
-def _submission_dict(submission: ElsterSubmission) -> dict[str, object]:
-    return {
+def _submission_dict(
+    submission: ElsterSubmission, *, include_payload: bool = False
+) -> dict[str, object]:
+    payload = {
         "id": submission.id,
         "tenant_id": submission.tenant_id,
         "company_id": submission.company_id,
@@ -40,6 +43,9 @@ def _submission_dict(submission: ElsterSubmission) -> dict[str, object]:
         else None,
         "created_by": submission.created_by,
     }
+    if include_payload:
+        payload["payload_xml"] = submission.payload_xml
+    return payload
 
 
 @api_bp.get("/elster/readiness")
@@ -70,6 +76,21 @@ def list_elster_submissions_via_api():
             ),
             200,
         )
+
+
+@api_bp.get("/elster/submissions/<int:submission_id>")
+def get_elster_submission_via_api(submission_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        return jsonify(_submission_dict(submission, include_payload=True)), 200
 
 
 @api_bp.post("/elster/ustva/submit")

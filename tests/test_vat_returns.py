@@ -574,6 +574,13 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     assert listed.status_code == 200
     assert [item["id"] for item in listed.get_json()["submissions"]] == [payload["id"]]
 
+    detail = client.get(f"/api/v1/elster/submissions/{payload['id']}")
+    assert detail.status_code == 200
+    detail_payload = detail.get_json()
+    assert detail_payload["id"] == payload["id"]
+    assert detail_payload["payload_hash"] == payload["payload_hash"]
+    assert "<Period>2026-05</Period>" in detail_payload["payload_xml"]
+
 
 def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> None:
     app = _create_test_app(tmp_path)

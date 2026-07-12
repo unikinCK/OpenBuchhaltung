@@ -34,6 +34,7 @@ EXPECTED_TOOL_NAMES = {
     "list_vat_returns",
     "create_vat_return",
     "list_elster_submissions",
+    "get_elster_submission",
     "get_elster_readiness",
     "submit_vat_return_elster",
     "get_trial_balance",
@@ -432,6 +433,19 @@ def test_elster_tools_forward_arguments() -> None:
         {"company_id": 7, "vat_return_id": 8},
         None,
     )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 324,
+            "method": "tools/call",
+            "params": {
+                "name": "get_elster_submission",
+                "arguments": {"submission_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/submissions/9", None, None)
 
     server.handle(
         {
