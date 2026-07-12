@@ -186,15 +186,27 @@ Beispiel Ausgangsrechnung: Forderungen 1.190 € (Soll) an Erlöse 1.000 € (Ha
 
 ## REST API (API-First)
 
-Die API ist im Entwicklungsmodus offen. Für geschützten Betrieb entweder einen globalen
-Token setzen oder API-Auth erzwingen und Benutzer-Tokens ausgeben — dann erfordern alle
-API-Aufrufe (außer `/health`) den Header `Authorization: Bearer <token>`:
+Die API-Authentifizierung ist **standardmäßig aktiv** (default-secure): alle
+API-Aufrufe außer `/health` erfordern den Header `Authorization: Bearer <token>`
+(globaler `API_AUTH_TOKEN` oder Benutzer-Token). Eingeloggte UI-Sessions erhalten
+zusätzlich lesenden API-Zugriff (GET) im eigenen Tenant-Scope — darüber laufen
+z. B. die CSV-Downloadlinks der Berichte-Seite.
+
+Nur für lokale Entwicklung lässt sich die API öffnen:
+
+```bash
+export API_REQUIRE_AUTH=0   # nicht für Produktion!
+```
+
+Optional zusätzlich ein globaler Token:
 
 ```bash
 export API_AUTH_TOKEN="mein-geheimer-token"
-# oder ohne globalen Token:
-export API_REQUIRE_AUTH=1
 ```
+
+Fehlgeschlagene UI-Logins sind rate-limitiert (Default: 5 Versuche je
+Benutzername/IP in 15 Minuten, konfigurierbar über `LOGIN_RATE_LIMIT_ATTEMPTS`
+und `LOGIN_RATE_LIMIT_WINDOW_SECONDS`; Abschalten mit `LOGIN_RATE_LIMIT=0`).
 
 Benutzer-Token erzeugen/rotieren:
 ```bash
