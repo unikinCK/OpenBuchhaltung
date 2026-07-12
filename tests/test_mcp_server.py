@@ -22,6 +22,7 @@ EXPECTED_TOOL_NAMES = {
     "create_journal_entry",
     "list_journal_entries",
     "finalize_journal_entry",
+    "finalize_journal_entries_until",
     "reverse_journal_entry",
     "get_vat_return",
     "list_vat_returns",
@@ -136,6 +137,24 @@ def test_finalize_and_reverse_fill_path_placeholder() -> None:
         }
     )
     assert http.calls[-1] == ("POST", "/journal-entries/9/finalize", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 310,
+            "method": "tools/call",
+            "params": {
+                "name": "finalize_journal_entries_until",
+                "arguments": {"company_id": 7, "up_to_date": "2026-07-31"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/journal-entries/finalize-until",
+        None,
+        {"company_id": 7, "up_to_date": "2026-07-31"},
+    )
 
     server.handle(
         {
@@ -492,9 +511,17 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
 
     # GoBD: Festschreiben und Storno über MCP.
     entry_id = json.loads(entry["content"][0]["text"])["id"]
+    batch = call_tool(
+        "finalize_journal_entries_until",
+        {"company_id": company_id, "up_to_date": "2026-03-15"},
+    )
+    assert batch["isError"] is False
+    assert json.loads(batch["content"][0]["text"])["finalized_count"] == 1
+
+    # Einzelnes Festschreiben ist idempotent blockiert, wenn die Buchung schon
+    # im Festschreibelauf enthalten war.
     finalized = call_tool("finalize_journal_entry", {"journal_entry_id": entry_id})
-    assert finalized["isError"] is False
-    assert json.loads(finalized["content"][0]["text"])["is_finalized"] is True
+    assert finalized["isError"] is True
 
     reversed_result = call_tool(
         "reverse_journal_entry",

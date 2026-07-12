@@ -325,6 +325,28 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="finalize_journal_entries_until",
+        description=(
+            "Schreibt alle offenen Buchungen einer Gesellschaft bis einschließlich "
+            "up_to_date fest. Bereits festgeschriebene Buchungen werden übersprungen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "up_to_date": {
+                    "type": "string",
+                    "description": "Stichtag im Format JJJJ-MM-TT.",
+                },
+            },
+            "required": ["company_id", "up_to_date"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-entries/finalize-until",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="reverse_journal_entry",
         description=(
             "Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip): Das "

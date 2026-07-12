@@ -522,6 +522,51 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert len(payload["rows"]) == 2
 
 
+def test_api_finalize_journal_entries_until(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Finalize Mandant", "company_name": "Finalize GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    for entry_date in ["2026-04-04", "2026-05-04"]:
+        response = client.post(
+            "/api/v1/journal-entries",
+            json={
+                "company_id": 1,
+                "entry_date": entry_date,
+                "description": f"Buchung {entry_date}",
+                "lines": [
+                    {"account_id": 1, "debit_amount": "100.00"},
+                    {"account_id": 2, "credit_amount": "100.00"},
+                ],
+            },
+        )
+        assert response.status_code == 201
+
+    finalize_response = client.post(
+        "/api/v1/journal-entries/finalize-until",
+        json={"company_id": 1, "up_to_date": "2026-04-30"},
+    )
+    assert finalize_response.status_code == 200
+    assert finalize_response.get_json()["finalized_count"] == 1
+
+    journal = client.get("/api/v1/journal-entries", query_string={"company_id": 1}).get_json()
+    finalized_by_date = {
+        entry["entry_date"]: entry["is_finalized"] for entry in journal["entries"]
+    }
+    assert finalized_by_date == {"2026-05-04": False, "2026-04-04": True}
+
+
 def test_api_create_journal_entry_by_account_code(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)
