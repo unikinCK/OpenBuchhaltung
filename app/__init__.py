@@ -10,7 +10,7 @@ from .api import api_bp
 from .auth import auth_bp, ensure_csrf_token
 from .cli import register_cli_commands
 from .db import create_session_factory
-from .main import main_bp
+from .web import main_bp
 
 
 def create_app(test_config: dict | None = None) -> Flask:

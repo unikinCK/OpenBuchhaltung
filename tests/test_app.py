@@ -299,7 +299,7 @@ def test_api_mcp_call_success_with_mock(tmp_path):
     app.config["MCP_SERVER_URL"] = "http://mcp.local/rpc"
     client = _logged_in_client(app)
 
-    with patch("app.api.call_mcp_server") as call_mock:
+    with patch("app.api.mcp.call_mcp_server") as call_mock:
         call_mock.return_value = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
         response = client.post(
             "/api/v1/mcp/call",
@@ -1238,7 +1238,7 @@ def test_document_upload_calls_configured_llm_endpoint(tmp_path):
         follow_redirects=True,
     )
 
-    with patch("app.main.send_document_update") as llm_mock:
+    with patch("app.web.documents.send_document_update") as llm_mock:
         llm_mock.return_value = {"id": "resp_123", "status": "completed"}
 
         response = client.post(
@@ -1271,7 +1271,7 @@ def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
         follow_redirects=True,
     )
 
-    with patch("app.main.send_document_update") as llm_mock:
+    with patch("app.web.documents.send_document_update") as llm_mock:
         llm_mock.side_effect = DocumentLLMError("boom")
 
         response = client.post(

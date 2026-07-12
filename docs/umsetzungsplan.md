@@ -179,6 +179,18 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       UI-Seite „Anlagen" (Anlagenverzeichnis, Buchwertsumme, Abschreibungsplan,
       AfA-/Abwertungs-/Abgangsbuchung). Audit-Events für alle Aktionen.
 
+## Phase 1.8 – Struktur-Refactoring / Sprint R (Stand 2026-07-12)
+
+- [x] **P1.8-001 Blueprint-Split**: Die monolithischen Module `app/main.py`
+      (~2.150 Zeilen) und `app/api.py` (~880 Zeilen) wurden in fachliche Pakete
+      zerlegt: `app/web/` (dashboard, journal, accounts, documents, receipt_ocr,
+      reports, admin, bank, open_items, fixed_assets, einvoice, periods) und
+      `app/api/` (system, tenants, accounts, journal, reports, exports,
+      fixed_assets, mcp), jeweils mit `blueprint.py` (Blueprint-Objekt) und
+      `helpers.py` (gemeinsame Helfer). Blueprint-Namen (`main`, `api`),
+      Routen und Endpoints sind unverändert — Templates und API-Clients sind
+      nicht betroffen. Rein mechanisches Refactoring ohne Verhaltensänderung.
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
       Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],
