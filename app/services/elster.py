@@ -11,7 +11,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Protocol
 from xml.etree import ElementTree as ET
 
 from sqlalchemy import select
@@ -33,6 +33,53 @@ class ElsterTransportResult:
     status: str
     transfer_ticket: str
     response_protocol: str
+
+
+class ElsterTransport(Protocol):
+    name: str
+
+    def transmit(
+        self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
+    ) -> ElsterTransportResult:
+        """Transmit a prepared payload and return the normalized protocol result."""
+
+
+@dataclass(frozen=True, slots=True)
+class MockElsterTransport:
+    name: str = "mock"
+
+    def transmit(
+        self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
+    ) -> ElsterTransportResult:
+        del payload_xml
+        ticket = f"MOCK-USTVA-{vat_return.period_label}-{payload_hash[:12].upper()}"
+        protocol = (
+            "ELSTER mock transport accepted UStVA "
+            f"{vat_return.period_label}; payload_sha256={payload_hash}; ticket={ticket}"
+        )
+        return ElsterTransportResult(
+            status="transmitted",
+            transfer_ticket=ticket,
+            response_protocol=protocol,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EricElsterTransport:
+    eric_library_path: str | None
+    certificate_path: str | None
+    certificate_alias: str | None = None
+    name: str = "eric"
+
+    def transmit(
+        self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
+    ) -> ElsterTransportResult:
+        del payload_xml, payload_hash, vat_return
+        if not self.eric_library_path or not Path(self.eric_library_path).exists():
+            raise ElsterError("ERiC library is not configured.")
+        if not self.certificate_path or not Path(self.certificate_path).exists():
+            raise ElsterError("ELSTER certificate is not configured.")
+        raise ElsterError("ERiC transport adapter is not implemented yet.")
 
 
 def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
@@ -112,6 +159,7 @@ def submit_vat_return(
     transport: str,
     changed_by: str,
     certificate_alias: str | None = None,
+    config: Mapping[str, object] | None = None,
 ) -> ElsterSubmission:
     environment = environment.strip().lower()
     transport = transport.strip().lower()
@@ -121,8 +169,6 @@ def submit_vat_return(
         raise ElsterError("transport must be 'mock' or 'eric'.")
     if transport == "mock" and environment != "test":
         raise ElsterError("Mock transport is only allowed for the test environment.")
-    if transport == "eric":
-        raise ElsterError("ERiC transport is not configured yet.")
 
     vat_return = session.get(VatReturn, vat_return_id)
     if vat_return is None:
@@ -130,7 +176,12 @@ def submit_vat_return(
 
     payload_xml = build_ustva_payload(vat_return)
     payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
-    result = _mock_transmit(payload_hash=payload_hash, vat_return=vat_return)
+    transport_adapter = _transport_adapter(
+        transport=transport, certificate_alias=certificate_alias, config=config or {}
+    )
+    result = transport_adapter.transmit(
+        payload_xml=payload_xml, payload_hash=payload_hash, vat_return=vat_return
+    )
 
     submission = ElsterSubmission(
         tenant_id=vat_return.tenant_id,
@@ -204,14 +255,15 @@ def list_elster_submissions(
     return session.execute(stmt).scalars().all()
 
 
-def _mock_transmit(*, payload_hash: str, vat_return: VatReturn) -> ElsterTransportResult:
-    ticket = f"MOCK-USTVA-{vat_return.period_label}-{payload_hash[:12].upper()}"
-    protocol = (
-        "ELSTER mock transport accepted UStVA "
-        f"{vat_return.period_label}; payload_sha256={payload_hash}; ticket={ticket}"
-    )
-    return ElsterTransportResult(
-        status="transmitted",
-        transfer_ticket=ticket,
-        response_protocol=protocol,
+def _transport_adapter(
+    *, transport: str, certificate_alias: str | None, config: Mapping[str, object]
+) -> ElsterTransport:
+    if transport == "mock":
+        return MockElsterTransport()
+    return EricElsterTransport(
+        eric_library_path=str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "") or None,
+        certificate_path=str(config.get("ELSTER_CERTIFICATE_PATH") or "") or None,
+        certificate_alias=certificate_alias
+        or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "")
+        or None,
     )

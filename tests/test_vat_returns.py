@@ -14,6 +14,8 @@ from app import create_app
 from app.auth import hash_password
 from app.services.elster import (
     ElsterError,
+    EricElsterTransport,
+    MockElsterTransport,
     elster_readiness,
     list_elster_submissions,
     submit_vat_return,
@@ -478,6 +480,25 @@ def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -
         .all()
     }
     assert {"transmitted", "elster_transmitted"}.issubset(audit_actions)
+
+
+def test_elster_transport_adapters(session: Session) -> None:
+    company = _seed(session)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026-05", changed_by="pytest"
+    )
+    payload_hash = "a" * 64
+
+    mock_result = MockElsterTransport().transmit(
+        payload_xml="<xml />", payload_hash=payload_hash, vat_return=vat_return
+    )
+    assert mock_result.status == "transmitted"
+    assert mock_result.transfer_ticket.startswith("MOCK-USTVA-2026-05-")
+
+    with pytest.raises(ElsterError, match="ERiC library"):
+        EricElsterTransport(eric_library_path=None, certificate_path=None).transmit(
+            payload_xml="<xml />", payload_hash=payload_hash, vat_return=vat_return
+        )
 
 
 def test_elster_mock_rejects_production(session: Session) -> None:

@@ -100,6 +100,7 @@ def submit_vat_return_elster_via_api():
                 transport=transport,
                 certificate_alias=certificate_alias,
                 changed_by=_api_changed_by(),
+                config=current_app.config,
             )
         except ElsterError as exc:
             return jsonify({"error": str(exc)}), 422
