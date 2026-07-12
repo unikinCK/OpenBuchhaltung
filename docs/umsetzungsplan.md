@@ -233,6 +233,26 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       `GET /api/v1/vat-return` (Berechnung), `GET/POST /api/v1/vat-returns`.
       Elektronische Übermittlung folgt mit der ELSTER-Schnittstelle (Phase 3.5).
 
+## Phase 1.11 – Schnittstellen-Parität / Sprint U (Stand 2026-07-12)
+
+Grundsatz (auch in den Coding-Guidelines verankert): Jede Fachfunktion wird über
+UI, REST-API und MCP angeboten und gepflegt.
+
+- [x] **P1.11-001 MCP-Parität zur API**: Fünf fehlende MCP-Tools ergänzt —
+      `finalize_journal_entry`, `reverse_journal_entry` (GoBD), `get_vat_return`,
+      `create_vat_return`, `list_vat_returns` (UStVA). Damit sind alle
+      API-Endpunkte (außer dem MCP-Proxy selbst) als MCP-Tools verfügbar.
+- [ ] **P1.11-002 API-/MCP-Ausbau für UI-only-Funktionen**: Journal lesen
+      (`GET /journal-entries`), Festschreibelauf, Belege (Upload/Verknüpfen/
+      Download/Liste), Beleg-OCR, E-Rechnung (Import/Export), Bank (Import/
+      Zuordnen/Buchen/Liste), Offene Posten, Anlagen (AfaA/Abgang),
+      Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
+      WJ-Beginn) — jeweils REST-Endpoint + MCP-Tool.
+- [ ] **P1.11-003 Audit-Log einsehbar machen**: UI-Seite + `GET /audit-log`
+      + MCP-Tool (wird bisher nur geschrieben, nirgends gelesen).
+- [ ] **P1.11-004 Kontenrahmen-Import & Benutzerverwaltung** über UI/API/MCP
+      (bisher nur CLI).
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
       Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],

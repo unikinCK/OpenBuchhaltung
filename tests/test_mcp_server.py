@@ -20,6 +20,11 @@ EXPECTED_TOOL_NAMES = {
     "create_account",
     "list_accounts",
     "create_journal_entry",
+    "finalize_journal_entry",
+    "reverse_journal_entry",
+    "get_vat_return",
+    "list_vat_returns",
+    "create_vat_return",
     "get_trial_balance",
     "get_income_statement",
     "get_balance_sheet",
@@ -112,6 +117,81 @@ def test_path_placeholder_filled_from_arguments() -> None:
         None,
         {"fiscal_year": 2026},
     )
+
+
+def test_finalize_and_reverse_fill_path_placeholder() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "finalize_journal_entry",
+                "arguments": {"journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/journal-entries/9/finalize", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "reverse_journal_entry",
+                "arguments": {"journal_entry_id": 9, "reversal_date": "2026-07-12"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/journal-entries/9/reverse",
+        None,
+        {"reversal_date": "2026-07-12"},
+    )
+
+
+def test_vat_return_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {
+                "name": "get_vat_return",
+                "arguments": {"company_id": 7, "period": "2026-H1"},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/vat-return", {"company_id": 7, "period": "2026-H1"}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {
+                "name": "create_vat_return",
+                "arguments": {"company_id": 7, "period": "2026-Q2"},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/vat-returns", None, {"company_id": 7, "period": "2026-Q2"})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {"name": "list_vat_returns", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/vat-returns", {"company_id": 7}, None)
 
 
 def test_income_statement_forwards_date_range_as_query() -> None:
@@ -335,3 +415,42 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     assert csv_result["isError"] is False
     assert "posting_number" in csv_result["content"][0]["text"]
     assert company_id == companies[0]["id"]
+
+    # GoBD: Festschreiben und Storno über MCP.
+    entry_id = json.loads(entry["content"][0]["text"])["id"]
+    finalized = call_tool("finalize_journal_entry", {"journal_entry_id": entry_id})
+    assert finalized["isError"] is False
+    assert json.loads(finalized["content"][0]["text"])["is_finalized"] is True
+
+    reversed_result = call_tool(
+        "reverse_journal_entry",
+        {"journal_entry_id": entry_id, "reversal_date": "2026-03-20"},
+    )
+    assert reversed_result["isError"] is False
+    reversal = json.loads(reversed_result["content"][0]["text"])
+    assert reversal["reversal_of_id"] == entry_id
+
+    # Doppelstorno wird von der API abgewiesen und als Tool-Fehler gemeldet.
+    second = call_tool(
+        "reverse_journal_entry",
+        {"journal_entry_id": entry_id, "reversal_date": "2026-03-21"},
+    )
+    assert second["isError"] is True
+
+    # UStVA: berechnen, festhalten, auflisten.
+    vat = json.loads(
+        call_tool("get_vat_return", {"company_id": company_id, "period": "2026-03"})[
+            "content"
+        ][0]["text"]
+    )
+    assert vat["period"] == "2026-03"
+    assert {row["kennziffer"] for row in vat["kennzahlen"]} >= {"81", "66", "83"}
+
+    saved = call_tool("create_vat_return", {"company_id": company_id, "period": "2026-03"})
+    assert saved["isError"] is False
+    assert json.loads(saved["content"][0]["text"])["period_label"] == "2026-03"
+
+    listed = json.loads(
+        call_tool("list_vat_returns", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [item["period_label"] for item in listed["vat_returns"]] == ["2026-03"]

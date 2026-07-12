@@ -4,6 +4,10 @@
 - Nutze Application Factory Pattern für Flask (`create_app`).
 - Trenne Schichten in `app/` (Presentation), `domain/` (Fachlogik), später `infrastructure/`.
 - Halte Controller dünn, verschiebe Regeln in Use-Cases/Domain-Services.
+- **Schnittstellen-Parität:** Jede Fachfunktion wird über alle drei Schnittstellen
+  angeboten und gepflegt — UI (`app/web/`), REST-API (`app/api/`) und MCP-Server
+  (`app/services/mcp_server.py`, ToolSpec-Proxy auf die API). Neue Features liefern
+  alle drei Schichten mit; vor dem Merge Parität prüfen.
 
 ## Python-Stil
 - Python 3.12 als Zielversion.
