@@ -6,6 +6,23 @@
   <h1 class="page-title">Umsatzsteuer-Voranmeldung</h1>
 
   <section class="card">
+    <h2>ELSTER-Konfiguration</h2>
+    <p>
+      <strong>Umgebung:</strong> {{ elster_readiness.environment }}
+      <span class="badge">{{ "produktionsbereit" if elster_readiness.production_ready else "nicht produktionsbereit" }}</span>
+    </p>
+    <p><strong>Mock-Transport:</strong> verfügbar</p>
+    <p><strong>ERiC:</strong> {{ "konfiguriert" if elster_readiness.eric_transport_available else "nicht konfiguriert" }}</p>
+    {% if elster_readiness.warnings %}
+      <ul>
+        {% for warning in elster_readiness.warnings %}
+          <li class="muted">{{ warning }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Zeitraum wählen</h2>
     {% if not selected_company_id %}
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>

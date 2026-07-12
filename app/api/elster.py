@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
-from app.services.elster import ElsterError, list_elster_submissions, submit_vat_return
+from app.services.elster import (
+    ElsterError,
+    elster_readiness,
+    list_elster_submissions,
+    submit_vat_return,
+)
 from domain.models import ElsterSubmission, VatReturn
 
 
@@ -35,6 +40,11 @@ def _submission_dict(submission: ElsterSubmission) -> dict[str, object]:
         else None,
         "created_by": submission.created_by,
     }
+
+
+@api_bp.get("/elster/readiness")
+def get_elster_readiness_via_api():
+    return jsonify(elster_readiness(current_app.config)), 200
 
 
 @api_bp.get("/elster/submissions")

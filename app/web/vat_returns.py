@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, request, url_for
 
-from app.services.elster import ElsterError, list_elster_submissions, submit_vat_return
+from app.services.elster import (
+    ElsterError,
+    elster_readiness,
+    list_elster_submissions,
+    submit_vat_return,
+)
 from app.services.vat_returns import (
     VatReturnError,
     compute_vat_return,
@@ -92,6 +97,7 @@ def vat_returns_page():
         rows=rows,
         saved_returns=saved_views,
         current_year=date.today().year,
+        elster_readiness=elster_readiness(current_app.config),
     )
 
 
