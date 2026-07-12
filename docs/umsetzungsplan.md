@@ -301,10 +301,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       ``ocr_booked``. Erweiterung: optionaler LLM [``RECEIPT_LLM_ENDPOINT_URL``] als
       Unterstützung/Fallback [ergänzt fehlende Felder] und als Kontrolle [Cross-Check des
       Bruttobetrags → ``bestätigt``/``Abweichung``], nicht-blockierend)*
-- [ ] REST-API + API-Tokens *(erstes Security-Inkrement: `API_REQUIRE_AUTH`,
-      Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende
-      API-Endpunkte umgesetzt; weiterer API-Ausbau offen)*
-- [ ] Mandantenübergreifendes Rollen-/Supportmodell
+- [x] REST-API + API-Tokens *(Security-Inkrement: `API_REQUIRE_AUTH`,
+      Benutzer-API-Tokens per CLI/UI/API, Tenant-Scoping, Rollenprüfung und
+      API-/MCP-Parität umgesetzt)*
+- [x] Mandantenübergreifendes Rollen-/Supportmodell *(globale Support-Rolle:
+      mandantenübergreifend lesend, ohne Schreib-/Admin-Rechte)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

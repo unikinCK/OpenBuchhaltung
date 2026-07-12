@@ -3,7 +3,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from app import create_app
-from domain.models import Account
+from domain.models import Account, User
 
 
 def _create_test_app(tmp_path: Path):
@@ -79,3 +79,27 @@ def test_cli_import_kontenrahmen_requires_exactly_one_source(tmp_path):
 
     assert result_with_both.exit_code != 0
     assert "Bitte genau eine Option" in result_with_both.output
+
+
+def test_cli_create_support_user(tmp_path):
+    app = _create_test_app(tmp_path)
+    runner = app.test_cli_runner()
+
+    result = runner.invoke(
+        args=[
+            "create-user",
+            "--username",
+            "support",
+            "--password",
+            "support123",
+            "--role",
+            "Support",
+        ]
+    )
+    assert result.exit_code == 0
+    assert "Benutzer support (Support) wurde angelegt." in result.output
+
+    with app.extensions["db_session_factory"]() as session:
+        user = session.execute(select(User).where(User.username == "support")).scalar_one()
+        assert user.role == "Support"
+        assert user.tenant_id is None

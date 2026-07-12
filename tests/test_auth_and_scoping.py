@@ -245,6 +245,55 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
     assert read_only_write.status_code == 403
 
 
+def test_support_api_token_reads_across_tenants_but_cannot_write(tmp_path):
+    token = "obk_support-token"
+    app = _create_test_app(tmp_path, API_REQUIRE_AUTH=True)
+    _seed_two_tenants_with_user(app)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="support",
+                password_hash=hash_password("passwort"),
+                role="Support",
+                tenant_id=None,
+                api_token_hash=hash_api_token(token),
+                api_token_last4=token[-4:],
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    companies = client.get("/api/v1/companies", headers={"Authorization": f"Bearer {token}"})
+    assert companies.status_code == 200
+    assert {company["name"] for company in companies.get_json()} == {"A GmbH", "B GmbH"}
+
+    write = client.post(
+        "/api/v1/accounts",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "company_id": companies.get_json()[0]["id"],
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+    )
+    assert write.status_code == 403
+
+    create_tenant = client.post(
+        "/api/v1/tenants",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tenant_name": "Tenant C", "company_name": "C GmbH"},
+    )
+    assert create_tenant.status_code == 403
+
+    create_user = client.post(
+        "/api/v1/users",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"username": "x", "password": "secret", "role": "Pruefer"},
+    )
+    assert create_user.status_code == 403
+
+
 def test_user_admin_api_create_rotate_and_disable(tmp_path):
     app = _create_test_app(tmp_path)
     company_a_id, _ = _seed_two_tenants_with_user(app)
@@ -451,7 +500,7 @@ def test_seed_demo_command_creates_demo_data_idempotently(tmp_path):
     assert account_count == 31
     assert tax_code_count == 5
     assert entry_count == 4
-    assert user_count == 3
+    assert user_count == 4
 
     from app.services.reports import balance_sheet_for_company
 

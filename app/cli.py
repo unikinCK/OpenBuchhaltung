@@ -12,6 +12,7 @@ from app.auth import (
     ROLE_ADMIN,
     ROLE_BUCHHALTER,
     ROLE_PRUEFER,
+    ROLE_SUPPORT,
     generate_api_token,
     hash_api_token,
     hash_password,
@@ -38,6 +39,7 @@ DEMO_USERS = (
     ("admin", "admin123", ROLE_ADMIN, False),
     ("buchhalter", "buchhalter123", ROLE_BUCHHALTER, True),
     ("pruefer", "pruefer123", ROLE_PRUEFER, True),
+    ("support", "support123", ROLE_SUPPORT, False),
 )
 
 
@@ -83,7 +85,7 @@ def register_cli_commands(app: Flask) -> None:
     @click.option("--password", required=True)
     @click.option(
         "--role",
-        type=click.Choice([ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER]),
+        type=click.Choice([ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT]),
         default=ROLE_BUCHHALTER,
         show_default=True,
     )

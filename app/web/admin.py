@@ -11,6 +11,7 @@ from app.auth import (
     ROLE_ADMIN,
     ROLE_BUCHHALTER,
     ROLE_PRUEFER,
+    ROLE_SUPPORT,
     current_tenant_id,
     current_user,
     generate_api_token,
@@ -22,7 +23,7 @@ from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
 from domain.models import Account, Company, Tenant, User
 
-ROLES = (ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER)
+ROLES = (ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT)
 
 
 def _is_admin() -> bool:

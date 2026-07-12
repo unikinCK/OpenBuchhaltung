@@ -9,7 +9,6 @@ from flask import current_app, jsonify, request
 from app.auth import (
     ROLE_ADMIN,
     WRITE_ROLES,
-    api_has_global_access,
     current_api_tenant_id,
     current_api_user,
 )
@@ -42,14 +41,14 @@ def api_scoped_company(session, company_id: int) -> Company | None:
 
 def api_can_write() -> bool:
     user = current_api_user()
-    if user is None or api_has_global_access():
+    if user is None:
         return True
     return user["role"] in WRITE_ROLES
 
 
 def api_can_create_tenant() -> bool:
     user = current_api_user()
-    if user is None or api_has_global_access():
+    if user is None:
         return True
     return user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
 
