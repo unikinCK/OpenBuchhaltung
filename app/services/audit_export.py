@@ -30,6 +30,9 @@ from domain.models import (
     JournalEntry,
     JournalEntryLine,
     OpenItem,
+    PayrollEmployee,
+    PayrollRun,
+    PayrollRunLine,
     Period,
     PeriodLock,
     TaxCode,
@@ -88,6 +91,14 @@ def build_audit_export_package(
         order_by=(Period.start_date, Period.period_number),
     )
     period_ids = [period.id for period in periods]
+    payroll_runs = _rows(
+        session,
+        PayrollRun,
+        PayrollRun.company_id == company.id,
+        _date_range(PayrollRun.payment_date, date_from, date_to),
+        order_by=(PayrollRun.payment_date, PayrollRun.id),
+    )
+    payroll_run_ids = [run.id for run in payroll_runs]
 
     tables: dict[str, list[dict[str, Any]] | dict[str, Any]] = {
         "tenant": _model_dict(tenant) if tenant is not None else {},
@@ -155,6 +166,25 @@ def build_audit_export_package(
                 DepreciationEntry.company_id == company.id,
                 _date_range(DepreciationEntry.depreciation_date, date_from, date_to),
                 order_by=(DepreciationEntry.depreciation_date, DepreciationEntry.id),
+            )
+        ],
+        "payroll_employees": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                PayrollEmployee,
+                PayrollEmployee.company_id == company.id,
+                order_by=(PayrollEmployee.last_name, PayrollEmployee.first_name),
+            )
+        ],
+        "payroll_runs": [_model_dict(row) for row in payroll_runs],
+        "payroll_run_lines": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                PayrollRunLine,
+                PayrollRunLine.payroll_run_id.in_(payroll_run_ids or [-1]),
+                order_by=(PayrollRunLine.payroll_run_id, PayrollRunLine.id),
             )
         ],
         "vat_returns": [

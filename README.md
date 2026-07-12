@@ -28,6 +28,9 @@ können, was gebucht, exportiert und protokolliert wird.
   offene Posten und Zahlungsausgleich.
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
+- **Lohnbuchhaltung:** Mitarbeiterstamm, konfigurierbare Abzugsraten,
+  Lohnläufe und automatische FiBu-Buchung von Brutto, Netto,
+  Lohnsteuer- und Sozialversicherungsverbindlichkeiten.
 - **Auswertungen & Exporte:** Summen-/Saldenliste, GuV, Bilanz,
   Journalexporte, DATEV-kompatibler Buchungsstapel und Prüferexport-Paket
   mit Manifest und Hashes.
@@ -62,6 +65,9 @@ Wichtig zur Einordnung:
   Preflight/Readiness-Diagnose und ERiC-Runner-Bridge vorbereitet; produktive
   Übermittlung benötigt eine lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und
   einen passenden Runner.
+- Lohnbuchhaltung ist als technisches MVP umgesetzt; amtliche Lohnsteuer-/
+  Sozialversicherungsmeldungen, ELStAM und PAP-Berechnung sind noch nicht
+  enthalten.
 
 ## Planung & Dokumentation
 
