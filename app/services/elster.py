@@ -238,6 +238,29 @@ def submit_vat_return(
     return submission
 
 
+def retry_elster_submission(
+    *,
+    session: Session,
+    submission_id: int,
+    changed_by: str,
+    config: Mapping[str, object] | None = None,
+) -> ElsterSubmission:
+    submission = session.get(ElsterSubmission, submission_id)
+    if submission is None:
+        raise ElsterError("ELSTER submission not found.")
+    if submission.status != "failed":
+        raise ElsterError("Only failed ELSTER submissions can be retried.")
+    return submit_vat_return(
+        session=session,
+        vat_return_id=submission.vat_return_id,
+        environment=submission.environment,
+        transport=submission.transport,
+        certificate_alias=submission.certificate_alias,
+        changed_by=changed_by,
+        config=config,
+    )
+
+
 def _record_submission(
     *,
     session: Session,

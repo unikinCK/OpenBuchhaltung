@@ -1162,6 +1162,24 @@ TOOLS: list[ToolSpec] = [
         arg_location="none",
     ),
     ToolSpec(
+        name="retry_elster_submission",
+        description="Versucht eine fehlgeschlagene ELSTER-Übermittlung erneut.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "submission_id": {
+                    "type": "integer",
+                    "description": "ID der fehlgeschlagenen ELSTER-Übermittlung.",
+                },
+            },
+            "required": ["submission_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/elster/submissions/{submission_id}/retry",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_elster_readiness",
         description="Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek und Zertifikat.",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},

@@ -23,6 +23,7 @@ from app.services.elster import (
     elster_submission_summary,
     get_elster_submission,
     list_elster_submissions,
+    retry_elster_submission,
     submit_vat_return,
 )
 from app.services.vat_returns import (
@@ -225,12 +226,9 @@ def retry_elster_submission_action(submission_id: int):
                 url_for("main.vat_returns_page", company_id=company_id, period=period_label)
             )
         try:
-            retry = submit_vat_return(
+            retry = retry_elster_submission(
                 session=session,
-                vat_return_id=submission.vat_return_id,
-                environment=submission.environment,
-                transport=submission.transport,
-                certificate_alias=submission.certificate_alias,
+                submission_id=submission.id,
                 changed_by=changed_by(),
                 config=current_app.config,
             )
