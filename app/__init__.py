@@ -43,8 +43,15 @@ def create_app(test_config: dict | None = None) -> Flask:
             "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
         ),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
-        API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "0") == "1",
+        # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
+        # per API_REQUIRE_AUTH=0.
+        API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "1") == "1",
         CSRF_PROTECT=os.environ.get("CSRF_PROTECT", "1") == "1",
+        LOGIN_RATE_LIMIT=os.environ.get("LOGIN_RATE_LIMIT", "1") == "1",
+        LOGIN_RATE_LIMIT_ATTEMPTS=int(os.environ.get("LOGIN_RATE_LIMIT_ATTEMPTS", "5")),
+        LOGIN_RATE_LIMIT_WINDOW_SECONDS=int(
+            os.environ.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900")
+        ),
         DATEV_CONSULTANT_NUMBER=int(os.environ.get("DATEV_CONSULTANT_NUMBER", "1000")),
         DATEV_CLIENT_NUMBER=(
             int(os.environ["DATEV_CLIENT_NUMBER"])
@@ -60,9 +67,15 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     if test_config:
         app.config.update(test_config)
-        # Tests posten Formulare ohne Token; expliziter Opt-in via CSRF_PROTECT möglich.
-        if app.config.get("TESTING") and "CSRF_PROTECT" not in test_config:
-            app.config["CSRF_PROTECT"] = False
+        # Tests posten Formulare ohne Token bzw. rufen die API ohne Bearer auf;
+        # expliziter Opt-in je Test über die jeweilige Config möglich.
+        if app.config.get("TESTING"):
+            if "CSRF_PROTECT" not in test_config:
+                app.config["CSRF_PROTECT"] = False
+            if "API_REQUIRE_AUTH" not in test_config:
+                app.config["API_REQUIRE_AUTH"] = False
+            if "LOGIN_RATE_LIMIT" not in test_config:
+                app.config["LOGIN_RATE_LIMIT"] = False
 
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 

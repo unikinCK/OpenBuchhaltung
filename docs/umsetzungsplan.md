@@ -257,6 +257,24 @@ UI, REST-API und MCP angeboten und gepflegt.
 - [x] **P1.11-004 Kontenrahmen-Import & Benutzerverwaltung** über UI/API/MCP
       umgesetzt.
 
+## Phase 1.12 – Security-Härtung / Sprint V (Stand 2026-07-12)
+
+- [x] **P1.12-001 API default-secure**: `API_REQUIRE_AUTH` ist jetzt
+      standardmäßig aktiv (Opt-out nur für lokale Entwicklung per
+      `API_REQUIRE_AUTH=0`); eingeloggte UI-Sessions erhalten lesenden
+      API-Zugriff (GET) im eigenen Tenant-Scope, damit die
+      CSV-/DATEV-Downloadlinks der Berichte-Seite weiter funktionieren;
+      schreibende API-Aufrufe erfordern immer ein Bearer-Token (kein
+      CSRF-Risiko über Session-Cookies).
+- [x] **P1.12-002 API-Token-Lookup**: Benutzer-Tokens werden als SHA-256
+      gespeichert und per eindeutigem Index nachgeschlagen (vorher: scrypt-
+      Verifikation über alle Benutzer je Request — O(n) und DoS-anfällig).
+      Bestehende Alt-Tokens bleiben gültig und werden beim ersten Gebrauch
+      automatisch auf SHA-256 migriert (keine Migration nötig).
+- [x] **P1.12-003 Login-Rate-Limiting**: Fehlgeschlagene UI-Logins sind auf
+      5 Versuche je Benutzername/IP in 15 Minuten begrenzt (429; In-Memory,
+      konfigurierbar, erfolgreicher Login setzt den Zähler zurück).
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
       Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],
