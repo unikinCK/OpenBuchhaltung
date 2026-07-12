@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -1147,6 +1148,72 @@ def test_document_download_returns_file(tmp_path):
     response = client.get("/documents/1/download")
     assert response.status_code == 200
     assert response.data == b"testbeleg"
+
+
+def test_api_document_upload_link_list_and_download(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Belege", "company_name": "Api Belege GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Erlöse", "account_type": "revenue"},
+    )
+    entry_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "API Belegbuchung",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00"},
+                {"account_id": 2, "credit_amount": "100.00"},
+            ],
+        },
+    )
+    assert entry_response.status_code == 201
+    entry_id = entry_response.get_json()["id"]
+
+    file_bytes = b"%PDF-1.4\napi beleg\n%%EOF\n"
+    upload_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+        },
+    )
+    assert upload_response.status_code == 201
+    document_id = upload_response.get_json()["id"]
+
+    link_response = client.post(
+        f"/api/v1/documents/{document_id}/link",
+        json={"journal_entry_id": entry_id},
+    )
+    assert link_response.status_code == 200
+    assert link_response.get_json()["journal_entry_id"] == entry_id
+
+    list_response = client.get("/api/v1/documents", query_string={"company_id": 1})
+    assert list_response.status_code == 200
+    assert [document["id"] for document in list_response.get_json()["documents"]] == [
+        document_id
+    ]
+
+    content_response = client.get(f"/api/v1/documents/{document_id}/content")
+    assert content_response.status_code == 200
+    assert base64.b64decode(content_response.get_json()["content_base64"]) == file_bytes
+
+    download_response = client.get(f"/api/v1/documents/{document_id}/download")
+    assert download_response.status_code == 200
+    assert download_response.data == file_bytes
 
 
 def test_trial_balance_csv_export_download(tmp_path):

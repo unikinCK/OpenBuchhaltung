@@ -8,6 +8,7 @@ from __future__ import annotations
 from app.api import (  # noqa: F401
     accounts,
     audit_log,
+    documents,
     exports,
     fixed_assets,
     journal,
