@@ -15,6 +15,7 @@ from app.api import (  # noqa: F401
     mcp,
     open_items,
     periods,
+    receipt_ocr,
     reports,
     system,
     tenants,

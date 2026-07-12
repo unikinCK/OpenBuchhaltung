@@ -38,6 +38,8 @@ EXPECTED_TOOL_NAMES = {
     "upload_document",
     "link_document",
     "download_document",
+    "create_receipt_ocr_suggestion",
+    "book_receipt_ocr_suggestion",
     "list_open_items",
     "create_open_item",
     "settle_open_item",
@@ -453,6 +455,70 @@ def test_document_tools_forward_arguments() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/documents/3/content", {}, None)
+
+
+def test_receipt_ocr_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {
+                "name": "create_receipt_ocr_suggestion",
+                "arguments": {
+                    "company_id": 7,
+                    "file_name": "beleg.pdf",
+                    "mime_type": "application/pdf",
+                    "content_base64": "JVBERi0xLjQK",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-ocr/suggestions",
+        None,
+        {
+            "company_id": 7,
+            "file_name": "beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": "JVBERi0xLjQK",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {
+                "name": "book_receipt_ocr_suggestion",
+                "arguments": {
+                    "company_id": 7,
+                    "document_id": 3,
+                    "expense_account_id": 4,
+                    "creditor_account_id": 5,
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-ocr/book",
+        None,
+        {
+            "company_id": 7,
+            "document_id": 3,
+            "expense_account_id": 4,
+            "creditor_account_id": 5,
+            "net_amount": "100.00",
+            "tax_amount": "19.00",
+        },
+    )
 
 
 def test_open_item_tools_forward_arguments() -> None:

@@ -245,7 +245,8 @@ UI, REST-API und MCP angeboten und gepflegt.
 - [ ] **P1.11-002 API-/MCP-Ausbau für UI-only-Funktionen**: Journal lesen
       (`GET /journal-entries` umgesetzt), Festschreibelauf
       (`POST /journal-entries/finalize-until` umgesetzt), Belege (Upload/Verknüpfen/
-      Download/Liste umgesetzt), Beleg-OCR, E-Rechnung (Import/Export), Bank (Import/
+      Download/Liste umgesetzt), Beleg-OCR (Vorschlag/Buchen umgesetzt),
+      E-Rechnung (Import/Export), Bank (Import/
       Zuordnen/Buchen/Liste), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
       Anlagen (AfaA/Abgang umgesetzt),
       Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
