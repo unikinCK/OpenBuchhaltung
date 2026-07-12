@@ -211,6 +211,26 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       EXTF-Header auf 1, wenn alle Buchungen des Stapels festgeschrieben sind.
       Audit-Events `finalized`/`reversed` für alle Aktionen.
 
+## Phase 1.10 – UStVA / Sprint T (Stand 2026-07-12)
+
+- [x] **P1.10-001 Umsatzsteuer-Voranmeldung**: Kennziffern-Berechnung
+      (`app/services/vat_returns.py`) datengetrieben aus den Journaldaten:
+      Steuerzeilen (Zeile auf dem Steuerkonto des Steuercodes) liefern USt/VSt,
+      Basiszeilen die Bemessungsgrundlagen; Richtung über den Kontotyp des
+      Steuerkontos (liability = USt, asset = VSt), steuerfreie Umsätze über
+      0-%-Codes auf Ertragskonten. Kennziffern Kz 81/86 (BMG in vollen Euro,
+      abgerundet), Kz 48 (steuerfrei), Kz 66 (Vorsteuer), Kz 83
+      (Zahllast/Überschuss, centgenau aus der Buchhaltung); Stornos
+      neutralisieren sich automatisch (Stornozeilen behalten den Steuercode,
+      `expand_tax_lines=False` verhindert doppelte Steuer-Expansion).
+      Voranmeldungszeiträume Monat ("JJJJ-MM") und Quartal ("JJJJ-Qn").
+      `VatReturn`-Modell (Migration 0011) hält Voranmeldungen als
+      unveränderlichen Kennziffern-Snapshot fest (unique je Gesellschaft und
+      Zeitraum, Status erstellt/uebermittelt, Audit-Event). UI-Seite „UStVA"
+      (Zeitraumwahl, Kennziffern-Tabelle, Festhalten, Liste); API
+      `GET /api/v1/vat-return` (Berechnung), `GET/POST /api/v1/vat-returns`.
+      Elektronische Übermittlung folgt mit der ELSTER-Schnittstelle (Phase 3.5).
+
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
       Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],
@@ -259,6 +279,24 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Benutzer-API-Tokens per CLI, Tenant-Scoping und Rollenprüfung für bestehende
       API-Endpunkte umgesetzt; weiterer API-Ausbau offen)*
 - [ ] Mandantenübergreifendes Rollen-/Supportmodell
+
+## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
+
+Elektronische Übermittlung an die Finanzverwaltung über die ELSTER-Schnittstelle
+(ERiC-Bibliothek bzw. zertifizierte Übermittlung). Voraussetzung je Verfahren:
+Datenmodell + Kennziffern-/Formularlogik, XML-Erzeugung nach amtlichem Schema,
+Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
+
+- [ ] **ELSTER-Grundlage**: ERiC-Anbindung (Bibliothek, Zertifikate,
+      Test-/Produktionsumgebung, Übermittlungsprotokolle + Audit)
+- [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
+      Sprint T) + USt-Jahreserklärung
+- [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung
+      (inkl. Hinzurechnungen/Kürzungen §§ 8, 9 GewStG)
+- [ ] **Körperschaftsteuer**: Vorauszahlung + KSt-Erklärung (inkl. E-Bilanz-
+      Taxonomie als Voraussetzung für die Übermittlung des Jahresabschlusses)
+- [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
+      LSt-Bescheinigungen *(setzt Lohnbuchhaltungs-Modul voraus — separat planen)*
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)

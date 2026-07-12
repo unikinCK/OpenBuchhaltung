@@ -553,6 +553,40 @@ class DepreciationEntry(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship()
 
 
+class VatReturn(Base):
+    """Festgehaltene Umsatzsteuer-Voranmeldung (Kennziffern-Snapshot je Zeitraum)."""
+
+    __tablename__ = "vat_return"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_label", name="uq_vat_return_company_period"),
+        CheckConstraint("date_from <= date_to", name="ck_vat_return_date_range"),
+        CheckConstraint(
+            "status IN ('erstellt', 'uebermittelt')", name="ck_vat_return_status_known"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    # Voranmeldungszeitraum, z. B. "2026-05" (Monat) oder "2026-Q2" (Quartal).
+    period_label: Mapped[str] = mapped_column(String(10), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    # Kennziffern-Snapshot: Liste von {kennziffer, label, amount} zum Zeitpunkt des Festhaltens.
+    kennzahlen: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship()
+
+
 class User(Base):
     __tablename__ = "user"
 
