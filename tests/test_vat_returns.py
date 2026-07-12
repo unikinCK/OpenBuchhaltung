@@ -134,6 +134,38 @@ def _create_test_app(tmp_path: Path):
     )
 
 
+def _make_eric_config(tmp_path: Path, *, status: str = "transmitted") -> dict[str, str]:
+    eric_library = tmp_path / "libericapi.dylib"
+    certificate = tmp_path / "certificate.pfx"
+    command = tmp_path / "eric-runner.py"
+    eric_library.write_text("fake", encoding="utf-8")
+    certificate.write_text("fake", encoding="utf-8")
+    command.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import os\n"
+        f"status = {status!r}\n"
+        "ticket = 'ERIC-' + os.environ['ELSTER_PAYLOAD_SHA256'][:12].upper()\n"
+        "response = {\n"
+        "    'status': status,\n"
+        "    'transfer_ticket': ticket if status == 'transmitted' else '',\n"
+        "    'response_protocol': 'ERiC runner ' + status + ' ' + "
+        "os.environ['ELSTER_PERIOD_LABEL'],\n"
+        "}\n"
+        "with open(os.environ['ELSTER_RESPONSE_JSON'], 'w', encoding='utf-8') as handle:\n"
+        "    json.dump(response, handle)\n",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    return {
+        "ELSTER_ENVIRONMENT": "production",
+        "ELSTER_ERIC_LIBRARY_PATH": str(eric_library),
+        "ELSTER_CERTIFICATE_PATH": str(certificate),
+        "ELSTER_CERTIFICATE_ALIAS": "prod-cert",
+        "ELSTER_ERIC_COMMAND": str(command),
+    }
+
+
 def _account_id(session: Session, company: Company, code: str) -> int:
     return session.scalar(
         select(Account.id).where(Account.company_id == company.id, Account.code == code)
@@ -632,23 +664,80 @@ def test_elster_failed_submission_is_recorded(session: Session) -> None:
     assert "elster_transmitted" not in audit_actions
 
 
-def test_elster_readiness_reports_configured_production(tmp_path: Path) -> None:
-    eric_library = tmp_path / "libericapi.dylib"
-    certificate = tmp_path / "certificate.pfx"
-    eric_library.write_text("fake", encoding="utf-8")
-    certificate.write_text("fake", encoding="utf-8")
-
-    readiness = elster_readiness(
-        {
-            "ELSTER_ENVIRONMENT": "production",
-            "ELSTER_ERIC_LIBRARY_PATH": str(eric_library),
-            "ELSTER_CERTIFICATE_PATH": str(certificate),
-            "ELSTER_CERTIFICATE_ALIAS": "prod-cert",
-        }
+def test_elster_eric_command_transport_records_transmission(
+    session: Session, tmp_path: Path
+) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session,
+        company_id=company.id,
+        period_label="2026-05",
+        changed_by="pytest",
     )
+    config = _make_eric_config(tmp_path)
+
+    preflight = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="production",
+        transport="eric",
+        config=config,
+    )
+    assert preflight["ok"] is True
+    assert preflight["readiness"]["eric_command_exists"] is True
+
+    submission = submit_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="production",
+        transport="eric",
+        changed_by="pytest",
+        config=config,
+    )
+
+    assert submission.status == "transmitted"
+    assert submission.transport == "eric"
+    assert submission.environment == "production"
+    assert submission.certificate_alias == "prod-cert"
+    assert submission.transfer_ticket.startswith("ERIC-")
+    assert submission.response_protocol == "ERiC runner transmitted 2026-05"
+    assert session.get(VatReturn, vat_return.id).status == "uebermittelt"
+
+
+def test_elster_eric_failed_result_keeps_vat_return_open(
+    session: Session, tmp_path: Path
+) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session,
+        company_id=company.id,
+        period_label="2026-05",
+        changed_by="pytest",
+    )
+
+    submission = submit_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="production",
+        transport="eric",
+        changed_by="pytest",
+        config=_make_eric_config(tmp_path, status="failed"),
+    )
+
+    assert submission.status == "failed"
+    assert submission.transfer_ticket == ""
+    assert submission.response_protocol == "ERiC runner failed 2026-05"
+    assert session.get(VatReturn, vat_return.id).status == "erstellt"
+
+
+def test_elster_readiness_reports_configured_production(tmp_path: Path) -> None:
+    readiness = elster_readiness(_make_eric_config(tmp_path))
     assert readiness["production_ready"] is True
     assert readiness["eric_transport_available"] is True
     assert readiness["certificate_alias"] == "prod-cert"
+    assert readiness["eric_command_exists"] is True
     assert readiness["warnings"] == []
 
 
@@ -948,4 +1037,8 @@ def test_elster_readiness_api(tmp_path: Path) -> None:
     payload = response.get_json()
     assert payload["environment"] == "production"
     assert payload["production_ready"] is False
-    assert "Production ELSTER requires ERiC library and certificate." in payload["warnings"]
+    assert "ELSTER_ERIC_COMMAND is not configured." in payload["warnings"]
+    assert (
+        "Production ELSTER requires ERiC library, certificate and command."
+        in payload["warnings"]
+    )
