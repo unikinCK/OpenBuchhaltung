@@ -20,6 +20,22 @@
         {% endfor %}
       </ul>
     {% endif %}
+    {% if elster_summary %}
+      <p>
+        <strong>Übermittlungen:</strong> {{ elster_summary.total }}
+        <span class="badge">ok {{ elster_summary.by_status.transmitted }}</span>
+        <span class="badge">fehlgeschlagen {{ elster_summary.by_status.failed }}</span>
+        <span class="badge">Mock {{ elster_summary.by_transport.mock }}</span>
+        <span class="badge">ERiC {{ elster_summary.by_transport.eric }}</span>
+      </p>
+      {% if elster_summary.latest %}
+        <p class="muted">
+          Letzte Übermittlung: #{{ elster_summary.latest.id }},
+          {{ elster_summary.latest.status }},
+          {{ elster_summary.latest.environment }}/{{ elster_summary.latest.transport }}
+        </p>
+      {% endif %}
+    {% endif %}
   </section>
 
   <section class="card">
@@ -96,6 +112,35 @@
   {% if selected_company_id %}
     <section class="card">
       <h2>Festgehaltene Voranmeldungen</h2>
+      <form method="get" action="{{ url_for('main.vat_returns_page') }}" class="inline-form">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="hidden" name="period" value="{{ period_label }}" />
+        <label for="elster_status">ELSTER-Status</label>
+        <select id="elster_status" name="elster_status" style="width:auto;">
+          <option value="">alle</option>
+          {% for status in ["transmitted", "failed", "created"] %}
+            <option value="{{ status }}" {% if elster_filters.status == status %}selected{% endif %}>{{ status }}</option>
+          {% endfor %}
+        </select>
+        <label for="elster_transport">Transport</label>
+        <select id="elster_transport" name="elster_transport" style="width:auto;">
+          <option value="">alle</option>
+          {% for transport in ["mock", "eric"] %}
+            <option value="{{ transport }}" {% if elster_filters.transport == transport %}selected{% endif %}>{{ transport }}</option>
+          {% endfor %}
+        </select>
+        <label for="elster_environment">Umgebung</label>
+        <select id="elster_environment" name="elster_environment" style="width:auto;">
+          <option value="">alle</option>
+          {% for environment in ["test", "production"] %}
+            <option value="{{ environment }}" {% if elster_filters.environment == environment %}selected{% endif %}>{{ environment }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Filtern</button>
+      </form>
+      {% if elster_filter_error %}
+        <p class="muted">{{ elster_filter_error }}</p>
+      {% endif %}
       {% if saved_returns %}
         <table>
           <thead>
@@ -124,7 +169,7 @@
                   {% if item.elster_submissions %}
                     {% set latest = item.elster_submissions[0] %}
                     <span class="badge">{{ latest.environment }}</span>
-                    {{ latest.transfer_ticket }}
+                    {{ latest.transfer_ticket or latest.status }}
                     <details class="submission-history">
                       <summary>{{ item.elster_submissions|length }} Übermittlung{% if item.elster_submissions|length != 1 %}en{% endif %}</summary>
                       {% for submission in item.elster_submissions %}
@@ -140,6 +185,12 @@
                             <pre>{{ submission.response_protocol }}</pre>
                           </details>
                           <a href="{{ url_for('main.download_elster_payload_action', submission_id=submission.id) }}">Payload-XML</a>
+                          {% if submission.status == "failed" %}
+                            <form method="post" action="{{ url_for('main.retry_elster_submission_action', submission_id=submission.id) }}" style="display:inline">
+                              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                              <button type="submit">Retry</button>
+                            </form>
+                          {% endif %}
                         </div>
                       {% endfor %}
                     </details>

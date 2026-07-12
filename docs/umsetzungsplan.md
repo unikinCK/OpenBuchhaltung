@@ -336,8 +336,9 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       Test-/Produktionsumgebung, Mock-Transport, Transport-Adapter,
       Readiness-Prüfung, UI-Historie, archivfähiger Detailabruf,
       Payload-XML-Download, Payload-Hash-Verifikation, Übermittlungsprotokolle
-      inkl. fehlgeschlagener Versuche, Protokollfilter/-übersicht + Audit);
-      echte ERiC-Anbindung (Bibliothek, Zertifikate) offen.
+      inkl. fehlgeschlagener Versuche, Protokollfilter/-übersicht, UI-Monitoring
+      und Retry-Aktion + Audit); echte ERiC-Anbindung (Bibliothek, Zertifikate)
+      offen.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung
