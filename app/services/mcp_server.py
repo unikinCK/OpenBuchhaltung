@@ -1316,6 +1316,129 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="create_payroll_employee",
+        description=(
+            "Legt Mitarbeiter-Stammdaten fuer das Lohnbuchhaltungs-MVP an. "
+            "Abzuege werden ueber konfigurierbare Raten gerechnet; amtliche "
+            "ELStAM/PAP-/DEUEV-Berechnung ist nicht enthalten."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "employee_number": {"type": "string", "description": "Personalnummer."},
+                "first_name": {"type": "string", "description": "Vorname."},
+                "last_name": {"type": "string", "description": "Nachname."},
+                "employment_start": {
+                    "type": "string",
+                    "description": "Eintrittsdatum JJJJ-MM-TT.",
+                },
+                "gross_monthly_salary": {
+                    "type": "string",
+                    "description": "Monatliches Bruttogehalt, z. B. '4000.00'.",
+                },
+                "wage_tax_rate": {
+                    "type": "string",
+                    "description": "Konfigurierbare Lohnsteuer-Rate, z. B. '0.20'.",
+                },
+                "employee_social_security_rate": {
+                    "type": "string",
+                    "description": "Konfigurierbare Arbeitnehmer-SV-Rate.",
+                },
+                "employer_social_security_rate": {
+                    "type": "string",
+                    "description": "Konfigurierbare Arbeitgeber-SV-Rate.",
+                },
+                "wage_expense_account_code": {"type": "string", "description": "Lohnaufwand."},
+                "employer_social_security_expense_account_code": {
+                    "type": "string",
+                    "description": "Arbeitgeber-SV-Aufwand.",
+                },
+                "payroll_liability_account_code": {
+                    "type": "string",
+                    "description": "Netto-Lohnverbindlichkeit.",
+                },
+                "wage_tax_liability_account_code": {
+                    "type": "string",
+                    "description": "Lohnsteuer-Verbindlichkeit.",
+                },
+                "social_security_liability_account_code": {
+                    "type": "string",
+                    "description": "Sozialversicherungs-Verbindlichkeit.",
+                },
+            },
+            "required": [
+                "company_id",
+                "employee_number",
+                "first_name",
+                "last_name",
+                "employment_start",
+                "gross_monthly_salary",
+            ],
+            "additionalProperties": True,
+        },
+        http_method="POST",
+        path="/payroll/employees",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_payroll_employees",
+        description="Listet Mitarbeiter-Stammdaten einer Gesellschaft.",
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/payroll/employees",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_payroll_run",
+        description=(
+            "Erzeugt einen Lohnlauf-Entwurf fuer aktive Mitarbeiter. Mit auto_post=true "
+            "wird direkt eine FiBu-Journalbuchung erzeugt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period_label": {"type": "string", "description": "Zeitraum JJJJ-MM."},
+                "payment_date": {"type": "string", "description": "Zahlungsdatum JJJJ-MM-TT."},
+                "employee_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Optional: nur diese Mitarbeiter einbeziehen.",
+                },
+                "auto_post": {"type": "boolean", "description": "Direkt buchen."},
+            },
+            "required": ["company_id", "period_label", "payment_date"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payroll/runs",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_payroll_runs",
+        description="Listet Lohnlaeufe einer Gesellschaft inklusive Mitarbeiterzeilen.",
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/payroll/runs",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="post_payroll_run",
+        description="Bucht einen Lohnlauf-Entwurf als FiBu-Journalbuchung.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "payroll_run_id": {"type": "integer", "description": "ID des Lohnlaufs."},
+            },
+            "required": ["payroll_run_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payroll/runs/{payroll_run_id}/post",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="create_fixed_asset",
         description=(
             "Legt ein Anlagegut in der Anlagenbuchhaltung an und wählt das AfA-Verfahren. "

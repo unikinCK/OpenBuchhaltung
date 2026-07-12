@@ -16,6 +16,7 @@ from app.web import (  # noqa: F401
     fixed_assets,
     journal,
     open_items,
+    payroll,
     periods,
     receipt_ocr,
     reports,

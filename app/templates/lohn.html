@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Lohn – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Lohnbuchhaltung</h1>
+
+  <section class="card">
+    <h2>Mitarbeiter anlegen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('main.create_payroll_employee_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <div class="grid-2">
+          <label>Personalnummer <input name="employee_number" required /></label>
+          <label>Eintritt <input name="employment_start" type="date" value="{{ today }}" required /></label>
+          <label>Vorname <input name="first_name" required /></label>
+          <label>Nachname <input name="last_name" required /></label>
+          <label>Steuer-ID <input name="tax_id" /></label>
+          <label>SV-Nummer <input name="social_security_number" /></label>
+          <label>Bruttogehalt <input name="gross_monthly_salary" inputmode="decimal" required /></label>
+          <label>Lohnsteuer-Rate <input name="wage_tax_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Kirchensteuer-Rate <input name="church_tax_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Soli-Rate <input name="solidarity_surcharge_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Arbeitnehmer-SV-Rate <input name="employee_social_security_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Arbeitgeber-SV-Rate <input name="employer_social_security_rate" inputmode="decimal" value="0.00" /></label>
+        </div>
+        <div class="grid-2">
+          <label>Lohnaufwand
+            <select name="wage_expense_account_id" required>
+              {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>AG-SV-Aufwand
+            <select name="employer_social_security_expense_account_id" required>
+              {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Netto-Verbindlichkeit
+            <select name="payroll_liability_account_id" required>
+              {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Lohnsteuer-Verbindlichkeit
+            <select name="wage_tax_liability_account_id" required>
+              {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>SV-Verbindlichkeit
+            <select name="social_security_liability_account_id" required>
+              {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        <button type="submit">Mitarbeiter speichern</button>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if selected_company_id %}
+    <section class="card">
+      <h2>Lohnlauf erstellen</h2>
+      <form method="post" action="{{ url_for('main.create_payroll_run_action') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label>Zeitraum <input name="period_label" value="{{ default_period }}" required /></label>
+        <label>Zahlungsdatum <input name="payment_date" type="date" value="{{ today }}" required /></label>
+        <button type="submit">Entwurf erzeugen</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Mitarbeiter</h2>
+      {% if employees %}
+        <table>
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th class="num">Brutto</th>
+              <th class="num">LSt</th>
+              <th class="num">AN-SV</th>
+              <th class="num">AG-SV</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for employee in employees %}
+              <tr>
+                <td>{{ employee.employee_number }}</td>
+                <td>{{ employee.first_name }} {{ employee.last_name }}</td>
+                <td>{{ employee.status }}</td>
+                <td class="num">{{ employee.gross_monthly_salary }}</td>
+                <td class="num">{{ employee.wage_tax_rate }}</td>
+                <td class="num">{{ employee.employee_social_security_rate }}</td>
+                <td class="num">{{ employee.employer_social_security_rate }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Mitarbeiter erfasst.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Lohnläufe</h2>
+      {% if runs %}
+        {% for run in runs %}
+          <div class="list-item">
+            <div>
+              <strong>{{ run.period_label }}</strong>
+              <span class="badge">{{ run.status }}</span>
+              <span class="muted">Zahlung {{ run.payment_date.isoformat() }}</span>
+            </div>
+            <div>
+              <span>Brutto {{ run.gross_total }}</span>
+              <span>Netto {{ run.net_total }}</span>
+              <span>AG-SV {{ run.employer_social_security_total }}</span>
+              {% if run.journal_entry_id %}
+                <span class="badge">Buchung #{{ run.journal_entry_id }}</span>
+              {% else %}
+                <form method="post" action="{{ url_for('main.post_payroll_run_action', payroll_run_id=run.id) }}" style="display:inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit">Buchen</button>
+                </form>
+              {% endif %}
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mitarbeiter</th>
+                  <th class="num">Brutto</th>
+                  <th class="num">LSt</th>
+                  <th class="num">AN-SV</th>
+                  <th class="num">Netto</th>
+                  <th class="num">AG gesamt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for line in run.lines %}
+                  <tr>
+                    <td>{{ line.employee.employee_number }} – {{ line.employee.first_name }} {{ line.employee.last_name }}</td>
+                    <td class="num">{{ line.gross_pay }}</td>
+                    <td class="num">{{ line.wage_tax + line.church_tax + line.solidarity_surcharge }}</td>
+                    <td class="num">{{ line.employee_social_security }}</td>
+                    <td class="num">{{ line.net_pay }}</td>
+                    <td class="num">{{ line.employer_total }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted">Noch keine Lohnläufe vorhanden.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

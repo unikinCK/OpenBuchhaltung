@@ -41,6 +41,11 @@ EXPECTED_TOOL_NAMES = {
     "preflight_vat_return_elster",
     "get_elster_readiness",
     "submit_vat_return_elster",
+    "create_payroll_employee",
+    "list_payroll_employees",
+    "create_payroll_run",
+    "list_payroll_runs",
+    "post_payroll_run",
     "get_trial_balance",
     "get_income_statement",
     "get_balance_sheet",
@@ -583,6 +588,100 @@ def test_income_statement_forwards_date_range_as_query() -> None:
         {"company_id": 1, "date_from": "2026-01-01", "date_to": "2026-03-31"},
         None,
     )
+
+
+def test_payroll_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 329,
+            "method": "tools/call",
+            "params": {
+                "name": "create_payroll_employee",
+                "arguments": {
+                    "company_id": 7,
+                    "employee_number": "P-001",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "employment_start": "2026-01-01",
+                    "gross_monthly_salary": "4000.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/payroll/employees",
+        None,
+        {
+            "company_id": 7,
+            "employee_number": "P-001",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "employment_start": "2026-01-01",
+            "gross_monthly_salary": "4000.00",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 330,
+            "method": "tools/call",
+            "params": {"name": "list_payroll_employees", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/employees", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 331,
+            "method": "tools/call",
+            "params": {
+                "name": "create_payroll_run",
+                "arguments": {
+                    "company_id": 7,
+                    "period_label": "2026-05",
+                    "payment_date": "2026-05-31",
+                    "auto_post": True,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/payroll/runs",
+        None,
+        {
+            "company_id": 7,
+            "period_label": "2026-05",
+            "payment_date": "2026-05-31",
+            "auto_post": True,
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 332,
+            "method": "tools/call",
+            "params": {"name": "list_payroll_runs", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/runs", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 333,
+            "method": "tools/call",
+            "params": {"name": "post_payroll_run", "arguments": {"payroll_run_id": 11}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/payroll/runs/11/post", None, {})
 
 
 def test_report_tools_expose_date_parameters() -> None:

@@ -362,8 +362,14 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       (inkl. Hinzurechnungen/Kürzungen §§ 8, 9 GewStG)
 - [ ] **Körperschaftsteuer**: Vorauszahlung + KSt-Erklärung (inkl. E-Bilanz-
       Taxonomie als Voraussetzung für die Übermittlung des Jahresabschlusses)
+- [x] **Lohnbuchhaltung-MVP** *(Sprint Z: Mitarbeiterstamm mit Lohn-/Verbindlichkeits-
+      konten, konfigurierbare Abzugsraten, Lohnlauf-Entwurf je Zeitraum,
+      automatische FiBu-Buchung [Brutto- und AG-SV-Aufwand an Netto-, Lohnsteuer-
+      und SV-Verbindlichkeiten], UI/API/MCP und Prüferexport-Tabellen. Keine
+      amtliche ELStAM/PAP-/DEÜV-Berechnung.)*
 - [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
-      LSt-Bescheinigungen *(setzt Lohnbuchhaltungs-Modul voraus — separat planen)*
+      LSt-Bescheinigungen *(setzt amtliche Lohnsteuerberechnung und ELSTER-
+      Verfahren auf dem Lohnbuchhaltung-MVP voraus)*
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)

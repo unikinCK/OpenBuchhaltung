@@ -18,6 +18,7 @@ from app.api import (  # noqa: F401
     journal,
     mcp,
     open_items,
+    payroll,
     periods,
     receipt_ocr,
     reports,

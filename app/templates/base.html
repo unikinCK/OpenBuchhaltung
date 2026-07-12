@@ -27,6 +27,8 @@
              {% if request.endpoint == 'main.open_items_page' %}class="active"{% endif %}>OPOS</a>
           <a href="{{ url_for('main.fixed_assets_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.fixed_assets_page' %}class="active"{% endif %}>Anlagen</a>
+          <a href="{{ url_for('main.payroll_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.payroll_page' %}class="active"{% endif %}>Lohn</a>
           <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.bank_page' %}class="active"{% endif %}>Bank</a>
           <a href="{{ url_for('main.einvoice_page', company_id=selected_company_id) }}"

@@ -67,6 +67,12 @@ class Company(Base):
     journal_entries: Mapped[list[JournalEntry]] = relationship(
         back_populates="company", cascade="all, delete"
     )
+    payroll_employees: Mapped[list[PayrollEmployee]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    payroll_runs: Mapped[list[PayrollRun]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
 
 
 class FiscalYear(Base):
@@ -645,6 +651,183 @@ class ElsterSubmission(Base):
 
     company: Mapped[Company] = relationship()
     vat_return: Mapped[VatReturn] = relationship(back_populates="elster_submissions")
+
+
+class PayrollEmployee(Base):
+    """Mitarbeiter-Stammdaten fuer das Lohnbuchhaltungs-MVP."""
+
+    __tablename__ = "payroll_employee"
+    __table_args__ = (
+        UniqueConstraint("company_id", "employee_number", name="uq_payroll_employee_number"),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_payroll_employee_status_known"
+        ),
+        CheckConstraint("gross_monthly_salary >= 0", name="ck_payroll_employee_salary_nonneg"),
+        CheckConstraint("wage_tax_rate >= 0", name="ck_payroll_employee_wage_tax_nonneg"),
+        CheckConstraint(
+            "employee_social_security_rate >= 0",
+            name="ck_payroll_employee_employee_sv_nonneg",
+        ),
+        CheckConstraint(
+            "employer_social_security_rate >= 0",
+            name="ck_payroll_employee_employer_sv_nonneg",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    employment_start: Mapped[date] = mapped_column(Date, nullable=False)
+    employment_end: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    tax_id: Mapped[str | None] = mapped_column(String(40))
+    social_security_number: Mapped[str | None] = mapped_column(String(40))
+    gross_monthly_salary: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    wage_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)
+    church_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)
+    solidarity_surcharge_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    employee_social_security_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    employer_social_security_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    wage_expense_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    employer_social_security_expense_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    payroll_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    wage_tax_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    social_security_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="payroll_employees")
+    wage_expense_account: Mapped[Account] = relationship(foreign_keys=[wage_expense_account_id])
+    employer_social_security_expense_account: Mapped[Account] = relationship(
+        foreign_keys=[employer_social_security_expense_account_id]
+    )
+    payroll_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[payroll_liability_account_id]
+    )
+    wage_tax_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[wage_tax_liability_account_id]
+    )
+    social_security_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[social_security_liability_account_id]
+    )
+    payroll_lines: Mapped[list[PayrollRunLine]] = relationship(back_populates="employee")
+
+
+class PayrollRun(Base):
+    """Lohnlauf je Gesellschaft und Meldezeitraum."""
+
+    __tablename__ = "payroll_run"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_label", name="uq_payroll_run_company_period"),
+        CheckConstraint("status IN ('draft', 'posted')", name="ck_payroll_run_status_known"),
+        CheckConstraint("gross_total >= 0", name="ck_payroll_run_gross_nonneg"),
+        CheckConstraint("net_total >= 0", name="ck_payroll_run_net_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    period_label: Mapped[str] = mapped_column(String(10), nullable=False)
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    gross_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    wage_tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    church_tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    solidarity_surcharge_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employee_social_security_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employer_social_security_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    net_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    company: Mapped[Company] = relationship(back_populates="payroll_runs")
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+    lines: Mapped[list[PayrollRunLine]] = relationship(
+        back_populates="payroll_run", cascade="all, delete-orphan"
+    )
+
+
+class PayrollRunLine(Base):
+    """Mitarbeiterzeile eines Lohnlaufs."""
+
+    __tablename__ = "payroll_run_line"
+    __table_args__ = (
+        UniqueConstraint("payroll_run_id", "employee_id", name="uq_payroll_line_employee"),
+        CheckConstraint("gross_pay >= 0", name="ck_payroll_line_gross_nonneg"),
+        CheckConstraint("net_pay >= 0", name="ck_payroll_line_net_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    payroll_run_id: Mapped[int] = mapped_column(
+        ForeignKey("payroll_run.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("payroll_employee.id", ondelete="RESTRICT"), nullable=False
+    )
+    gross_pay: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    wage_tax: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    church_tax: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    solidarity_surcharge: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employee_social_security: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employer_social_security: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    net_pay: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    employer_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    calculation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+    payroll_run: Mapped[PayrollRun] = relationship(back_populates="lines")
+    employee: Mapped[PayrollEmployee] = relationship(back_populates="payroll_lines")
 
 
 class User(Base):
