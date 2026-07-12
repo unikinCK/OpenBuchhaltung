@@ -179,49 +179,44 @@ def submit_vat_return(
     transport_adapter = _transport_adapter(
         transport=transport, certificate_alias=certificate_alias, config=config or {}
     )
-    result = transport_adapter.transmit(
-        payload_xml=payload_xml, payload_hash=payload_hash, vat_return=vat_return
-    )
+    try:
+        result = transport_adapter.transmit(
+            payload_xml=payload_xml, payload_hash=payload_hash, vat_return=vat_return
+        )
+    except ElsterError as exc:
+        submission = _record_submission(
+            session=session,
+            vat_return=vat_return,
+            environment=environment,
+            transport=transport,
+            certificate_alias=certificate_alias,
+            payload_hash=payload_hash,
+            payload_xml=payload_xml,
+            status="failed",
+            response_protocol=str(exc),
+            transfer_ticket=None,
+            changed_by=changed_by,
+        )
+        session.commit()
+        session.refresh(submission)
+        raise ElsterError(f"{exc} Submission {submission.id} was recorded as failed.") from exc
 
-    submission = ElsterSubmission(
-        tenant_id=vat_return.tenant_id,
-        company_id=vat_return.company_id,
-        vat_return_id=vat_return.id,
-        procedure="ustva",
+    submission = _record_submission(
+        session=session,
+        vat_return=vat_return,
         environment=environment,
-        status=result.status,
         transport=transport,
         certificate_alias=certificate_alias,
         payload_hash=payload_hash,
         payload_xml=payload_xml,
+        status=result.status,
         response_protocol=result.response_protocol,
         transfer_ticket=result.transfer_ticket,
-        submitted_at=datetime.now(timezone.utc),
-        created_by=changed_by,
+        changed_by=changed_by,
     )
-    session.add(submission)
     vat_return.status = "uebermittelt"
     session.flush()
 
-    log_audit_event(
-        session=session,
-        tenant_id=submission.tenant_id,
-        company_id=submission.company_id,
-        entity_type="elster_submission",
-        entity_id=str(submission.id),
-        action="transmitted",
-        changed_by=changed_by,
-        payload={
-            "procedure": submission.procedure,
-            "environment": submission.environment,
-            "transport": submission.transport,
-            "status": submission.status,
-            "vat_return_id": vat_return.id,
-            "period_label": vat_return.period_label,
-            "payload_hash": submission.payload_hash,
-            "transfer_ticket": submission.transfer_ticket,
-        },
-    )
     log_audit_event(
         session=session,
         tenant_id=vat_return.tenant_id,
@@ -239,6 +234,61 @@ def submit_vat_return(
     )
     session.commit()
     session.refresh(submission)
+    return submission
+
+
+def _record_submission(
+    *,
+    session: Session,
+    vat_return: VatReturn,
+    environment: str,
+    transport: str,
+    certificate_alias: str | None,
+    payload_hash: str,
+    payload_xml: str,
+    status: str,
+    response_protocol: str | None,
+    transfer_ticket: str | None,
+    changed_by: str,
+) -> ElsterSubmission:
+    submission = ElsterSubmission(
+        tenant_id=vat_return.tenant_id,
+        company_id=vat_return.company_id,
+        vat_return_id=vat_return.id,
+        procedure="ustva",
+        environment=environment,
+        status=status,
+        transport=transport,
+        certificate_alias=certificate_alias,
+        payload_hash=payload_hash,
+        payload_xml=payload_xml,
+        response_protocol=response_protocol,
+        transfer_ticket=transfer_ticket,
+        submitted_at=datetime.now(timezone.utc) if status == "transmitted" else None,
+        created_by=changed_by,
+    )
+    session.add(submission)
+    session.flush()
+
+    log_audit_event(
+        session=session,
+        tenant_id=submission.tenant_id,
+        company_id=submission.company_id,
+        entity_type="elster_submission",
+        entity_id=str(submission.id),
+        action=status,
+        changed_by=changed_by,
+        payload={
+            "procedure": submission.procedure,
+            "environment": submission.environment,
+            "transport": submission.transport,
+            "status": submission.status,
+            "vat_return_id": vat_return.id,
+            "period_label": vat_return.period_label,
+            "payload_hash": submission.payload_hash,
+            "transfer_ticket": submission.transfer_ticket,
+        },
+    )
     return submission
 
 

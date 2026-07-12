@@ -517,6 +517,46 @@ def test_elster_mock_rejects_production(session: Session) -> None:
         )
 
 
+def test_elster_failed_submission_is_recorded(session: Session) -> None:
+    company = _seed(session)
+    vat_return = save_vat_return(
+        session=session,
+        company_id=company.id,
+        period_label="2026-05",
+        changed_by="pytest",
+    )
+
+    with pytest.raises(ElsterError, match="recorded as failed"):
+        submit_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="production",
+            transport="eric",
+            changed_by="pytest",
+            config={},
+        )
+
+    session.refresh(vat_return)
+    assert vat_return.status == "erstellt"
+    submissions = list_elster_submissions(session=session, company_id=company.id)
+    assert len(submissions) == 1
+    failed = submissions[0]
+    assert failed.status == "failed"
+    assert failed.transport == "eric"
+    assert failed.submitted_at is None
+    assert "ERiC library" in failed.response_protocol
+    assert "<Period>2026-05</Period>" in failed.payload_xml
+
+    audit_actions = {
+        item.action
+        for item in session.scalars(
+            select(AuditLog).where(AuditLog.company_id == company.id)
+        )
+    }
+    assert "failed" in audit_actions
+    assert "elster_transmitted" not in audit_actions
+
+
 def test_elster_readiness_reports_configured_production(tmp_path: Path) -> None:
     eric_library = tmp_path / "libericapi.dylib"
     certificate = tmp_path / "certificate.pfx"
