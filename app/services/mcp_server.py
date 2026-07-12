@@ -829,6 +829,46 @@ TOOLS: list[ToolSpec] = [
         path="/fixed-assets/{asset_id}/depreciation",
         arg_location="json",
     ),
+    ToolSpec(
+        name="record_fixed_asset_impairment",
+        description="Verbucht eine außerplanmäßige Abschreibung (AfaA) für ein Anlagegut.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+                "fiscal_year": {"type": "integer", "description": "Wirtschaftsjahr."},
+                "amount": {"type": "string", "description": "Abschreibungsbetrag."},
+                "depreciation_date": {
+                    "type": "string",
+                    "description": "Buchungsdatum JJJJ-MM-TT.",
+                },
+                "note": {"type": "string", "description": "Optionaler Hinweis."},
+            },
+            "required": ["asset_id", "fiscal_year", "amount"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fixed-assets/{asset_id}/impairment",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="dispose_fixed_asset",
+        description="Bucht den Restbuchwert aus und markiert ein Anlagegut als abgegangen.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+                "disposal_date": {"type": "string", "description": "Abgangsdatum JJJJ-MM-TT."},
+                "proceeds": {"type": "string", "description": "Optionaler Veräußerungserlös."},
+                "fiscal_year": {"type": "integer", "description": "Optionales Wirtschaftsjahr."},
+            },
+            "required": ["asset_id", "disposal_date"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fixed-assets/{asset_id}/disposal",
+        arg_location="json",
+    ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}
