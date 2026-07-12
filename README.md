@@ -58,8 +58,10 @@ Wichtig zur Einordnung:
 - DATEV-Export ist kompatibel angelegt, aber nicht DATEV-zertifiziert.
 - GoBD-Funktionen sind als technische Basis umgesetzt, aber keine formale
   GoBD-/IDW-PS-880-Zertifizierung.
-- ELSTER ist app-seitig vorbereitet; produktive Übermittlung benötigt eine
-  lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und einen passenden Runner.
+- ELSTER ist app-seitig mit Testtransport, Submission-Historie,
+  Preflight/Readiness-Diagnose und ERiC-Runner-Bridge vorbereitet; produktive
+  Übermittlung benötigt eine lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und
+  einen passenden Runner.
 
 ## Planung & Dokumentation
 

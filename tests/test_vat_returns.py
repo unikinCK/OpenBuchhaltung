@@ -738,6 +738,12 @@ def test_elster_readiness_reports_configured_production(tmp_path: Path) -> None:
     assert readiness["eric_transport_available"] is True
     assert readiness["certificate_alias"] == "prod-cert"
     assert readiness["eric_command_exists"] is True
+    assert readiness["missing_production_requirements"] == []
+    required_checks = [
+        item for item in readiness["checks"] if item["required_for_production"]
+    ]
+    assert required_checks
+    assert all(item["ok"] for item in required_checks)
     assert readiness["warnings"] == []
 
 
@@ -936,6 +942,8 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert "2 Übermittlungen" in html
     assert "ELSTER mock transport accepted UStVA 2026-05" in html
     assert html.count("MOCK-USTVA-2026-05-") == 3
+    assert "Produktions-Checkliste" in html
+    assert "ELSTER_ERIC_COMMAND" in html
     assert "Hash ok" in html
     assert "Payload-XML" in html
     assert "Preflight" in html
@@ -1037,6 +1045,8 @@ def test_elster_readiness_api(tmp_path: Path) -> None:
     payload = response.get_json()
     assert payload["environment"] == "production"
     assert payload["production_ready"] is False
+    assert "ELSTER_ERIC_COMMAND" in payload["missing_production_requirements"]
+    assert any(item["id"] == "eric_command" for item in payload["checks"])
     assert "ELSTER_ERIC_COMMAND is not configured." in payload["warnings"]
     assert (
         "Production ELSTER requires ERiC library, certificate and command."

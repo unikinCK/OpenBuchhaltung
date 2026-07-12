@@ -346,14 +346,15 @@ Elektronische Übermittlung an die Finanzverwaltung über die ELSTER-Schnittstel
 Datenmodell + Kennziffern-/Formularlogik, XML-Erzeugung nach amtlichem Schema,
 Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
-- [ ] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
+- [x] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
       Test-/Produktionsumgebung, Mock-Transport, Transport-Adapter,
       Readiness-/Preflight-Prüfung mit Payload-Diagnostik und Größenlimit,
       UI-Historie, archivfähiger Detailabruf, Payload-XML-Download,
       Payload-Hash-Verifikation, Übermittlungsprotokolle inkl. fehlgeschlagener
       Versuche, Protokollfilter/-übersicht, UI-Monitoring, Retry-Aktion und
       API-/MCP-Retry + Audit, externer `ELSTER_ERIC_COMMAND`-Runner als
-      ERiC-Bridge); produktive amtliche Nutzung erfordert lokale
+      ERiC-Bridge; Sprint Y ergänzt strukturierte Produktions-Readiness-Checks
+      in API/MCP/UI); produktive amtliche Nutzung erfordert lokale
       ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.
 - [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
       Sprint T) + USt-Jahreserklärung
