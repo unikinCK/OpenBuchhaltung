@@ -254,8 +254,8 @@ UI, REST-API und MCP angeboten und gepflegt.
 - [x] **P1.11-003 Audit-Log einsehbar machen**: UI-Seite „Audit",
       `GET /api/v1/audit-log` mit Tenant-/Company-/Objekt-/Aktionsfiltern und
       MCP-Tool `list_audit_log`.
-- [ ] **P1.11-004 Kontenrahmen-Import & Benutzerverwaltung** über UI/API/MCP:
-      Kontenrahmen-Import umgesetzt; Benutzerverwaltung noch offen.
+- [x] **P1.11-004 Kontenrahmen-Import & Benutzerverwaltung** über UI/API/MCP
+      umgesetzt.
 
 ## Phase 2 – Prozesse & Qualität (4–6 Wochen)
 - [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:

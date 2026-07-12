@@ -152,6 +152,67 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_users",
+        description="Listet Benutzer im administrierbaren Zugriffsbereich.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/users",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="create_user",
+        description="Legt einen Benutzer an.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "Benutzername."},
+                "password": {"type": "string", "description": "Initiales Passwort."},
+                "role": {"type": "string", "description": "Admin, Buchhalter oder Pruefer."},
+                "tenant_id": {
+                    "type": ["integer", "null"],
+                    "description": "Optionaler Mandant; null bedeutet global.",
+                },
+                "is_active": {"type": "boolean", "description": "Aktivstatus."},
+            },
+            "required": ["username", "password"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="rotate_user_api_token",
+        description="Erzeugt ein neues API-Token für einen Benutzer und gibt es einmalig zurück.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/api-token",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_user_active",
+        description="Aktiviert oder deaktiviert einen Benutzer.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+                "is_active": {"type": "boolean", "description": "Neuer Aktivstatus."},
+            },
+            "required": ["user_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="create_account",
         description="Legt ein Sachkonto für eine Gesellschaft an.",
         input_schema={

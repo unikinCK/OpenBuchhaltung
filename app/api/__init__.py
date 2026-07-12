@@ -22,6 +22,7 @@ from app.api import (  # noqa: F401
     reports,
     system,
     tenants,
+    users,
     vat_returns,
 )
 from app.api.blueprint import api_bp

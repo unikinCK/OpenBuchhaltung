@@ -18,6 +18,10 @@ EXPECTED_TOOL_NAMES = {
     "health",
     "list_companies",
     "create_tenant_with_company",
+    "list_users",
+    "create_user",
+    "rotate_user_api_token",
+    "set_user_active",
     "create_account",
     "import_account_chart",
     "list_accounts",
@@ -122,6 +126,71 @@ def test_query_tool_forwards_arguments_as_query_params() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/balance-sheet", {"company_id": 7}, None)
+
+
+def test_user_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {"name": "list_users", "arguments": {}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/users", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "create_user",
+                "arguments": {
+                    "username": "api-user",
+                    "password": "secret",
+                    "role": "Buchhalter",
+                    "tenant_id": 7,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/users",
+        None,
+        {
+            "username": "api-user",
+            "password": "secret",
+            "role": "Buchhalter",
+            "tenant_id": 7,
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {"name": "rotate_user_api_token", "arguments": {"user_id": 9}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/users/9/api-token", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "set_user_active",
+                "arguments": {"user_id": 9, "is_active": False},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/users/9/active", None, {"is_active": False})
 
 
 def test_account_chart_tool_forwards_arguments() -> None:
