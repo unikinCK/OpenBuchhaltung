@@ -4,11 +4,22 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    abort,
+    current_app,
+    flash,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 
 from app.services.elster import (
     ElsterError,
+    elster_payload_filename,
     elster_readiness,
+    get_elster_submission,
     list_elster_submissions,
     submit_vat_return,
 )
@@ -163,3 +174,21 @@ def submit_vat_return_elster_test_action(vat_return_id: int):
 
     flash(f"ELSTER-Testübermittlung protokolliert: {submission.transfer_ticket}", "success")
     return redirect(url_for("main.vat_returns_page", company_id=company_id, period=period_label))
+
+
+@main_bp.get("/ustva/elster-submissions/<int:submission_id>/payload.xml")
+def download_elster_payload_action(submission_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if submission is None:
+            abort(404)
+        require_company_access(session, submission.company_id)
+        response = make_response(submission.payload_xml)
+        response.headers["Content-Type"] = "application/xml; charset=utf-8"
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{elster_payload_filename(submission)}"'
+        )
+        return response

@@ -261,6 +261,11 @@ def get_elster_submission(
     return session.get(ElsterSubmission, submission_id)
 
 
+def elster_payload_filename(submission: ElsterSubmission) -> str:
+    period_label = submission.vat_return.period_label.replace("/", "-")
+    return f"elster-{submission.procedure}-{period_label}-{submission.id}.xml"
+
+
 def _transport_adapter(
     *, transport: str, certificate_alias: str | None, config: Mapping[str, object]
 ) -> ElsterTransport:

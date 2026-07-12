@@ -581,6 +581,12 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     assert detail_payload["payload_hash"] == payload["payload_hash"]
     assert "<Period>2026-05</Period>" in detail_payload["payload_xml"]
 
+    payload_download = client.get(f"/api/v1/elster/submissions/{payload['id']}/payload.xml")
+    assert payload_download.status_code == 200
+    assert payload_download.content_type == "application/xml; charset=utf-8"
+    assert "elster-ustva-2026-05-" in payload_download.headers["Content-Disposition"]
+    assert b"<Period>2026-05</Period>" in payload_download.data
+
 
 def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> None:
     app = _create_test_app(tmp_path)
@@ -600,7 +606,7 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
             period_label="2026-05",
             changed_by="pytest",
         )
-        submit_vat_return(
+        first_submission = submit_vat_return(
             session=session,
             vat_return_id=vat_return.id,
             environment="test",
@@ -615,6 +621,7 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
             changed_by="pytest",
         )
         company_id = company.id
+        submission_id = first_submission.id
 
     client = app.test_client()
     client.post("/auth/login", data={"username": "admin", "password": "admin123"})
@@ -625,6 +632,12 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert "2 Übermittlungen" in html
     assert "ELSTER mock transport accepted UStVA 2026-05" in html
     assert html.count("MOCK-USTVA-2026-05-") == 3
+    assert "Payload-XML" in html
+
+    download = client.get(f"/ustva/elster-submissions/{submission_id}/payload.xml")
+    assert download.status_code == 200
+    assert download.content_type == "application/xml; charset=utf-8"
+    assert b"<Period>2026-05</Period>" in download.data
 
 
 def test_elster_readiness_api(tmp_path: Path) -> None:

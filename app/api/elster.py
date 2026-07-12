@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from flask import current_app, jsonify, request
+from flask import current_app, jsonify, make_response, request
 
 from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
 from app.services.elster import (
     ElsterError,
+    elster_payload_filename,
     elster_readiness,
     get_elster_submission,
     list_elster_submissions,
@@ -91,6 +92,26 @@ def get_elster_submission_via_api(submission_id: int):
         ):
             return jsonify({"error": "ELSTER submission not found."}), 404
         return jsonify(_submission_dict(submission, include_payload=True)), 200
+
+
+@api_bp.get("/elster/submissions/<int:submission_id>/payload.xml")
+def download_elster_payload_via_api(submission_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        response = make_response(submission.payload_xml)
+        response.headers["Content-Type"] = "application/xml; charset=utf-8"
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{elster_payload_filename(submission)}"'
+        )
+        return response
 
 
 @api_bp.post("/elster/ustva/submit")

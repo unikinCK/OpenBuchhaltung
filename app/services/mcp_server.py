@@ -1121,6 +1121,24 @@ TOOLS: list[ToolSpec] = [
         arg_location="none",
     ),
     ToolSpec(
+        name="download_elster_payload",
+        description="Lädt die gespeicherte XML-Nutzlast einer ELSTER-Übermittlung.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "submission_id": {
+                    "type": "integer",
+                    "description": "ID der ELSTER-Übermittlung.",
+                },
+            },
+            "required": ["submission_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/elster/submissions/{submission_id}/payload.xml",
+        arg_location="none",
+    ),
+    ToolSpec(
         name="get_elster_readiness",
         description="Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek und Zertifikat.",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
