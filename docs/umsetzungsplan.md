@@ -242,7 +242,7 @@ UI, REST-API und MCP angeboten und gepflegt.
       `finalize_journal_entry`, `reverse_journal_entry` (GoBD), `get_vat_return`,
       `create_vat_return`, `list_vat_returns` (UStVA). Damit sind alle
       API-Endpunkte (außer dem MCP-Proxy selbst) als MCP-Tools verfügbar.
-- [ ] **P1.11-002 API-/MCP-Ausbau für UI-only-Funktionen**: Journal lesen
+- [x] **P1.11-002 API-/MCP-Ausbau für UI-only-Funktionen**: Journal lesen
       (`GET /journal-entries` umgesetzt), Festschreibelauf
       (`POST /journal-entries/finalize-until` umgesetzt), Belege (Upload/Verknüpfen/
       Download/Liste umgesetzt), Beleg-OCR (Vorschlag/Buchen umgesetzt),
