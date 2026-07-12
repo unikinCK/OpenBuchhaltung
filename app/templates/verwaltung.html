@@ -54,10 +54,82 @@
   </section>
 
   <section class="card">
+    <h2>Benutzerverwaltung</h2>
+    {% if is_admin %}
+      <form method="post" action="{{ url_for('main.create_user_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+        <label for="username">Benutzername</label>
+        <input id="username" name="username" required />
+
+        <label for="password">Passwort</label>
+        <input id="password" name="password" type="password" required />
+
+        <label for="role">Rolle</label>
+        <select id="role" name="role" required>
+          {% for role in roles %}
+            <option value="{{ role }}">{{ role }}</option>
+          {% endfor %}
+        </select>
+
+        {% if is_global_admin %}
+          <label for="tenant_id">Mandant</label>
+          <select id="tenant_id" name="tenant_id">
+            <option value="">Global</option>
+            {% for tenant in tenants %}
+              <option value="{{ tenant.id }}">{{ tenant.name }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+
+        <button type="submit">Benutzer anlegen</button>
+      </form>
+
+      {% if users %}
+        <table>
+          <thead>
+            <tr>
+              <th>Benutzer</th>
+              <th>Rolle</th>
+              <th>Mandant</th>
+              <th>API</th>
+              <th>Status</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td>{{ user.username }}</td>
+                <td><span class="badge">{{ user.role }}</span></td>
+                <td>{{ user.tenant.name if user.tenant else "Global" }}</td>
+                <td>{{ "..." ~ user.api_token_last4 if user.api_token_last4 else "kein Token" }}</td>
+                <td>{{ "aktiv" if user.is_active else "inaktiv" }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('main.rotate_user_api_token_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit">Token rotieren</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.set_user_active_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}" />
+                    <button type="submit">{{ "Deaktivieren" if user.is_active else "Aktivieren" }}</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% else %}
+      <p class="muted">Benutzer verwalten kann nur ein Administrator.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Kontenrahmen &amp; Demo-Daten</h2>
     <p class="muted">Per CLI verfügbar:</p>
     <p><code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
     <p><code>flask --app run.py seed-demo</code></p>
-    <p><code>flask --app run.py create-user --username ... --password ... --role Buchhalter --tenant-id ...</code></p>
   </section>
 {% endblock %}

@@ -245,6 +245,83 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
     assert read_only_write.status_code == 403
 
 
+def test_user_admin_api_create_rotate_and_disable(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_a_id, _ = _seed_two_tenants_with_user(app)
+    client = app.test_client()
+
+    with app.extensions["db_session_factory"]() as session:
+        tenant_id = session.get(Company, company_a_id).tenant_id
+
+    created = client.post(
+        "/api/v1/users",
+        json={
+            "username": "api-buchhalter",
+            "password": "start123",
+            "role": "Buchhalter",
+            "tenant_id": tenant_id,
+        },
+    )
+    assert created.status_code == 201
+    user_id = created.get_json()["id"]
+
+    rotated = client.post(f"/api/v1/users/{user_id}/api-token", json={})
+    assert rotated.status_code == 201
+    rotated_payload = rotated.get_json()
+    assert rotated_payload["api_token"].startswith("obk_")
+    assert rotated_payload["api_token_last4"] == rotated_payload["api_token"][-4:]
+
+    disabled = client.post(f"/api/v1/users/{user_id}/active", json={"is_active": False})
+    assert disabled.status_code == 200
+    assert disabled.get_json()["is_active"] is False
+
+    listed = client.get("/api/v1/users")
+    assert listed.status_code == 200
+    assert any(user["username"] == "api-buchhalter" for user in listed.get_json()["users"])
+
+
+def test_admin_ui_manages_users(tmp_path):
+    app = _create_test_app(tmp_path)
+    _seed_two_tenants_with_user(app)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="global-admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "global-admin", "password": "admin123"})
+    created = client.post(
+        "/users",
+        data={"username": "ui-pruefer", "password": "start123", "role": "Pruefer"},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert b"ui-pruefer" in created.data
+
+    with app.extensions["db_session_factory"]() as session:
+        user_id = session.execute(select(User.id).where(User.username == "ui-pruefer")).scalar_one()
+
+    rotated = client.post(f"/users/{user_id}/api-token", follow_redirects=True)
+    assert rotated.status_code == 200
+    assert b"API-Token f" in rotated.data
+    assert b"obk_" in rotated.data
+
+    disabled = client.post(
+        f"/users/{user_id}/active",
+        data={"is_active": "false"},
+        follow_redirects=True,
+    )
+    assert disabled.status_code == 200
+    with app.extensions["db_session_factory"]() as session:
+        assert session.get(User, user_id).is_active is False
+
+
 def test_api_tenant_bound_user_cannot_create_tenant(tmp_path):
     token = "obk_no-new-tenant"
     app = _create_test_app(tmp_path, API_REQUIRE_AUTH=True)
