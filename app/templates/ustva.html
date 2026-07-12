@@ -13,6 +13,33 @@
     </p>
     <p><strong>Mock-Transport:</strong> verfügbar</p>
     <p><strong>ERiC:</strong> {{ "konfiguriert" if elster_readiness.eric_transport_available else "nicht konfiguriert" }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Produktions-Checkliste</th>
+          <th>Status</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for check in elster_readiness.checks %}
+          <tr>
+            <td>
+              {{ check.label }}
+              {% if check.required_for_production %}<span class="badge">Pflicht</span>{% endif %}
+            </td>
+            <td>{{ "ok" if check.ok else "offen" }}</td>
+            <td class="muted">{{ check.detail }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if elster_readiness.missing_production_requirements %}
+      <p class="muted">
+        Für Produktion fehlt:
+        {{ elster_readiness.missing_production_requirements|join(", ") }}
+      </p>
+    {% endif %}
     {% if elster_readiness.warnings %}
       <ul>
         {% for warning in elster_readiness.warnings %}

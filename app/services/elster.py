@@ -182,12 +182,67 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         warnings.append("ELSTER_ERIC_COMMAND does not exist.")
     if environment == "production" and not eric_configured:
         warnings.append("Production ELSTER requires ERiC library, certificate and command.")
+    missing_production_requirements = []
+    if environment != "production":
+        missing_production_requirements.append("ELSTER_ENVIRONMENT=production")
+    if not eric_library_exists:
+        missing_production_requirements.append("ELSTER_ERIC_LIBRARY_PATH")
+    if not certificate_exists:
+        missing_production_requirements.append("ELSTER_CERTIFICATE_PATH")
+    if not eric_command_exists:
+        missing_production_requirements.append("ELSTER_ERIC_COMMAND")
+    checks = [
+        {
+            "id": "environment",
+            "label": "ELSTER environment",
+            "ok": environment in ELSTER_ENVIRONMENTS,
+            "required_for_production": True,
+            "detail": environment,
+        },
+        {
+            "id": "mock_transport",
+            "label": "Mock transport",
+            "ok": True,
+            "required_for_production": False,
+            "detail": "available for test submissions",
+        },
+        {
+            "id": "eric_library",
+            "label": "ERiC library",
+            "ok": eric_library_exists,
+            "required_for_production": True,
+            "detail": eric_library_path or "not configured",
+        },
+        {
+            "id": "certificate",
+            "label": "ELSTER certificate",
+            "ok": certificate_exists,
+            "required_for_production": True,
+            "detail": certificate_path or "not configured",
+        },
+        {
+            "id": "eric_command",
+            "label": "ERiC command runner",
+            "ok": eric_command_exists,
+            "required_for_production": True,
+            "detail": eric_command or "not configured",
+        },
+        {
+            "id": "certificate_alias",
+            "label": "Certificate alias",
+            "ok": bool(certificate_alias),
+            "required_for_production": False,
+            "detail": certificate_alias or "not configured",
+        },
+    ]
 
     return {
         "environment": environment,
         "mock_transport_available": True,
         "eric_transport_available": eric_configured,
         "production_ready": environment == "production" and eric_configured,
+        "checks": checks,
+        "missing_production_requirements": missing_production_requirements,
         "eric_library_path": eric_library_path or None,
         "eric_library_exists": eric_library_exists,
         "certificate_path": certificate_path or None,
