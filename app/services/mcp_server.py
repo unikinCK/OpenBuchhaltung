@@ -265,6 +265,45 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_journal_entries",
+        description=(
+            "Listet Buchungen einer Gesellschaft samt Buchungszeilen. Optional nach "
+            "date_from/date_to, source, is_finalized und limit filtern."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "date_from": {
+                    "type": "string",
+                    "description": "Zeitraum-Beginn (Format JJJJ-MM-TT, optional).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Buchungsquelle, z. B. manual oder storno.",
+                },
+                "is_finalized": {
+                    "type": "boolean",
+                    "description": "Nur festgeschriebene bzw. offene Buchungen.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximale Anzahl Einträge, 1 bis 500.",
+                    "default": 100,
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/journal-entries",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="finalize_journal_entry",
         description=(
             "Schreibt eine Buchung fest (GoBD): danach ist sie unveränderbar; Korrekturen "

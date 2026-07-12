@@ -20,6 +20,7 @@ EXPECTED_TOOL_NAMES = {
     "create_account",
     "list_accounts",
     "create_journal_entry",
+    "list_journal_entries",
     "finalize_journal_entry",
     "reverse_journal_entry",
     "get_vat_return",
@@ -152,6 +153,40 @@ def test_finalize_and_reverse_fill_path_placeholder() -> None:
         "/journal-entries/9/reverse",
         None,
         {"reversal_date": "2026-07-12"},
+    )
+
+
+def test_list_journal_entries_forwards_filters_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "list_journal_entries",
+                "arguments": {
+                    "company_id": 7,
+                    "date_from": "2026-01-01",
+                    "date_to": "2026-01-31",
+                    "is_finalized": False,
+                    "limit": 25,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/journal-entries",
+        {
+            "company_id": 7,
+            "date_from": "2026-01-01",
+            "date_to": "2026-01-31",
+            "is_finalized": False,
+            "limit": 25,
+        },
+        None,
     )
 
 
@@ -438,6 +473,12 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         },
     )
     assert entry["isError"] is False
+
+    journal = json.loads(
+        call_tool("list_journal_entries", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert journal["entries"][0]["description"] == "MCP Buchung"
+    assert journal["entries"][0]["lines"][0]["account_code"] == "1200"
 
     tb_result = call_tool("get_trial_balance", {"company_id": company_id})
     trial_balance = json.loads(tb_result["content"][0]["text"])
