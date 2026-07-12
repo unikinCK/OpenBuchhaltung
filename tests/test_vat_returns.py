@@ -19,6 +19,7 @@ from app.services.elster import (
     elster_readiness,
     elster_submission_summary,
     list_elster_submissions,
+    preflight_vat_return,
     retry_elster_submission,
     submit_vat_return,
 )
@@ -460,6 +461,18 @@ def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -
         session=session, company_id=company.id, period_label="2026-05", changed_by="pytest"
     )
 
+    preflight = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        config={},
+    )
+    assert preflight["ok"] is True
+    assert preflight["period_label"] == "2026-05"
+    assert len(preflight["payload_hash"]) == 64
+    assert preflight["payload_size"] > 0
+
     submission = submit_vat_return(
         session=session,
         vat_return_id=vat_return.id,
@@ -637,6 +650,27 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
         vat_return_id = vat_return.id
 
     client = app.test_client()
+    preflight_response = client.post(
+        "/api/v1/elster/ustva/preflight",
+        json={"vat_return_id": vat_return_id, "environment": "test", "transport": "mock"},
+    )
+    assert preflight_response.status_code == 200
+    preflight_payload = preflight_response.get_json()
+    assert preflight_payload["ok"] is True
+    assert preflight_payload["period_label"] == "2026-05"
+    assert len(preflight_payload["payload_hash"]) == 64
+
+    failed_preflight = client.post(
+        "/api/v1/elster/ustva/preflight",
+        json={
+            "vat_return_id": vat_return_id,
+            "environment": "production",
+            "transport": "mock",
+        },
+    )
+    assert failed_preflight.status_code == 422
+    assert failed_preflight.get_json()["ok"] is False
+
     response = client.post(
         "/api/v1/elster/ustva/submit",
         json={"vat_return_id": vat_return_id, "environment": "test", "transport": "mock"},
@@ -774,6 +808,7 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
             changed_by="pytest",
         )
         company_id = company.id
+        vat_return_id = vat_return.id
         submission_id = first_submission.id
 
     client = app.test_client()
@@ -789,6 +824,14 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert html.count("MOCK-USTVA-2026-05-") == 3
     assert "Hash ok" in html
     assert "Payload-XML" in html
+    assert "Preflight" in html
+
+    preflight = client.post(
+        f"/ustva/{vat_return_id}/elster-preflight",
+        follow_redirects=True,
+    )
+    assert preflight.status_code == 200
+    assert "ELSTER-Preflight ok" in preflight.get_data(as_text=True)
 
     download = client.get(f"/ustva/elster-submissions/{submission_id}/payload.xml")
     assert download.status_code == 200

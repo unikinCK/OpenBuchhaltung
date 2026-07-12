@@ -23,6 +23,7 @@ from app.services.elster import (
     elster_submission_summary,
     get_elster_submission,
     list_elster_submissions,
+    preflight_vat_return,
     retry_elster_submission,
     submit_vat_return,
 )
@@ -202,6 +203,38 @@ def submit_vat_return_elster_test_action(vat_return_id: int):
             )
 
     flash(f"ELSTER-Testübermittlung protokolliert: {submission.transfer_ticket}", "success")
+    return redirect(url_for("main.vat_returns_page", company_id=company_id, period=period_label))
+
+
+@main_bp.post("/ustva/<int:vat_return_id>/elster-preflight")
+def preflight_vat_return_elster_action(vat_return_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        from domain.models import VatReturn
+
+        vat_return = session.get(VatReturn, vat_return_id)
+        if vat_return is None:
+            flash("UStVA wurde nicht gefunden.", "error")
+            return redirect(url_for("main.vat_returns_page"))
+        require_company_access(session, vat_return.company_id)
+        company_id = vat_return.company_id
+        period_label = vat_return.period_label
+        result = preflight_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="test",
+            transport="mock",
+            config=current_app.config,
+        )
+
+    if result["ok"]:
+        flash(
+            "ELSTER-Preflight ok: "
+            f"{result['period_label']}, Hash {str(result['payload_hash'])[:12]}",
+            "success",
+        )
+    else:
+        flash(f"ELSTER-Preflight fehlgeschlagen: {', '.join(result['errors'])}", "error")
     return redirect(url_for("main.vat_returns_page", company_id=company_id, period=period_label))
 
 

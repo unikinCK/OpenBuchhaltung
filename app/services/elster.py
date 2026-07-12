@@ -238,6 +238,65 @@ def submit_vat_return(
     return submission
 
 
+def preflight_vat_return(
+    *,
+    session: Session,
+    vat_return_id: int,
+    environment: str,
+    transport: str,
+    certificate_alias: str | None = None,
+    config: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    environment = environment.strip().lower()
+    transport = transport.strip().lower()
+    errors: list[str] = []
+    if environment not in ELSTER_ENVIRONMENTS:
+        errors.append("environment must be 'test' or 'production'.")
+    if transport not in ELSTER_TRANSPORTS:
+        errors.append("transport must be 'mock' or 'eric'.")
+    if transport == "mock" and environment != "test":
+        errors.append("Mock transport is only allowed for the test environment.")
+
+    vat_return = session.get(VatReturn, vat_return_id)
+    if vat_return is None:
+        errors.append("UStVA not found.")
+        return {
+            "ok": False,
+            "errors": errors,
+            "warnings": [],
+            "vat_return_id": vat_return_id,
+            "environment": environment,
+            "transport": transport,
+            "certificate_alias": certificate_alias,
+            "payload_hash": None,
+            "payload_size": 0,
+            "period_label": None,
+            "readiness": elster_readiness(config or {}),
+        }
+
+    payload_xml = build_ustva_payload(vat_return)
+    readiness = elster_readiness(config or {})
+    if transport == "eric" and not readiness["eric_transport_available"]:
+        errors.append("ERiC transport is not configured.")
+    if environment == "production" and not readiness["production_ready"]:
+        errors.append("Production ELSTER is not ready.")
+
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": readiness["warnings"],
+        "vat_return_id": vat_return.id,
+        "environment": environment,
+        "transport": transport,
+        "certificate_alias": certificate_alias
+        or readiness.get("certificate_alias"),
+        "payload_hash": hashlib.sha256(payload_xml.encode("utf-8")).hexdigest(),
+        "payload_size": len(payload_xml.encode("utf-8")),
+        "period_label": vat_return.period_label,
+        "readiness": readiness,
+    }
+
+
 def retry_elster_submission(
     *,
     session: Session,
