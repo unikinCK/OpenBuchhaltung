@@ -15,6 +15,7 @@ from app.services.elster import (
     elster_submission_summary,
     get_elster_submission,
     list_elster_submissions,
+    retry_elster_submission,
     submit_vat_return,
 )
 from domain.models import ElsterSubmission, VatReturn
@@ -145,6 +146,33 @@ def download_elster_payload_via_api(submission_id: int):
             f'attachment; filename="{elster_payload_filename(submission)}"'
         )
         return response
+
+
+@api_bp.post("/elster/submissions/<int:submission_id>/retry")
+def retry_elster_submission_via_api(submission_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        try:
+            retry = retry_elster_submission(
+                session=session,
+                submission_id=submission.id,
+                changed_by=_api_changed_by(),
+                config=current_app.config,
+            )
+        except ElsterError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_submission_dict(retry)), 201
 
 
 @api_bp.post("/elster/ustva/submit")
