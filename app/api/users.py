@@ -12,7 +12,7 @@ from app.auth import (
     ROLE_ADMIN,
     ROLE_BUCHHALTER,
     ROLE_PRUEFER,
-    api_has_global_access,
+    ROLE_SUPPORT,
     current_api_tenant_id,
     current_api_user,
     generate_api_token,
@@ -21,12 +21,12 @@ from app.auth import (
 )
 from domain.models import Tenant, User
 
-ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER}
+ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT}
 
 
 def _api_can_manage_users() -> bool:
     user = current_api_user()
-    if user is None or api_has_global_access():
+    if user is None:
         return True
     return user["role"] == ROLE_ADMIN
 
@@ -104,7 +104,7 @@ def create_user_via_api():
     if not username or not password:
         return jsonify({"error": "username and password are required."}), 400
     if role not in ROLES:
-        return jsonify({"error": "role must be Admin, Buchhalter or Pruefer."}), 400
+        return jsonify({"error": "role must be Admin, Buchhalter, Pruefer or Support."}), 400
 
     session_factory = get_session_factory()
     with session_factory() as session:

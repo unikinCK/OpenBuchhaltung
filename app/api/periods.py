@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
-from app.auth import ROLE_ADMIN, api_has_global_access, current_api_user
+from app.auth import ROLE_ADMIN, current_api_user
 from app.services.periods import (
     PeriodActionError,
     close_fiscal_year,
@@ -27,7 +27,7 @@ def _api_changed_by() -> str:
 
 def _api_can_admin() -> bool:
     user = current_api_user()
-    return user is None or api_has_global_access() or user["role"] == ROLE_ADMIN
+    return user is None or user["role"] == ROLE_ADMIN
 
 
 def _fiscal_year_dict(fiscal_year: FiscalYear, periods: list[Period]) -> dict[str, object]:

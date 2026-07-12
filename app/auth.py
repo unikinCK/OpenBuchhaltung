@@ -30,6 +30,7 @@ def _protect_auth_posts():
 ROLE_ADMIN = "Admin"
 ROLE_BUCHHALTER = "Buchhalter"
 ROLE_PRUEFER = "Pruefer"
+ROLE_SUPPORT = "Support"
 WRITE_ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER}
 
 

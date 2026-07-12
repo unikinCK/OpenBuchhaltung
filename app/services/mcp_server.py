@@ -167,7 +167,10 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "username": {"type": "string", "description": "Benutzername."},
                 "password": {"type": "string", "description": "Initiales Passwort."},
-                "role": {"type": "string", "description": "Admin, Buchhalter oder Pruefer."},
+                "role": {
+                    "type": "string",
+                    "description": "Admin, Buchhalter, Pruefer oder Support.",
+                },
                 "tenant_id": {
                     "type": ["integer", "null"],
                     "description": "Optionaler Mandant; null bedeutet global.",
