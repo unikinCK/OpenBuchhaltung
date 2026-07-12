@@ -28,7 +28,8 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
 - **Auswertungen & Exporte:** Summen-/Saldenliste, GuV, Bilanz,
-  Journalexporte und DATEV-kompatibler Buchungsstapel.
+  Journalexporte, DATEV-kompatibler Buchungsstapel und Prüferexport-Paket
+  mit Manifest und Hashes.
 - **Schnittstellen:** REST API mit Token-Auth, MCP-Server für agentische
   Workflows und ein ELSTER-Bridge-Konzept über lokalen ERiC-Runner.
 - **Nachvollziehbarkeit:** Rollen, Tenant-Scoping, Audit-Log,

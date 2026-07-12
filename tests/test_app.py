@@ -1,4 +1,7 @@
 import base64
+import hashlib
+import json
+import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -879,6 +882,81 @@ def test_api_csv_exports_for_journal_and_trial_balance(tmp_path):
     assert trial_balance_response.status_code == 200
     trial_balance_csv = trial_balance_response.get_data(as_text=True)
     assert "account_code,account_name,debit_total,credit_total,balance" in trial_balance_csv
+
+
+def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_path):
+    app = _create_test_app(tmp_path, APP_COMMIT_SHA="test-commit")
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Audit Export Mandant", "company_name": "Audit Export GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    entry_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Prueferexport Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+    entry_id = entry_response.get_json()["id"]
+    document_bytes = b"%PDF-1.4\naudit-export\n%%EOF\n"
+    upload_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "journal_entry_id": entry_id,
+            "file_name": "rechnung.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(document_bytes).decode("ascii"),
+        },
+    )
+    assert upload_response.status_code == 201
+
+    manifest_response = client.get(
+        "/api/v1/exports/audit-package.zip",
+        query_string={"company_id": 1, "manifest_only": "true"},
+    )
+    assert manifest_response.status_code == 200
+    assert manifest_response.get_json()["commit_sha"] == "test-commit"
+
+    response = client.get("/api/v1/exports/audit-package.zip", query_string={"company_id": 1})
+    assert response.status_code == 200
+    assert response.content_type == "application/zip"
+    assert "prueferexport-company-1-" in response.headers["Content-Disposition"]
+
+    with zipfile.ZipFile(BytesIO(response.data)) as archive:
+        names = set(archive.namelist())
+        assert "manifest.json" in names
+        assert "data/accounts.json" in names
+        assert "data/journal_entries.json" in names
+        assert "data/documents.json" in names
+        document_paths = [name for name in names if name.startswith("documents/")]
+        assert len(document_paths) == 1
+        assert archive.read(document_paths[0]) == document_bytes
+        manifest = json.loads(archive.read("manifest.json"))
+        documents = json.loads(archive.read("data/documents.json"))
+
+    assert manifest["export_format_version"] == "1"
+    assert manifest["table_counts"]["journal_entries"] == 1
+    assert manifest["table_counts"]["documents"] == 1
+    assert manifest["totals"]["document_file_count"] == 1
+    assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
+    assert any(file["path"] == document_paths[0] for file in manifest["files"])
 
 
 def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):

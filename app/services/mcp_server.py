@@ -521,6 +521,42 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="export_audit_package",
+        description=(
+            "Erzeugt ein Prueferexport-Paket mit JSON-Tabellen, Belegindex, "
+            "Originalbelegen und Manifest. Fuer MCP ist manifest_only=true sinnvoll."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "date_from": {
+                    "type": "string",
+                    "description": "Optionaler Zeitraum-Beginn (Format JJJJ-MM-TT).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Optionales Zeitraum-Ende (Format JJJJ-MM-TT).",
+                },
+                "include_documents": {
+                    "type": "boolean",
+                    "description": "Originalbelege in das ZIP aufnehmen.",
+                    "default": True,
+                },
+                "manifest_only": {
+                    "type": "boolean",
+                    "description": "Nur das Exportmanifest als JSON zurueckgeben.",
+                    "default": True,
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/exports/audit-package.zip",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="list_documents",
         description="Listet Belege einer Gesellschaft, optional gefiltert nach Buchung.",
         input_schema={

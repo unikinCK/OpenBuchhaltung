@@ -324,6 +324,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       API-/MCP-Parität umgesetzt)*
 - [x] Mandantenübergreifendes Rollen-/Supportmodell *(globale Support-Rolle:
       mandantenübergreifend lesend, ohne Schreib-/Admin-Rechte)*
+- [x] Prüferexport-Basis *(Sprint W: `GET /api/v1/exports/audit-package.zip`
+      erzeugt ein ZIP-Paket mit JSON-Tabellen für Stammdaten, Buchungen,
+      Belege, OPOS, Bank, Anlagen, Perioden, UStVA/ELSTER und Audit-Log;
+      Originalbelege werden unter `documents/` aufgenommen, `manifest.json`
+      enthält Zeitraumparameter, Tabellenzählungen, Dateigrößen und SHA-256-
+      Hashes; Berichte-Seite mit Downloadlink, MCP-Tool
+      `export_audit_package` mit `manifest_only` für Automationen.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

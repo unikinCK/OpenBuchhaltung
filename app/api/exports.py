@@ -1,4 +1,4 @@
-"""Exporte: Journal-/SuSa-CSV und DATEV-Buchungsstapel."""
+"""Exporte: Journal-/SuSa-CSV, DATEV-Buchungsstapel und Prueferpaket."""
 
 from __future__ import annotations
 
@@ -9,10 +9,18 @@ from io import StringIO
 from flask import Response, current_app, jsonify, request
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_scoped_company, get_session_factory
+from app.api.helpers import DateArgError, api_scoped_company, date_arg, get_session_factory
+from app.services.audit_export import build_audit_export_package
 from app.services.datev_export import DatevExportOptions, build_datev_export
 from app.services.reports import trial_balance_for_company
 from domain.models import Account, JournalEntry, JournalEntryLine
+
+
+def _bool_arg(name: str, *, default: bool = False) -> bool:
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "ja", "on"}
 
 
 @api_bp.get("/exports/trial-balance.csv")
@@ -147,4 +155,47 @@ def export_datev_csv():
         payload,
         content_type="text/csv; charset=windows-1252",
         headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/audit-package.zip")
+def export_audit_package():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if date_from and date_to and date_from > date_to:
+        return jsonify({"error": "date_from must be before or equal to date_to."}), 400
+
+    include_documents = _bool_arg("include_documents", default=True)
+    manifest_only = _bool_arg("manifest_only", default=False)
+    generated_at = datetime.now(timezone.utc)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        package = build_audit_export_package(
+            session=session,
+            company_id=company.id,
+            generated_at=generated_at,
+            date_from=date_from,
+            date_to=date_to,
+            commit_sha=current_app.config.get("APP_COMMIT_SHA"),
+            include_documents=include_documents,
+        )
+
+    if manifest_only:
+        return jsonify(package.manifest), 200
+
+    return Response(
+        package.payload,
+        content_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{package.file_name}"'},
     )
