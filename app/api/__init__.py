@@ -14,6 +14,7 @@ from app.api import (  # noqa: F401
     journal,
     mcp,
     open_items,
+    periods,
     reports,
     system,
     tenants,

@@ -41,6 +41,12 @@ EXPECTED_TOOL_NAMES = {
     "list_open_items",
     "create_open_item",
     "settle_open_item",
+    "list_fiscal_years",
+    "create_fiscal_year",
+    "lock_period",
+    "unlock_period",
+    "close_fiscal_year",
+    "set_fiscal_year_start",
     "list_audit_log",
     "create_fixed_asset",
     "list_fixed_assets",
@@ -516,6 +522,96 @@ def test_open_item_tools_forward_arguments() -> None:
         "/open-items/3/settle",
         None,
         {"amount": "100.00"},
+    )
+
+
+def test_period_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 45,
+            "method": "tools/call",
+            "params": {"name": "list_fiscal_years", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/fiscal-years", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 46,
+            "method": "tools/call",
+            "params": {
+                "name": "create_fiscal_year",
+                "arguments": {
+                    "company_id": 7,
+                    "label": "2026",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fiscal-years",
+        None,
+        {
+            "company_id": 7,
+            "label": "2026",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 47,
+            "method": "tools/call",
+            "params": {"name": "lock_period", "arguments": {"period_id": 3, "reason": "QA"}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/periods/3/lock", None, {"reason": "QA"})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 48,
+            "method": "tools/call",
+            "params": {"name": "unlock_period", "arguments": {"period_id": 3}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/periods/3/unlock", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 49,
+            "method": "tools/call",
+            "params": {"name": "close_fiscal_year", "arguments": {"fiscal_year_id": 4}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/fiscal-years/4/close", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 50,
+            "method": "tools/call",
+            "params": {
+                "name": "set_fiscal_year_start",
+                "arguments": {"company_id": 7, "start_month": 4},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/companies/7/fiscal-year-start",
+        None,
+        {"start_month": 4},
     )
 
 

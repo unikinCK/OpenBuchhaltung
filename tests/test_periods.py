@@ -505,3 +505,63 @@ def test_admin_can_close_fiscal_year_via_ui(tmp_path):
         follow_redirects=True,
     )
     assert "Geschäftsjahr ist abgeschlossen".encode() in booking_response.data
+
+
+def test_periods_api_lifecycle(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Perioden API", "company_name": "Perioden API GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "0860",
+            "name": "Gewinnvortrag vor Verwendung",
+            "account_type": "equity",
+        },
+    )
+
+    start_response = client.post(
+        "/api/v1/companies/1/fiscal-year-start",
+        json={"start_month": 4},
+    )
+    assert start_response.status_code == 200
+    assert start_response.get_json()["fiscal_year_start_month"] == 4
+
+    create_response = client.post(
+        "/api/v1/fiscal-years",
+        json={
+            "company_id": 1,
+            "label": "2026",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+        },
+    )
+    assert create_response.status_code == 201
+    fiscal_year = create_response.get_json()
+    fiscal_year_id = fiscal_year["id"]
+    period_id = fiscal_year["periods"][0]["id"]
+
+    list_response = client.get("/api/v1/fiscal-years", query_string={"company_id": 1})
+    assert list_response.status_code == 200
+    assert list_response.get_json()["fiscal_years"][0]["label"] == "2026"
+
+    lock_response = client.post(
+        f"/api/v1/periods/{period_id}/lock",
+        json={"reason": "Monatsabschluss"},
+    )
+    assert lock_response.status_code == 200
+    assert lock_response.get_json()["status"] == "locked"
+
+    unlock_response = client.post(f"/api/v1/periods/{period_id}/unlock", json={})
+    assert unlock_response.status_code == 200
+    assert unlock_response.get_json()["status"] == "open"
+
+    close_response = client.post(f"/api/v1/fiscal-years/{fiscal_year_id}/close", json={})
+    assert close_response.status_code == 200
+    assert close_response.get_json()["is_closed"] is True
+    assert {period["status"] for period in close_response.get_json()["periods"]} == {"locked"}
