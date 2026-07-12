@@ -21,6 +21,7 @@ from app.services.audit_log import log_audit_event
 from domain.models import ElsterSubmission, VatReturn
 
 ELSTER_ENVIRONMENTS = {"test", "production"}
+ELSTER_STATUSES = {"created", "transmitted", "failed"}
 ELSTER_TRANSPORTS = {"mock", "eric"}
 
 
@@ -293,8 +294,24 @@ def _record_submission(
 
 
 def list_elster_submissions(
-    *, session: Session, company_id: int, vat_return_id: int | None = None
+    *,
+    session: Session,
+    company_id: int,
+    vat_return_id: int | None = None,
+    status: str | None = None,
+    transport: str | None = None,
+    environment: str | None = None,
 ) -> list[ElsterSubmission]:
+    status = status.strip().lower() if status else None
+    transport = transport.strip().lower() if transport else None
+    environment = environment.strip().lower() if environment else None
+    if status is not None and status not in ELSTER_STATUSES:
+        raise ElsterError("status must be 'created', 'transmitted' or 'failed'.")
+    if transport is not None and transport not in ELSTER_TRANSPORTS:
+        raise ElsterError("transport must be 'mock' or 'eric'.")
+    if environment is not None and environment not in ELSTER_ENVIRONMENTS:
+        raise ElsterError("environment must be 'test' or 'production'.")
+
     stmt = (
         select(ElsterSubmission)
         .where(ElsterSubmission.company_id == company_id)
@@ -302,6 +319,12 @@ def list_elster_submissions(
     )
     if vat_return_id is not None:
         stmt = stmt.where(ElsterSubmission.vat_return_id == vat_return_id)
+    if status is not None:
+        stmt = stmt.where(ElsterSubmission.status == status)
+    if transport is not None:
+        stmt = stmt.where(ElsterSubmission.transport == transport)
+    if environment is not None:
+        stmt = stmt.where(ElsterSubmission.environment == environment)
     return session.execute(stmt).scalars().all()
 
 

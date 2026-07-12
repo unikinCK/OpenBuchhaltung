@@ -1091,6 +1091,18 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Optional: nur Protokolle dieser UStVA.",
                 },
+                "status": {
+                    "type": "string",
+                    "description": "Optional: created, transmitted oder failed.",
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "Optional: mock oder eric.",
+                },
+                "environment": {
+                    "type": "string",
+                    "description": "Optional: test oder production.",
+                },
             },
             "required": ["company_id"],
             "additionalProperties": False,
