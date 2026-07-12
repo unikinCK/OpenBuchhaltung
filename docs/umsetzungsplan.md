@@ -247,7 +247,7 @@ UI, REST-API und MCP angeboten und gepflegt.
       (`POST /journal-entries/finalize-until` umgesetzt), Belege (Upload/Verknüpfen/
       Download/Liste umgesetzt), Beleg-OCR (Vorschlag/Buchen umgesetzt),
       E-Rechnung (Import/Export umgesetzt), Bank (Import/
-      Zuordnen/Buchen/Liste), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
+      Zuordnen/Buchen/Liste umgesetzt), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
       Anlagen (AfaA/Abgang umgesetzt),
       Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
       WJ-Beginn umgesetzt) — jeweils REST-Endpoint + MCP-Tool.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import date
 from decimal import Decimal
 from io import BytesIO, StringIO
@@ -315,3 +316,82 @@ def test_bank_page_upload_and_book_flow(tmp_path):
     assert book_response.status_code == 200
     assert b"wurde verbucht" in book_response.data
     assert b"verbucht</span>" in book_response.data
+
+
+def test_bank_api_import_list_match_and_book_flow(tmp_path):
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "B Mandant", "company_name": "B GmbH"})
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "4200", "name": "Miete", "account_type": "expense"},
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "8400", "name": "Erlöse", "account_type": "income"},
+    )
+
+    with app.extensions["db_session_factory"]() as db_session:
+        bank_id = db_session.execute(select(Account.id).where(Account.code == "1200")).scalar_one()
+        rent_id = db_session.execute(select(Account.id).where(Account.code == "4200")).scalar_one()
+        revenue_id = db_session.execute(
+            select(Account.id).where(Account.code == "8400")
+        ).scalar_one()
+        matching_entry = create_journal_entry(
+            session=db_session,
+            payload=JournalEntryInput(
+                company_id=1,
+                entry_date=date(2026, 7, 4),
+                description="Ausgangsrechnung RE-1001",
+                status="posted",
+                lines=[
+                    JournalLineInput(bank_id, Decimal("1190.00"), Decimal("0.00")),
+                    JournalLineInput(revenue_id, Decimal("0.00"), Decimal("1190.00")),
+                ],
+            ),
+        )
+        matching_entry_id = matching_entry.id
+
+    import_response = client.post(
+        "/api/v1/bank-transactions/import",
+        json={
+            "company_id": 1,
+            "bank_account_id": bank_id,
+            "file_name": "umsaetze.csv",
+            "mime_type": "text/csv",
+            "content_base64": base64.b64encode(GERMAN_CSV.encode("utf-8")).decode("ascii"),
+        },
+    )
+    assert import_response.status_code == 201
+    assert import_response.get_json()["report"]["imported_rows"] == 3
+
+    list_response = client.get(
+        "/api/v1/bank-transactions",
+        query_string={"company_id": 1, "include_suggestions": "true"},
+    )
+    assert list_response.status_code == 200
+    transactions = list_response.get_json()["transactions"]
+    incoming = next(tx for tx in transactions if tx["amount"] == "1190.00")
+    outgoing = next(tx for tx in transactions if tx["amount"] == "-595.00")
+    assert incoming["suggestions"][0]["id"] == matching_entry_id
+
+    match_response = client.post(
+        f"/api/v1/bank-transactions/{incoming['id']}/match",
+        json={"journal_entry_id": matching_entry_id},
+    )
+    assert match_response.status_code == 200
+    assert match_response.get_json()["status"] == "matched"
+
+    book_response = client.post(
+        f"/api/v1/bank-transactions/{outgoing['id']}/book",
+        json={"contra_account_id": rent_id, "description": "Miete Juli"},
+    )
+    assert book_response.status_code == 201
+    booked = book_response.get_json()
+    assert booked["status"] == "booked"
+    assert booked["journal_entry_id"] is not None

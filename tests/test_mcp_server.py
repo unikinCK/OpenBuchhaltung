@@ -42,6 +42,10 @@ EXPECTED_TOOL_NAMES = {
     "book_receipt_ocr_suggestion",
     "import_einvoice",
     "export_einvoice",
+    "list_bank_transactions",
+    "import_bank_transactions",
+    "match_bank_transaction",
+    "book_bank_transaction",
     "list_open_items",
     "create_open_item",
     "settle_open_item",
@@ -600,6 +604,96 @@ def test_einvoice_tools_forward_arguments() -> None:
                 }
             ],
         },
+    )
+
+
+def test_bank_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "list_bank_transactions",
+                "arguments": {"company_id": 7, "status": "open", "include_suggestions": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/bank-transactions",
+        {"company_id": 7, "status": "open", "include_suggestions": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 56,
+            "method": "tools/call",
+            "params": {
+                "name": "import_bank_transactions",
+                "arguments": {
+                    "company_id": 7,
+                    "bank_account_id": 4,
+                    "file_name": "umsaetze.csv",
+                    "content_base64": "QnVjaHVuZ3N0YWc7QmV0cmFnCg==",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/import",
+        None,
+        {
+            "company_id": 7,
+            "bank_account_id": 4,
+            "file_name": "umsaetze.csv",
+            "content_base64": "QnVjaHVuZ3N0YWc7QmV0cmFnCg==",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 57,
+            "method": "tools/call",
+            "params": {
+                "name": "match_bank_transaction",
+                "arguments": {"transaction_id": 8, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/match",
+        None,
+        {"journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 58,
+            "method": "tools/call",
+            "params": {
+                "name": "book_bank_transaction",
+                "arguments": {
+                    "transaction_id": 8,
+                    "contra_account_id": 10,
+                    "description": "Bankgebühr",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/book",
+        None,
+        {"contra_account_id": 10, "description": "Bankgebühr"},
     )
 
 

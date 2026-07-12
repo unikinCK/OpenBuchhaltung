@@ -649,6 +649,85 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_bank_transactions",
+        description=(
+            "Listet Bankumsätze einer Gesellschaft, optional nach Status und mit "
+            "Buchungsvorschlägen für offene Umsätze."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "status": {
+                    "type": "string",
+                    "description": "Optional: open, matched oder booked.",
+                },
+                "include_suggestions": {
+                    "type": "boolean",
+                    "description": "Optional: passende Buchungen für offene Umsätze liefern.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-transactions",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="import_bank_transactions",
+        description="Importiert Bankumsätze aus einer CSV-Datei. content_base64 enthält die CSV.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "bank_account_id": {"type": "integer", "description": "Bankkonto."},
+                "file_name": {"type": "string", "description": "Originaler CSV-Dateiname."},
+                "mime_type": {"type": "string", "description": "MIME-Type, z. B. text/csv."},
+                "content_base64": {"type": "string", "description": "CSV-Inhalt als Base64."},
+            },
+            "required": ["company_id", "bank_account_id", "file_name", "content_base64"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/import",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="match_bank_transaction",
+        description="Ordnet einen offenen Bankumsatz einer bestehenden Buchung zu.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "integer", "description": "ID des Bankumsatzes."},
+                "journal_entry_id": {"type": "integer", "description": "ID der Buchung."},
+            },
+            "required": ["transaction_id", "journal_entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/{transaction_id}/match",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="book_bank_transaction",
+        description="Verbucht einen offenen Bankumsatz gegen ein Gegenkonto.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "integer", "description": "ID des Bankumsatzes."},
+                "contra_account_id": {"type": "integer", "description": "Gegenkonto."},
+                "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
+                "description": {"type": "string", "description": "Optionaler Buchungstext."},
+            },
+            "required": ["transaction_id", "contra_account_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/{transaction_id}/book",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."
