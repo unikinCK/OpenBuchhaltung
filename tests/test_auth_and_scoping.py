@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app import create_app
 from app.auth import hash_api_token, hash_password
-from domain.models import Account, Company, JournalEntry, TaxCode, Tenant, User
+from domain.models import Account, AuditLog, Company, JournalEntry, TaxCode, Tenant, User
 
 
 def _create_test_app(tmp_path: Path, **extra_config):
@@ -138,6 +138,51 @@ def test_api_user_token_scopes_companies_to_tenant(tmp_path):
     payload = response.get_json()
     assert [company["id"] for company in payload] == [company_a_id]
     assert payload[0]["name"] == "A GmbH"
+
+
+def test_api_user_token_scopes_audit_log_to_tenant(tmp_path):
+    token = "obk_audit-scope"
+    app = _create_test_app(tmp_path, API_REQUIRE_AUTH=True)
+    company_a_id, company_b_id = _seed_two_tenants_with_user(app)
+    with app.extensions["db_session_factory"]() as session:
+        user = session.execute(select(User).where(User.username == "nutzer-a")).scalar_one()
+        user.api_token_hash = hash_api_token(token)
+        user.api_token_last4 = token[-4:]
+        company_a = session.get(Company, company_a_id)
+        company_b = session.get(Company, company_b_id)
+        session.add_all(
+            [
+                AuditLog(
+                    tenant_id=company_a.tenant_id,
+                    company_id=company_a.id,
+                    entity_type="journal_entry",
+                    entity_id="1",
+                    action="created",
+                    changed_by="a",
+                ),
+                AuditLog(
+                    tenant_id=company_b.tenant_id,
+                    company_id=company_b.id,
+                    entity_type="journal_entry",
+                    entity_id="2",
+                    action="created",
+                    changed_by="b",
+                ),
+            ]
+        )
+        session.commit()
+
+    client = app.test_client()
+    response = client.get("/api/v1/audit-log", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert [entry["entity_id"] for entry in payload["entries"]] == ["1"]
+
+    foreign_filter = client.get(
+        f"/api/v1/audit-log?company_id={company_b_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert foreign_filter.status_code == 404
 
 
 def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):

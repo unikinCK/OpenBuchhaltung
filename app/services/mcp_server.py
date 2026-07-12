@@ -374,6 +374,34 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_audit_log",
+        description=(
+            "Listet Audit-Log-Einträge im Zugriffsbereich des API-Tokens. Optional nach "
+            "tenant_id, company_id, entity_type, action und limit filtern."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tenant_id": {"type": "integer", "description": "Mandanten-ID (nur global)."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "entity_type": {
+                    "type": "string",
+                    "description": "Objekttyp, z. B. journal_entry oder document.",
+                },
+                "action": {"type": "string", "description": "Aktion, z. B. created."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximale Anzahl Einträge, 1 bis 500.",
+                    "default": 100,
+                },
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/audit-log",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_vat_return",
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "

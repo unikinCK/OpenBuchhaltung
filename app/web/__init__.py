@@ -8,6 +8,7 @@ from __future__ import annotations
 from app.web import (  # noqa: F401
     accounts,
     admin,
+    audit_log,
     bank,
     dashboard,
     documents,

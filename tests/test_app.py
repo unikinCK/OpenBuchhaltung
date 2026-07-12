@@ -6,7 +6,7 @@ from unittest.mock import patch
 from app import create_app
 from app.auth import hash_password
 from app.services.document_llm import DocumentLLMError
-from domain.models import AuditLog, Document, FiscalYear, Period, PeriodLock, User
+from domain.models import AuditLog, Company, Document, FiscalYear, Period, PeriodLock, Tenant, User
 
 
 def _create_test_app(tmp_path: Path, **extra_config):
@@ -149,6 +149,35 @@ def test_can_create_tenant_and_company_via_form(tmp_path):
     assert response.status_code == 200
     assert b"Mandant und Gesellschaft wurden angelegt" in response.data
     assert b"Mandanten:</strong> 1" in response.data
+
+
+def test_audit_log_page_lists_entries(tmp_path):
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        tenant = Tenant(name="Audit Mandant")
+        company = Company(name="Audit GmbH", currency_code="EUR", tenant=tenant)
+        session.add_all([tenant, company])
+        session.flush()
+        session.add(
+            AuditLog(
+                tenant_id=tenant.id,
+                company_id=company.id,
+                entity_type="journal_entry",
+                entity_id="42",
+                action="created",
+                payload={"posting_number": "2026-0001"},
+                changed_by="pytest",
+            )
+        )
+        session.commit()
+
+    client = _logged_in_client(app)
+    response = client.get("/audit-log")
+
+    assert response.status_code == 200
+    assert b"Audit-Log" in response.data
+    assert b"journal_entry" in response.data
+    assert b"2026-0001" in response.data
 
 
 def test_can_create_account_via_form(tmp_path):

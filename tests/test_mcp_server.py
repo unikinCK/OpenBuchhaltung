@@ -31,6 +31,7 @@ EXPECTED_TOOL_NAMES = {
     "export_trial_balance_csv",
     "export_journal_csv",
     "export_datev_csv",
+    "list_audit_log",
     "create_fixed_asset",
     "list_fixed_assets",
     "get_depreciation_schedule",
@@ -228,6 +229,38 @@ def test_report_tools_expose_date_parameters() -> None:
     # Bilanz ist Stichtag: date_to, aber kein date_from.
     balance_props = by_name["get_balance_sheet"].input_schema["properties"]
     assert "date_to" in balance_props and "date_from" not in balance_props
+
+
+def test_audit_log_tool_forwards_filters_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {
+                "name": "list_audit_log",
+                "arguments": {
+                    "company_id": 7,
+                    "entity_type": "journal_entry",
+                    "action": "created",
+                    "limit": 20,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/audit-log",
+        {
+            "company_id": 7,
+            "entity_type": "journal_entry",
+            "action": "created",
+            "limit": 20,
+        },
+        None,
+    )
 
 
 def test_json_tool_forwards_arguments_as_body() -> None:
