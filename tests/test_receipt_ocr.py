@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import date
 from decimal import Decimal
@@ -498,6 +499,69 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
         total_debit = sum(line.debit_amount for line in entry.lines)
         total_credit = sum(line.credit_amount for line in entry.lines)
         assert total_debit == total_credit == Decimal("238.00")
+        assert any(
+            e.action == "ocr_booked"
+            for e in session.query(AuditLog).filter_by(entity_type="document").all()
+        )
+
+
+def test_receipt_ocr_api_suggest_and_book(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    client = _logged_in_client(app)
+
+    pdf = _pdf_with_text(
+        [
+            "Muster Lieferant GmbH",
+            "Rechnung Nr. 2026-4711",
+            "Rechnungsdatum: 08.07.2026",
+            "Nettobetrag 200,00 EUR",
+            "MwSt 19 % 38,00 EUR",
+            "Gesamtbetrag 238,00 EUR",
+        ]
+    )
+
+    suggest = client.post(
+        "/api/v1/receipt-ocr/suggestions",
+        json={
+            "company_id": company_id,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(pdf).decode("ascii"),
+        },
+    )
+    assert suggest.status_code == 201
+    suggestion = suggest.get_json()
+    assert suggestion["extraction"]["supplier"] == "Muster Lieferant GmbH"
+    assert suggestion["extraction"]["gross_amount"] == "238.00"
+    document_id = suggestion["document_id"]
+
+    with app.extensions["db_session_factory"]() as session:
+        tax_code_id = session.query(TaxCode).one().id
+        expense_id = session.query(Account).filter_by(code="6300").one().id
+        creditor_id = session.query(Account).filter_by(code="1600").one().id
+
+    book = client.post(
+        "/api/v1/receipt-ocr/book",
+        json={
+            "company_id": company_id,
+            "document_id": document_id,
+            "expense_account_id": expense_id,
+            "creditor_account_id": creditor_id,
+            "tax_code_id": tax_code_id,
+            "entry_date": "2026-07-08",
+            "description": "Muster Lieferant 2026-4711",
+            "net_amount": "200.00",
+            "tax_amount": "38.00",
+        },
+    )
+    assert book.status_code == 201
+    assert book.get_json()["gross_amount"] == "238.00"
+
+    with app.extensions["db_session_factory"]() as session:
+        entry = session.query(JournalEntry).one()
+        document = session.get(Document, document_id)
+        assert document.journal_entry_id == entry.id
         assert any(
             e.action == "ocr_booked"
             for e in session.query(AuditLog).filter_by(entity_type="document").all()

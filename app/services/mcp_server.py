@@ -522,6 +522,60 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="create_receipt_ocr_suggestion",
+        description=(
+            "Lädt einen Beleg hoch, analysiert ihn per Beleg-OCR und liefert einen "
+            "Buchungsvorschlag zurück. content_base64 enthält den Dateiinhalt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "file_name": {"type": "string", "description": "Originaler Dateiname."},
+                "mime_type": {
+                    "type": "string",
+                    "description": "MIME-Type, z. B. application/pdf.",
+                },
+                "content_base64": {"type": "string", "description": "Dateiinhalt als Base64."},
+            },
+            "required": ["company_id", "file_name", "mime_type", "content_base64"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-ocr/suggestions",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="book_receipt_ocr_suggestion",
+        description="Bucht einen Beleg-OCR-Vorschlag und verknüpft den Beleg mit der Buchung.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "document_id": {"type": "integer", "description": "ID des gespeicherten Belegs."},
+                "expense_account_id": {"type": "integer", "description": "Aufwandskonto."},
+                "creditor_account_id": {"type": "integer", "description": "Kreditorenkonto."},
+                "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
+                "entry_date": {"type": "string", "description": "Buchungsdatum JJJJ-MM-TT."},
+                "description": {"type": "string", "description": "Buchungstext."},
+                "net_amount": {"type": "string", "description": "Nettobetrag."},
+                "tax_amount": {"type": "string", "description": "Steuerbetrag."},
+            },
+            "required": [
+                "company_id",
+                "document_id",
+                "expense_account_id",
+                "creditor_account_id",
+                "net_amount",
+                "tax_amount",
+            ],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-ocr/book",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."
