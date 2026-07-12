@@ -1220,6 +1220,38 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="preflight_vat_return_elster",
+        description=(
+            "Prüft eine festgehaltene UStVA für die ELSTER-Übermittlung, ohne eine "
+            "Submission anzulegen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "vat_return_id": {"type": "integer", "description": "ID der UStVA."},
+                "environment": {
+                    "type": "string",
+                    "description": "test oder production.",
+                    "default": "test",
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "mock oder eric.",
+                    "default": "mock",
+                },
+                "certificate_alias": {
+                    "type": "string",
+                    "description": "Optionaler Zertifikats-/Schlüssel-Alias.",
+                },
+            },
+            "required": ["vat_return_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/elster/ustva/preflight",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="create_fixed_asset",
         description=(
             "Legt ein Anlagegut in der Anlagenbuchhaltung an und wählt das AfA-Verfahren. "

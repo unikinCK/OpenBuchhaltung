@@ -334,7 +334,7 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
 - [ ] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
       Test-/Produktionsumgebung, Mock-Transport, Transport-Adapter,
-      Readiness-Prüfung, UI-Historie, archivfähiger Detailabruf,
+      Readiness-/Preflight-Prüfung, UI-Historie, archivfähiger Detailabruf,
       Payload-XML-Download, Payload-Hash-Verifikation, Übermittlungsprotokolle
       inkl. fehlgeschlagener Versuche, Protokollfilter/-übersicht, UI-Monitoring,
       Retry-Aktion und API-/MCP-Retry + Audit); echte ERiC-Anbindung

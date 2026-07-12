@@ -38,6 +38,7 @@ EXPECTED_TOOL_NAMES = {
     "get_elster_submission",
     "download_elster_payload",
     "retry_elster_submission",
+    "preflight_vat_return_elster",
     "get_elster_readiness",
     "submit_vat_return_elster",
     "get_trial_balance",
@@ -529,6 +530,28 @@ def test_elster_tools_forward_arguments() -> None:
     assert http.calls[-1] == (
         "POST",
         "/elster/ustva/submit",
+        None,
+        {"vat_return_id": 8, "environment": "test", "transport": "mock"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 328,
+            "method": "tools/call",
+            "params": {
+                "name": "preflight_vat_return_elster",
+                "arguments": {
+                    "vat_return_id": 8,
+                    "environment": "test",
+                    "transport": "mock",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/elster/ustva/preflight",
         None,
         {"vat_return_id": 8, "environment": "test", "transport": "mock"},
     )

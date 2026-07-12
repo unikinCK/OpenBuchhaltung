@@ -15,6 +15,7 @@ from app.services.elster import (
     elster_submission_summary,
     get_elster_submission,
     list_elster_submissions,
+    preflight_vat_return,
     retry_elster_submission,
     submit_vat_return,
 )
@@ -208,3 +209,31 @@ def submit_vat_return_elster_via_api():
         except ElsterError as exc:
             return jsonify({"error": str(exc)}), 422
         return jsonify(_submission_dict(submission)), 201
+
+
+@api_bp.post("/elster/ustva/preflight")
+def preflight_vat_return_elster_via_api():
+    payload = request.get_json(silent=True) or {}
+    try:
+        vat_return_id = int(payload.get("vat_return_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "vat_return_id is required."}), 400
+
+    environment = (payload.get("environment") or "test").strip()
+    transport = (payload.get("transport") or "mock").strip()
+    certificate_alias = (payload.get("certificate_alias") or "").strip() or None
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        vat_return = session.get(VatReturn, vat_return_id)
+        if vat_return is None or api_scoped_company(session, vat_return.company_id) is None:
+            return jsonify({"error": "UStVA not found."}), 404
+        result = preflight_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment=environment,
+            transport=transport,
+            certificate_alias=certificate_alias,
+            config=current_app.config,
+        )
+        return jsonify(result), 200 if result["ok"] else 422
