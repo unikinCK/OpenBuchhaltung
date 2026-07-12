@@ -1141,6 +1141,44 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="get_vat_annual_return",
+        description=(
+            "Berechnet die Kennziffern der USt-Jahreserklärung für ein Kalenderjahr "
+            "aus den Journaldaten, ohne sie zu speichern."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+            },
+            "required": ["company_id", "year"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/vat-annual-return",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_vat_annual_return",
+        description=(
+            "Hält die USt-Jahreserklärung für ein Kalenderjahr als unveränderlichen "
+            "Kennziffern-Snapshot fest."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+            },
+            "required": ["company_id", "year"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/vat-annual-returns",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_elster_submissions",
         description="Listet ELSTER-Test-/Übermittlungsprotokolle einer Gesellschaft.",
         input_schema={
@@ -1313,6 +1351,76 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/elster/ustva/preflight",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="submit_vat_annual_return_elster",
+        description=(
+            "Übermittelt eine festgehaltene USt-Jahreserklärung über die "
+            "ELSTER-Transportkante."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "vat_return_id": {
+                    "type": "integer",
+                    "description": "ID des Jahres-Snapshots.",
+                },
+                "environment": {
+                    "type": "string",
+                    "description": "test oder production; aktuell mock nur mit test.",
+                    "default": "test",
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "mock oder eric.",
+                    "default": "mock",
+                },
+                "certificate_alias": {
+                    "type": "string",
+                    "description": "Optionaler Zertifikats-/Schlüssel-Alias.",
+                },
+            },
+            "required": ["vat_return_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/elster/ust-jahreserklaerung/submit",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="preflight_vat_annual_return_elster",
+        description=(
+            "Prüft eine festgehaltene USt-Jahreserklärung für die ELSTER-Übermittlung, "
+            "ohne eine Submission anzulegen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "vat_return_id": {
+                    "type": "integer",
+                    "description": "ID des Jahres-Snapshots.",
+                },
+                "environment": {
+                    "type": "string",
+                    "description": "test oder production.",
+                    "default": "test",
+                },
+                "transport": {
+                    "type": "string",
+                    "description": "mock oder eric.",
+                    "default": "mock",
+                },
+                "certificate_alias": {
+                    "type": "string",
+                    "description": "Optionaler Zertifikats-/Schlüssel-Alias.",
+                },
+            },
+            "required": ["vat_return_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/elster/ust-jahreserklaerung/preflight",
         arg_location="json",
     ),
     ToolSpec(

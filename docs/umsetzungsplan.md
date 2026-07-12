@@ -226,12 +226,13 @@ Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Pr
       Meldezeiträume Monat ("JJJJ-MM"), Quartal ("JJJJ-Qn"), Halbjahr
       ("JJJJ-Hn") und Jahr ("JJJJ") — wiederverwendbar für weitere
       Steuerarten (ELSTER, Phase 3.5).
-      `VatReturn`-Modell (Migration 0011) hält Voranmeldungen als
+      `VatReturn`-Modell (Migration 0011) hält Voranmeldungen/Jahreserklärungen als
       unveränderlichen Kennziffern-Snapshot fest (unique je Gesellschaft und
       Zeitraum, Status erstellt/uebermittelt, Audit-Event). UI-Seite „UStVA"
       (Zeitraumwahl, Kennziffern-Tabelle, Festhalten, Liste); API
       `GET /api/v1/vat-return` (Berechnung), `GET/POST /api/v1/vat-returns`.
-      Elektronische Übermittlung folgt mit der ELSTER-Schnittstelle (Phase 3.5).
+      Die elektronische Übermittlung folgt mit der ELSTER-Schnittstelle
+      (Phase 3.5).
 
 ## Phase 1.11 – Schnittstellen-Parität / Sprint U (Stand 2026-07-12)
 
@@ -356,8 +357,13 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       ERiC-Bridge; Sprint Y ergänzt strukturierte Produktions-Readiness-Checks
       in API/MCP/UI); produktive amtliche Nutzung erfordert lokale
       ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.
-- [ ] **Umsatzsteuer**: UStVA elektronisch übermitteln (Berechnung siehe
-      Sprint T) + USt-Jahreserklärung
+- [x] **Umsatzsteuer** *(Sprint AB: UStVA elektronisch übermitteln
+      [Mock-Testtransport und ERiC-Runner-Kante aus Sprint Y] sowie
+      USt-Jahreserklärung als Jahres-Snapshot `period=JJJJ`. ELSTER-Payload
+      unterscheidet `ustva` und `ust_jahreserklaerung`, API/MCP bieten
+      explizite Jahreserklärungs-Endpunkte, UI kennzeichnet
+      UStVA/Jahreserklärung; produktive amtliche Nutzung erfordert weiterhin
+      lokale ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.)*
 - [ ] **Gewerbesteuer**: Vorauszahlungsanpassung/-meldung + GewSt-Erklärung
       (inkl. Hinzurechnungen/Kürzungen §§ 8, 9 GewStG)
 - [ ] **Körperschaftsteuer**: Vorauszahlung + KSt-Erklärung (inkl. E-Bilanz-

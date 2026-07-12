@@ -552,6 +552,41 @@ def test_elster_mock_submission_updates_vat_return_and_audit(session: Session) -
     assert {"transmitted", "elster_transmitted"}.issubset(audit_actions)
 
 
+def test_elster_annual_vat_return_uses_annual_procedure(session: Session) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026", changed_by="pytest"
+    )
+
+    preflight = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        config={},
+    )
+    assert preflight["ok"] is True
+    assert preflight["period_label"] == "2026"
+    assert preflight["declaration_type"] == "annual"
+    assert preflight["payload"]["procedure"] == "ust_jahreserklaerung"
+    assert preflight["payload"]["declaration_type"] == "annual"
+
+    submission = submit_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="mock",
+        changed_by="pytest",
+    )
+    assert submission.status == "transmitted"
+    assert submission.procedure == "ust_jahreserklaerung"
+    assert submission.transfer_ticket.startswith("MOCK-UST-JAHR-2026-")
+    assert "<DeclarationType>annual</DeclarationType>" in submission.payload_xml
+    assert "<Period>2026</Period>" in submission.payload_xml
+    assert session.get(VatReturn, vat_return.id).status == "uebermittelt"
+
+
 def test_elster_transport_adapters(session: Session) -> None:
     company = _seed(session)
     vat_return = save_vat_return(
@@ -853,6 +888,74 @@ def test_elster_api_submits_vat_return(tmp_path: Path) -> None:
     assert payload_download.content_type == "application/xml; charset=utf-8"
     assert "elster-ustva-2026-05-" in payload_download.headers["Content-Disposition"]
     assert b"<Period>2026-05</Period>" in payload_download.data
+
+
+def test_vat_annual_return_api_and_elster_flow(tmp_path: Path) -> None:
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        company = _seed(session)
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        company_id = company.id
+
+    client = app.test_client()
+    preview = client.get(
+        "/api/v1/vat-annual-return",
+        query_string={"company_id": company_id, "year": 2026},
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.get_json()
+    assert preview_payload["period"] == "2026"
+    assert preview_payload["declaration_type"] == "annual"
+
+    created = client.post(
+        "/api/v1/vat-annual-returns",
+        json={"company_id": company_id, "year": 2026},
+    )
+    assert created.status_code == 201
+    created_payload = created.get_json()
+    assert created_payload["period_label"] == "2026"
+    assert created_payload["declaration_type"] == "annual"
+    vat_return_id = created_payload["id"]
+
+    preflight = client.post(
+        "/api/v1/elster/ust-jahreserklaerung/preflight",
+        json={"vat_return_id": vat_return_id, "environment": "test", "transport": "mock"},
+    )
+    assert preflight.status_code == 200
+    preflight_payload = preflight.get_json()
+    assert preflight_payload["payload"]["procedure"] == "ust_jahreserklaerung"
+    assert preflight_payload["payload"]["declaration_type"] == "annual"
+
+    submitted = client.post(
+        "/api/v1/elster/ust-jahreserklaerung/submit",
+        json={"vat_return_id": vat_return_id, "environment": "test", "transport": "mock"},
+    )
+    assert submitted.status_code == 201
+    submitted_payload = submitted.get_json()
+    assert submitted_payload["procedure"] == "ust_jahreserklaerung"
+    assert submitted_payload["transfer_ticket"].startswith("MOCK-UST-JAHR-2026-")
+
+    monthly = client.post(
+        "/api/v1/vat-returns",
+        json={"company_id": company_id, "period": "2026-05"},
+    )
+    assert monthly.status_code == 201
+    monthly_guard = client.post(
+        "/api/v1/elster/ust-jahreserklaerung/preflight",
+        json={
+            "vat_return_id": monthly.get_json()["id"],
+            "environment": "test",
+            "transport": "mock",
+        },
+    )
+    assert monthly_guard.status_code == 422
 
 
 def test_elster_api_retries_failed_submission(tmp_path: Path) -> None:

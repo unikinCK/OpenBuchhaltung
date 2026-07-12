@@ -23,12 +23,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.vat_returns import (
+    VAT_RETURN_KIND_ANNUAL,
+    vat_return_display_name,
+    vat_return_kind_from_label,
+)
 from domain.models import ElsterSubmission, VatReturn
 
 ELSTER_ENVIRONMENTS = {"test", "production"}
 ELSTER_PAYLOAD_ROOT = "OpenBuchhaltungElster"
 ELSTER_PAYLOAD_VERSION = "1"
 ELSTER_PROCEDURE_USTVA = "ustva"
+ELSTER_PROCEDURE_VAT_ANNUAL = "ust_jahreserklaerung"
 ELSTER_STATUSES = {"created", "transmitted", "failed"}
 ELSTER_TRANSPORTS = {"mock", "eric"}
 
@@ -61,9 +67,16 @@ class MockElsterTransport:
         self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
     ) -> ElsterTransportResult:
         del payload_xml
-        ticket = f"MOCK-USTVA-{vat_return.period_label}-{payload_hash[:12].upper()}"
+        procedure = vat_return_elster_procedure(vat_return)
+        prefix = (
+            "MOCK-UST-JAHR"
+            if procedure == ELSTER_PROCEDURE_VAT_ANNUAL
+            else "MOCK-USTVA"
+        )
+        display_name = vat_return_display_name(vat_return.period_label)
+        ticket = f"{prefix}-{vat_return.period_label}-{payload_hash[:12].upper()}"
         protocol = (
-            "ELSTER mock transport accepted UStVA "
+            f"ELSTER mock transport accepted {display_name} "
             f"{vat_return.period_label}; payload_sha256={payload_hash}; ticket={ticket}"
         )
         return ElsterTransportResult(
@@ -254,21 +267,32 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def vat_return_elster_procedure(vat_return: VatReturn) -> str:
+    return (
+        ELSTER_PROCEDURE_VAT_ANNUAL
+        if vat_return_kind_from_label(vat_return.period_label) == VAT_RETURN_KIND_ANNUAL
+        else ELSTER_PROCEDURE_USTVA
+    )
+
+
 def build_ustva_payload(vat_return: VatReturn) -> str:
-    """Erzeugt eine interne, versionierte UStVA-XML-Nutzlast.
+    """Erzeugt eine interne, versionierte Umsatzsteuer-XML-Nutzlast.
 
     Diese XML ist noch kein amtliches ELSTER-ERiC-Transferformat. Sie ist der
     stabile Übergabepunkt für den späteren ERiC-Adapter.
     """
+    procedure = vat_return_elster_procedure(vat_return)
+    declaration_type = vat_return_kind_from_label(vat_return.period_label)
 
     root = ET.Element(
         ELSTER_PAYLOAD_ROOT,
         {
             "version": ELSTER_PAYLOAD_VERSION,
-            "procedure": ELSTER_PROCEDURE_USTVA,
+            "procedure": procedure,
         },
     )
     declaration = ET.SubElement(root, "VatReturn")
+    ET.SubElement(declaration, "DeclarationType").text = declaration_type
     ET.SubElement(declaration, "TenantId").text = str(vat_return.tenant_id)
     ET.SubElement(declaration, "CompanyId").text = str(vat_return.company_id)
     ET.SubElement(declaration, "VatReturnId").text = str(vat_return.id)
@@ -308,7 +332,7 @@ def submit_vat_return(
 
     vat_return = session.get(VatReturn, vat_return_id)
     if vat_return is None:
-        raise ElsterError("UStVA not found.")
+        raise ElsterError("VAT return not found.")
 
     payload_xml = build_ustva_payload(vat_return)
     payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
@@ -402,7 +426,7 @@ def preflight_vat_return(
 
     vat_return = session.get(VatReturn, vat_return_id)
     if vat_return is None:
-        errors.append("UStVA not found.")
+        errors.append("VAT return not found.")
         return {
             "ok": False,
             "errors": errors,
@@ -430,15 +454,16 @@ def preflight_vat_return(
     if environment != readiness["environment"]:
         warnings.append("Requested ELSTER environment differs from configured environment.")
     if vat_return.status == "uebermittelt":
-        warnings.append("UStVA was already transmitted.")
+        display_name = vat_return_display_name(vat_return.period_label)
+        warnings.append(f"{display_name} was already transmitted.")
     if payload["root_tag"] != ELSTER_PAYLOAD_ROOT:
         errors.append("ELSTER payload root is invalid.")
     if payload["version"] != ELSTER_PAYLOAD_VERSION:
         errors.append("ELSTER payload version is invalid.")
-    if payload["procedure"] != ELSTER_PROCEDURE_USTVA:
+    if payload["procedure"] != vat_return_elster_procedure(vat_return):
         errors.append("ELSTER payload procedure is invalid.")
     if payload["period_label"] != vat_return.period_label:
-        errors.append("ELSTER payload period does not match the UStVA.")
+        errors.append("ELSTER payload period does not match the VAT return.")
     if payload["date_from"] != vat_return.date_from.isoformat():
         errors.append("ELSTER payload start date does not match the UStVA.")
     if payload["date_to"] != vat_return.date_to.isoformat():
@@ -463,6 +488,7 @@ def preflight_vat_return(
         "payload_hash": hashlib.sha256(payload_bytes).hexdigest(),
         "payload_size": len(payload_bytes),
         "period_label": vat_return.period_label,
+        "declaration_type": vat_return_kind_from_label(vat_return.period_label),
         "readiness": readiness,
     }
 
@@ -508,7 +534,7 @@ def _record_submission(
         tenant_id=vat_return.tenant_id,
         company_id=vat_return.company_id,
         vat_return_id=vat_return.id,
-        procedure="ustva",
+        procedure=vat_return_elster_procedure(vat_return),
         environment=environment,
         status=status,
         transport=transport,
@@ -636,6 +662,9 @@ def _payload_diagnostics(payload_xml: str) -> dict[str, object]:
         "root_tag": root.tag,
         "version": root.attrib.get("version"),
         "procedure": root.attrib.get("procedure"),
+        "declaration_type": declaration.findtext("DeclarationType")
+        if declaration is not None
+        else None,
         "period_label": declaration.findtext("Period") if declaration is not None else None,
         "date_from": declaration.findtext("DateFrom") if declaration is not None else None,
         "date_to": declaration.findtext("DateTo") if declaration is not None else None,

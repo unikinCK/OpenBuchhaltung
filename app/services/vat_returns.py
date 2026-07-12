@@ -56,6 +56,21 @@ class VatReturnRow:
 
 
 ZERO = Decimal("0.00")
+VAT_RETURN_KIND_ADVANCE = "advance"
+VAT_RETURN_KIND_ANNUAL = "annual"
+
+
+def vat_return_kind_from_label(period_label: str) -> str:
+    """Ordnet ein kanonisches Periodenlabel fachlich ein."""
+    return VAT_RETURN_KIND_ANNUAL if "-" not in period_label.strip() else VAT_RETURN_KIND_ADVANCE
+
+
+def vat_return_display_name(period_label: str) -> str:
+    return (
+        "USt-Jahreserklärung"
+        if vat_return_kind_from_label(period_label) == VAT_RETURN_KIND_ANNUAL
+        else "UStVA"
+    )
 
 
 def period_bounds(period_label: str) -> tuple[date, date, str]:
@@ -231,7 +246,7 @@ def save_vat_return(
     period_label: str,
     changed_by: str,
 ) -> VatReturn:
-    """Hält die UStVA für den Zeitraum als unveränderlichen Snapshot fest."""
+    """Hält Umsatzsteuer-Kennziffern als unveränderlichen Snapshot fest."""
     company = session.get(Company, company_id)
     if company is None:
         raise VatReturnError("Gesellschaft nicht gefunden.")
@@ -245,8 +260,9 @@ def save_vat_return(
         )
     ).first()
     if existing:
+        display_name = vat_return_display_name(period_label)
         raise VatReturnError(
-            f"Für den Zeitraum {period_label} wurde bereits eine UStVA festgehalten."
+            f"Für den Zeitraum {period_label} wurde bereits eine {display_name} festgehalten."
         )
 
     rows = compute_vat_return(
@@ -278,6 +294,7 @@ def save_vat_return(
         changed_by=changed_by,
         payload={
             "period_label": period_label,
+            "declaration_type": vat_return_kind_from_label(period_label),
             "date_from": date_from.isoformat(),
             "date_to": date_to.isoformat(),
             "kennzahlen": vat_return.kennzahlen,
