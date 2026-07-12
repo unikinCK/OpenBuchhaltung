@@ -23,8 +23,10 @@ from app.services.fixed_assets import (
     create_fixed_asset,
     current_book_value,
     depreciation_schedule,
+    dispose_fixed_asset,
     list_fixed_assets,
     post_depreciation,
+    record_impairment,
 )
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from domain.models import FixedAsset
@@ -210,3 +212,95 @@ def post_fixed_asset_depreciation_via_api(asset_id: int):
             ),
             201,
         )
+
+
+@api_bp.post("/fixed-assets/<int:asset_id>/impairment")
+def impair_fixed_asset_via_api(asset_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        fiscal_year = int(payload.get("fiscal_year") or date.today().year)
+        amount = parse_decimal(str(payload.get("amount")))
+        depreciation_date_raw = payload.get("depreciation_date")
+        depreciation_date = (
+            date.fromisoformat(depreciation_date_raw) if depreciation_date_raw else None
+        )
+    except (TypeError, ValueError):
+        return (
+            jsonify({"error": "valid fiscal_year, amount and depreciation_date are required."}),
+            400,
+        )
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None or api_scoped_company(session, asset.company_id) is None:
+            return jsonify({"error": "Fixed asset not found."}), 404
+        try:
+            entry = record_impairment(
+                session=session,
+                fixed_asset_id=asset_id,
+                fiscal_year=fiscal_year,
+                amount=amount,
+                depreciation_date=depreciation_date,
+                note=payload.get("note"),
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except FixedAssetError as exc:
+            return validation_error(str(exc))
+        return (
+            jsonify(
+                {
+                    "id": entry.id,
+                    "fixed_asset_id": entry.fixed_asset_id,
+                    "fiscal_year": entry.fiscal_year,
+                    "amount": str(entry.amount),
+                    "book_value_before": str(entry.book_value_before),
+                    "book_value_after": str(entry.book_value_after),
+                    "journal_entry_id": entry.journal_entry_id,
+                    "kind": entry.kind,
+                }
+            ),
+            201,
+        )
+
+
+@api_bp.post("/fixed-assets/<int:asset_id>/disposal")
+def dispose_fixed_asset_via_api(asset_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        disposal_date = date.fromisoformat(payload.get("disposal_date") or date.today().isoformat())
+        proceeds = (
+            parse_decimal(str(payload["proceeds"])) if payload.get("proceeds") is not None else None
+        )
+        fiscal_year = (
+            int(payload["fiscal_year"]) if payload.get("fiscal_year") is not None else None
+        )
+    except (TypeError, ValueError):
+        return (
+            jsonify({"error": "valid disposal_date, proceeds and fiscal_year are required."}),
+            400,
+        )
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None or api_scoped_company(session, asset.company_id) is None:
+            return jsonify({"error": "Fixed asset not found."}), 404
+        try:
+            asset = dispose_fixed_asset(
+                session=session,
+                fixed_asset_id=asset_id,
+                disposal_date=disposal_date,
+                proceeds=proceeds,
+                fiscal_year=fiscal_year,
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except FixedAssetError as exc:
+            return validation_error(str(exc))
+        return jsonify(_fixed_asset_dict(session, asset)), 200

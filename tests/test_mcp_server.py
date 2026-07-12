@@ -46,6 +46,8 @@ EXPECTED_TOOL_NAMES = {
     "list_fixed_assets",
     "get_depreciation_schedule",
     "post_depreciation",
+    "record_fixed_asset_impairment",
+    "dispose_fixed_asset",
 }
 
 
@@ -127,6 +129,50 @@ def test_path_placeholder_filled_from_arguments() -> None:
         "/fixed-assets/5/depreciation",
         None,
         {"fiscal_year": 2026},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 301,
+            "method": "tools/call",
+            "params": {
+                "name": "record_fixed_asset_impairment",
+                "arguments": {
+                    "asset_id": 5,
+                    "fiscal_year": 2026,
+                    "amount": "100.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/impairment",
+        None,
+        {"fiscal_year": 2026, "amount": "100.00"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 302,
+            "method": "tools/call",
+            "params": {
+                "name": "dispose_fixed_asset",
+                "arguments": {
+                    "asset_id": 5,
+                    "disposal_date": "2026-12-31",
+                    "proceeds": "10.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/disposal",
+        None,
+        {"disposal_date": "2026-12-31", "proceeds": "10.00"},
     )
 
 

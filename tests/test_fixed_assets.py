@@ -333,3 +333,58 @@ def test_fixed_assets_ui_create_and_depreciate(tmp_path: Path) -> None:
     with app.extensions["db_session_factory"]() as db_session:
         asset = db_session.get(FixedAsset, 1)
         assert current_book_value(session=db_session, asset=asset) == Decimal("9600.00")
+
+
+def test_fixed_assets_api_impairment_and_disposal(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Anlagen API", "company_name": "Anlagen API GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "0400", "name": "Maschinen", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    create_response = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": 1,
+            "asset_number": "A-API-1",
+            "name": "API Maschine",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost": "12000.00",
+            "method": "linear",
+            "useful_life_months": 60,
+            "asset_account_id": 1,
+            "depreciation_account_id": 2,
+        },
+    )
+    assert create_response.status_code == 201
+    asset_id = create_response.get_json()["id"]
+
+    impairment = client.post(
+        f"/api/v1/fixed-assets/{asset_id}/impairment",
+        json={"fiscal_year": 2026, "amount": "1000.00"},
+    )
+    assert impairment.status_code == 201
+    assert impairment.get_json()["kind"] == "ausserplanmaessig"
+    assert impairment.get_json()["book_value_after"] == "11000.00"
+
+    disposal = client.post(
+        f"/api/v1/fixed-assets/{asset_id}/disposal",
+        json={"disposal_date": "2026-12-31", "proceeds": "5000.00"},
+    )
+    assert disposal.status_code == 200
+    assert disposal.get_json()["status"] == "disposed"
+    assert disposal.get_json()["book_value"] == "0.00"
