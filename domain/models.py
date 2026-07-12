@@ -234,6 +234,8 @@ class JournalEntry(Base):
     __tablename__ = "journal_entry"
     __table_args__ = (
         UniqueConstraint("company_id", "posting_number", name="uq_journal_entry_company_no"),
+        # Eine Buchung darf höchstens einmal storniert werden.
+        UniqueConstraint("reversal_of_id", name="uq_journal_entry_reversal_of"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -253,6 +255,15 @@ class JournalEntry(Base):
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    # GoBD-Festschreibung: festgeschriebene Buchungen sind unveränderbar;
+    # Korrekturen erfolgen ausschließlich über Stornobuchungen.
+    is_finalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_by: Mapped[str | None] = mapped_column(String(120))
+    # Gesetzt auf der Stornobuchung: verweist auf die stornierte Originalbuchung.
+    reversal_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="RESTRICT")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -264,6 +275,12 @@ class JournalEntry(Base):
         back_populates="journal_entry", cascade="all, delete-orphan"
     )
     documents: Mapped[list[Document]] = relationship(back_populates="journal_entry")
+    reversal_of: Mapped[JournalEntry | None] = relationship(
+        remote_side="JournalEntry.id", back_populates="reversed_by"
+    )
+    reversed_by: Mapped[JournalEntry | None] = relationship(
+        back_populates="reversal_of", uselist=False
+    )
 
 
 class JournalEntryLine(Base):

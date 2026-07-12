@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import abort, flash, redirect, render_template, request, url_for
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +13,10 @@ from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    finalize_journal_entries_until,
+    finalize_journal_entry,
     parse_decimal,
+    reverse_journal_entry,
 )
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
@@ -90,6 +93,14 @@ def journal_page():
                     }
                 )
 
+        # Storno-Verweise: Original-ID -> Belegnummer der Stornobuchung.
+        reversed_by_entry = {
+            entry.reversal_of_id: entry.posting_number
+            for entry in journal_entries
+            if entry.reversal_of_id is not None
+        }
+        posting_number_by_id = {entry.id: entry.posting_number for entry in journal_entries}
+
     return render_template(
         "buchungen.html",
         companies=companies,
@@ -98,6 +109,8 @@ def journal_page():
         tax_codes=tax_codes,
         journal_entries=journal_entries,
         lines_by_entry=lines_by_entry,
+        reversed_by_entry=reversed_by_entry,
+        posting_number_by_id=posting_number_by_id,
         today=date.today().isoformat(),
     )
 
@@ -203,4 +216,101 @@ def create_journal_entry_from_form():
         return redirect(url_for("main.journal_page", company_id=company_id))
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
+    return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+@main_bp.post("/journal-entries/<int:journal_entry_id>/festschreiben")
+def finalize_journal_entry_action(journal_entry_id: int):
+    company_id = request.form.get("company_id", type=int)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = session.get(JournalEntry, journal_entry_id)
+        if entry is None:
+            abort(404)
+        require_company_access(session, entry.company_id)
+        company_id = entry.company_id
+        try:
+            entry = finalize_journal_entry(
+                session=session, journal_entry_id=journal_entry_id, changed_by=changed_by()
+            )
+        except JournalEntryCreationError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.journal_page", company_id=company_id))
+
+    flash(f"Buchung {entry.posting_number} wurde festgeschrieben.", "success")
+    return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+@main_bp.post("/journal-entries/festschreiben")
+def finalize_journal_entries_action():
+    company_id = request.form.get("company_id", type=int)
+    up_to_raw = request.form.get("up_to_date", "").strip()
+
+    if not company_id or not up_to_raw:
+        flash("Gesellschaft und Datum sind Pflichtfelder.", "error")
+        return redirect(url_for("main.journal_page", company_id=company_id))
+
+    try:
+        up_to_date = date.fromisoformat(up_to_raw)
+    except ValueError:
+        flash("Ungültiges Datum für den Festschreibelauf.", "error")
+        return redirect(url_for("main.journal_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        require_company_access(session, company_id)
+        count = finalize_journal_entries_until(
+            session=session,
+            company_id=company_id,
+            up_to_date=up_to_date,
+            changed_by=changed_by(),
+        )
+
+    if count:
+        flash(
+            f"{count} Buchung(en) bis {up_to_date.isoformat()} wurden festgeschrieben.",
+            "success",
+        )
+    else:
+        flash("Keine offenen Buchungen bis zu diesem Datum gefunden.", "success")
+    return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+@main_bp.post("/journal-entries/<int:journal_entry_id>/stornieren")
+def reverse_journal_entry_action(journal_entry_id: int):
+    company_id = request.form.get("company_id", type=int)
+    reversal_date_raw = request.form.get("reversal_date", "").strip()
+
+    try:
+        reversal_date = (
+            date.fromisoformat(reversal_date_raw) if reversal_date_raw else date.today()
+        )
+    except ValueError:
+        flash("Ungültiges Stornodatum.", "error")
+        return redirect(url_for("main.journal_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = session.get(JournalEntry, journal_entry_id)
+        if entry is None:
+            abort(404)
+        require_company_access(session, entry.company_id)
+        company_id = entry.company_id
+        original_number = entry.posting_number
+        try:
+            reversal = reverse_journal_entry(
+                session=session,
+                journal_entry_id=journal_entry_id,
+                reversal_date=reversal_date,
+                changed_by=changed_by(),
+            )
+        except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.journal_page", company_id=company_id))
+
+    flash(
+        f"Buchung {original_number} wurde storniert (Stornobuchung {reversal.posting_number}).",
+        "success",
+    )
     return redirect(url_for("main.journal_page", company_id=company_id))
