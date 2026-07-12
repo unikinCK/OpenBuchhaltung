@@ -331,6 +331,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       enthält Zeitraumparameter, Tabellenzählungen, Dateigrößen und SHA-256-
       Hashes; Berichte-Seite mit Downloadlink, MCP-Tool
       `export_audit_package` mit `manifest_only` für Automationen.)*
+- [x] Belegintegrität & Versionierung *(Sprint X: `Document` speichert
+      `file_sha256`, `file_size_bytes`, `version_number`, `is_current`,
+      `replaces_document_id` und `replaced_at`; alle Upload-Pfade
+      [UI/API, OCR, E-Rechnung] schreiben Hash und Größe; Ersetzen erzeugt
+      append-only eine neue Version statt Überschreiben; API-DELETE wird mit
+      Löschschutz 409 abgewiesen; Prüferexport weist gespeicherten Hash gegen
+      archivierte Datei aus.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.documents import document_file_metadata
 from domain.models import (
     Account,
     AuditLog,
@@ -202,11 +203,16 @@ def build_audit_export_package(
         archive_path = f"documents/{document.id}-{_safe_name(document.file_name)}"
         if include_documents and path.exists():
             content = path.read_bytes()
+            metadata = document_file_metadata(content)
             document_data.update(
                 {
                     "archive_path": archive_path,
-                    "file_size_bytes": len(content),
-                    "file_sha256": _sha256(content),
+                    "archived_file_size_bytes": len(content),
+                    "archived_file_sha256": metadata.file_sha256,
+                    "file_sha256_matches": (
+                        metadata.file_sha256 == document.file_sha256
+                        and metadata.file_size_bytes == document.file_size_bytes
+                    ),
                     "file_missing": False,
                 }
             )
@@ -215,8 +221,9 @@ def build_audit_export_package(
             document_data.update(
                 {
                     "archive_path": archive_path if include_documents else None,
-                    "file_size_bytes": 0,
-                    "file_sha256": None,
+                    "archived_file_size_bytes": 0,
+                    "archived_file_sha256": None,
+                    "file_sha256_matches": False,
                     "file_missing": include_documents,
                 }
             )

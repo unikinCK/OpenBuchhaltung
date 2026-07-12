@@ -51,6 +51,7 @@ EXPECTED_TOOL_NAMES = {
     "list_documents",
     "upload_document",
     "link_document",
+    "replace_document",
     "download_document",
     "create_receipt_ocr_suggestion",
     "book_receipt_ocr_suggestion",
@@ -1320,6 +1321,20 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     )
     assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
 
+    replacement = json.loads(
+        call_tool(
+            "replace_document",
+            {
+                "document_id": document_id,
+                "file_name": "mcp-beleg-v2.pdf",
+                "mime_type": "application/pdf",
+                "content_base64": base64.b64encode(b"%PDF-1.4\nv2\n%%EOF\n").decode("ascii"),
+            },
+        )["content"][0]["text"]
+    )
+    assert replacement["replaces_document_id"] == document_id
+    assert replacement["version_number"] == 2
+
     audit_export = json.loads(
         call_tool(
             "export_audit_package",
@@ -1327,8 +1342,8 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         )["content"][0]["text"]
     )
     assert audit_export["company"]["id"] == company_id
-    assert audit_export["table_counts"]["documents"] == 1
-    assert audit_export["totals"]["document_file_count"] == 1
+    assert audit_export["table_counts"]["documents"] == 2
+    assert audit_export["totals"]["document_file_count"] == 2
 
     open_item = call_tool(
         "create_open_item",

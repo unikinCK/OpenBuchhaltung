@@ -21,8 +21,9 @@ können, was gebucht, exportiert und protokolliert wird.
   mehrzeilige Journalbuchungen, Storno und Festschreibung.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
   UStVA-Berechnung und festhaltbare Voranmeldungs-Snapshots.
-- **Belege & E-Rechnung:** Uploads, optionale OCR-/LLM-Unterstützung,
-  XRechnung/ZUGFeRD-Import und E-Rechnungs-Export.
+- **Belege & E-Rechnung:** Uploads mit SHA-256-Hash und Versionierung,
+  optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
+  E-Rechnungs-Export.
 - **Bank & OPOS:** CSV-Bankimport, Deduplizierung, Matching,
   offene Posten und Zahlungsausgleich.
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,

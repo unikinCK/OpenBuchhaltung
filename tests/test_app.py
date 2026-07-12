@@ -1270,7 +1270,13 @@ def test_api_document_upload_link_list_and_download(tmp_path):
         },
     )
     assert upload_response.status_code == 201
-    document_id = upload_response.get_json()["id"]
+    upload_payload = upload_response.get_json()
+    document_id = upload_payload["id"]
+    assert upload_payload["file_sha256"] == hashlib.sha256(file_bytes).hexdigest()
+    assert upload_payload["file_size_bytes"] == len(file_bytes)
+    assert upload_payload["version_number"] == 1
+    assert upload_payload["is_current"] is True
+    assert upload_payload["delete_protected"] is True
 
     link_response = client.post(
         f"/api/v1/documents/{document_id}/link",
@@ -1287,11 +1293,40 @@ def test_api_document_upload_link_list_and_download(tmp_path):
 
     content_response = client.get(f"/api/v1/documents/{document_id}/content")
     assert content_response.status_code == 200
-    assert base64.b64decode(content_response.get_json()["content_base64"]) == file_bytes
+    content_payload = content_response.get_json()
+    assert base64.b64decode(content_payload["content_base64"]) == file_bytes
+    assert content_payload["integrity"]["matches"] is True
 
     download_response = client.get(f"/api/v1/documents/{document_id}/download")
     assert download_response.status_code == 200
     assert download_response.data == file_bytes
+
+    replacement_bytes = b"%PDF-1.4\napi beleg version 2\n%%EOF\n"
+    replace_response = client.post(
+        f"/api/v1/documents/{document_id}/replace",
+        json={
+            "file_name": "api-beleg-v2.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(replacement_bytes).decode("ascii"),
+        },
+    )
+    assert replace_response.status_code == 201
+    replacement = replace_response.get_json()
+    assert replacement["replaces_document_id"] == document_id
+    assert replacement["version_number"] == 2
+    assert replacement["file_sha256"] == hashlib.sha256(replacement_bytes).hexdigest()
+
+    delete_response = client.delete(f"/api/v1/documents/{document_id}")
+    assert delete_response.status_code == 409
+    assert "append-only" in delete_response.get_json()["error"]
+
+    with app.extensions["db_session_factory"]() as session:
+        original = session.get(Document, document_id)
+        new_document = session.get(Document, replacement["id"])
+        assert original.is_current is False
+        assert original.replaced_at is not None
+        assert new_document.is_current is True
+        assert new_document.replaces_document_id == original.id
 
 
 def test_trial_balance_csv_export_download(tmp_path):

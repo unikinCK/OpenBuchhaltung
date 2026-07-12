@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from werkzeug.utils import secure_filename
 from app.auth import current_tenant_id
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError, send_document_update
+from app.services.documents import document_file_metadata
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -107,7 +109,9 @@ def upload_document():
         company_dir = tenant_dir / str(company.id)
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
-        uploaded_file.save(target_path)
+        file_bytes = uploaded_file.read()
+        target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -116,6 +120,8 @@ def upload_document():
             file_name=original_file_name,
             storage_key=str(target_path),
             mime_type=uploaded_file.mimetype or "application/octet-stream",
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
         )
         session.add(document)
         session.flush()
@@ -132,6 +138,9 @@ def upload_document():
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
                 "mime_type": document.mime_type,
+                "file_sha256": document.file_sha256,
+                "file_size_bytes": document.file_size_bytes,
+                "version_number": document.version_number,
             },
         )
         session.commit()
@@ -235,6 +244,84 @@ def link_document(document_id: int):
     else:
         flash("Verknüpfung des Belegs wurde entfernt.", "success")
     return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+
+
+@main_bp.post("/documents/<int:document_id>/replace")
+def replace_document(document_id: int):
+    uploaded_file = request.files.get("document_file")
+    if uploaded_file is None or not uploaded_file.filename:
+        flash("Bitte eine neue Belegdatei auswählen.", "error")
+        return redirect(url_for("main.documents_page"))
+
+    original_file_name = secure_filename(uploaded_file.filename)
+    if not original_file_name:
+        flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.documents_page"))
+
+    upload_error = document_upload_error(uploaded_file, original_file_name)
+    if upload_error:
+        flash(upload_error, "error")
+        return redirect(url_for("main.documents_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        previous = session.get(Document, document_id)
+        if previous is None:
+            abort(404)
+        require_company_access(session, previous.company_id)
+        if not previous.is_current:
+            flash("Nur die aktuelle Belegversion kann ersetzt werden.", "error")
+            return redirect(url_for("main.documents_page", company_id=previous.company_id))
+
+        unique_name = f"{uuid4().hex}_{original_file_name}"
+        company_dir = (
+            Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
+            / str(previous.tenant_id)
+            / str(previous.company_id)
+        )
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        file_bytes = uploaded_file.read()
+        target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
+
+        replacement = Document(
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            journal_entry_id=previous.journal_entry_id,
+            file_name=original_file_name,
+            storage_key=str(target_path),
+            mime_type=uploaded_file.mimetype or "application/octet-stream",
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
+            version_number=previous.version_number + 1,
+            replaces_document_id=previous.id,
+        )
+        previous.is_current = False
+        previous.replaced_at = datetime.now(timezone.utc)
+        session.add(replacement)
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            entity_type="document",
+            entity_id=str(previous.id),
+            action="replaced",
+            changed_by=changed_by(),
+            payload={
+                "replacement_document_id": replacement.id,
+                "previous_file_sha256": previous.file_sha256,
+                "replacement_file_sha256": replacement.file_sha256,
+                "previous_version_number": previous.version_number,
+                "replacement_version_number": replacement.version_number,
+            },
+        )
+        session.commit()
+        company_id = replacement.company_id
+
+    flash("Beleg wurde als neue Version ersetzt.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
 
 
 @main_bp.get("/documents/<int:document_id>/download")
