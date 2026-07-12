@@ -505,6 +505,17 @@ def test_api_create_journal_entry_and_trial_balance(tmp_path):
     assert create_payload["posting_number"] == "2026-0001"
     assert "created_at" in create_payload
 
+    journal_response = client.get(
+        "/api/v1/journal-entries",
+        query_string={"company_id": 1, "date_from": "2026-04-01", "date_to": "2026-04-30"},
+    )
+    assert journal_response.status_code == 200
+    journal_payload = journal_response.get_json()
+    assert journal_payload["entries"][0]["posting_number"] == "2026-0001"
+    assert journal_payload["entries"][0]["description"] == "API Buchung"
+    assert journal_payload["entries"][0]["lines"][0]["account_code"] == "1000"
+    assert journal_payload["entries"][0]["lines"][1]["account_code"] == "8400"
+
     report_response = client.get("/api/v1/trial-balance", query_string={"company_id": 1})
     assert report_response.status_code == 200
     payload = report_response.get_json()
