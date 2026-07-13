@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Ertragsteuern – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Ertragsteuern</h1>
+
+  <section class="card">
+    <h2>Berechnung</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% else %}
+      <form method="get" action="{{ url_for('main.income_taxes_page') }}" class="inline-form">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="year">Jahr</label>
+        <input id="year" name="year" value="{{ params.year }}" style="width:7rem;" />
+        <label for="tax_type">Steuerart</label>
+        <select id="tax_type" name="tax_type" style="width:auto;">
+          <option value="corporate_income" {% if params.tax_type == "corporate_income" %}selected{% endif %}>Körperschaftsteuer</option>
+          <option value="trade_tax" {% if params.tax_type == "trade_tax" %}selected{% endif %}>Gewerbesteuer</option>
+        </select>
+        <label for="declaration_type">Art</label>
+        <select id="declaration_type" name="declaration_type" style="width:auto;">
+          <option value="declaration" {% if params.declaration_type == "declaration" %}selected{% endif %}>Erklärung</option>
+          <option value="prepayment_adjustment" {% if params.declaration_type == "prepayment_adjustment" %}selected{% endif %}>Vorauszahlungsanpassung</option>
+        </select>
+        <label for="additions_total">Hinzurechnungen</label>
+        <input id="additions_total" name="additions_total" value="{{ params.additions_total }}" style="width:8rem;" />
+        <label for="reductions_total">Kürzungen</label>
+        <input id="reductions_total" name="reductions_total" value="{{ params.reductions_total }}" style="width:8rem;" />
+        <label for="loss_carryforward">Verlustvortrag</label>
+        <input id="loss_carryforward" name="loss_carryforward" value="{{ params.loss_carryforward }}" style="width:8rem;" />
+        <label for="prepayments">Vorauszahlungen</label>
+        <input id="prepayments" name="prepayments" value="{{ params.prepayments }}" style="width:8rem;" />
+        <label for="municipality_multiplier">Hebesatz %</label>
+        <input id="municipality_multiplier" name="municipality_multiplier" value="{{ params.municipality_multiplier or '' }}" style="width:7rem;" />
+        <label for="trade_tax_allowance">GewSt-Freibetrag</label>
+        <input id="trade_tax_allowance" name="trade_tax_allowance" value="{{ params.trade_tax_allowance }}" style="width:8rem;" />
+        <button type="submit">Anzeigen</button>
+      </form>
+
+      {% if error %}
+        <p class="muted">{{ error }}</p>
+      {% elif preview %}
+        <p class="muted">
+          {{ display_tax_type(preview.tax_type) }} ·
+          {{ display_declaration_type(preview.declaration_type) }} ·
+          {{ preview.period_label }}
+        </p>
+        {% if preview.warnings %}
+          <ul>
+            {% for warning in preview.warnings %}
+              <li class="muted">{{ warning }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        <table>
+          <thead>
+            <tr>
+              <th>Position</th>
+              <th class="num">Betrag</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Jahresergebnis laut GuV</td><td class="num">{{ preview.basis.net_income }}</td></tr>
+            <tr><td>Hinzurechnungen</td><td class="num">{{ preview.basis.additions_total }}</td></tr>
+            <tr><td>Kürzungen</td><td class="num">{{ preview.basis.reductions_total }}</td></tr>
+            <tr><td>Verlustvortrag</td><td class="num">{{ preview.basis.loss_carryforward }}</td></tr>
+            {% for row in preview.calculation.rows %}
+              <tr {% if row.code in ["payable", "tax_total"] %}style="font-weight:bold;"{% endif %}>
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.amount }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <form method="post" action="{{ url_for('main.save_income_tax_return_action') }}" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <input type="hidden" name="year" value="{{ params.year }}" />
+          <input type="hidden" name="tax_type" value="{{ params.tax_type }}" />
+          <input type="hidden" name="declaration_type" value="{{ params.declaration_type }}" />
+          <input type="hidden" name="additions_total" value="{{ params.additions_total }}" />
+          <input type="hidden" name="reductions_total" value="{{ params.reductions_total }}" />
+          <input type="hidden" name="loss_carryforward" value="{{ params.loss_carryforward }}" />
+          <input type="hidden" name="prepayments" value="{{ params.prepayments }}" />
+          <input type="hidden" name="municipality_multiplier" value="{{ params.municipality_multiplier or '' }}" />
+          <input type="hidden" name="trade_tax_allowance" value="{{ params.trade_tax_allowance }}" />
+          <button type="submit">Snapshot festhalten</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  {% if selected_company_id %}
+    <section class="card">
+      <h2>Festgehaltene Snapshots</h2>
+      {% if snapshots %}
+        <table>
+          <thead>
+            <tr>
+              <th>Steuerart</th>
+              <th>Art</th>
+              <th>Jahr</th>
+              <th>Status</th>
+              <th class="num">Steuer gesamt</th>
+              <th class="num">Zahllast</th>
+              <th>Festgehalten</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in snapshots %}
+              <tr>
+                <td>{{ display_tax_type(item.tax_type) }}</td>
+                <td>{{ display_declaration_type(item.declaration_type) }}</td>
+                <td>{{ item.period_label }}</td>
+                <td>{{ item.status }}</td>
+                <td class="num">{{ item.calculation.calculation.tax_total }}</td>
+                <td class="num">{{ item.calculation.calculation.payable }}</td>
+                <td>{{ item.created_at.strftime("%Y-%m-%d %H:%M") }} ({{ item.created_by }})</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Ertragsteuer-Snapshots festgehalten.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

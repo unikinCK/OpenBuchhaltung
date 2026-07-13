@@ -35,6 +35,8 @@
              {% if request.endpoint == 'main.einvoice_page' %}class="active"{% endif %}>E-Rechnung</a>
           <a href="{{ url_for('main.vat_returns_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.vat_returns_page' %}class="active"{% endif %}>UStVA</a>
+          <a href="{{ url_for('main.income_taxes_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.income_taxes_page' %}class="active"{% endif %}>Ertragsteuern</a>
           <a href="{{ url_for('main.periods_page', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.periods_page' %}class="active"{% endif %}>Perioden</a>
           <a href="{{ url_for('main.audit_log_page') }}"

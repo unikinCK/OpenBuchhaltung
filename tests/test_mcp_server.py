@@ -35,6 +35,9 @@ EXPECTED_TOOL_NAMES = {
     "create_vat_return",
     "get_vat_annual_return",
     "create_vat_annual_return",
+    "preview_income_tax_return",
+    "create_income_tax_return",
+    "list_income_tax_returns",
     "list_elster_submissions",
     "get_elster_submission_summary",
     "get_elster_submission",
@@ -427,6 +430,61 @@ def test_vat_return_tools_forward_arguments() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/vat-returns", {"company_id": 7}, None)
+
+
+def test_income_tax_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    arguments = {
+        "company_id": 7,
+        "year": 2026,
+        "tax_type": "trade_tax",
+        "declaration_type": "prepayment_adjustment",
+        "additions": [{"code": "GEW8", "label": "Hinzurechnung", "amount": "100.00"}],
+        "municipality_multiplier": "400",
+    }
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {"name": "preview_income_tax_return", "arguments": arguments},
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/income-tax-returns/preview",
+        None,
+        arguments,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {"name": "create_income_tax_return", "arguments": arguments},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/income-tax-returns", None, arguments)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "list_income_tax_returns",
+                "arguments": {"company_id": 7, "tax_type": "trade_tax"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/income-tax-returns",
+        {"company_id": 7, "tax_type": "trade_tax"},
+        None,
+    )
 
 
 def test_elster_tools_forward_arguments() -> None:

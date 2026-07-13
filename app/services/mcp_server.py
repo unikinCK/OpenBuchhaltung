@@ -1179,6 +1179,117 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="preview_income_tax_return",
+        description=(
+            "Berechnet Körperschaftsteuer oder Gewerbesteuer für ein Kalenderjahr "
+            "inklusive manueller Hinzurechnungen, Kürzungen, Verlustvortrag und "
+            "Vorauszahlungen, ohne einen Snapshot zu speichern."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "tax_type": {
+                    "type": "string",
+                    "description": "corporate_income oder trade_tax.",
+                },
+                "declaration_type": {
+                    "type": "string",
+                    "description": "declaration oder prepayment_adjustment.",
+                    "default": "declaration",
+                },
+                "additions": {
+                    "type": "array",
+                    "description": "Hinzurechnungen als {code,label,amount}.",
+                    "items": {"type": "object"},
+                },
+                "reductions": {
+                    "type": "array",
+                    "description": "Kürzungen als {code,label,amount}.",
+                    "items": {"type": "object"},
+                },
+                "loss_carryforward": {
+                    "type": "string",
+                    "description": "Verlustvortrag.",
+                    "default": "0",
+                },
+                "prepayments": {
+                    "type": "string",
+                    "description": "Bereits geleistete Vorauszahlungen.",
+                    "default": "0",
+                },
+                "municipality_multiplier": {
+                    "type": "string",
+                    "description": "Gewerbesteuer-Hebesatz in Prozent.",
+                },
+                "trade_tax_allowance": {
+                    "type": "string",
+                    "description": "Gewerbesteuer-Freibetrag, bei Kapitalgesellschaften 0.",
+                    "default": "0",
+                },
+            },
+            "required": ["company_id", "year", "tax_type"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/income-tax-returns/preview",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="create_income_tax_return",
+        description=(
+            "Hält Körperschaftsteuer oder Gewerbesteuer für ein Kalenderjahr als "
+            "Erklärungs- oder Vorauszahlungs-Snapshot fest."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "tax_type": {
+                    "type": "string",
+                    "description": "corporate_income oder trade_tax.",
+                },
+                "declaration_type": {
+                    "type": "string",
+                    "description": "declaration oder prepayment_adjustment.",
+                    "default": "declaration",
+                },
+                "additions": {"type": "array", "items": {"type": "object"}},
+                "reductions": {"type": "array", "items": {"type": "object"}},
+                "loss_carryforward": {"type": "string", "default": "0"},
+                "prepayments": {"type": "string", "default": "0"},
+                "municipality_multiplier": {"type": "string"},
+                "trade_tax_allowance": {"type": "string", "default": "0"},
+            },
+            "required": ["company_id", "year", "tax_type"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/income-tax-returns",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_income_tax_returns",
+        description="Listet festgehaltene KSt-/GewSt-Snapshots einer Gesellschaft.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "tax_type": {
+                    "type": "string",
+                    "description": "Optional: corporate_income oder trade_tax.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/income-tax-returns",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="list_elster_submissions",
         description="Listet ELSTER-Test-/Übermittlungsprotokolle einer Gesellschaft.",
         input_schema={

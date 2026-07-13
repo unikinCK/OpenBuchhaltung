@@ -22,7 +22,8 @@ können, was gebucht, exportiert und protokolliert wird.
   mehrzeilige Journalbuchungen, Storno und Festschreibung.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
   UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
-  Testübermittlung und ERiC-Runner-Kante.
+  Testübermittlung und ERiC-Runner-Kante sowie KSt-/GewSt-Arbeitssnapshots
+  für Erklärung und Vorauszahlungsanpassung.
 - **Belege & E-Rechnung:** Uploads mit SHA-256-Hash und Versionierung,
   optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
   E-Rechnungs-Export.
