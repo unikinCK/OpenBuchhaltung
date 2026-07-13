@@ -12,6 +12,7 @@ from app.services.audit_log import (
     serialize_audit_log_entry,
     verify_audit_log_integrity,
 )
+from app.services.compliance_integrity import verify_compliance_integrity
 
 
 @api_bp.get("/audit-log")
@@ -73,4 +74,31 @@ def verify_audit_log_integrity_via_api():
             session=session,
             tenant_id=tenant_scope if tenant_scope is not None else requested_tenant_id,
         )
+    return jsonify(result.as_dict()), 200
+
+
+@api_bp.get("/integrity")
+def verify_compliance_integrity_via_api():
+    tenant_scope = current_api_tenant_id()
+    requested_tenant_id = request.args.get("tenant_id", type=int)
+    company_id = request.args.get("company_id", type=int)
+    if (
+        tenant_scope is not None
+        and requested_tenant_id is not None
+        and requested_tenant_id != tenant_scope
+    ):
+        return jsonify({"error": "Forbidden."}), 403
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if company_id is not None and api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            result = verify_compliance_integrity(
+                session=session,
+                tenant_id=tenant_scope if tenant_scope is not None else requested_tenant_id,
+                company_id=company_id,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     return jsonify(result.as_dict()), 200

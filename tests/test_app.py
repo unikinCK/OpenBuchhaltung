@@ -955,6 +955,7 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
     assert manifest["table_counts"]["journal_entries"] == 1
     assert manifest["table_counts"]["documents"] == 1
     assert manifest["totals"]["document_file_count"] == 1
+    assert manifest["integrity"]["valid"] is True
     assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
     assert any(file["path"] == document_paths[0] for file in manifest["files"])
 

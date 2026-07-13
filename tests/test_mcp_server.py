@@ -85,6 +85,7 @@ EXPECTED_TOOL_NAMES = {
     "set_fiscal_year_start",
     "list_audit_log",
     "verify_audit_log_integrity",
+    "verify_compliance_integrity",
     "create_fixed_asset",
     "list_fixed_assets",
     "get_depreciation_schedule",
@@ -814,6 +815,24 @@ def test_audit_log_tool_forwards_filters_as_query() -> None:
         "GET",
         "/audit-log/integrity",
         {"tenant_id": 3},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "verify_compliance_integrity",
+                "arguments": {"tenant_id": 3, "company_id": 7},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/integrity",
+        {"tenant_id": 3, "company_id": 7},
         None,
     )
 

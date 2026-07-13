@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.compliance_integrity import verify_compliance_integrity
 from app.services.documents import document_file_metadata
 from domain.models import (
     Account,
@@ -63,6 +64,11 @@ def build_audit_export_package(
     if company is None:
         raise ValueError("Company not found.")
     tenant = session.get(Tenant, company.tenant_id)
+    integrity_result = verify_compliance_integrity(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+    )
 
     journal_entries = _rows(
         session,
@@ -300,6 +306,7 @@ def build_audit_export_package(
                 "name": company.name,
                 "currency_code": company.currency_code,
             },
+            "integrity": integrity_result.as_dict(),
             "table_counts": table_counts,
             "files": file_entries,
             "totals": {

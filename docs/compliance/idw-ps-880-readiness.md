@@ -74,9 +74,11 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 ### Phase B: Compliance-Haertung
 
 - Datenbankseitige Unveraenderbarkeit implementieren. *(fuer festgeschriebene
-  Buchungen und Audit-Log umgesetzt; Belegschutz separat)*
-- Hashketten fuer Audit-Log und Belege implementieren. *(Audit-Log mit
-  SHA-256-Kette und CLI/API/UI/MCP-Pruefung umgesetzt; Belegkette separat)*
+  Buchungen und Audit-Log umgesetzt; Belege sind API-seitig loeschgeschuetzt und
+  werden per Dateipruefsumme kontrolliert)*
+- Kryptografische Integritaetsnachweise implementieren. *(Audit-Log mit
+  SHA-256-Kette, festgeschriebene Buchungen mit Inhaltshash und Belege mit
+  Dateipruefsumme; gemeinsame CLI/API/UI/MCP-Pruefung umgesetzt)*
 - Vollstaendigen Prueferexport entwickeln.
 - Verfahrensdokumentation und Betriebshandbuch erstellen.
 - Release-Prozess mit signierten oder gehashten Artefakten einfuehren.

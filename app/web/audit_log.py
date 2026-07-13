@@ -5,7 +5,8 @@ from __future__ import annotations
 from flask import render_template, request
 
 from app.auth import current_tenant_id
-from app.services.audit_log import list_audit_log_entries, verify_audit_log_integrity
+from app.services.audit_log import list_audit_log_entries
+from app.services.compliance_integrity import verify_compliance_integrity
 from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
 
@@ -35,7 +36,11 @@ def audit_log_page():
             limit=limit,
         )
         integrity_result = (
-            verify_audit_log_integrity(session=session, tenant_id=tenant_scope)
+            verify_compliance_integrity(
+                session=session,
+                tenant_id=tenant_scope,
+                company_id=company_filter_id,
+            )
             if verify_integrity
             else None
         )

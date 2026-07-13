@@ -308,9 +308,17 @@ def test_integrity_is_exposed_via_api_ui_and_cli(tmp_path: Path) -> None:
     client.post("/auth/login", data={"username": "audit-admin", "password": "audit-pass"})
     page_response = client.get("/audit-log?verify_integrity=1")
     assert page_response.status_code == 200
-    assert "Hashkette prüfen".encode() in page_response.data
+    assert "Integrität prüfen".encode() in page_response.data
     assert b"Intakt" in page_response.data
+
+    compliance_response = client.get("/api/v1/integrity")
+    assert compliance_response.status_code == 200
+    assert compliance_response.get_json()["valid"] is True
 
     cli_result = app.test_cli_runner().invoke(args=["verify-audit-log"])
     assert cli_result.exit_code == 0
     assert "Audit-Hashkette intakt" in cli_result.output
+
+    compliance_cli_result = app.test_cli_runner().invoke(args=["verify-integrity"])
+    assert compliance_cli_result.exit_code == 0
+    assert "Integritätsnachweise sind intakt" in compliance_cli_result.output

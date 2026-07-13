@@ -1089,6 +1089,30 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="verify_compliance_integrity",
+        description=(
+            "Prüft Inhalts-Hashes festgeschriebener Buchungen, Belegdateien und "
+            "Audit-Hashketten in einem gemeinsamen Integritätsnachweis."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tenant_id": {
+                    "type": "integer",
+                    "description": "Optionale Mandanten-ID für globale Zugriffe.",
+                },
+                "company_id": {
+                    "type": "integer",
+                    "description": "Optionale ID einer Gesellschaft.",
+                },
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/integrity",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_vat_return",
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "

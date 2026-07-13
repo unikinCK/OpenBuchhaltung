@@ -19,6 +19,7 @@ from app.auth import (
 )
 from app.services.account_chart_import import import_account_chart_file
 from app.services.audit_log import verify_audit_log_integrity
+from app.services.compliance_integrity import verify_compliance_integrity
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -45,6 +46,41 @@ DEMO_USERS = (
 
 
 def register_cli_commands(app: Flask) -> None:
+    @app.cli.command("verify-integrity")
+    @click.option("--tenant-id", type=int, default=None, help="Optionaler einzelner Mandant")
+    @click.option("--company-id", type=int, default=None, help="Optionale Gesellschaft")
+    def verify_integrity(tenant_id: int | None, company_id: int | None):
+        """Prüft Buchungen, Belege und Audit-Hashketten kryptografisch."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            try:
+                result = verify_compliance_integrity(
+                    session=session,
+                    tenant_id=tenant_id,
+                    company_id=company_id,
+                )
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
+
+        click.echo(
+            f"Geprüft: {result.finalized_entries_checked} festgeschriebene Buchungen, "
+            f"{result.documents_checked} Belege, "
+            f"{result.audit.checked_entries} Audit-Einträge."
+        )
+        if result.valid:
+            click.echo("Integritätsnachweise sind intakt.")
+            return
+
+        for issue in result.issues:
+            click.echo(f"{issue.area} {issue.entity_id or '-'}: {issue.code} – {issue.message}")
+        for tenant in result.audit.tenants:
+            for issue in tenant.issues:
+                click.echo(
+                    f"Mandant {tenant.tenant_id}, Sequenz "
+                    f"{issue.sequence_number or '-'}: {issue.code} – {issue.message}"
+                )
+        raise click.ClickException("Integritätsnachweise sind nicht intakt.")
+
     @app.cli.command("verify-audit-log")
     @click.option("--tenant-id", type=int, default=None, help="Optionaler einzelner Mandant")
     def verify_audit_log(tenant_id: int | None):

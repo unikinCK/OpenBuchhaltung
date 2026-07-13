@@ -109,3 +109,31 @@ def test_immutability_migration_can_be_downgraded_and_reapplied(tmp_path: Path):
     command.upgrade(config, "head")
     assert _alembic_version(db_path) == _alembic_head_revision()
     assert "obk_audit_log_no_update" in _sqlite_trigger_names(engine)
+
+
+def test_journal_hash_migration_roundtrip_preserves_earlier_guards(tmp_path: Path):
+    db_path = tmp_path / "journal-hash-roundtrip.db"
+    engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+    config = _alembic_config(engine)
+
+    command.upgrade(config, "head")
+    command.downgrade(config, "20260713_0020")
+
+    triggers = _sqlite_trigger_names(engine)
+    assert {
+        "obk_journal_entry_finalized_no_update",
+        "obk_journal_entry_finalized_no_delete",
+        "obk_journal_entry_line_finalized_no_insert",
+        "obk_journal_entry_line_finalized_no_update",
+        "obk_journal_entry_line_finalized_no_delete",
+        "obk_audit_log_no_update",
+        "obk_audit_log_no_delete",
+    } <= triggers
+    assert not any("hash_required" in trigger for trigger in triggers)
+
+    command.upgrade(config, "head")
+    assert _alembic_version(db_path) == _alembic_head_revision()
+    assert {
+        "obk_journal_entry_hash_required_on_insert",
+        "obk_journal_entry_hash_required_on_update",
+    } <= _sqlite_trigger_names(engine)
