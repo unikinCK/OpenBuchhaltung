@@ -147,8 +147,9 @@ Bei Exporten an Steuerberater, Wirtschaftspruefer oder Betriebspruefer:
 Vor Produktivstart sollten folgende Punkte bestaetigt sein:
 
 - produktive Authentisierung aktiv
+- starker, installationsspezifischer `SECRET_KEY` gesetzt; Start ohne Secret schlägt fehl
 - Demo-Benutzer geloescht oder Passwoerter geaendert
-- API/MCP abgesichert
+- API und MCP mit getrennten Tokens abgesichert; MCP nicht ungeschützt öffentlich gebunden
 - Datenbank produktionsgeeignet
 - Belegablage persistent und gesichert
 - Backup eingerichtet

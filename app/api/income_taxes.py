@@ -9,6 +9,7 @@ from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_se
 from app.auth import current_api_user
 from app.services.income_taxes import (
     DECLARATION_TYPE_DECLARATION,
+    IncomeTaxConflict,
     IncomeTaxError,
     compute_income_tax_return,
     display_declaration_type,
@@ -26,6 +27,7 @@ def _income_tax_return_payload(item) -> dict[str, object]:
     return {
         "id": item.id,
         "company_id": item.company_id,
+        "fiscal_year_id": item.fiscal_year_id,
         "tax_type": item.tax_type,
         "tax_type_label": display_tax_type(item.tax_type),
         "declaration_type": item.declaration_type,
@@ -46,9 +48,16 @@ def preview_income_tax_return_via_api():
     try:
         company_id = int(payload.get("company_id"))
         year = payload.get("year")
+        fiscal_year_id = (
+            int(payload["fiscal_year_id"])
+            if payload.get("fiscal_year_id") not in (None, "")
+            else None
+        )
         tax_type = str(payload.get("tax_type") or "")
     except (TypeError, ValueError):
-        return jsonify({"error": "company_id, year and tax_type are required."}), 400
+        return jsonify({"error": "company_id, year/fiscal_year_id and tax_type are required."}), 400
+    if (year is None or year == "") and fiscal_year_id is None:
+        return jsonify({"error": "year or fiscal_year_id is required."}), 400
     declaration_type = str(payload.get("declaration_type") or DECLARATION_TYPE_DECLARATION)
 
     session_factory = get_session_factory()
@@ -62,6 +71,7 @@ def preview_income_tax_return_via_api():
                 year=year,
                 tax_type=tax_type,
                 declaration_type=declaration_type,
+                fiscal_year_id=fiscal_year_id,
                 additions=payload.get("additions"),
                 reductions=payload.get("reductions"),
                 loss_carryforward=payload.get("loss_carryforward") or "0",
@@ -113,9 +123,16 @@ def create_income_tax_return_via_api():
     try:
         company_id = int(payload.get("company_id"))
         year = payload.get("year")
+        fiscal_year_id = (
+            int(payload["fiscal_year_id"])
+            if payload.get("fiscal_year_id") not in (None, "")
+            else None
+        )
         tax_type = str(payload.get("tax_type") or "")
     except (TypeError, ValueError):
-        return jsonify({"error": "company_id, year and tax_type are required."}), 400
+        return jsonify({"error": "company_id, year/fiscal_year_id and tax_type are required."}), 400
+    if (year is None or year == "") and fiscal_year_id is None:
+        return jsonify({"error": "year or fiscal_year_id is required."}), 400
     declaration_type = str(payload.get("declaration_type") or DECLARATION_TYPE_DECLARATION)
 
     session_factory = get_session_factory()
@@ -129,6 +146,7 @@ def create_income_tax_return_via_api():
                 year=year,
                 tax_type=tax_type,
                 declaration_type=declaration_type,
+                fiscal_year_id=fiscal_year_id,
                 additions=payload.get("additions"),
                 reductions=payload.get("reductions"),
                 loss_carryforward=payload.get("loss_carryforward") or "0",
@@ -137,6 +155,8 @@ def create_income_tax_return_via_api():
                 trade_tax_allowance=payload.get("trade_tax_allowance") or "0",
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )
+        except IncomeTaxConflict as exc:
+            return jsonify({"error": str(exc)}), 409
         except IncomeTaxError as exc:
             return jsonify({"error": str(exc)}), 422
         return jsonify(_income_tax_return_payload(item)), 201

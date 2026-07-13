@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from flask import flash, redirect, render_template, request, url_for
+from sqlalchemy import select
 
 from app.services.income_taxes import (
     DECLARATION_TYPE_DECLARATION,
@@ -23,6 +24,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
+from domain.models import FiscalYear
 
 
 def _form_adjustment(field: str, code: str, label: str) -> list[dict[str, str]]:
@@ -37,6 +39,7 @@ def _request_params() -> dict[str, object]:
     reductions_total = request.values.get("reductions_total") or "0"
     return {
         "year": request.values.get("year") or str(date.today().year),
+        "fiscal_year_id": request.values.get("fiscal_year_id", type=int),
         "tax_type": request.values.get("tax_type") or TAX_TYPE_CORPORATE_INCOME,
         "declaration_type": request.values.get("declaration_type")
         or DECLARATION_TYPE_DECLARATION,
@@ -72,7 +75,19 @@ def income_taxes_page():
         preview = None
         error = None
         snapshots = []
+        fiscal_years = []
         if selected_company_id:
+            fiscal_years = (
+                session.execute(
+                    select(FiscalYear)
+                    .where(FiscalYear.company_id == selected_company_id)
+                    .order_by(FiscalYear.end_date.desc())
+                )
+                .scalars()
+                .all()
+            )
+            if fiscal_years and params["fiscal_year_id"] is None:
+                params["fiscal_year_id"] = fiscal_years[0].id
             try:
                 preview = compute_income_tax_return(
                     session=session,
@@ -93,6 +108,7 @@ def income_taxes_page():
         preview=preview,
         error=error,
         snapshots=snapshots,
+        fiscal_years=fiscal_years,
         display_tax_type=display_tax_type,
         display_declaration_type=display_declaration_type,
     )
@@ -129,7 +145,8 @@ def save_income_tax_return_action():
         url_for(
             "main.income_taxes_page",
             company_id=company_id,
-            year=item.period_label,
+            year=item.date_to.year,
+            fiscal_year_id=item.fiscal_year_id,
             tax_type=item.tax_type,
             declaration_type=item.declaration_type,
         )

@@ -5,8 +5,11 @@ import threading
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
 from app.services.mcp_http import (
     accepts_event_stream,
+    authorization_allowed,
     make_server,
     origin_allowed,
     process_post,
@@ -112,6 +115,18 @@ def test_origin_allowed_wildcard() -> None:
     assert origin_allowed(None, wildcard) is True
 
 
+def test_authorization_allowed() -> None:
+    assert authorization_allowed(None, None) is True
+    assert authorization_allowed(None, "mcp-secret") is False
+    assert authorization_allowed("Bearer wrong", "mcp-secret") is False
+    assert authorization_allowed("Bearer mcp-secret", "mcp-secret") is True
+
+
+def test_non_loopback_server_requires_auth_token() -> None:
+    with pytest.raises(RuntimeError, match="MCP_HTTP_AUTH_TOKEN"):
+        make_server(_server(), host="0.0.0.0", port=0)
+
+
 def _run_server(httpd):
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -200,6 +215,34 @@ def test_http_server_rejects_disallowed_origin() -> None:
             raise AssertionError("disallowed origin should be rejected")
         except HTTPError as exc:
             assert exc.code == 403
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_http_server_requires_bearer_token() -> None:
+    httpd = make_server(
+        _server(), host="127.0.0.1", port=0, path="/mcp", auth_token="mcp-secret"
+    )
+    _run_server(httpd)
+    try:
+        port = httpd.server_address[1]
+        url = f"http://127.0.0.1:{port}/mcp"
+        unauthorized = Request(url, data=_tools_list().encode(), method="POST")
+        try:
+            urlopen(unauthorized, timeout=5)
+            raise AssertionError("missing bearer token should be rejected")
+        except HTTPError as exc:
+            assert exc.code == 401
+
+        authorized = Request(
+            url,
+            data=_tools_list().encode(),
+            headers={"Authorization": "Bearer mcp-secret"},
+            method="POST",
+        )
+        with urlopen(authorized, timeout=5) as response:
+            assert response.status == 200
     finally:
         httpd.shutdown()
         httpd.server_close()

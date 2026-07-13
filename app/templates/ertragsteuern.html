@@ -12,8 +12,20 @@
     {% else %}
       <form method="get" action="{{ url_for('main.income_taxes_page') }}" class="inline-form">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-        <label for="year">Jahr</label>
-        <input id="year" name="year" value="{{ params.year }}" style="width:7rem;" />
+        {% if fiscal_years %}
+          <label for="fiscal_year_id">Wirtschaftsjahr</label>
+          <select id="fiscal_year_id" name="fiscal_year_id" style="width:auto;">
+            {% for fiscal_year in fiscal_years %}
+              <option value="{{ fiscal_year.id }}" {% if params.fiscal_year_id == fiscal_year.id %}selected{% endif %}>
+                {{ fiscal_year.label }} ({{ fiscal_year.start_date }}–{{ fiscal_year.end_date }})
+              </option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="year" value="{{ params.year }}" />
+        {% else %}
+          <label for="year">Endjahr des Wirtschaftsjahres</label>
+          <input id="year" name="year" value="{{ params.year }}" style="width:7rem;" />
+        {% endif %}
         <label for="tax_type">Steuerart</label>
         <select id="tax_type" name="tax_type" style="width:auto;">
           <option value="corporate_income" {% if params.tax_type == "corporate_income" %}selected{% endif %}>Körperschaftsteuer</option>
@@ -78,6 +90,7 @@
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
           <input type="hidden" name="year" value="{{ params.year }}" />
+          <input type="hidden" name="fiscal_year_id" value="{{ params.fiscal_year_id or '' }}" />
           <input type="hidden" name="tax_type" value="{{ params.tax_type }}" />
           <input type="hidden" name="declaration_type" value="{{ params.declaration_type }}" />
           <input type="hidden" name="additions_total" value="{{ params.additions_total }}" />

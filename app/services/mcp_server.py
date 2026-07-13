@@ -1181,7 +1181,7 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="preview_income_tax_return",
         description=(
-            "Berechnet Körperschaftsteuer oder Gewerbesteuer für ein Kalenderjahr "
+            "Berechnet Körperschaftsteuer oder Gewerbesteuer für ein Wirtschaftsjahr "
             "inklusive manueller Hinzurechnungen, Kürzungen, Verlustvortrag und "
             "Vorauszahlungen, ohne einen Snapshot zu speichern."
         ),
@@ -1189,7 +1189,14 @@ TOOLS: list[ToolSpec] = [
             "type": "object",
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
-                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "year": {
+                    "type": "integer",
+                    "description": "Endjahr des Wirtschaftsjahres, z. B. 2026.",
+                },
+                "fiscal_year_id": {
+                    "type": "integer",
+                    "description": "Optional die eindeutige ID des Wirtschaftsjahres.",
+                },
                 "tax_type": {
                     "type": "string",
                     "description": "corporate_income oder trade_tax.",
@@ -1229,7 +1236,8 @@ TOOLS: list[ToolSpec] = [
                     "default": "0",
                 },
             },
-            "required": ["company_id", "year", "tax_type"],
+            "required": ["company_id", "tax_type"],
+            "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],
             "additionalProperties": False,
         },
         http_method="POST",
@@ -1239,14 +1247,21 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="create_income_tax_return",
         description=(
-            "Hält Körperschaftsteuer oder Gewerbesteuer für ein Kalenderjahr als "
+            "Hält Körperschaftsteuer oder Gewerbesteuer für ein Wirtschaftsjahr als "
             "Erklärungs- oder Vorauszahlungs-Snapshot fest."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
-                "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "year": {
+                    "type": "integer",
+                    "description": "Endjahr des Wirtschaftsjahres, z. B. 2026.",
+                },
+                "fiscal_year_id": {
+                    "type": "integer",
+                    "description": "Optional die eindeutige ID des Wirtschaftsjahres.",
+                },
                 "tax_type": {
                     "type": "string",
                     "description": "corporate_income oder trade_tax.",
@@ -1263,7 +1278,8 @@ TOOLS: list[ToolSpec] = [
                 "municipality_multiplier": {"type": "string"},
                 "trade_tax_allowance": {"type": "string", "default": "0"},
             },
-            "required": ["company_id", "year", "tax_type"],
+            "required": ["company_id", "tax_type"],
+            "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],
             "additionalProperties": False,
         },
         http_method="POST",

@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    command: gunicorn --bind 0.0.0.0:8000 --workers 2 --access-logfile - run:app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      SESSION_COOKIE_SECURE: "1"
+      DATABASE_URL: postgresql+psycopg://openbuchhaltung:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/openbuchhaltung
+      API_REQUIRE_AUTH: "1"
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
+    volumes:
+      - app_data:/app/instance
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openbuchhaltung
+      POSTGRES_USER: openbuchhaltung
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openbuchhaltung -d openbuchhaltung"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  app_data:
+  postgres_data:
