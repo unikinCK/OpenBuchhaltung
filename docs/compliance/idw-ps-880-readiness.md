@@ -75,7 +75,8 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 
 - Datenbankseitige Unveraenderbarkeit implementieren. *(fuer festgeschriebene
   Buchungen und Audit-Log umgesetzt; Belegschutz separat)*
-- Hashketten fuer Audit-Log und Belege implementieren.
+- Hashketten fuer Audit-Log und Belege implementieren. *(Audit-Log mit
+  SHA-256-Kette und CLI/API/UI/MCP-Pruefung umgesetzt; Belegkette separat)*
 - Vollstaendigen Prueferexport entwickeln.
 - Verfahrensdokumentation und Betriebshandbuch erstellen.
 - Release-Prozess mit signierten oder gehashten Artefakten einfuehren.

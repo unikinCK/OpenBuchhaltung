@@ -344,6 +344,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       festgeschriebener Buchungen sowie Inserts, Updates und Deletes ihrer Zeilen
       verhindern; Audit-Einträge sind append-only. Neue Datenbanken werden vollständig
       über Alembic aufgebaut, damit die Schutzmechanismen immer installiert sind.)*
+- [x] Audit-Hashkette & Integritätsprüfung *(Compliance-Härtung: Audit-Einträge
+      werden je Mandant deterministisch per SHA-256 verkettet; Sequenz und Vorgänger
+      sind gegen Forks eindeutig, ein atomarer Mandantenanker erkennt gekürzte Ketten.
+      Migration verkettet Altbestände. Prüfung und Manipulationsdiagnose stehen in UI,
+      REST-API, MCP und CLI zur Verfügung.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

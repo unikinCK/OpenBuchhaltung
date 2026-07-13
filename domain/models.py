@@ -26,9 +26,23 @@ class Base(DeclarativeBase):
 
 class Tenant(Base):
     __tablename__ = "tenant"
+    __table_args__ = (
+        CheckConstraint(
+            "audit_sequence_number >= 0", name="ck_tenant_audit_sequence_non_negative"
+        ),
+        CheckConstraint(
+            "length(audit_head_hash) = 64", name="ck_tenant_audit_head_hash_length"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    audit_sequence_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    audit_head_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="0" * 64, server_default="0" * 64
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -922,6 +936,20 @@ class User(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "sequence_number", name="uq_audit_log_tenant_sequence"
+        ),
+        UniqueConstraint(
+            "tenant_id", "previous_hash", name="uq_audit_log_tenant_previous_hash"
+        ),
+        CheckConstraint("sequence_number > 0", name="ck_audit_log_sequence_positive"),
+        CheckConstraint("hash_version = 1", name="ck_audit_log_hash_version"),
+        CheckConstraint(
+            "length(previous_hash) = 64", name="ck_audit_log_previous_hash_length"
+        ),
+        CheckConstraint("length(entry_hash) = 64", name="ck_audit_log_entry_hash_length"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
@@ -932,6 +960,12 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
     action: Mapped[str] = mapped_column(String(40), nullable=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    hash_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     changed_by: Mapped[str] = mapped_column(String(120), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)

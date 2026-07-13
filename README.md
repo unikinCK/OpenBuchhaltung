@@ -142,6 +142,24 @@ Manuell migrieren (z. B. für eine externe DB):
 DATABASE_URL="sqlite+pysqlite:///$(pwd)/instance/openbuchhaltung.db" alembic upgrade head
 ```
 
+### Audit-Integrität
+
+Audit-Einträge werden je Mandant über Sequenznummern und SHA-256-Hashes
+kryptografisch verkettet. Die Prüfung ist in der Audit-Ansicht, über
+`GET /api/v1/audit-log/integrity`, das MCP-Tool
+`verify_audit_log_integrity` und per CLI verfügbar:
+
+```bash
+flask --app run.py verify-audit-log
+flask --app run.py verify-audit-log --tenant-id 1
+```
+
+Die Hashkette macht nachträgliche Inhaltsänderungen, Löschungen und gebrochene
+Verknüpfungen erkennbar. Ein atomar gepflegter Kettenanker je Mandant erkennt
+auch eine am Ende gekürzte oder vollständig entfernte Historie. Die Kette
+ersetzt keine Zugriffskontrolle oder externe Signatur; der DB-seitige
+Append-only-Schutz bleibt zusätzlich aktiv.
+
 ## Login & Benutzer
 
 Alle UI-Seiten erfordern eine Anmeldung. `seed-demo` legt folgende Benutzer an:

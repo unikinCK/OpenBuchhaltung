@@ -25,8 +25,28 @@
       <input id="limit" name="limit" type="number" min="1" max="500" value="{{ limit }}" />
 
       <button type="submit">Filtern</button>
+      <button type="submit" name="verify_integrity" value="1">Hashkette prüfen</button>
     </form>
   </section>
+
+  {% if integrity_result %}
+    <section class="card">
+      <h2>Integritätsprüfung</h2>
+      {% if integrity_result.valid %}
+        <p><span class="badge">Intakt</span> {{ integrity_result.checked_entries }} Einträge in {{ integrity_result.checked_tenants }} Mandanten geprüft.</p>
+      {% else %}
+        <p><span class="badge">Fehler erkannt</span> Die Audit-Hashkette ist nicht intakt.</p>
+        {% for tenant in integrity_result.tenants %}
+          {% for issue in tenant.issues %}
+            <p><code>Mandant {{ tenant.tenant_id }}, Sequenz {{ issue.sequence_number or "–" }}: {{ issue.code }}</code> – {{ issue.message }}</p>
+          {% endfor %}
+        {% endfor %}
+      {% endif %}
+      {% for tenant in integrity_result.tenants %}
+        <p class="muted">Mandant {{ tenant.tenant_id }}: {{ tenant.checked_entries }} Einträge, Kopf-Hash <code>{{ tenant.head_hash or "–" }}</code></p>
+      {% endfor %}
+    </section>
+  {% endif %}
 
   <section class="card">
     {% if entries %}
@@ -39,6 +59,7 @@
             <th>ID</th>
             <th>Aktion</th>
             <th>Benutzer</th>
+            <th>Sequenz / Hash</th>
             <th>Details</th>
           </tr>
         </thead>
@@ -51,6 +72,7 @@
               <td>{{ entry.entity_id }}</td>
               <td><span class="badge">{{ entry.action }}</span></td>
               <td>{{ entry.changed_by }}</td>
+              <td><code>#{{ entry.sequence_number }} {{ entry.entry_hash[:12] }}…</code></td>
               <td>
                 {% if entry.payload %}
                   <code>{{ entry.payload }}</code>
