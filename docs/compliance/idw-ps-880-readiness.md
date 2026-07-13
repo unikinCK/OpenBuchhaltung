@@ -31,7 +31,7 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 | DOCU-007 | Release-Dokumentation | Version, Commit, Migrationen, Changelog, Pruefsummen, Freigabe | offen |
 | DOCU-008 | Betriebsdokumentation | Installation, Konfiguration, Backup, Restore, Monitoring, Updates | offen |
 | DOCU-009 | Sicherheitskonzept | Authentisierung, Autorisierung, Secrets, Uploads, Protokolle, Adminzugriffe | offen |
-| DOCU-010 | Datenexportbeschreibung | Tabellen, Felder, Formate, Manifest, Hashes, Beispielpaket | offen |
+| DOCU-010 | Datenexportbeschreibung | Tabellen, Felder, Formate, Manifest, Hashes, Beispielpaket | teilweise |
 
 ## 3. Produktkontrollen
 
@@ -79,7 +79,9 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 - Kryptografische Integritaetsnachweise implementieren. *(Audit-Log mit
   SHA-256-Kette, festgeschriebene Buchungen mit Inhaltshash und Belege mit
   Dateipruefsumme; gemeinsame CLI/API/UI/MCP-Pruefung umgesetzt)*
-- Vollstaendigen Prueferexport entwickeln.
+- Vollstaendigen Prueferexport entwickeln. *(Formatversion 2 mit Feldkatalog,
+  Einzelhashes, stabilem Datenbestands-Hash, Rollen und lokaler Paketpruefung
+  umgesetzt; fachliche Restfelder und Beispielpaket offen)*
 - Verfahrensdokumentation und Betriebshandbuch erstellen.
 - Release-Prozess mit signierten oder gehashten Artefakten einfuehren.
 

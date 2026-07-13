@@ -523,8 +523,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="export_audit_package",
         description=(
-            "Erzeugt ein Prueferexport-Paket mit JSON-Tabellen, Belegindex, "
-            "Originalbelegen und Manifest. Fuer MCP ist manifest_only=true sinnvoll."
+            "Erzeugt ein Prueferexport-Paket v2 mit JSON-Tabellen, Feldkatalog, "
+            "Belegindex, Originalbelegen, Einzelhashes und stabilem Datenbestands-Hash. "
+            "Fuer MCP liefert manifest_only=true auch den SHA-256-Hash des ZIP-Pakets."
         ),
         input_schema={
             "type": "object",

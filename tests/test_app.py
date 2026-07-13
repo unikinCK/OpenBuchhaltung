@@ -2,13 +2,17 @@ import base64
 import hashlib
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from app import create_app
 from app.auth import hash_password
+from app.services.audit_export import (
+    build_audit_export_package,
+    verify_audit_export_package,
+)
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError
 from domain.models import AuditLog, Company, Document, FiscalYear, Period, PeriodLock, Tenant, User
@@ -892,6 +896,16 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         "/api/v1/tenants",
         json={"tenant_name": "Audit Export Mandant", "company_name": "Audit Export GmbH"},
     )
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="audit-user",
+                password_hash=hash_password("audit-pass"),
+                role="Pruefer",
+                tenant_id=1,
+            )
+        )
+        session.commit()
     client.post(
         "/api/v1/accounts",
         json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
@@ -932,32 +946,121 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         query_string={"company_id": 1, "manifest_only": "true"},
     )
     assert manifest_response.status_code == 200
-    assert manifest_response.get_json()["commit_sha"] == "test-commit"
+    manifest_payload = manifest_response.get_json()
+    assert manifest_payload["commit_sha"] == "test-commit"
+    assert len(manifest_payload["package_sha256"]) == 64
+    assert (
+        manifest_response.headers["X-OpenBuchhaltung-SHA256"]
+        == manifest_payload["package_sha256"]
+    )
 
     response = client.get("/api/v1/exports/audit-package.zip", query_string={"company_id": 1})
     assert response.status_code == 200
     assert response.content_type == "application/zip"
     assert "prueferexport-company-1-" in response.headers["Content-Disposition"]
+    assert response.headers["X-OpenBuchhaltung-SHA256"] == hashlib.sha256(
+        response.data
+    ).hexdigest()
 
     with zipfile.ZipFile(BytesIO(response.data)) as archive:
         names = set(archive.namelist())
         assert "manifest.json" in names
+        assert "README.txt" in names
+        assert "schema/field_catalog.json" in names
         assert "data/accounts.json" in names
         assert "data/journal_entries.json" in names
         assert "data/documents.json" in names
+        assert "data/users.json" in names
         document_paths = [name for name in names if name.startswith("documents/")]
         assert len(document_paths) == 1
         assert archive.read(document_paths[0]) == document_bytes
         manifest = json.loads(archive.read("manifest.json"))
         documents = json.loads(archive.read("data/documents.json"))
+        users = json.loads(archive.read("data/users.json"))
+        field_catalog = json.loads(archive.read("schema/field_catalog.json"))
 
-    assert manifest["export_format_version"] == "1"
+    assert manifest["export_format_version"] == "2"
     assert manifest["table_counts"]["journal_entries"] == 1
     assert manifest["table_counts"]["documents"] == 1
+    assert manifest["table_counts"]["users"] == 1
     assert manifest["totals"]["document_file_count"] == 1
     assert manifest["integrity"]["valid"] is True
+    assert manifest["dataset_sha256"] == manifest_payload["dataset_sha256"]
     assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
+    assert "storage_key" not in documents[0]
+    assert users[0]["username"] == "audit-user"
+    assert users[0]["role"] == "Pruefer"
+    assert users[0]["api_token_configured"] is False
+    assert "password_hash" not in users[0]
+    assert "api_token_hash" not in users[0]
+    user_fields = {
+        field["name"] for field in field_catalog["tables"]["users"]["fields"]
+    }
+    assert {"username", "role", "api_token_configured"} <= user_fields
+    assert "password_hash" not in user_fields
+    document_fields = {
+        field["name"] for field in field_catalog["tables"]["documents"]["fields"]
+    }
+    assert {"file_sha256", "archive_path", "file_sha256_matches"} <= document_fields
+    assert "storage_key" not in document_fields
     assert any(file["path"] == document_paths[0] for file in manifest["files"])
+
+    verification = verify_audit_export_package(response.data)
+    assert verification.valid is True
+    assert verification.dataset_sha256 == manifest["dataset_sha256"]["value"]
+    assert verification.files_checked == len(manifest["files"])
+
+    fixed_generated_at = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+    with app.extensions["db_session_factory"]() as session:
+        reproducible_a = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at,
+            commit_sha="test-commit",
+        )
+        reproducible_b = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at,
+            commit_sha="test-commit",
+        )
+        later_export = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at + timedelta(seconds=2),
+            commit_sha="test-commit",
+        )
+    assert reproducible_a.payload == reproducible_b.payload
+    assert reproducible_a.package_sha256 == reproducible_b.package_sha256
+    assert (
+        reproducible_a.manifest["dataset_sha256"]
+        == later_export.manifest["dataset_sha256"]
+    )
+    assert reproducible_a.package_sha256 != later_export.package_sha256
+
+    package_path = tmp_path / "audit-package.zip"
+    package_path.write_bytes(response.data)
+    cli_result = app.test_cli_runner().invoke(
+        args=["verify-audit-package", str(package_path)]
+    )
+    assert cli_result.exit_code == 0
+    assert "Prüferexport ist intakt" in cli_result.output
+
+    tampered_buffer = BytesIO()
+    with zipfile.ZipFile(BytesIO(response.data)) as source, zipfile.ZipFile(
+        tampered_buffer, "w"
+    ) as target:
+        for info in source.infolist():
+            content = source.read(info.filename)
+            if info.filename == "data/accounts.json":
+                content += b"\n"
+            target.writestr(info, content)
+    tampered_result = verify_audit_export_package(tampered_buffer.getvalue())
+    assert tampered_result.valid is False
+    assert {issue.code for issue in tampered_result.issues} >= {
+        "hash_mismatch",
+        "dataset_hash_mismatch",
+    }
 
 
 def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):

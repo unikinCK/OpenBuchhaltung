@@ -355,6 +355,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       Eine gemeinsame Prüfung kontrolliert Buchungshashes, Belegdateien und
       Audit-Hashketten über UI, REST-API, MCP und CLI. Der Prüferexport enthält
       Hashfelder und Prüfergebnis im Manifest.)*
+- [x] Prüferexport v2 & reproduzierbarer Datenbestandsnachweis *(Compliance-
+      Härtung: vollständiger technischer Feldkatalog, selbstbeschreibendes README,
+      Benutzer/Rollen ohne Authentisierungsgeheimnisse, stabile Einzelhashes und
+      kanonischer `dataset_sha256`; deterministische ZIP-Erzeugung bei festem
+      Zeitpunkt, Download-Hash und lokale CLI-Paketprüfung mit Manipulationsdiagnose.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 
