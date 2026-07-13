@@ -339,6 +339,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       append-only eine neue Version statt Überschreiben; API-DELETE wird mit
       Löschschutz 409 abgewiesen; Prüferexport weist gespeicherten Hash gegen
       archivierte Datei aus.)*
+- [x] Datenbankseitige Unveränderbarkeit *(Compliance-Härtung: Alembic-Migration
+      installiert für SQLite und PostgreSQL Trigger, die Updates und Deletes
+      festgeschriebener Buchungen sowie Inserts, Updates und Deletes ihrer Zeilen
+      verhindern; Audit-Einträge sind append-only. Neue Datenbanken werden vollständig
+      über Alembic aufgebaut, damit die Schutzmechanismen immer installiert sind.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

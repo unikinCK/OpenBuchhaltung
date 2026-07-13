@@ -38,7 +38,7 @@ Jeder Testfall sollte dokumentieren:
 | T-FIN-002 | Doppelte Festschreibung | Aktion wird abgewiesen oder bleibt idempotent nachvollziehbar | automatisiert | hoch |
 | T-FIN-003 | Festgeschriebene Buchung per UI aendern | Aenderung wird verhindert | automatisiert | hoch |
 | T-FIN-004 | Festgeschriebene Buchung per API aendern | Aenderung wird verhindert | automatisiert | hoch |
-| T-FIN-005 | Festgeschriebene Buchung per DB-Update aendern | Datenbank verhindert Aenderung oder Integritaetspruefung meldet Manipulation | automatisiert/manuell | hoch |
+| T-FIN-005 | Festgeschriebene Buchung per DB-Update aendern | Datenbank verhindert Aenderung | automatisiert | hoch |
 | T-FIN-006 | Storno erzeugen | Gegenbuchung entsteht, Original bleibt unveraendert | automatisiert | hoch |
 | T-FIN-007 | Doppelstorno versuchen | Zweites Storno wird verhindert | automatisiert | hoch |
 | T-FIN-008 | Storno einer Stornobuchung | Aktion wird verhindert | automatisiert | hoch |
@@ -78,7 +78,7 @@ Jeder Testfall sollte dokumentieren:
 | T-AUD-003 | Storno erzeugen | Audit-Eintrag fuer Original und Storno nachvollziehbar | automatisiert | hoch |
 | T-AUD-004 | Benutzer/Rolle aendern | Audit-Eintrag wird erzeugt | automatisiert | hoch |
 | T-AUD-005 | Export erzeugen | Export wird mit Parametern protokolliert | automatisiert | mittel |
-| T-AUD-006 | Audit-Eintrag aendern | DB verhindert Aenderung oder Integritaetspruefung meldet Manipulation | automatisiert/manuell | hoch |
+| T-AUD-006 | Audit-Eintrag aendern oder loeschen | DB verhindert Aenderung und Loeschung | automatisiert | hoch |
 | T-AUD-007 | Hashkette pruefen | Unveraenderte Kette ist gueltig | automatisiert | hoch |
 | T-AUD-008 | Hashkette manipulieren | Pruefung erkennt Abweichung | automatisiert | hoch |
 

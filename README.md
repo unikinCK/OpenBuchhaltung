@@ -39,8 +39,9 @@ können, was gebucht, exportiert und protokolliert wird.
   mit Manifest und Hashes.
 - **Schnittstellen:** REST API mit Token-Auth, MCP-Server für agentische
   Workflows und ein ELSTER-Bridge-Konzept über lokalen ERiC-Runner.
-- **Nachvollziehbarkeit:** Rollen, Tenant-Scoping, Audit-Log,
-  Security-Header und Migrationsstrategie für reproduzierbare Deployments.
+- **Nachvollziehbarkeit:** Rollen, Tenant-Scoping, append-only Audit-Log,
+  DB-seitiger Schutz festgeschriebener Buchungen, Security-Header und
+  Migrationsstrategie für reproduzierbare Deployments.
 
 ## Für wen ist das interessant?
 
@@ -126,7 +127,8 @@ docker compose -f docker-compose.production.yml up --build -d
 ### Datenbank & Migrationen
 
 Beim Start bringt die App die Datenbank automatisch auf den aktuellen Stand:
-- **Leere DB:** Das Schema wird angelegt und auf den Alembic-Head gestampt.
+- **Leere DB:** Alle Alembic-Migrationen werden bis zum Head ausgeführt. Damit
+  werden neben Tabellen auch DB-seitige Schutzmechanismen wie Trigger angelegt.
 - **Bestehende, von der App verwaltete DB:** Ausstehende Migrationen werden per
   `alembic upgrade head` automatisch nachgezogen — ein **Redeploy gegen eine
   bestehende Datenbank** wendet neue Migrationen also selbst an (kein manueller Schritt
