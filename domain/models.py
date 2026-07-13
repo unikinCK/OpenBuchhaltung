@@ -104,6 +104,9 @@ class FiscalYear(Base):
     journal_entries: Mapped[list[JournalEntry]] = relationship(
         back_populates="fiscal_year", cascade="all, delete"
     )
+    income_tax_returns: Mapped[list[IncomeTaxReturn]] = relationship(
+        back_populates="fiscal_year"
+    )
 
 
 class Period(Base):
@@ -693,6 +696,9 @@ class IncomeTaxReturn(Base):
     company_id: Mapped[int] = mapped_column(
         ForeignKey("company.id", ondelete="CASCADE"), nullable=False
     )
+    fiscal_year_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="RESTRICT")
+    )
     tax_type: Mapped[str] = mapped_column(String(30), nullable=False)
     declaration_type: Mapped[str] = mapped_column(String(30), nullable=False)
     period_label: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -706,6 +712,9 @@ class IncomeTaxReturn(Base):
     created_by: Mapped[str] = mapped_column(String(120), nullable=False)
 
     company: Mapped[Company] = relationship(back_populates="income_tax_returns")
+    fiscal_year: Mapped[FiscalYear | None] = relationship(
+        back_populates="income_tax_returns"
+    )
 
 
 class PayrollEmployee(Base):

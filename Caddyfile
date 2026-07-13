@@ -21,11 +21,10 @@
 		header_up -Origin
 	}
 
-	# --- Optionaler Zugriffsschutz -------------------------------------------
-	# Der MCP-Endpunkt selbst hat KEINE Authentifizierung: Wer die URL erreicht,
-	# kann Tools aufrufen (u. a. Buchungen anlegen). Beschränke den Zugriff daher
-	# möglichst auf bekannte Client-IPs (die Maschine mit Claude Desktop) oder ein
-	# VPN. Zum Aktivieren die beiden Zeilen entkommentieren und IPs anpassen:
+	# Der MCP-Endpunkt prüft zusätzlich MCP_HTTP_AUTH_TOKEN. Der Proxy reicht den
+	# Authorization-Header unverändert durch. Für öffentliche Installationen sollte
+	# der Zugriff darüber hinaus auf bekannte Client-IPs oder ein VPN begrenzt werden.
+	# Zum Aktivieren die folgenden Zeilen entkommentieren und IPs anpassen:
 	#
 	# @erlaubt remote_ip 203.0.113.7 198.51.100.0/24
 	# handle @erlaubt {

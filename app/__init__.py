@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -12,13 +13,18 @@ from .cli import register_cli_commands
 from .db import create_session_factory
 from .web import main_bp
 
+logger = logging.getLogger(__name__)
+INSECURE_DEVELOPMENT_SECRET = "dev-secret-key-change-me"
+DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local"}
+
 
 def create_app(test_config: dict | None = None) -> Flask:
     """Application factory for OpenBuchhaltung."""
     document_max_upload_bytes = int(os.environ.get("DOCUMENT_MAX_UPLOAD_BYTES", "10485760"))
     app = Flask(__name__)
     app.config.from_mapping(
-        SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key-change-me"),
+        APP_ENV=os.environ.get("APP_ENV") or os.environ.get("FLASK_ENV") or "production",
+        SECRET_KEY=os.environ.get("SECRET_KEY"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
@@ -77,6 +83,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             if "LOGIN_RATE_LIMIT" not in test_config:
                 app.config["LOGIN_RATE_LIMIT"] = False
 
+    _configure_secret_key(app)
+
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
     app.extensions["db_session_factory"] = create_session_factory(app.config.get("DATABASE_URL"))
@@ -112,3 +120,26 @@ def create_app(test_config: dict | None = None) -> Flask:
         return {"error": "Uploaded file is too large."}, 413
 
     return app
+
+
+def _configure_secret_key(app: Flask) -> None:
+    """Require an explicit session secret except in tests or an explicit dev environment."""
+    if app.config.get("TESTING"):
+        app.config["SECRET_KEY"] = app.config.get("SECRET_KEY") or "testing-secret-key"
+        return
+
+    environment = str(app.config.get("APP_ENV") or "production").strip().lower()
+    secret_key = app.config.get("SECRET_KEY")
+    if environment in DEVELOPMENT_ENVIRONMENTS:
+        if not secret_key:
+            app.config["SECRET_KEY"] = INSECURE_DEVELOPMENT_SECRET
+            logger.warning(
+                "Kein SECRET_KEY gesetzt; die unsichere Entwicklungsvorgabe wird verwendet."
+            )
+        return
+
+    if not secret_key or secret_key == INSECURE_DEVELOPMENT_SECRET:
+        raise RuntimeError(
+            "SECRET_KEY muss außerhalb einer expliziten Entwicklungsumgebung gesetzt sein. "
+            "Für lokale Entwicklung APP_ENV=development setzen."
+        )

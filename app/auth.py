@@ -55,7 +55,34 @@ def hash_api_token(token: str) -> str:
 
 
 def current_user() -> dict | None:
-    return session.get("user")
+    """Return the current, database-backed UI user.
+
+    The session only carries the user id as a lookup hint. Role, tenant scope and
+    active status are refreshed once per request so administrative changes take
+    effect immediately for already logged-in browsers.
+    """
+    if getattr(g, "_current_user_loaded", False):
+        return getattr(g, "_current_user", None)
+
+    g._current_user_loaded = True
+    session_user = session.get("user")
+    if not isinstance(session_user, dict) or not session_user.get("id"):
+        g._current_user = None
+        return None
+
+    session_factory = _get_session_factory()
+    with session_factory() as db_session:
+        user = db_session.get(User, session_user["id"])
+        if user is None or not user.is_active:
+            session.pop("user", None)
+            g._current_user = None
+            return None
+        refreshed_user = _api_user_dict(user)
+
+    if session_user != refreshed_user:
+        session["user"] = refreshed_user
+    g._current_user = refreshed_user
+    return refreshed_user
 
 
 def current_api_user() -> dict | None:

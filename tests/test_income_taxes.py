@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -12,8 +13,15 @@ from app.services.income_taxes import (
     list_income_tax_returns,
     save_income_tax_return,
 )
+from app.services.journal_entries import JournalLineInput
 from domain.models import Base, User
-from tests.test_vat_returns import _create_test_app, _seed, _seed_bookings
+from tests.test_vat_returns import (
+    _account_id,
+    _book,
+    _create_test_app,
+    _seed,
+    _seed_bookings,
+)
 
 
 def _session() -> Session:
@@ -55,6 +63,43 @@ def test_compute_corporate_income_tax_return() -> None:
     assert rows["corporate_tax"] == Decimal("150.00")
     assert rows["solidarity_surcharge"] == Decimal("8.25")
     assert rows["payable"] == Decimal("158.25")
+
+
+def test_income_tax_uses_deviating_fiscal_year_ending_in_requested_year() -> None:
+    with _session() as session:
+        company = _seed(session)
+        company.fiscal_year_start_month = 7
+        session.commit()
+        _seed_bookings(session, company)
+        _book(
+            session,
+            company,
+            entry_date=date(2026, 8, 1),
+            description="Umsatz im Folge-Wirtschaftsjahr",
+            lines=[
+                JournalLineInput(
+                    account_id=_account_id(session, company, "1200"),
+                    debit_amount=Decimal("1000.00"),
+                ),
+                JournalLineInput(
+                    account_id=_account_id(session, company, "8100"),
+                    credit_amount=Decimal("1000.00"),
+                ),
+            ],
+        )
+
+        result = compute_income_tax_return(
+            session=session,
+            company_id=company.id,
+            year=2026,
+            tax_type="corporate_income",
+        )
+
+    assert result["period_label"] == "2025/2026"
+    assert result["date_from"] == "2025-07-01"
+    assert result["date_to"] == "2026-06-30"
+    assert result["fiscal_year_id"] is not None
+    assert result["basis"]["net_income"] == "900.50"
 
 
 def test_save_trade_tax_prepayment_snapshot() -> None:
@@ -130,6 +175,19 @@ def test_income_tax_api_preview_create_and_list(tmp_path: Path) -> None:
     created_payload = created.get_json()
     assert created_payload["tax_type"] == "trade_tax"
     assert created_payload["calculation"]["calculation"]["tax_total"] == "140.00"
+
+    duplicate = client.post(
+        "/api/v1/income-tax-returns",
+        json={
+            "company_id": company_id,
+            "year": 2026,
+            "tax_type": "trade_tax",
+            "declaration_type": "declaration",
+            "additions": [{"code": "GEW8", "label": "Hinzurechnung", "amount": "99.50"}],
+            "municipality_multiplier": "400",
+        },
+    )
+    assert duplicate.status_code == 409
 
     listed = client.get(
         "/api/v1/income-tax-returns", query_string={"company_id": company_id}

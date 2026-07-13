@@ -8,17 +8,19 @@ Kontennamen zu erraten.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Iterable
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
 from app.services.reports import income_statement_for_company
-from domain.models import Company, IncomeTaxReturn
+from domain.models import Company, FiscalYear, IncomeTaxReturn
 
 ZERO = Decimal("0.00")
 
@@ -42,6 +44,10 @@ class IncomeTaxError(ValueError):
     """Raised when an income tax calculation cannot be fulfilled."""
 
 
+class IncomeTaxConflict(IncomeTaxError):
+    """Raised when the requested immutable snapshot already exists."""
+
+
 @dataclass(frozen=True, slots=True)
 class TaxAdjustment:
     code: str
@@ -49,14 +55,91 @@ class TaxAdjustment:
     amount: Decimal
 
 
+@dataclass(frozen=True, slots=True)
+class IncomeTaxPeriod:
+    fiscal_year_id: int | None
+    label: str
+    date_from: date
+    date_to: date
+
+
 def year_bounds(year: int | str) -> tuple[date, date, str]:
+    """Return calendar-year bounds for compatibility and validation helpers."""
+    parsed_year = _parse_year(year)
+    return date(parsed_year, 1, 1), date(parsed_year, 12, 31), str(parsed_year)
+
+
+def _parse_year(year: int | str | None) -> int:
     try:
         parsed_year = int(str(year).strip())
         if parsed_year < 1900 or parsed_year > 2999:
             raise ValueError
     except (TypeError, ValueError):
         raise IncomeTaxError("year must be a four digit calendar year.") from None
-    return date(parsed_year, 1, 1), date(parsed_year, 12, 31), str(parsed_year)
+    return parsed_year
+
+
+def resolve_income_tax_period(
+    *,
+    session: Session,
+    company: Company,
+    year: int | str | None,
+    fiscal_year_id: int | None = None,
+) -> IncomeTaxPeriod:
+    """Resolve the exact accounting period used as the tax calculation basis."""
+    if fiscal_year_id is not None:
+        fiscal_year = session.get(FiscalYear, fiscal_year_id)
+        if fiscal_year is None or fiscal_year.company_id != company.id:
+            raise IncomeTaxError("Wirtschaftsjahr nicht gefunden.")
+        return IncomeTaxPeriod(
+            fiscal_year_id=fiscal_year.id,
+            label=fiscal_year.label,
+            date_from=fiscal_year.start_date,
+            date_to=fiscal_year.end_date,
+        )
+
+    parsed_year = _parse_year(year)
+    fiscal_years = (
+        session.execute(
+            select(FiscalYear)
+            .where(
+                FiscalYear.company_id == company.id,
+                FiscalYear.end_date >= date(parsed_year, 1, 1),
+                FiscalYear.end_date <= date(parsed_year, 12, 31),
+            )
+            .order_by(FiscalYear.start_date)
+        )
+        .scalars()
+        .all()
+    )
+    if len(fiscal_years) > 1:
+        raise IncomeTaxError(
+            "Mehrere Wirtschaftsjahre enden im angegebenen Jahr; fiscal_year_id ist erforderlich."
+        )
+    if fiscal_years:
+        fiscal_year = fiscal_years[0]
+        return IncomeTaxPeriod(
+            fiscal_year_id=fiscal_year.id,
+            label=fiscal_year.label,
+            date_from=fiscal_year.start_date,
+            date_to=fiscal_year.end_date,
+        )
+
+    start_month = company.fiscal_year_start_month
+    if start_month == 1:
+        date_from, date_to, label = year_bounds(parsed_year)
+    else:
+        start_year = parsed_year - 1
+        end_month = start_month - 1
+        date_from = date(start_year, start_month, 1)
+        date_to = date(parsed_year, end_month, calendar.monthrange(parsed_year, end_month)[1])
+        label = f"{start_year}/{parsed_year}"
+    return IncomeTaxPeriod(
+        fiscal_year_id=None,
+        label=label,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 def normalize_adjustments(items: Iterable[dict[str, object]] | None) -> list[TaxAdjustment]:
@@ -77,9 +160,10 @@ def compute_income_tax_return(
     *,
     session: Session,
     company_id: int,
-    year: int | str,
+    year: int | str | None,
     tax_type: str,
     declaration_type: str = DECLARATION_TYPE_DECLARATION,
+    fiscal_year_id: int | None = None,
     additions: Iterable[dict[str, object]] | None = None,
     reductions: Iterable[dict[str, object]] | None = None,
     loss_carryforward: Decimal | str | int = ZERO,
@@ -89,13 +173,21 @@ def compute_income_tax_return(
 ) -> dict[str, object]:
     tax_type = _normalize_tax_type(tax_type)
     declaration_type = _normalize_declaration_type(declaration_type)
-    date_from, date_to, period_label = year_bounds(year)
     company = session.get(Company, company_id)
     if company is None:
         raise IncomeTaxError("Gesellschaft nicht gefunden.")
+    period = resolve_income_tax_period(
+        session=session,
+        company=company,
+        year=year,
+        fiscal_year_id=fiscal_year_id,
+    )
 
     income_statement = income_statement_for_company(
-        session=session, company_id=company_id, date_from=date_from, date_to=date_to
+        session=session,
+        company_id=company_id,
+        date_from=period.date_from,
+        date_to=period.date_to,
     )
     net_income = _money(income_statement["totals"]["net_income"])
     normalized_additions = normalize_adjustments(additions)
@@ -124,11 +216,12 @@ def compute_income_tax_return(
 
     return {
         "company_id": company_id,
+        "fiscal_year_id": period.fiscal_year_id,
         "tax_type": tax_type,
         "declaration_type": declaration_type,
-        "period_label": period_label,
-        "date_from": date_from.isoformat(),
-        "date_to": date_to.isoformat(),
+        "period_label": period.label,
+        "date_from": period.date_from.isoformat(),
+        "date_to": period.date_to.isoformat(),
         "basis": {
             "net_income": str(net_income),
             "additions": [_adjustment_payload(item) for item in normalized_additions],
@@ -149,10 +242,11 @@ def save_income_tax_return(
     *,
     session: Session,
     company_id: int,
-    year: int | str,
+    year: int | str | None,
     tax_type: str,
     declaration_type: str,
     changed_by: str,
+    fiscal_year_id: int | None = None,
     additions: Iterable[dict[str, object]] | None = None,
     reductions: Iterable[dict[str, object]] | None = None,
     loss_carryforward: Decimal | str | int = ZERO,
@@ -162,31 +256,37 @@ def save_income_tax_return(
 ) -> IncomeTaxReturn:
     tax_type = _normalize_tax_type(tax_type)
     declaration_type = _normalize_declaration_type(declaration_type)
-    date_from, date_to, period_label = year_bounds(year)
     company = session.get(Company, company_id)
     if company is None:
         raise IncomeTaxError("Gesellschaft nicht gefunden.")
+    period = resolve_income_tax_period(
+        session=session,
+        company=company,
+        year=year,
+        fiscal_year_id=fiscal_year_id,
+    )
 
     existing = session.execute(
         select(IncomeTaxReturn.id).where(
             IncomeTaxReturn.company_id == company_id,
             IncomeTaxReturn.tax_type == tax_type,
             IncomeTaxReturn.declaration_type == declaration_type,
-            IncomeTaxReturn.period_label == period_label,
+            IncomeTaxReturn.period_label == period.label,
         )
     ).first()
     if existing:
-        raise IncomeTaxError(
+        raise IncomeTaxConflict(
             f"Für {display_tax_type(tax_type)} {display_declaration_type(declaration_type)} "
-            f"{period_label} existiert bereits ein Snapshot."
+            f"{period.label} existiert bereits ein Snapshot."
         )
 
     calculation = compute_income_tax_return(
         session=session,
         company_id=company_id,
-        year=period_label,
+        year=year,
         tax_type=tax_type,
         declaration_type=declaration_type,
+        fiscal_year_id=period.fiscal_year_id,
         additions=additions,
         reductions=reductions,
         loss_carryforward=loss_carryforward,
@@ -197,34 +297,42 @@ def save_income_tax_return(
     item = IncomeTaxReturn(
         tenant_id=company.tenant_id,
         company_id=company.id,
+        fiscal_year_id=period.fiscal_year_id,
         tax_type=tax_type,
         declaration_type=declaration_type,
-        period_label=period_label,
-        date_from=date_from,
-        date_to=date_to,
+        period_label=period.label,
+        date_from=period.date_from,
+        date_to=period.date_to,
         calculation=calculation,
         status="erstellt",
         created_by=changed_by,
     )
     session.add(item)
-    session.flush()
-
-    log_audit_event(
-        session=session,
-        tenant_id=company.tenant_id,
-        company_id=company.id,
-        entity_type="income_tax_return",
-        entity_id=str(item.id),
-        action="created",
-        changed_by=changed_by,
-        payload={
-            "tax_type": tax_type,
-            "declaration_type": declaration_type,
-            "period_label": period_label,
-            "calculation": calculation,
-        },
-    )
-    session.commit()
+    try:
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="income_tax_return",
+            entity_id=str(item.id),
+            action="created",
+            changed_by=changed_by,
+            payload={
+                "tax_type": tax_type,
+                "declaration_type": declaration_type,
+                "period_label": period.label,
+                "fiscal_year_id": period.fiscal_year_id,
+                "calculation": calculation,
+            },
+        )
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise IncomeTaxConflict(
+            f"Für {display_tax_type(tax_type)} {display_declaration_type(declaration_type)} "
+            f"{period.label} existiert bereits ein Snapshot."
+        ) from exc
     session.refresh(item)
     return item
 

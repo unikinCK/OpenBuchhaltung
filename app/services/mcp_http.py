@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -27,6 +28,7 @@ from app.services.mcp_server import MCPServer, build_server_from_env
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 DEFAULT_PATH = "/mcp"
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 @dataclass(slots=True)
@@ -123,7 +125,22 @@ def origin_allowed(origin: str | None, allowed_origins: frozenset[str]) -> bool:
     return origin in allowed_origins
 
 
-def _make_handler(server: MCPServer, path: str, allowed_origins: frozenset[str]):
+def authorization_allowed(authorization: str | None, auth_token: str | None) -> bool:
+    """Validate the optional inbound bearer token for Streamable HTTP."""
+    if not auth_token:
+        return True
+    if not authorization or not authorization.startswith("Bearer "):
+        return False
+    supplied_token = authorization.removeprefix("Bearer ").strip()
+    return bool(supplied_token) and secrets.compare_digest(supplied_token, auth_token)
+
+
+def _make_handler(
+    server: MCPServer,
+    path: str,
+    allowed_origins: frozenset[str],
+    auth_token: str | None,
+):
     class MCPRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "OpenBuchhaltungMCP/1.0"
@@ -150,6 +167,9 @@ def _make_handler(server: MCPServer, path: str, allowed_origins: frozenset[str])
         def do_POST(self) -> None:  # noqa: N802 (stdlib-Namenskonvention)
             if self.path.split("?", 1)[0] != path:
                 self._reject(404, "Not found.")
+                return
+            if not authorization_allowed(self.headers.get("Authorization"), auth_token):
+                self._reject(401, "Unauthorized.")
                 return
             if not origin_allowed(self.headers.get("Origin"), allowed_origins):
                 self._reject(403, "Origin not allowed.")
@@ -182,8 +202,13 @@ def make_server(
     port: int = DEFAULT_PORT,
     path: str = DEFAULT_PATH,
     allowed_origins: frozenset[str] = frozenset(),
+    auth_token: str | None = None,
 ) -> ThreadingHTTPServer:
-    handler = _make_handler(server, path, allowed_origins)
+    if host not in LOOPBACK_HOSTS and not auth_token:
+        raise RuntimeError(
+            "MCP_HTTP_AUTH_TOKEN muss gesetzt sein, wenn MCP_HTTP_HOST nicht auf Loopback bindet."
+        )
+    handler = _make_handler(server, path, allowed_origins, auth_token)
     return ThreadingHTTPServer((host, port), handler)
 
 
@@ -199,8 +224,9 @@ def main() -> None:
     port = int(os.environ.get("MCP_HTTP_PORT", str(DEFAULT_PORT)))
     path = os.environ.get("MCP_HTTP_PATH", DEFAULT_PATH)
     allowed_origins = _allowed_origins_from_env(os.environ.get("MCP_HTTP_ALLOWED_ORIGINS"))
+    auth_token = (os.environ.get("MCP_HTTP_AUTH_TOKEN") or "").strip() or None
 
-    httpd = make_server(server, host, port, path, allowed_origins)
+    httpd = make_server(server, host, port, path, allowed_origins, auth_token)
     print(f"OpenBuchhaltung MCP-Server (Streamable HTTP) läuft auf http://{host}:{port}{path}")
     try:
         httpd.serve_forever()

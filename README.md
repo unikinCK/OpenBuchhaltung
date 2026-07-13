@@ -85,17 +85,21 @@ Wichtig zur Einordnung:
    ```bash
    pip install -r requirements-dev.txt
    ```
-3. Demo-Daten anlegen (Mandant, SKR03, Steuercodes, Benutzer, Beispielbuchungen)
+3. Lokale Entwicklungsumgebung ausdrücklich aktivieren
+   ```bash
+   export APP_ENV=development
+   ```
+4. Demo-Daten anlegen (Mandant, SKR03, Steuercodes, Benutzer, Beispielbuchungen)
    ```bash
    flask --app run.py seed-demo
    ```
-4. Anwendung starten
+5. Anwendung starten
    ```bash
    python run.py
    ```
    Die App läuft auf Port **8000** (macOS reserviert Port 5000 für AirPlay).
    Anderer Port: `PORT=5001 python run.py`
-5. Im Browser anmelden: http://localhost:8000
+6. Im Browser anmelden: http://localhost:8000
 
 Tests und Linting:
 ```bash
@@ -106,6 +110,17 @@ pytest
 Optional mit Containern:
 ```bash
 docker compose up --build
+```
+Der Entwicklungs-Stack bindet die Web-App nur an `127.0.0.1`, verwendet die
+enthaltene PostgreSQL-Datenbank und veröffentlicht PostgreSQL/Redis nicht auf dem
+Host. Für einen Produktionsstart steht die separate, fail-fast konfigurierte Datei
+`docker-compose.production.yml` zur Verfügung.
+
+Produktionsbeispiel (Secrets nicht ins Repository schreiben):
+```bash
+export SECRET_KEY="$(openssl rand -hex 32)"
+export POSTGRES_PASSWORD="ein-langes-zufaelliges-passwort"
+docker compose -f docker-compose.production.yml up --build -d
 ```
 
 ### Datenbank & Migrationen
@@ -496,17 +511,21 @@ antwortet er mit `application/json` oder als `text/event-stream` (SSE):
 export MCP_HTTP_HOST=127.0.0.1     # Standard 127.0.0.1
 export MCP_HTTP_PORT=8080          # Standard 8080
 export MCP_HTTP_PATH=/mcp          # Standard /mcp
+# Pflicht bei Bindung an Nicht-Loopback-Adressen:
+export MCP_HTTP_AUTH_TOKEN="ein-langes-zufaelliges-token"
 python -m app.services.mcp_http
 ```
 
 ```bash
 # JSON-Antwort
 curl -X POST http://127.0.0.1:8080/mcp \
+  -H 'Authorization: Bearer ein-langes-zufaelliges-token' \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # SSE-Stream
 curl -N -X POST http://127.0.0.1:8080/mcp \
+  -H 'Authorization: Bearer ein-langes-zufaelliges-token' \
   -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_companies","arguments":{}}}'
 ```
@@ -520,15 +539,18 @@ Origins erlaubt — sinnvoll hinter einem vertrauenswürdigen Proxy mit eigenem 
 
 ### Transport 2 in Docker Compose
 
-Der Streamable-HTTP-Transport ist als eigener `mcp`-Service in der `docker-compose.yml`
+Der Streamable-HTTP-Transport ist als opt-in `mcp`-Service in der `docker-compose.yml`
 enthalten. Er baut dasselbe Image, spricht die App über das Compose-Netz an
 (`OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1`) und ist auf dem Host unter
 **Port 8090** (nur an `127.0.0.1` gebunden) erreichbar:
 
 ```bash
-docker compose up mcp        # startet mcp inkl. Abhängigkeit app
+export MCP_HTTP_AUTH_TOKEN="ein-langes-zufaelliges-token"
+export OPENBUCHHALTUNG_API_TOKEN="obk_..."
+docker compose --profile mcp up mcp
 # Test vom Host aus:
 curl -X POST http://localhost:8090/mcp \
+  -H 'Authorization: Bearer ein-langes-zufaelliges-token' \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
@@ -566,16 +588,18 @@ Enthalten als opt-in `caddy`-Service (Profil `proxy`) samt `Caddyfile`. Domain p
 
 ```bash
 export MCP_DOMAIN=mcp.example.com     # A/AAAA-Record muss auf den Server zeigen
+export MCP_HTTP_AUTH_TOKEN="ein-langes-zufaelliges-token"
+export OPENBUCHHALTUNG_API_TOKEN="obk_..."
 docker compose --profile proxy up -d caddy
 ```
 
 Caddy holt automatisch ein Let's-Encrypt-Zertifikat und proxyt auf `mcp:8090`; der
 `Origin`-Header wird dabei entfernt. Connector-URL: `https://<MCP_DOMAIN>/mcp`.
 
-> **Sicherheit:** Der MCP-Endpunkt selbst hat keine Authentifizierung — wer die URL
-> erreicht, kann Tools aufrufen (u. a. Buchungen anlegen). Zugriff daher auf das Tailnet
-> bzw. bekannte Client-IPs beschränken (siehe Kommentare im `Caddyfile`) und die
-> App-API zusätzlich per `API_REQUIRE_AUTH=1` + Token absichern.
+> **Sicherheit:** Der MCP-Endpunkt verlangt bei Netzwerkbindung ein eigenes
+> `MCP_HTTP_AUTH_TOKEN`. Dieses Eingangstoken ist vom Backend-Token
+> `OPENBUCHHALTUNG_API_TOKEN` zu trennen. Zusätzlich sollten öffentliche Deployments
+> auf Tailnet/VPN bzw. bekannte Client-IPs beschränkt bleiben.
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
 hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.

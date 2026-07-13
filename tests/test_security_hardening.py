@@ -78,9 +78,51 @@ def test_api_requires_auth_by_default_outside_testing(tmp_path: Path) -> None:
 def test_env_default_is_secure(tmp_path: Path, monkeypatch) -> None:
     """Ohne TESTING und ohne API_REQUIRE_AUTH-Env ist die API zu."""
     monkeypatch.delenv("API_REQUIRE_AUTH", raising=False)
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path / 'env.db'}")
     app = create_app()
     assert app.config["API_REQUIRE_AUTH"] is True
+
+
+def test_production_start_requires_secret_key(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        create_app()
+
+
+def test_inactive_user_loses_existing_browser_session(tmp_path: Path) -> None:
+    app = _create_app(tmp_path)
+    user_id = _seed_user(app)
+    client = app.test_client()
+    _login(client)
+    assert client.get("/").status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        user = session.get(User, user_id)
+        user.is_active = False
+        session.commit()
+
+    response = client.get("/")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/auth/login?next=/")
+
+
+def test_role_changes_apply_to_existing_browser_session(tmp_path: Path) -> None:
+    app = _create_app(tmp_path)
+    user_id = _seed_user(app, role="Admin")
+    client = app.test_client()
+    _login(client)
+
+    with app.extensions["db_session_factory"]() as session:
+        user = session.get(User, user_id)
+        user.role = "Pruefer"
+        session.commit()
+
+    response = client.post("/tenants", data={"tenant_name": "X", "company_name": "Y"})
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
 
 
 def test_logged_in_session_gets_read_only_api_access(tmp_path: Path) -> None:
