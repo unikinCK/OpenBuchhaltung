@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app import create_app
 from app.auth import hash_password
+from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError
 from domain.models import AuditLog, Company, Document, FiscalYear, Period, PeriodLock, Tenant, User
 
@@ -162,16 +163,15 @@ def test_audit_log_page_lists_entries(tmp_path):
         company = Company(name="Audit GmbH", currency_code="EUR", tenant=tenant)
         session.add_all([tenant, company])
         session.flush()
-        session.add(
-            AuditLog(
-                tenant_id=tenant.id,
-                company_id=company.id,
-                entity_type="journal_entry",
-                entity_id="42",
-                action="created",
-                payload={"posting_number": "2026-0001"},
-                changed_by="pytest",
-            )
+        log_audit_event(
+            session=session,
+            tenant_id=tenant.id,
+            company_id=company.id,
+            entity_type="journal_entry",
+            entity_id="42",
+            action="created",
+            payload={"posting_number": "2026-0001"},
+            changed_by="pytest",
         )
         session.commit()
 

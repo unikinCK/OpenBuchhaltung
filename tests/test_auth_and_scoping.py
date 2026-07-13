@@ -6,7 +6,8 @@ from sqlalchemy import select
 
 from app import create_app
 from app.auth import hash_api_token, hash_password
-from domain.models import Account, AuditLog, Company, JournalEntry, TaxCode, Tenant, User
+from app.services.audit_log import log_audit_event
+from domain.models import Account, Company, JournalEntry, TaxCode, Tenant, User
 
 
 def _create_test_app(tmp_path: Path, **extra_config):
@@ -150,25 +151,25 @@ def test_api_user_token_scopes_audit_log_to_tenant(tmp_path):
         user.api_token_last4 = token[-4:]
         company_a = session.get(Company, company_a_id)
         company_b = session.get(Company, company_b_id)
-        session.add_all(
-            [
-                AuditLog(
-                    tenant_id=company_a.tenant_id,
-                    company_id=company_a.id,
-                    entity_type="journal_entry",
-                    entity_id="1",
-                    action="created",
-                    changed_by="a",
-                ),
-                AuditLog(
-                    tenant_id=company_b.tenant_id,
-                    company_id=company_b.id,
-                    entity_type="journal_entry",
-                    entity_id="2",
-                    action="created",
-                    changed_by="b",
-                ),
-            ]
+        tenant_a_id = company_a.tenant_id
+        tenant_b_id = company_b.tenant_id
+        log_audit_event(
+            session=session,
+            tenant_id=company_a.tenant_id,
+            company_id=company_a.id,
+            entity_type="journal_entry",
+            entity_id="1",
+            action="created",
+            changed_by="a",
+        )
+        log_audit_event(
+            session=session,
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            entity_type="journal_entry",
+            entity_id="2",
+            action="created",
+            changed_by="b",
         )
         session.commit()
 
@@ -178,11 +179,25 @@ def test_api_user_token_scopes_audit_log_to_tenant(tmp_path):
     payload = response.get_json()
     assert [entry["entity_id"] for entry in payload["entries"]] == ["1"]
 
+    integrity = client.get(
+        "/api/v1/audit-log/integrity",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert integrity.status_code == 200
+    assert integrity.get_json()["checked_tenants"] == 1
+    assert integrity.get_json()["tenants"][0]["tenant_id"] == tenant_a_id
+
     foreign_filter = client.get(
         f"/api/v1/audit-log?company_id={company_b_id}",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert foreign_filter.status_code == 404
+
+    foreign_integrity = client.get(
+        f"/api/v1/audit-log/integrity?tenant_id={tenant_b_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert foreign_integrity.status_code == 403
 
 
 def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):

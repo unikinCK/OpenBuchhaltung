@@ -7,7 +7,11 @@ from flask import jsonify, request
 from app.api.blueprint import api_bp
 from app.api.helpers import api_scoped_company, get_session_factory
 from app.auth import current_api_tenant_id
-from app.services.audit_log import list_audit_log_entries, serialize_audit_log_entry
+from app.services.audit_log import (
+    list_audit_log_entries,
+    serialize_audit_log_entry,
+    verify_audit_log_integrity,
+)
 
 
 @api_bp.get("/audit-log")
@@ -50,3 +54,23 @@ def list_audit_log_via_api():
             ),
             200,
         )
+
+
+@api_bp.get("/audit-log/integrity")
+def verify_audit_log_integrity_via_api():
+    tenant_scope = current_api_tenant_id()
+    requested_tenant_id = request.args.get("tenant_id", type=int)
+    if (
+        tenant_scope is not None
+        and requested_tenant_id is not None
+        and requested_tenant_id != tenant_scope
+    ):
+        return jsonify({"error": "Forbidden."}), 403
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        result = verify_audit_log_integrity(
+            session=session,
+            tenant_id=tenant_scope if tenant_scope is not None else requested_tenant_id,
+        )
+    return jsonify(result.as_dict()), 200

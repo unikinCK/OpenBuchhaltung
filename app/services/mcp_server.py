@@ -1069,6 +1069,26 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="verify_audit_log_integrity",
+        description=(
+            "Prüft Sequenzen, Vorgänger-Hashes und Inhalts-Hashes der Audit-Kette. "
+            "Tenant-gebundene Tokens werden automatisch auf ihren Mandanten begrenzt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tenant_id": {
+                    "type": "integer",
+                    "description": "Optionale Mandanten-ID für globale Zugriffe.",
+                },
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/audit-log/integrity",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_vat_return",
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "

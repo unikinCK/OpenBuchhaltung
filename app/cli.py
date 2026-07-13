@@ -18,6 +18,7 @@ from app.auth import (
     hash_password,
 )
 from app.services.account_chart_import import import_account_chart_file
+from app.services.audit_log import verify_audit_log_integrity
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -44,6 +45,30 @@ DEMO_USERS = (
 
 
 def register_cli_commands(app: Flask) -> None:
+    @app.cli.command("verify-audit-log")
+    @click.option("--tenant-id", type=int, default=None, help="Optionaler einzelner Mandant")
+    def verify_audit_log(tenant_id: int | None):
+        """Prüft die kryptografische Integrität der Audit-Hashketten."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            result = verify_audit_log_integrity(session=session, tenant_id=tenant_id)
+
+        if result.valid:
+            click.echo(
+                "Audit-Hashkette intakt: "
+                f"{result.checked_entries} Einträge in "
+                f"{result.checked_tenants} Mandanten geprüft."
+            )
+            return
+
+        for tenant in result.tenants:
+            for issue in tenant.issues:
+                click.echo(
+                    f"Mandant {tenant.tenant_id}, Sequenz "
+                    f"{issue.sequence_number or '-'}: {issue.code} – {issue.message}"
+                )
+        raise click.ClickException("Audit-Hashkette ist nicht intakt.")
+
     @app.cli.command("import-kontenrahmen")
     @click.option("--company-id", required=True, type=int, help="ID der Zielgesellschaft")
     @click.option(

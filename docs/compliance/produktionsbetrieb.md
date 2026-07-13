@@ -130,6 +130,15 @@ Der Betrieb muss sicherstellen:
 - Integritaetspruefungen fuer Belege, Audit-Log und Exportpakete werden regelmaessig ausgefuehrt.
 - Auffaelligkeiten werden dokumentiert und eskaliert.
 
+Die Audit-Hashkette sollte nach Updates und regelmaessig im Betrieb geprueft werden:
+
+```bash
+flask --app run.py verify-audit-log
+```
+
+Der Befehl beendet sich bei erkannten Sequenz-, Verknuepfungs- oder
+Inhaltsabweichungen mit einem Fehlerstatus und eignet sich damit fuer Monitoring.
+
 ## 10. Export und Weitergabe an Dritte
 
 Bei Exporten an Steuerberater, Wirtschaftspruefer oder Betriebspruefer:

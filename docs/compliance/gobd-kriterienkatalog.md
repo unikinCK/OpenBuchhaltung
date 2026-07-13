@@ -34,8 +34,8 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | AUD-002 | Kontextdaten | Audit-Eintraege enthalten Benutzer, Rolle, Mandant, Gesellschaft, Objekt, Aktion, Zeitpunkt, Quelle und Softwareversion. | Datenmodell/Test | offen |
 | AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Datenmodell/Test | offen |
 | AUD-004 | Append-only | Audit-Eintraege duerfen nicht geaendert oder geloescht werden. | DB-Trigger/Test | umgesetzt |
-| AUD-005 | Hashkette | Audit-Eintraege werden kryptografisch verkettet, um nachtraegliche Manipulationen erkennbar zu machen. | Integritaetstest | offen |
-| AUD-006 | Integritaetspruefung | System kann Hashketten und Belegpruefsummen pruefen und Abweichungen melden. | CLI/API/UI-Pruefung | offen |
+| AUD-005 | Hashkette | Audit-Eintraege werden kryptografisch verkettet, um nachtraegliche Manipulationen erkennbar zu machen. | Integritaetstest | umgesetzt |
+| AUD-006 | Integritaetspruefung | System kann Hashketten und Belegpruefsummen pruefen und Abweichungen melden. | CLI/API/UI/MCP-Pruefung | umgesetzt |
 
 ## 4. Belegverwaltung und Archiv
 
@@ -95,7 +95,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 ## 9. Priorisierte verbleibende Luecken
 
-1. Kryptografische Hashketten fuer Buchungen und Audit-Log sowie Integritaetspruefung.
+1. Erweiterter kryptografischer Integritaetsnachweis fuer festgeschriebene Buchungen und Belege.
 2. Vollstaendiger Prueferexport mit Feldbeschreibung und reproduzierbarem Nachweis.
 3. Verfahrensdokumentation und Betriebshandbuch.
 4. Traceability von Anforderungen zu Tests und Pull Requests.
