@@ -7,9 +7,10 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
+from app.services.compliance_integrity import seal_journal_entry
 from domain.models import (
     Account,
     Company,
@@ -610,7 +611,12 @@ def finalize_journal_entry(
     Korrekturen an festgeschriebenen Buchungen sind nur noch über
     ``reverse_journal_entry`` (Stornobuchung) möglich.
     """
-    entry = session.get(JournalEntry, journal_entry_id)
+    entry = session.execute(
+        select(JournalEntry)
+        .where(JournalEntry.id == journal_entry_id)
+        .options(selectinload(JournalEntry.lines))
+        .with_for_update()
+    ).scalar_one_or_none()
     if entry is None:
         raise JournalEntryCreationError("Buchung nicht gefunden.")
     if entry.is_finalized:
@@ -618,9 +624,11 @@ def finalize_journal_entry(
             f"Buchung {entry.posting_number} ist bereits festgeschrieben."
         )
 
-    entry.is_finalized = True
-    entry.finalized_at = datetime.now(timezone.utc)
-    entry.finalized_by = changed_by
+    seal_journal_entry(
+        entry,
+        finalized_at=datetime.now(timezone.utc),
+        finalized_by=changed_by,
+    )
 
     log_audit_event(
         session=session,
@@ -656,7 +664,9 @@ def finalize_journal_entries_until(
                 JournalEntry.is_finalized.is_(False),
                 JournalEntry.entry_date <= up_to_date,
             )
+            .options(selectinload(JournalEntry.lines))
             .order_by(JournalEntry.entry_date, JournalEntry.id)
+            .with_for_update()
         )
         .scalars()
         .all()
@@ -666,9 +676,7 @@ def finalize_journal_entries_until(
 
     finalized_at = datetime.now(timezone.utc)
     for entry in entries:
-        entry.is_finalized = True
-        entry.finalized_at = finalized_at
-        entry.finalized_by = changed_by
+        seal_journal_entry(entry, finalized_at=finalized_at, finalized_by=changed_by)
         log_audit_event(
             session=session,
             tenant_id=entry.tenant_id,
@@ -751,9 +759,11 @@ def reverse_journal_entry(
     )
 
     # Stornobuchungen sind Korrekturbelege und werden sofort festgeschrieben.
-    reversal.is_finalized = True
-    reversal.finalized_at = datetime.now(timezone.utc)
-    reversal.finalized_by = changed_by
+    seal_journal_entry(
+        reversal,
+        finalized_at=datetime.now(timezone.utc),
+        finalized_by=changed_by,
+    )
 
     log_audit_event(
         session=session,

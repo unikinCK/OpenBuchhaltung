@@ -49,6 +49,8 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
         "is_finalized": entry.is_finalized,
         "finalized_at": entry.finalized_at.isoformat() if entry.finalized_at else None,
         "finalized_by": entry.finalized_by,
+        "content_hash_version": entry.content_hash_version,
+        "content_hash": entry.content_hash,
         "reversal_of_id": entry.reversal_of_id,
         "created_at": entry.created_at.isoformat(),
         "lines": [

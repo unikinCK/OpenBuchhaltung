@@ -131,6 +131,9 @@ def test_finalize_sets_flags_and_audit(session: Session) -> None:
     assert finalized.is_finalized is True
     assert finalized.finalized_by == "pytest"
     assert finalized.finalized_at is not None
+    assert finalized.content_hash_version == 1
+    assert finalized.content_hash is not None
+    assert len(finalized.content_hash) == 64
 
     audit = session.execute(
         select(AuditLog).where(
@@ -168,6 +171,9 @@ def test_bulk_finalize_until_date(session: Session) -> None:
     assert early.is_finalized is True
     assert mid.is_finalized is True
     assert late.is_finalized is False
+    assert early.content_hash is not None
+    assert mid.content_hash is not None
+    assert late.content_hash is None
 
     # Zweiter Lauf findet nichts mehr.
     assert (
@@ -196,6 +202,8 @@ def test_reverse_creates_mirrored_finalized_entry(session: Session) -> None:
     assert reversal.reversal_of_id == entry.id
     assert reversal.source == "storno"
     assert reversal.is_finalized is True
+    assert reversal.content_hash_version == 1
+    assert reversal.content_hash is not None
     assert entry.posting_number in reversal.description
 
     original_lines = session.execute(

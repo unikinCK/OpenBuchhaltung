@@ -187,6 +187,14 @@ def test_api_user_token_scopes_audit_log_to_tenant(tmp_path):
     assert integrity.get_json()["checked_tenants"] == 1
     assert integrity.get_json()["tenants"][0]["tenant_id"] == tenant_a_id
 
+    compliance_integrity = client.get(
+        "/api/v1/integrity",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert compliance_integrity.status_code == 200
+    assert compliance_integrity.get_json()["audit"]["checked_tenants"] == 1
+    assert compliance_integrity.get_json()["audit"]["tenants"][0]["tenant_id"] == tenant_a_id
+
     foreign_filter = client.get(
         f"/api/v1/audit-log?company_id={company_b_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -198,6 +206,18 @@ def test_api_user_token_scopes_audit_log_to_tenant(tmp_path):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert foreign_integrity.status_code == 403
+
+    foreign_compliance_company = client.get(
+        f"/api/v1/integrity?company_id={company_b_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert foreign_compliance_company.status_code == 404
+
+    foreign_compliance_tenant = client.get(
+        f"/api/v1/integrity?tenant_id={tenant_b_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert foreign_compliance_tenant.status_code == 403
 
 
 def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):

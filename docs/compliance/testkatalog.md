@@ -44,6 +44,9 @@ Jeder Testfall sollte dokumentieren:
 | T-FIN-008 | Storno einer Stornobuchung | Aktion wird verhindert | automatisiert | hoch |
 | T-FIN-009 | Storno in gesperrter Periode | Aktion wird verhindert | automatisiert | hoch |
 | T-FIN-010 | Festschreibelauf bis Datum | Alle passenden Buchungen werden festgeschrieben, spaetere bleiben offen | automatisiert | hoch |
+| T-FIN-011 | Inhaltshash bei Festschreibung | Kopfdaten und Zeilen werden deterministisch per SHA-256 versiegelt | automatisiert | hoch |
+| T-FIN-012 | Privilegierte Buchungsmanipulation | Gemeinsame Integritaetspruefung meldet eine Hashabweichung | automatisiert | hoch |
+| T-FIN-013 | Migration festgeschriebener Altbestaende | Migration erzeugt gueltige Inhaltshashes und erhaelt DB-Schutz | automatisiert | hoch |
 
 ## 4. Perioden und Jahresabschluss
 

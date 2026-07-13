@@ -142,7 +142,7 @@ Manuell migrieren (z. B. für eine externe DB):
 DATABASE_URL="sqlite+pysqlite:///$(pwd)/instance/openbuchhaltung.db" alembic upgrade head
 ```
 
-### Audit-Integrität
+### Compliance-Integrität
 
 Audit-Einträge werden je Mandant über Sequenznummern und SHA-256-Hashes
 kryptografisch verkettet. Die Prüfung ist in der Audit-Ansicht, über
@@ -153,6 +153,20 @@ kryptografisch verkettet. Die Prüfung ist in der Audit-Ansicht, über
 flask --app run.py verify-audit-log
 flask --app run.py verify-audit-log --tenant-id 1
 ```
+
+Festgeschriebene Buchungen erhalten zusätzlich einen reproduzierbaren SHA-256-
+Inhaltshash über Kopfdaten und sämtliche Buchungszeilen. Die gemeinsame Prüfung
+kontrolliert diese Buchungshashes, die gespeicherten Belegdateien und die
+Audit-Hashkette. Sie ist über `GET /api/v1/integrity`, das MCP-Tool
+`verify_compliance_integrity`, die Audit-Ansicht und per CLI verfügbar:
+
+```bash
+flask --app run.py verify-integrity
+flask --app run.py verify-integrity --tenant-id 1 --company-id 1
+```
+
+Der Prüferexport nimmt das Ergebnis dieser gemeinsamen Prüfung in sein Manifest
+auf und exportiert die Hashfelder der Journalbuchungen mit.
 
 Die Hashkette macht nachträgliche Inhaltsänderungen, Löschungen und gebrochene
 Verknüpfungen erkennbar. Ein atomar gepflegter Kettenanker je Mandant erkennt

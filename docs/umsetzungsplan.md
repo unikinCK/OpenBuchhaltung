@@ -349,6 +349,12 @@ UI, REST-API und MCP angeboten und gepflegt.
       sind gegen Forks eindeutig, ein atomarer Mandantenanker erkennt gekürzte Ketten.
       Migration verkettet Altbestände. Prüfung und Manipulationsdiagnose stehen in UI,
       REST-API, MCP und CLI zur Verfügung.)*
+- [x] Buchungsversiegelung & gemeinsame Integritätsprüfung *(Compliance-Härtung:
+      Festgeschriebene Buchungen erhalten einen versionierten, deterministischen
+      SHA-256-Inhaltshash über Kopfdaten und Zeilen; Migration versiegelt Altbestände.
+      Eine gemeinsame Prüfung kontrolliert Buchungshashes, Belegdateien und
+      Audit-Hashketten über UI, REST-API, MCP und CLI. Der Prüferexport enthält
+      Hashfelder und Prüfergebnis im Manifest.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

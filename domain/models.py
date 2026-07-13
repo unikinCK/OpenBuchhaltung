@@ -262,6 +262,14 @@ class JournalEntry(Base):
         UniqueConstraint("company_id", "posting_number", name="uq_journal_entry_company_no"),
         # Eine Buchung darf höchstens einmal storniert werden.
         UniqueConstraint("reversal_of_id", name="uq_journal_entry_reversal_of"),
+        CheckConstraint(
+            "((is_finalized = false AND content_hash IS NULL "
+            "AND content_hash_version IS NULL) OR "
+            "(is_finalized = true AND content_hash IS NOT NULL "
+            "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
+            "AND content_hash_version = 1))",
+            name="ck_journal_entry_finalized_content_hash",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -286,6 +294,8 @@ class JournalEntry(Base):
     is_finalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finalized_by: Mapped[str | None] = mapped_column(String(120))
+    content_hash_version: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
     # Gesetzt auf der Stornobuchung: verweist auf die stornierte Originalbuchung.
     reversal_of_id: Mapped[int | None] = mapped_column(
         ForeignKey("journal_entry.id", ondelete="RESTRICT")

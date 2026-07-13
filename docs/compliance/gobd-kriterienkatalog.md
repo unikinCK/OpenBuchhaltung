@@ -11,7 +11,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | GOBD-003 | Zeitgerechte Erfassung | Belege und Buchungen muessen mit Erfassungszeitpunkt und Belegdatum getrennt dokumentiert werden. | Datenmodell, Audit-Log, UI/API-Tests | offen |
 | GOBD-004 | Ordnung | Buchungen, Belege, Konten, Perioden und Abschluesse muessen eindeutig sortierbar, auffindbar und exportierbar sein. | Exportpaket, Datenmodellbeschreibung | teilweise |
 | GOBD-005 | Nachvollziehbarkeit | Jeder Vorgang muss vom Beleg zur Buchung und von der Buchung zum Beleg nachvollziehbar sein. | Beleg-Buchungs-Link, Audit-Log, Prueferexport | teilweise |
-| GOBD-006 | Unveraenderbarkeit | Festgeschriebene Buchungen und steuerlich relevante Dokumente duerfen nicht unbemerkt veraendert oder geloescht werden koennen. | DB-Trigger, Hashketten, Integritaetspruefung | teilweise |
+| GOBD-006 | Unveraenderbarkeit | Festgeschriebene Buchungen und steuerlich relevante Dokumente duerfen nicht unbemerkt veraendert oder geloescht werden koennen. | DB-Trigger, Buchungshashes, Belegpruefsummen, Audit-Hashkette, gemeinsame Integritaetspruefung | teilweise |
 
 ## 2. Buchungen, Festschreibung und Storno
 
@@ -25,6 +25,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | BOOK-006 | Periodensperren | Geschlossene Perioden duerfen fuer Schreibrollen nicht mehr bebuchbar sein. | Perioden-Test | teilweise |
 | BOOK-007 | Abschlussjahr sperren | Nach Jahresabschluss darf nicht mehr in das Jahr gebucht werden. | Abschluss-Test | teilweise |
 | BOOK-008 | Buchungsnummern | Buchungen muessen eindeutig identifizierbar und chronologisch auswertbar sein. | Datenmodell/Test | offen |
+| BOOK-009 | Kryptografische Versiegelung | Festgeschriebene Buchungen erhalten einen reproduzierbaren Inhaltshash ueber Kopfdaten und Zeilen. | Migration, Integritaets- und Manipulationstest | umgesetzt |
 
 ## 3. Audit-Log und Manipulationserkennung
 
@@ -42,11 +43,11 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | ID | Anforderung | Soll-Umsetzung in OpenBuchhaltung | Nachweis | Status |
 |---|---|---|---|---|
 | DOC-001 | Originalerhalt | Hochgeladene Belege werden unveraendert gespeichert. | Hashvergleich | teilweise |
-| DOC-002 | Beleghash | Beim Eingang wird ein kryptografischer Hash der Originaldatei gespeichert. | Unit-Test | offen |
-| DOC-003 | Versionierung | Ersetzungen erfolgen nur als neue Version, niemals als stille Ueberschreibung. | Belegversionstest | offen |
+| DOC-002 | Beleghash | Beim Eingang wird ein kryptografischer Hash der Originaldatei gespeichert. | Unit- und API-Test | umgesetzt |
+| DOC-003 | Versionierung | Ersetzungen erfolgen nur als neue Version, niemals als stille Ueberschreibung. | Belegversionstest | umgesetzt |
 | DOC-004 | Verknuepfung | Belege koennen eindeutig mit Buchungen, OPOS, Anlagen oder Bankumsaetzen verknuepft werden. | Integrationstest | teilweise |
-| DOC-005 | Loeschschutz | Steuerlich relevante Belege duerfen nach Zuordnung/Festschreibung nicht geloescht werden. | Negativtest | offen |
-| DOC-006 | Belegindex | Ein Exportindex enthaelt Dateiname, Hash, Uploadzeit, Belegdatum, Verknuepfung und Version. | Exporttest | offen |
+| DOC-005 | Loeschschutz | Steuerlich relevante Belege duerfen nach Zuordnung/Festschreibung nicht geloescht werden. | API-Negativtest | umgesetzt |
+| DOC-006 | Belegindex | Ein Exportindex enthaelt Dateiname, Hash, Uploadzeit, Belegdatum, Verknuepfung und Version. | Exporttest | teilweise |
 | DOC-007 | Aufbewahrung | Aufbewahrungsfristen und Sperren sind technisch abbildbar. | Fachkonzept/Test | offen |
 
 ## 5. Export und Datenzugriff
@@ -95,8 +96,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 ## 9. Priorisierte verbleibende Luecken
 
-1. Erweiterter kryptografischer Integritaetsnachweis fuer festgeschriebene Buchungen und Belege.
-2. Vollstaendiger Prueferexport mit Feldbeschreibung und reproduzierbarem Nachweis.
-3. Verfahrensdokumentation und Betriebshandbuch.
-4. Traceability von Anforderungen zu Tests und Pull Requests.
-5. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.
+1. Vollstaendiger Prueferexport mit Feldbeschreibung und reproduzierbarem Nachweis.
+2. Verfahrensdokumentation und Betriebshandbuch.
+3. Traceability von Anforderungen zu Tests und Pull Requests.
+4. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.
