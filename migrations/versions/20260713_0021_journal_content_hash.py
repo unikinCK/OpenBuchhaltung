@@ -257,6 +257,67 @@ def _drop_hash_validation(dialect: str) -> None:
         raise RuntimeError(f"Unsupported database dialect for journal hashes: {dialect}")
 
 
+def _drop_sqlite_journal_guards_for_rebuild() -> None:
+    for trigger_name in (
+        "obk_journal_entry_finalized_no_update",
+        "obk_journal_entry_finalized_no_delete",
+        "obk_journal_entry_line_finalized_no_insert",
+        "obk_journal_entry_line_finalized_no_update",
+        "obk_journal_entry_line_finalized_no_delete",
+    ):
+        op.execute(sa.text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+
+
+def _restore_sqlite_journal_guards_after_rebuild() -> None:
+    _create_immutable_update_trigger("sqlite")
+    statements = (
+        """
+        CREATE TRIGGER obk_journal_entry_finalized_no_delete
+        BEFORE DELETE ON journal_entry
+        WHEN OLD.is_finalized = 1
+        BEGIN
+            SELECT RAISE(ABORT, 'finalized journal entries are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER obk_journal_entry_line_finalized_no_insert
+        BEFORE INSERT ON journal_entry_line
+        WHEN EXISTS (
+            SELECT 1 FROM journal_entry
+            WHERE id = NEW.journal_entry_id AND is_finalized = 1
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'lines of finalized journal entries are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER obk_journal_entry_line_finalized_no_update
+        BEFORE UPDATE ON journal_entry_line
+        WHEN EXISTS (
+            SELECT 1 FROM journal_entry
+            WHERE id IN (OLD.journal_entry_id, NEW.journal_entry_id)
+              AND is_finalized = 1
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'lines of finalized journal entries are immutable');
+        END
+        """,
+        """
+        CREATE TRIGGER obk_journal_entry_line_finalized_no_delete
+        BEFORE DELETE ON journal_entry_line
+        WHEN EXISTS (
+            SELECT 1 FROM journal_entry
+            WHERE id = OLD.journal_entry_id AND is_finalized = 1
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'lines of finalized journal entries are immutable');
+        END
+        """,
+    )
+    for statement in statements:
+        op.execute(sa.text(statement))
+
+
 def upgrade() -> None:
     dialect = op.get_bind().dialect.name
     with op.batch_alter_table("journal_entry") as batch_op:
@@ -272,24 +333,12 @@ def downgrade() -> None:
     _drop_hash_validation(dialect)
     if dialect == "sqlite":
         # SQLite rebuilds the table while dropping columns, which also removes
-        # triggers attached directly to journal_entry. Restore the guards from
-        # revision 0019 after the rebuild.
-        op.execute(sa.text("DROP TRIGGER IF EXISTS obk_journal_entry_finalized_no_update"))
-        op.execute(sa.text("DROP TRIGGER IF EXISTS obk_journal_entry_finalized_no_delete"))
+        # triggers attached directly to journal_entry. Newer SQLite versions
+        # also reject the temporary missing table while line triggers still
+        # reference it, so all journal guards must be restored afterwards.
+        _drop_sqlite_journal_guards_for_rebuild()
     with op.batch_alter_table("journal_entry") as batch_op:
         batch_op.drop_column("content_hash")
         batch_op.drop_column("content_hash_version")
     if dialect == "sqlite":
-        _create_immutable_update_trigger(dialect)
-        op.execute(
-            sa.text(
-                """
-                CREATE TRIGGER obk_journal_entry_finalized_no_delete
-                BEFORE DELETE ON journal_entry
-                WHEN OLD.is_finalized = 1
-                BEGIN
-                    SELECT RAISE(ABORT, 'finalized journal entries are immutable');
-                END
-                """
-            )
-        )
+        _restore_sqlite_journal_guards_after_rebuild()
