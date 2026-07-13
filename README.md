@@ -166,7 +166,17 @@ flask --app run.py verify-integrity --tenant-id 1 --company-id 1
 ```
 
 Der Prüferexport nimmt das Ergebnis dieser gemeinsamen Prüfung in sein Manifest
-auf und exportiert die Hashfelder der Journalbuchungen mit.
+auf und exportiert die Hashfelder der Journalbuchungen mit. Formatversion 2
+enthält zusätzlich einen vollständigen Feldkatalog, Benutzer/Rollen ohne
+Authentisierungsgeheimnisse und einen stabilen SHA-256-Gesamtnachweis über den
+Datenbestand. Ein heruntergeladenes Paket lässt sich lokal prüfen:
+
+```bash
+flask --app run.py verify-audit-package prueferexport-company-1-2026-07-13.zip
+```
+
+Die technische Datenbeschreibung steht unter
+[`docs/compliance/prueferexport-datenbeschreibung.md`](docs/compliance/prueferexport-datenbeschreibung.md).
 
 Die Hashkette macht nachträgliche Inhaltsänderungen, Löschungen und gebrochene
 Verknüpfungen erkennbar. Ein atomar gepflegter Kettenanker je Mandant erkennt

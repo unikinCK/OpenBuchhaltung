@@ -18,6 +18,7 @@ from app.auth import (
     hash_password,
 )
 from app.services.account_chart_import import import_account_chart_file
+from app.services.audit_export import verify_audit_export_package
 from app.services.audit_log import verify_audit_log_integrity
 from app.services.compliance_integrity import verify_compliance_integrity
 from app.services.journal_entries import (
@@ -46,6 +47,26 @@ DEMO_USERS = (
 
 
 def register_cli_commands(app: Flask) -> None:
+    @app.cli.command("verify-audit-package")
+    @click.argument(
+        "package_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    )
+    def verify_audit_package(package_path: Path):
+        """Prüft Dateihashes und Gesamtnachweis eines Prüferexport-ZIPs."""
+        result = verify_audit_export_package(package_path.read_bytes())
+        click.echo(f"Paket-SHA-256: {result.package_sha256}")
+        click.echo(
+            f"Geprüft: {result.files_checked} Dateien; "
+            f"Datenbestand-SHA-256: {result.dataset_sha256 or '-'}"
+        )
+        if result.valid:
+            click.echo("Prüferexport ist intakt.")
+            return
+        for issue in result.issues:
+            click.echo(f"{issue.path or '-'}: {issue.code} – {issue.message}")
+        raise click.ClickException("Prüferexport ist nicht intakt.")
+
     @app.cli.command("verify-integrity")
     @click.option("--tenant-id", type=int, default=None, help="Optionaler einzelner Mandant")
     @click.option("--company-id", type=int, default=None, help="Optionale Gesellschaft")

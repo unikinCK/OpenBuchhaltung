@@ -109,6 +109,10 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-006 | Export mit Zeitraum | Nur relevante Daten plus notwendige Stammdaten enthalten | automatisiert | mittel |
 | T-EXP-007 | Bank-CSV importieren | Umsaetze werden korrekt gelesen und dedupliziert | automatisiert | mittel |
 | T-EXP-008 | E-Rechnung importieren | Rechnungsdaten werden gelesen und korrekt verbucht | automatisiert | mittel |
+| T-EXP-009 | Feldkatalog im Prueferexport | Alle exportierten Tabellen und Felder sind technisch beschrieben | automatisiert | hoch |
+| T-EXP-010 | Export reproduzieren | Identischer Datenstand ergibt denselben Datenbestands-Hash | automatisiert | hoch |
+| T-EXP-011 | Exportdatei manipulieren | Paketpruefung meldet Datei- und Datenbestands-Hashabweichung | automatisiert | hoch |
+| T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 

@@ -192,10 +192,19 @@ def export_audit_package():
         )
 
     if manifest_only:
-        return jsonify(package.manifest), 200
+        manifest_payload = {
+            **package.manifest,
+            "package_sha256": package.package_sha256,
+        }
+        response = jsonify(manifest_payload)
+        response.headers["X-OpenBuchhaltung-SHA256"] = package.package_sha256
+        return response, 200
 
     return Response(
         package.payload,
         content_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{package.file_name}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{package.file_name}"',
+            "X-OpenBuchhaltung-SHA256": package.package_sha256,
+        },
     )

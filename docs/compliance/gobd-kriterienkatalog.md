@@ -55,11 +55,11 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | ID | Anforderung | Soll-Umsetzung in OpenBuchhaltung | Nachweis | Status |
 |---|---|---|---|---|
 | EXP-001 | DATEV-Export | Buchungsstapel koennen DATEV-kompatibel exportiert werden. | DATEV-Testdateien | teilweise |
-| EXP-002 | Prueferexport | Vollstaendiges Exportpaket fuer Wirtschaftspruefer/Betriebspruefer. | Exportpaket-Test | offen |
-| EXP-003 | Exportumfang | Export enthaelt Buchungen, Zeilen, Konten, Steuercodes, Stammdaten, Audit-Log, Belegindex, Belege, OPOS, Anlagen, Bank, Perioden. | Manifest-Test | offen |
-| EXP-004 | Exportmanifest | Jeder Export enthaelt Manifest mit Version, Zeitraum, Parametern, Tabellen, Dateihashes und Erstellzeit. | Exporttest | offen |
-| EXP-005 | Maschinenlesbarkeit | Exportdaten liegen in stabil dokumentierten CSV/JSON-Formaten mit Feldbeschreibung vor. | Schema-Dokumentation | offen |
-| EXP-006 | Reproduzierbarkeit | Gleiche Parameter auf gleichem Datenstand erzeugen nachvollziehbare Ergebnisse. | Snapshot-Test | offen |
+| EXP-002 | Prueferexport | Vollstaendiges Exportpaket fuer Wirtschaftspruefer/Betriebspruefer. | Exportpaket-Test | teilweise |
+| EXP-003 | Exportumfang | Export enthaelt Buchungen, Zeilen, Konten, Steuercodes, Stammdaten, Audit-Log, Belegindex, Belege, OPOS, Anlagen, Bank, Perioden und Rollen. | Manifest-Test | teilweise |
+| EXP-004 | Exportmanifest | Jeder Export enthaelt Manifest mit Version, Zeitraum, Parametern, Tabellen, Dateihashes und Erstellzeit. | Exporttest | umgesetzt |
+| EXP-005 | Maschinenlesbarkeit | Exportdaten liegen in stabil dokumentierten JSON-Formaten mit vollstaendigem Feldkatalog vor. | Feldkatalog und Datenbeschreibung | umgesetzt |
+| EXP-006 | Reproduzierbarkeit | Gleiche Parameter auf gleichem Datenstand erzeugen einen stabilen Datenbestands-Hash. | Snapshot-Test | umgesetzt |
 
 ## 6. Rollen und Berechtigungen
 
@@ -96,7 +96,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 ## 9. Priorisierte verbleibende Luecken
 
-1. Vollstaendiger Prueferexport mit Feldbeschreibung und reproduzierbarem Nachweis.
+1. Restluecken im Prueferexport: Belegdatum, Kontenaenderungshistorie und Abschlussnachweise.
 2. Verfahrensdokumentation und Betriebshandbuch.
 3. Traceability von Anforderungen zu Tests und Pull Requests.
 4. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.
