@@ -9,8 +9,6 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from domain.models import Base
-
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +45,8 @@ def _current_revision(engine) -> str | None:
 def _bootstrap_schema(engine) -> None:
     """Bringt die Datenbank beim Start auf den aktuellen Stand.
 
-    * **Leere DB:** Schema per ``create_all`` anlegen und auf den Alembic-Head stampen.
+    * **Leere DB:** alle Migrationen bis zum Alembic-Head anwenden. Dadurch werden
+      neben Tabellen auch DB-seitige Schutzmechanismen wie Trigger installiert.
     * **Von der App verwaltete DB** (besitzt ``alembic_version``): ausstehende
       Migrationen automatisch via ``alembic upgrade head`` nachziehen — damit ein
       Redeploy gegen eine bestehende Datenbank neue Migrationen selbst anwendet.
@@ -58,22 +57,8 @@ def _bootstrap_schema(engine) -> None:
     tables = inspect(engine).get_table_names()
 
     if not tables:
-        Base.metadata.create_all(engine)
-        head = _alembic_head_revision()
-        if head is None:
-            return
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "CREATE TABLE IF NOT EXISTS alembic_version "
-                    "(version_num VARCHAR(32) NOT NULL)"
-                )
-            )
-            connection.execute(text("DELETE FROM alembic_version"))
-            connection.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES (:head)"), {"head": head}
-            )
-        logger.info("Neues Schema angelegt und auf Alembic-Revision %s gestampt.", head)
+        command.upgrade(_alembic_config(engine), "head")
+        logger.info("Neues Schema vollständig bis zum Alembic-Head migriert.")
         return
 
     if "alembic_version" not in tables:
@@ -94,9 +79,7 @@ def _upgrade_to_head(engine) -> None:
     try:
         command.upgrade(_alembic_config(engine), "head")
     except Exception:
-        logger.exception(
-            "Automatische DB-Migration von %s auf %s fehlgeschlagen.", current, head
-        )
+        logger.exception("Automatische DB-Migration von %s auf %s fehlgeschlagen.", current, head)
         raise
     logger.info("Datenbank von Revision %s auf Head %s migriert.", current, head)
 

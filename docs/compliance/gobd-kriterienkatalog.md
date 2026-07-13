@@ -11,15 +11,15 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | GOBD-003 | Zeitgerechte Erfassung | Belege und Buchungen muessen mit Erfassungszeitpunkt und Belegdatum getrennt dokumentiert werden. | Datenmodell, Audit-Log, UI/API-Tests | offen |
 | GOBD-004 | Ordnung | Buchungen, Belege, Konten, Perioden und Abschluesse muessen eindeutig sortierbar, auffindbar und exportierbar sein. | Exportpaket, Datenmodellbeschreibung | teilweise |
 | GOBD-005 | Nachvollziehbarkeit | Jeder Vorgang muss vom Beleg zur Buchung und von der Buchung zum Beleg nachvollziehbar sein. | Beleg-Buchungs-Link, Audit-Log, Prueferexport | teilweise |
-| GOBD-006 | Unveraenderbarkeit | Festgeschriebene Buchungen und steuerlich relevante Dokumente duerfen nicht unbemerkt veraendert oder geloescht werden koennen. | DB-Trigger, Hashketten, Integritaetspruefung | offen |
+| GOBD-006 | Unveraenderbarkeit | Festgeschriebene Buchungen und steuerlich relevante Dokumente duerfen nicht unbemerkt veraendert oder geloescht werden koennen. | DB-Trigger, Hashketten, Integritaetspruefung | teilweise |
 
 ## 2. Buchungen, Festschreibung und Storno
 
 | ID | Anforderung | Soll-Umsetzung in OpenBuchhaltung | Nachweis | Status |
 |---|---|---|---|---|
 | BOOK-001 | Vorlaeufige Buchungen | Buchungen duerfen vor Festschreibung korrigierbar sein, muessen aber als vorlaeufig erkennbar bleiben. | UI/API-Test | teilweise |
-| BOOK-002 | Festschreibung | Buchungen koennen einzeln oder periodisch festgeschrieben werden. Danach keine direkte Aenderung. | Service- und E2E-Test | teilweise |
-| BOOK-003 | Technischer Aenderungsschutz | Updates und Deletes festgeschriebener Buchungen muessen auch auf Datenbankebene verhindert werden. | Migration/Trigger-Test | offen |
+| BOOK-002 | Festschreibung | Buchungen koennen einzeln oder periodisch festgeschrieben werden. Danach keine direkte Aenderung. | Service- und Integrationstest | umgesetzt |
+| BOOK-003 | Technischer Aenderungsschutz | Updates und Deletes festgeschriebener Buchungen muessen auch auf Datenbankebene verhindert werden. | Migration/Trigger-Test | umgesetzt |
 | BOOK-004 | Storno statt Loeschung | Korrekturen festgeschriebener Buchungen erfolgen ausschliesslich ueber Gegenbuchungen. | Storno-Testmatrix | teilweise |
 | BOOK-005 | Doppelstorno verhindern | Eine Buchung darf nicht mehrfach storniert werden. | Negativtest | teilweise |
 | BOOK-006 | Periodensperren | Geschlossene Perioden duerfen fuer Schreibrollen nicht mehr bebuchbar sein. | Perioden-Test | teilweise |
@@ -33,7 +33,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | AUD-001 | Vollstaendige Protokollierung | Kritische Aktionen werden protokolliert: Erstellen, Aendern, Festschreiben, Storno, Import, Export, Login, Rollen, Perioden, Abschluss. | Audit-Testmatrix | teilweise |
 | AUD-002 | Kontextdaten | Audit-Eintraege enthalten Benutzer, Rolle, Mandant, Gesellschaft, Objekt, Aktion, Zeitpunkt, Quelle und Softwareversion. | Datenmodell/Test | offen |
 | AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Datenmodell/Test | offen |
-| AUD-004 | Append-only | Audit-Eintraege duerfen nicht geaendert oder geloescht werden. | DB-Trigger/Test | offen |
+| AUD-004 | Append-only | Audit-Eintraege duerfen nicht geaendert oder geloescht werden. | DB-Trigger/Test | umgesetzt |
 | AUD-005 | Hashkette | Audit-Eintraege werden kryptografisch verkettet, um nachtraegliche Manipulationen erkennbar zu machen. | Integritaetstest | offen |
 | AUD-006 | Integritaetspruefung | System kann Hashketten und Belegpruefsummen pruefen und Abweichungen melden. | CLI/API/UI-Pruefung | offen |
 
@@ -93,12 +93,10 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | DEV-005 | Release-Freigabe | Releases haben Version, Commit, Schema, Changelog, Testbericht und Freigabe. | Release-Artefakt | offen |
 | DEV-006 | Signierte Artefakte | Release-Archive und Container-Images werden signiert oder mit Hashes dokumentiert. | Release-Prozess | offen |
 
-## 9. Priorisierte Luecken
+## 9. Priorisierte verbleibende Luecken
 
-1. Datenbankseitiger Manipulationsschutz fuer festgeschriebene Buchungen und Audit-Log.
-2. Kryptografische Hashes fuer Belege, Buchungen, Audit-Log und Exporte.
-3. Vollstaendiger Prueferexport mit Manifest und Feldbeschreibung.
-4. Verfahrensdokumentation und Betriebshandbuch.
-5. Traceability von Anforderungen zu Tests und Pull Requests.
-6. Revisionssichere Belegversionierung und Loeschschutz.
-7. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.
+1. Kryptografische Hashketten fuer Buchungen und Audit-Log sowie Integritaetspruefung.
+2. Vollstaendiger Prueferexport mit Feldbeschreibung und reproduzierbarem Nachweis.
+3. Verfahrensdokumentation und Betriebshandbuch.
+4. Traceability von Anforderungen zu Tests und Pull Requests.
+5. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.

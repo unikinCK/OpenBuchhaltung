@@ -40,7 +40,7 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 | CTRL-001 | Buchungsvalidierung | Keine unausgeglichenen Buchungen; klare Fehler bei ungueltigen Eingaben | Unit/E2E | teilweise |
 | CTRL-002 | Steuerlogik | USt/VSt wird nachvollziehbar aus Steuercodes und Konten abgeleitet | Fachtests | teilweise |
 | CTRL-003 | Periodensperre | Schreibzugriffe in gesperrte Perioden werden verhindert | E2E/API | teilweise |
-| CTRL-004 | Festschreibung | Direktaenderungen festgeschriebener Buchungen sind technisch ausgeschlossen | DB/API/UI | offen |
+| CTRL-004 | Festschreibung | Direktaenderungen festgeschriebener Buchungen sind technisch ausgeschlossen | DB/API/UI | umgesetzt |
 | CTRL-005 | Storno | Korrekturen erfolgen ueber nachvollziehbare Gegenbuchungen | Fachtests | teilweise |
 | CTRL-006 | Audit-Log | Kritische Aktionen sind vollstaendig, unveraenderbar und auswertbar protokolliert | Audit-Test | teilweise |
 | CTRL-007 | Belegarchiv | Originalbelege bleiben erhalten und sind gegen stille Ersetzung geschuetzt | Hash/Versionstest | offen |
@@ -73,7 +73,8 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 
 ### Phase B: Compliance-Haertung
 
-- Datenbankseitige Unveraenderbarkeit implementieren.
+- Datenbankseitige Unveraenderbarkeit implementieren. *(fuer festgeschriebene
+  Buchungen und Audit-Log umgesetzt; Belegschutz separat)*
 - Hashketten fuer Audit-Log und Belege implementieren.
 - Vollstaendigen Prueferexport entwickeln.
 - Verfahrensdokumentation und Betriebshandbuch erstellen.
