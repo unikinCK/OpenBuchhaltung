@@ -61,6 +61,18 @@ def test_tenant_bound_user_sees_only_own_tenant(tmp_path):
 def test_tenant_bound_user_cannot_write_to_foreign_company(tmp_path):
     app = _create_test_app(tmp_path)
     _, company_b_id = _seed_two_tenants_with_user(app)
+    with app.extensions["db_session_factory"]() as session:
+        company_b = session.get(Company, company_b_id)
+        foreign_account = Account(
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            code="1200",
+            name="Fremde Bank",
+            account_type="asset",
+        )
+        session.add(foreign_account)
+        session.commit()
+        foreign_account_id = foreign_account.id
 
     client = app.test_client()
     client.post("/auth/login", data={"username": "nutzer-a", "password": "passwort-a"})
@@ -75,6 +87,12 @@ def test_tenant_bound_user_cannot_write_to_foreign_company(tmp_path):
         },
     )
     assert response.status_code == 404
+
+    update_response = client.post(
+        f"/accounts/{foreign_account_id}/update",
+        data={"name": "Manipuliert", "is_active": "false"},
+    )
+    assert update_response.status_code == 404
 
 
 def test_tenant_bound_user_cannot_create_new_tenant(tmp_path):
@@ -254,6 +272,20 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
         },
     )
     assert own_write.status_code == 201
+    own_account_id = own_write.get_json()["id"]
+
+    with app.extensions["db_session_factory"]() as session:
+        company_b = session.get(Company, company_b_id)
+        foreign_account = Account(
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            code="1200",
+            name="Fremde Bank",
+            account_type="asset",
+        )
+        session.add(foreign_account)
+        session.commit()
+        foreign_account_id = foreign_account.id
 
     foreign_write = client.post(
         "/api/v1/accounts",
@@ -267,6 +299,19 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
     )
     assert foreign_write.status_code == 404
 
+    foreign_update = client.patch(
+        f"/api/v1/accounts/{foreign_account_id}",
+        headers={"Authorization": f"Bearer {buchhalter_token}"},
+        json={"name": "Manipuliert"},
+    )
+    assert foreign_update.status_code == 404
+
+    foreign_history = client.get(
+        f"/api/v1/accounts/{foreign_account_id}/history",
+        headers={"Authorization": f"Bearer {buchhalter_token}"},
+    )
+    assert foreign_history.status_code == 404
+
     read_only_write = client.post(
         "/api/v1/accounts",
         headers={"Authorization": f"Bearer {pruefer_token}"},
@@ -278,6 +323,19 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
         },
     )
     assert read_only_write.status_code == 403
+
+    read_only_update = client.patch(
+        f"/api/v1/accounts/{own_account_id}",
+        headers={"Authorization": f"Bearer {pruefer_token}"},
+        json={"name": "Nicht erlaubt"},
+    )
+    assert read_only_update.status_code == 403
+
+    read_only_history = client.get(
+        f"/api/v1/accounts/{own_account_id}/history",
+        headers={"Authorization": f"Bearer {pruefer_token}"},
+    )
+    assert read_only_history.status_code == 200
 
 
 def test_support_api_token_reads_across_tenants_but_cannot_write(tmp_path):

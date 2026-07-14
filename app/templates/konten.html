@@ -72,6 +72,7 @@
             <th>Typ</th>
             <th>Ebene</th>
             <th>Status</th>
+            <th>Ändern</th>
           </tr>
         </thead>
         <tbody>
@@ -82,12 +83,55 @@
               <td><span class="badge">{{ account.account_type }}</span></td>
               <td>{{ account.hierarchy_level }}</td>
               <td>{{ "aktiv" if account.is_active else "inaktiv" }}</td>
+              <td>
+                <form method="post" action="{{ url_for('main.update_account', account_id=account.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <input name="name" value="{{ account.name }}" aria-label="Kontobezeichnung {{ account.code }}" required />
+                  <select name="is_active" aria-label="Status {{ account.code }}">
+                    <option value="true" {% if account.is_active %}selected{% endif %}>aktiv</option>
+                    <option value="false" {% if not account.is_active %}selected{% endif %}>inaktiv</option>
+                  </select>
+                  <button type="submit">Speichern</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
       <p class="muted">Noch keine Konten vorhanden.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Kontenänderungshistorie</h2>
+    {% if account_events %}
+      <table>
+        <thead>
+          <tr>
+            <th>Zeitpunkt</th>
+            <th>Konto-ID</th>
+            <th>Aktion</th>
+            <th>Benutzer</th>
+            <th>Vorher</th>
+            <th>Nachher</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in account_events %}
+            <tr>
+              <td>{{ event.changed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ event.entity_id }}</td>
+              <td><span class="badge">{{ event.action }}</span></td>
+              <td>{{ event.changed_by }}</td>
+              <td><code>{{ event.payload.before if event.payload else '–' }}</code></td>
+              <td><code>{{ event.payload.after if event.payload else '–' }}</code></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine protokollierten Kontenänderungen.</p>
     {% endif %}
   </section>
 {% endblock %}

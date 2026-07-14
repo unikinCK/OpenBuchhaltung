@@ -86,6 +86,9 @@ Jeder Testfall sollte dokumentieren:
 | T-AUD-006 | Audit-Eintrag aendern oder loeschen | DB verhindert Aenderung und Loeschung | automatisiert | hoch |
 | T-AUD-007 | Hashkette pruefen | Unveraenderte Kette ist gueltig | automatisiert | hoch |
 | T-AUD-008 | Hashkette manipulieren | Pruefung erkennt Abweichung | automatisiert | hoch |
+| T-AUD-009 | Konto anlegen | Erstellungsereignis enthaelt `before=null` und vollstaendigen `after`-Snapshot | automatisiert | hoch |
+| T-AUD-010 | Kontobezeichnung oder Status aendern | Genau ein Ereignis enthaelt vollstaendige Vorher-/Nachher-Werte | automatisiert | hoch |
+| T-AUD-011 | Kontonummer oder Kontotyp aendern | Strukturelle Aenderung wird abgewiesen | automatisiert | hoch |
 
 ## 7. Rollen, Mandanten und API/MCP
 
@@ -115,6 +118,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-010 | Export reproduzieren | Identischer Datenstand ergibt denselben Datenbestands-Hash | automatisiert | hoch |
 | T-EXP-011 | Exportdatei manipulieren | Paketpruefung meldet Datei- und Datenbestands-Hashabweichung | automatisiert | hoch |
 | T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
+| T-EXP-013 | Kontenaenderungshistorie exportieren | Anlage und Aenderungen sind mit Snapshots und Hashkette enthalten | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 

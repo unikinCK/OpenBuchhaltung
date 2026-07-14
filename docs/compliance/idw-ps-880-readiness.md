@@ -81,7 +81,7 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
   Dateipruefsumme; gemeinsame CLI/API/UI/MCP-Pruefung umgesetzt)*
 - Vollstaendigen Prueferexport entwickeln. *(Formatversion 2 mit Feldkatalog,
   Einzelhashes, stabilem Datenbestands-Hash, Rollen und lokaler Paketpruefung
-  umgesetzt; fachliche Restfelder und Beispielpaket offen)*
+  sowie Kontenstamm-Historie umgesetzt; Abschlussnachweise und Beispielpaket offen)*
 - Verfahrensdokumentation und Betriebshandbuch erstellen.
 - Release-Prozess mit signierten oder gehashten Artefakten einfuehren.
 
