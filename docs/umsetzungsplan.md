@@ -360,6 +360,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       Benutzer/Rollen ohne Authentisierungsgeheimnisse, stabile Einzelhashes und
       kanonischer `dataset_sha256`; deterministische ZIP-Erzeugung bei festem
       Zeitpunkt, Download-Hash und lokale CLI-Paketprüfung mit Manipulationsdiagnose.)*
+- [x] Belegdatum getrennt vom Erfassungszeitpunkt *(Compliance-Härtung:
+      `Document.document_date` per Migration ergänzt; manuelle Uploads erfassen
+      es verpflichtend über UI/API/MCP, OCR übernimmt und bestätigt das erkannte
+      Rechnungsdatum, E-Rechnungen übernehmen das strukturierte Ausstellungsdatum,
+      Versionen erben das fachliche Datum. Belegliste, Audit-Log, Feldkatalog und
+      Prüferexport weisen Beleg- und Uploaddatum getrennt aus; Altdaten bleiben
+      transparent `null` statt ein Datum zu erfinden.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 

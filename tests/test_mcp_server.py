@@ -869,6 +869,7 @@ def test_document_tools_forward_arguments() -> None:
                     "company_id": 7,
                     "file_name": "beleg.pdf",
                     "mime_type": "application/pdf",
+                    "document_date": "2026-04-03",
                     "content_base64": "JVBERi0xLjQK",
                 },
             },
@@ -882,6 +883,7 @@ def test_document_tools_forward_arguments() -> None:
             "company_id": 7,
             "file_name": "beleg.pdf",
             "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
             "content_base64": "JVBERi0xLjQK",
         },
     )
@@ -929,6 +931,7 @@ def test_receipt_ocr_tools_forward_arguments() -> None:
                     "company_id": 7,
                     "file_name": "beleg.pdf",
                     "mime_type": "application/pdf",
+                    "document_date": "2026-04-03",
                     "content_base64": "JVBERi0xLjQK",
                 },
             },
@@ -942,6 +945,7 @@ def test_receipt_ocr_tools_forward_arguments() -> None:
             "company_id": 7,
             "file_name": "beleg.pdf",
             "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
             "content_base64": "JVBERi0xLjQK",
         },
     )
@@ -1509,11 +1513,13 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
             "company_id": company_id,
             "file_name": "mcp-beleg.pdf",
             "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
             "content_base64": base64.b64encode(b"%PDF-1.4\n%%EOF\n").decode("ascii"),
         },
     )
     assert document_upload["isError"] is False
     document_id = json.loads(document_upload["content"][0]["text"])["id"]
+    assert json.loads(document_upload["content"][0]["text"])["document_date"] == "2026-04-03"
 
     linked_document = call_tool(
         "link_document", {"document_id": document_id, "journal_entry_id": entry_id}
@@ -1544,6 +1550,7 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     )
     assert replacement["replaces_document_id"] == document_id
     assert replacement["version_number"] == 2
+    assert replacement["document_date"] == "2026-04-03"
 
     audit_export = json.loads(
         call_tool(

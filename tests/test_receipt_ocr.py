@@ -450,9 +450,25 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
         ]
     )
 
+    missing_date = client.post(
+        "/api/v1/receipt-ocr/suggestions",
+        json={
+            "company_id": company_id,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(pdf).decode("ascii"),
+        },
+    )
+    assert missing_date.status_code == 400
+    assert "document_date" in missing_date.get_json()["error"]
+
     suggest = client.post(
         "/belege/ocr/vorschlag",
-        data={"company_id": str(company_id), "document_file": (BytesIO(pdf), "beleg.pdf")},
+        data={
+            "company_id": str(company_id),
+            "document_date": "2026-07-07",
+            "document_file": (BytesIO(pdf), "beleg.pdf"),
+        },
         content_type="multipart/form-data",
     )
     assert suggest.status_code == 200
@@ -463,6 +479,7 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
     with app.extensions["db_session_factory"]() as session:
         document = session.query(Document).one()
         assert document.journal_entry_id is None
+        assert document.document_date == date(2026, 7, 8)
         document_id = document.id
         assert any(
             e.action == "ocr_analyzed"
@@ -496,6 +513,7 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
         assert entry.description == "Muster Lieferant 2026-4711"
         document = session.get(Document, document_id)
         assert document.journal_entry_id == entry.id
+        assert document.document_date == entry.entry_date == date(2026, 7, 8)
         total_debit = sum(line.debit_amount for line in entry.lines)
         total_credit = sum(line.credit_amount for line in entry.lines)
         assert total_debit == total_credit == Decimal("238.00")
@@ -503,6 +521,37 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
             e.action == "ocr_booked"
             for e in session.query(AuditLog).filter_by(entity_type="document").all()
         )
+
+
+def test_receipt_ocr_keeps_fallback_document_date_when_none_is_recognized(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    client = _logged_in_client(app)
+    pdf = _pdf_with_text(
+        [
+            "Muster Lieferant GmbH",
+            "Rechnung Nr. OHNE-DATUM",
+            "Nettobetrag 100,00 EUR",
+            "MwSt 19 % 19,00 EUR",
+            "Gesamtbetrag 119,00 EUR",
+        ]
+    )
+
+    response = client.post(
+        "/api/v1/receipt-ocr/suggestions",
+        json={
+            "company_id": company_id,
+            "document_date": "2026-07-07",
+            "file_name": "fallback.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(pdf).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()["extraction"]["invoice_date"] is None
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().document_date == date(2026, 7, 7)
 
 
 def test_receipt_ocr_api_suggest_and_book(tmp_path):
@@ -525,6 +574,7 @@ def test_receipt_ocr_api_suggest_and_book(tmp_path):
         "/api/v1/receipt-ocr/suggestions",
         json={
             "company_id": company_id,
+            "document_date": "2026-07-07",
             "file_name": "api-beleg.pdf",
             "mime_type": "application/pdf",
             "content_base64": base64.b64encode(pdf).decode("ascii"),
@@ -562,6 +612,7 @@ def test_receipt_ocr_api_suggest_and_book(tmp_path):
         entry = session.query(JournalEntry).one()
         document = session.get(Document, document_id)
         assert document.journal_entry_id == entry.id
+        assert document.document_date == entry.entry_date == date(2026, 7, 8)
         assert any(
             e.action == "ocr_booked"
             for e in session.query(AuditLog).filter_by(entity_type="document").all()
@@ -577,6 +628,7 @@ def test_ocr_suggest_rejects_disallowed_type(tmp_path):
         "/belege/ocr/vorschlag",
         data={
             "company_id": str(company_id),
+            "document_date": "2026-07-07",
             "document_file": (BytesIO(b"text"), "notiz.txt", "text/plain"),
         },
         content_type="multipart/form-data",

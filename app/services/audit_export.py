@@ -144,6 +144,7 @@ FIELD_DESCRIPTIONS = {
     "content_hash_version": "Version des Verfahrens für den Buchungsinhaltshash.",
     "file_sha256": "Beim Eingang gespeicherter SHA-256-Hash der Originaldatei.",
     "file_size_bytes": "Beim Eingang gespeicherte Dateigröße in Bytes.",
+    "document_date": "Fachliches Datum des Belegs, getrennt vom Erfassungszeitpunkt.",
     "archive_path": "Relativer Pfad der Originaldatei innerhalb des ZIP-Pakets.",
     "archived_file_sha256": "Beim Export berechneter SHA-256-Hash der Originaldatei.",
     "archived_file_size_bytes": "Beim Export ermittelte Dateigröße in Bytes.",

@@ -20,6 +20,9 @@
           {% endfor %}
         </select>
 
+        <label for="document_date">Belegdatum</label>
+        <input id="document_date" name="document_date" type="date" value="{{ today }}" required />
+
         <label for="document_file">Datei</label>
         <input id="document_file" name="document_file" type="file" required />
 
@@ -40,6 +43,7 @@
             <th>Version</th>
             <th>Hash</th>
             <th>Buchung</th>
+            <th>Belegdatum</th>
             <th>Hochgeladen</th>
             <th></th>
           </tr>
@@ -68,6 +72,7 @@
                   <noscript><button type="submit">Speichern</button></noscript>
                 </form>
               </td>
+              <td>{{ document.document_date.isoformat() if document.document_date else 'nicht erfasst' }}</td>
               <td>{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
               <td>
                 <a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a>

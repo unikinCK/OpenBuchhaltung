@@ -199,6 +199,7 @@ def einvoice_book_action():
             mime_type=uploaded_file.mimetype or "application/xml",
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
+            document_date=invoice.issue_date,
         )
         session.add(document)
         session.flush()
@@ -216,6 +217,7 @@ def einvoice_book_action():
                 "syntax": invoice.syntax,
                 "grand_total": str(invoice.grand_total),
                 "document_id": document.id,
+                "document_date": document.document_date.isoformat(),
             },
         )
         session.commit()

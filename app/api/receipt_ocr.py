@@ -65,6 +65,7 @@ def _load_upload_payload():
         return (
             {
                 "company_id": request.form.get("company_id", type=int),
+                "document_date": request.form.get("document_date"),
                 "file_name": secure_filename(uploaded_file.filename),
                 "mime_type": uploaded_file.mimetype or "application/octet-stream",
                 "content": content,
@@ -84,6 +85,7 @@ def _load_upload_payload():
     return (
         {
             "company_id": payload.get("company_id"),
+            "document_date": payload.get("document_date"),
             "file_name": secure_filename((payload.get("file_name") or "").strip()),
             "mime_type": payload.get("mime_type") or "application/octet-stream",
             "content": content,
@@ -118,6 +120,10 @@ def create_receipt_ocr_suggestion_via_api():
         company_id = int(upload["company_id"])
     except (TypeError, ValueError):
         return jsonify({"error": "company_id is required."}), 400
+    try:
+        document_date = date.fromisoformat(str(upload["document_date"] or ""))
+    except ValueError:
+        return jsonify({"error": "document_date is required in YYYY-MM-DD format."}), 400
 
     file_name = upload["file_name"]
     mime_type = upload["mime_type"]
@@ -151,6 +157,7 @@ def create_receipt_ocr_suggestion_via_api():
             mime_type=mime_type,
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
         )
         session.add(document)
         session.flush()
@@ -182,6 +189,11 @@ def create_receipt_ocr_suggestion_via_api():
 
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
+        document = session.get(Document, document_id)
+        if company is None or document is None or document.company_id != company.id:
+            return jsonify({"error": "Document not found."}), 404
+        if extraction.invoice_date is not None:
+            document.document_date = extraction.invoice_date
         log_audit_event(
             session=session,
             tenant_id=company.tenant_id,
@@ -201,6 +213,9 @@ def create_receipt_ocr_suggestion_via_api():
                 "tax_rate": str(extraction.tax_rate) if extraction.tax_rate is not None else None,
                 "supplier": extraction.supplier,
                 "invoice_number": extraction.invoice_number,
+                "document_date": (
+                    document.document_date.isoformat() if document.document_date else None
+                ),
             },
         )
         session.commit()
@@ -304,6 +319,7 @@ def book_receipt_ocr_suggestion_via_api():
             return jsonify({"error": str(exc)}), 422
 
         document.journal_entry_id = entry.id
+        document.document_date = entry_date
         log_audit_event(
             session=session,
             tenant_id=company.tenant_id,
@@ -317,6 +333,7 @@ def book_receipt_ocr_suggestion_via_api():
                 "net_amount": str(net_amount),
                 "tax_amount": str(tax_amount),
                 "gross_amount": str(gross_amount),
+                "document_date": document.document_date.isoformat(),
             },
         )
         session.commit()

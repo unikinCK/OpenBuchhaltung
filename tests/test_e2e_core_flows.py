@@ -76,6 +76,7 @@ def test_e2e_happy_path_core_flow(e2e_app):
         data={
             "company_id": "1",
             "journal_entry_id": "1",
+            "document_date": "2026-04-09",
             "document_file": (BytesIO(b"e2e-rechnung"), "rechnung-e2e.pdf"),
         },
         content_type="multipart/form-data",
@@ -142,6 +143,7 @@ def test_e2e_negative_document_link_to_missing_journal_entry(e2e_app):
         data={
             "company_id": "1",
             "journal_entry_id": "999",
+            "document_date": "2026-04-09",
             "document_file": (BytesIO(b"doc"), "neg-e2e.pdf"),
         },
         content_type="multipart/form-data",

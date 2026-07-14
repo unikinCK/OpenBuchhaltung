@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -20,6 +21,7 @@ def send_document_update(
     file_name: str,
     mime_type: str,
     journal_entry_id: int | None,
+    document_date: date | None = None,
 ) -> dict:
     if not endpoint_url:
         raise DocumentLLMError("LLM endpoint URL is not configured.")
@@ -49,7 +51,8 @@ def send_document_update(
                             "Zusammenfassung mit Feldern suggestion, confidence und notes. "
                             f"company_id={company_id}, document_id={document_id}, "
                             f"file_name={file_name}, mime_type={mime_type}, "
-                            f"journal_entry_id={journal_entry_id}."
+                            f"journal_entry_id={journal_entry_id}, "
+                            f"document_date={document_date.isoformat() if document_date else None}."
                         ),
                     }
                 ],

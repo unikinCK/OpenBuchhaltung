@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,7 +46,7 @@ def documents_page():
             documents = (
                 session.execute(
                     scoped_select(Document, company_id=selected_company_id).order_by(
-                        Document.uploaded_at.desc()
+                        Document.document_date.desc(), Document.uploaded_at.desc()
                     )
                 )
                 .scalars()
@@ -70,6 +70,7 @@ def documents_page():
         documents=documents,
         journal_entries=journal_entries,
         journal_entry_labels=journal_entry_labels,
+        today=date.today().isoformat(),
     )
 
 
@@ -77,10 +78,22 @@ def documents_page():
 def upload_document():
     company_id = request.form.get("company_id", type=int)
     journal_entry_id = request.form.get("journal_entry_id", type=int)
+    document_date_raw = request.form.get("document_date", "").strip()
     uploaded_file = request.files.get("document_file")
 
-    if not company_id or uploaded_file is None or not uploaded_file.filename:
-        flash("Gesellschaft und Datei sind Pflichtfelder.", "error")
+    if (
+        not company_id
+        or not document_date_raw
+        or uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        flash("Gesellschaft, Belegdatum und Datei sind Pflichtfelder.", "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    try:
+        document_date = date.fromisoformat(document_date_raw)
+    except ValueError:
+        flash("Ungültiges Belegdatum.", "error")
         return redirect(url_for("main.documents_page", company_id=company_id))
 
     original_file_name = secure_filename(uploaded_file.filename)
@@ -122,6 +135,7 @@ def upload_document():
             mime_type=uploaded_file.mimetype or "application/octet-stream",
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
         )
         session.add(document)
         session.flush()
@@ -141,6 +155,7 @@ def upload_document():
                 "file_sha256": document.file_sha256,
                 "file_size_bytes": document.file_size_bytes,
                 "version_number": document.version_number,
+                "document_date": document.document_date.isoformat(),
             },
         )
         session.commit()
@@ -151,6 +166,7 @@ def upload_document():
         uploaded_file_name = document.file_name
         uploaded_mime_type = document.mime_type
         uploaded_journal_entry_id = document.journal_entry_id
+        uploaded_document_date = document.document_date
 
     llm_endpoint = current_app.config.get("DOCUMENT_LLM_ENDPOINT_URL")
     if llm_endpoint:
@@ -163,6 +179,7 @@ def upload_document():
                 file_name=uploaded_file_name,
                 mime_type=uploaded_mime_type,
                 journal_entry_id=uploaded_journal_entry_id,
+                document_date=uploaded_document_date,
             )
             with session_factory() as session:
                 log_audit_event(
@@ -296,6 +313,7 @@ def replace_document(document_id: int):
             file_size_bytes=metadata.file_size_bytes,
             version_number=previous.version_number + 1,
             replaces_document_id=previous.id,
+            document_date=previous.document_date,
         )
         previous.is_current = False
         previous.replaced_at = datetime.now(timezone.utc)
@@ -315,6 +333,11 @@ def replace_document(document_id: int):
                 "replacement_file_sha256": replacement.file_sha256,
                 "previous_version_number": previous.version_number,
                 "replacement_version_number": replacement.version_number,
+                "document_date": (
+                    replacement.document_date.isoformat()
+                    if replacement.document_date
+                    else None
+                ),
             },
         )
         session.commit()
