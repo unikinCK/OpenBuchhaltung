@@ -44,7 +44,7 @@ Vor einer externen Pruefung muss eindeutig festgelegt werden, was geprueft werde
 | CTRL-005 | Storno | Korrekturen erfolgen ueber nachvollziehbare Gegenbuchungen | Fachtests | teilweise |
 | CTRL-006 | Audit-Log | Kritische Aktionen sind vollstaendig, unveraenderbar und auswertbar protokolliert | Audit-Test | teilweise |
 | CTRL-007 | Belegarchiv | Originalbelege bleiben erhalten und sind gegen stille Ersetzung geschuetzt | Hash/Versionstest | offen |
-| CTRL-008 | Export | Vollstaendiger Prueferexport inklusive Manifest und Belegen | Exporttest | offen |
+| CTRL-008 | Export | Vollstaendiger Prueferexport inklusive Manifest und Belegen | Exporttest | teilweise |
 | CTRL-009 | Rollen | Rechte und Mandantentrennung gelten fuer UI, API und MCP einheitlich | Security-Test | teilweise |
 | CTRL-010 | Migrationen | Datenbankschema wird nachvollziehbar migriert; Fehler fuehren zu Abbruch | Migrationstest | teilweise |
 

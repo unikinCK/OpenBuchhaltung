@@ -71,8 +71,12 @@ unbemerkter Veränderung, ist aber keine externe digitale Signatur.
 
 ## 6. Belegindex
 
-Der Belegindex enthält die gespeicherten Hash- und Versionsinformationen sowie
-die beim Export erneut ermittelten Dateieigenschaften. `file_included` zeigt, ob
-die Originaldatei eingebettet wurde. Bei bewusst deaktivierter Belegeinbettung
-sind die Prüfwerte `null`; bei angeforderter, aber fehlender Datei ist
-`file_missing=true` und die gemeinsame Integritätsprüfung schlägt fehl.
+Der Belegindex enthält das fachliche `document_date` getrennt vom technischen
+`uploaded_at`, die Buchungsverknüpfung, gespeicherte Hash- und
+Versionsinformationen sowie die beim Export erneut ermittelten
+Dateieigenschaften. Bei vor Einführung des Belegdatums angelegten Altdaten kann
+`document_date` `null` sein; es wird bewusst kein historisches Datum erfunden.
+`file_included` zeigt, ob die Originaldatei eingebettet wurde. Bei bewusst
+deaktivierter Belegeinbettung sind die Prüfwerte `null`; bei angeforderter, aber
+fehlender Datei ist `file_missing=true` und die gemeinsame Integritätsprüfung
+schlägt fehl.

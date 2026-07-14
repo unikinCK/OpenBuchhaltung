@@ -98,10 +98,22 @@ def receipt_ocr_page():
 @main_bp.post("/belege/ocr/vorschlag")
 def receipt_ocr_suggest():
     company_id = request.form.get("company_id", type=int)
+    document_date_raw = request.form.get("document_date", "").strip()
     uploaded_file = request.files.get("document_file")
 
-    if not company_id or uploaded_file is None or not uploaded_file.filename:
-        flash("Gesellschaft und Datei sind Pflichtfelder.", "error")
+    if (
+        not company_id
+        or not document_date_raw
+        or uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        flash("Gesellschaft, Belegdatum und Datei sind Pflichtfelder.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    try:
+        document_date = date.fromisoformat(document_date_raw)
+    except ValueError:
+        flash("Ungültiges Belegdatum.", "error")
         return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
     original_file_name = secure_filename(uploaded_file.filename)
@@ -140,6 +152,7 @@ def receipt_ocr_suggest():
             mime_type=mime_type,
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
         )
         session.add(document)
         session.flush()
@@ -172,6 +185,12 @@ def receipt_ocr_suggest():
 
     with session_factory() as session:
         company = require_company_access(session, company_id)
+        document = session.get(Document, document_id)
+        if document is None or document.company_id != company.id:
+            flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+        if extraction.invoice_date is not None:
+            document.document_date = extraction.invoice_date
         log_audit_event(
             session=session,
             tenant_id=company.tenant_id,
@@ -193,6 +212,9 @@ def receipt_ocr_suggest():
                 else None,
                 "supplier": extraction.supplier,
                 "invoice_number": extraction.invoice_number,
+                "document_date": (
+                    document.document_date.isoformat() if document.document_date else None
+                ),
             },
         )
         session.commit()
@@ -305,6 +327,7 @@ def receipt_ocr_book():
             return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
         document.journal_entry_id = entry.id
+        document.document_date = entry_date
         log_audit_event(
             session=session,
             tenant_id=company.tenant_id,
@@ -318,6 +341,7 @@ def receipt_ocr_book():
                 "net_amount": str(net_amount),
                 "tax_amount": str(tax_amount),
                 "gross_amount": str(gross_amount),
+                "document_date": document.document_date.isoformat(),
             },
         )
         session.commit()

@@ -21,6 +21,9 @@
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
 
+        <label for="document_date">Belegdatum (Fallback, falls OCR kein Datum erkennt)</label>
+        <input id="document_date" name="document_date" type="date" value="{{ today }}" required />
+
         <label for="document_file">Beleg (PDF/JPG/PNG)</label>
         <input id="document_file" name="document_file" type="file"
                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required />

@@ -225,6 +225,7 @@ def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
         assert payload["journal_entry_id"] == entry.id
         assert payload["document_id"] == document.id
         assert document.journal_entry_id == entry.id
+        assert document.document_date == date(2026, 6, 15)
         assert entry.entry_date == date(2026, 6, 15)
         audit = session.execute(select(AuditLog).where(AuditLog.entity_type == "einvoice"))
         assert audit.scalar_one().action == "imported"

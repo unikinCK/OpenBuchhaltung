@@ -580,7 +580,8 @@ TOOLS: list[ToolSpec] = [
         name="upload_document",
         description=(
             "Lädt einen Beleg hoch. content_base64 enthält den Dateiinhalt als Base64; "
-            "erlaubt sind PDF, JPG und PNG."
+            "erlaubt sind PDF, JPG und PNG. Das Belegdatum wird getrennt vom "
+            "Uploadzeitpunkt gespeichert."
         ),
         input_schema={
             "type": "object",
@@ -592,12 +593,23 @@ TOOLS: list[ToolSpec] = [
                     "description": "MIME-Type, z. B. application/pdf.",
                 },
                 "content_base64": {"type": "string", "description": "Dateiinhalt als Base64."},
+                "document_date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Belegdatum im Format JJJJ-MM-TT.",
+                },
                 "journal_entry_id": {
                     "type": "integer",
                     "description": "Optional: direkt mit dieser Buchung verknüpfen.",
                 },
             },
-            "required": ["company_id", "file_name", "mime_type", "content_base64"],
+            "required": [
+                "company_id",
+                "file_name",
+                "mime_type",
+                "content_base64",
+                "document_date",
+            ],
             "additionalProperties": False,
         },
         http_method="POST",
@@ -684,8 +696,19 @@ TOOLS: list[ToolSpec] = [
                     "description": "MIME-Type, z. B. application/pdf.",
                 },
                 "content_base64": {"type": "string", "description": "Dateiinhalt als Base64."},
+                "document_date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Fallback-Belegdatum im Format JJJJ-MM-TT.",
+                },
             },
-            "required": ["company_id", "file_name", "mime_type", "content_base64"],
+            "required": [
+                "company_id",
+                "file_name",
+                "mime_type",
+                "content_base64",
+                "document_date",
+            ],
             "additionalProperties": False,
         },
         http_method="POST",

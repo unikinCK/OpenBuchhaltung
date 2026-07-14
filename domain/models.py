@@ -401,6 +401,7 @@ class Document(Base):
         ForeignKey("document.id", ondelete="SET NULL")
     )
     replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    document_date: Mapped[date | None] = mapped_column(Date)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

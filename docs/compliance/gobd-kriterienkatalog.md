@@ -8,7 +8,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 |---|---|---|---|---|
 | GOBD-001 | Vollstaendigkeit | Alle steuerlich relevanten Geschaeftsvorfaelle muessen lueckenlos erfasst oder importiert werden koennen. | Fachtests Journal, Import, OPOS, Anlagen, Bank, E-Rechnung | teilweise |
 | GOBD-002 | Richtigkeit | Buchungen muessen fachlich validiert werden, insbesondere Soll/Haben-Gleichheit, Steuerlogik und Periodenbezug. | Unit-, Integrations- und E2E-Tests | teilweise |
-| GOBD-003 | Zeitgerechte Erfassung | Belege und Buchungen muessen mit Erfassungszeitpunkt und Belegdatum getrennt dokumentiert werden. | Datenmodell, Audit-Log, UI/API-Tests | offen |
+| GOBD-003 | Zeitgerechte Erfassung | Belege und Buchungen muessen mit Erfassungszeitpunkt und Belegdatum getrennt dokumentiert werden. | Datenmodell, Audit-Log, UI/API-Tests | umgesetzt |
 | GOBD-004 | Ordnung | Buchungen, Belege, Konten, Perioden und Abschluesse muessen eindeutig sortierbar, auffindbar und exportierbar sein. | Exportpaket, Datenmodellbeschreibung | teilweise |
 | GOBD-005 | Nachvollziehbarkeit | Jeder Vorgang muss vom Beleg zur Buchung und von der Buchung zum Beleg nachvollziehbar sein. | Beleg-Buchungs-Link, Audit-Log, Prueferexport | teilweise |
 | GOBD-006 | Unveraenderbarkeit | Festgeschriebene Buchungen und steuerlich relevante Dokumente duerfen nicht unbemerkt veraendert oder geloescht werden koennen. | DB-Trigger, Buchungshashes, Belegpruefsummen, Audit-Hashkette, gemeinsame Integritaetspruefung | teilweise |
@@ -47,7 +47,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 | DOC-003 | Versionierung | Ersetzungen erfolgen nur als neue Version, niemals als stille Ueberschreibung. | Belegversionstest | umgesetzt |
 | DOC-004 | Verknuepfung | Belege koennen eindeutig mit Buchungen, OPOS, Anlagen oder Bankumsaetzen verknuepft werden. | Integrationstest | teilweise |
 | DOC-005 | Loeschschutz | Steuerlich relevante Belege duerfen nach Zuordnung/Festschreibung nicht geloescht werden. | API-Negativtest | umgesetzt |
-| DOC-006 | Belegindex | Ein Exportindex enthaelt Dateiname, Hash, Uploadzeit, Belegdatum, Verknuepfung und Version. | Exporttest | teilweise |
+| DOC-006 | Belegindex | Ein Exportindex enthaelt Dateiname, Hash, Uploadzeit, Belegdatum, Verknuepfung und Version. | Exporttest | umgesetzt |
 | DOC-007 | Aufbewahrung | Aufbewahrungsfristen und Sperren sind technisch abbildbar. | Fachkonzept/Test | offen |
 
 ## 5. Export und Datenzugriff
@@ -96,7 +96,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 ## 9. Priorisierte verbleibende Luecken
 
-1. Restluecken im Prueferexport: Belegdatum, Kontenaenderungshistorie und Abschlussnachweise.
+1. Restluecken im Prueferexport: Kontenaenderungshistorie und Abschlussnachweise.
 2. Verfahrensdokumentation und Betriebshandbuch.
 3. Traceability von Anforderungen zu Tests und Pull Requests.
 4. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.

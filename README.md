@@ -24,7 +24,7 @@ können, was gebucht, exportiert und protokolliert wird.
   UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
   Testübermittlung und ERiC-Runner-Kante sowie KSt-/GewSt-Arbeitssnapshots
   für Erklärung und Vorauszahlungsanpassung.
-- **Belege & E-Rechnung:** Uploads mit SHA-256-Hash und Versionierung,
+- **Belege & E-Rechnung:** getrenntes Beleg-/Erfassungsdatum, Uploads mit SHA-256-Hash und Versionierung,
   optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
   E-Rechnungs-Export.
 - **Bank & OPOS:** CSV-Bankimport, Deduplizierung, Matching,

@@ -2,7 +2,7 @@ import base64
 import hashlib
 import json
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -936,6 +936,7 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
             "journal_entry_id": entry_id,
             "file_name": "rechnung.pdf",
             "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
             "content_base64": base64.b64encode(document_bytes).decode("ascii"),
         },
     )
@@ -987,6 +988,7 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
     assert manifest["integrity"]["valid"] is True
     assert manifest["dataset_sha256"] == manifest_payload["dataset_sha256"]
     assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
+    assert documents[0]["document_date"] == "2026-04-03"
     assert "storage_key" not in documents[0]
     assert users[0]["username"] == "audit-user"
     assert users[0]["role"] == "Pruefer"
@@ -1202,6 +1204,7 @@ def test_can_upload_document_and_link_to_journal_entry(tmp_path):
         data={
             "company_id": "1",
             "journal_entry_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"rechnung"), "rechnung.pdf"),
         },
         content_type="multipart/form-data",
@@ -1216,6 +1219,7 @@ def test_can_upload_document_and_link_to_journal_entry(tmp_path):
         document = session.query(Document).one()
         assert document.file_name == "rechnung.pdf"
         assert document.journal_entry_id == 1
+        assert document.document_date == date(2026, 4, 3)
 
 
 def test_can_link_and_unlink_document_after_upload(tmp_path):
@@ -1251,7 +1255,11 @@ def test_can_link_and_unlink_document_after_upload(tmp_path):
     )
     client.post(
         "/documents",
-        data={"company_id": "1", "document_file": (BytesIO(b"beleg"), "beleg.pdf")},
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"beleg"), "beleg.pdf"),
+        },
         content_type="multipart/form-data",
         follow_redirects=True,
     )
@@ -1291,7 +1299,11 @@ def test_link_document_rejects_missing_journal_entry(tmp_path):
     )
     client.post(
         "/documents",
-        data={"company_id": "1", "document_file": (BytesIO(b"beleg"), "beleg.pdf")},
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"beleg"), "beleg.pdf"),
+        },
         content_type="multipart/form-data",
         follow_redirects=True,
     )
@@ -1320,6 +1332,7 @@ def test_document_download_returns_file(tmp_path):
         "/documents",
         data={
             "company_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"testbeleg"), "beleg.pdf"),
         },
         content_type="multipart/form-data",
@@ -1364,12 +1377,25 @@ def test_api_document_upload_link_list_and_download(tmp_path):
     entry_id = entry_response.get_json()["id"]
 
     file_bytes = b"%PDF-1.4\napi beleg\n%%EOF\n"
+    missing_date_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+        },
+    )
+    assert missing_date_response.status_code == 400
+    assert "document_date" in missing_date_response.get_json()["error"]
+
     upload_response = client.post(
         "/api/v1/documents",
         json={
             "company_id": 1,
             "file_name": "api-beleg.pdf",
             "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
             "content_base64": base64.b64encode(file_bytes).decode("ascii"),
         },
     )
@@ -1381,6 +1407,7 @@ def test_api_document_upload_link_list_and_download(tmp_path):
     assert upload_payload["version_number"] == 1
     assert upload_payload["is_current"] is True
     assert upload_payload["delete_protected"] is True
+    assert upload_payload["document_date"] == "2026-04-03"
 
     link_response = client.post(
         f"/api/v1/documents/{document_id}/link",
@@ -1419,6 +1446,7 @@ def test_api_document_upload_link_list_and_download(tmp_path):
     assert replacement["replaces_document_id"] == document_id
     assert replacement["version_number"] == 2
     assert replacement["file_sha256"] == hashlib.sha256(replacement_bytes).hexdigest()
+    assert replacement["document_date"] == "2026-04-03"
 
     delete_response = client.delete(f"/api/v1/documents/{document_id}")
     assert delete_response.status_code == 409
@@ -1499,6 +1527,7 @@ def test_document_upload_writes_audit_log(tmp_path):
         "/documents",
         data={
             "company_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"beleg-audit"), "audit.pdf"),
         },
         content_type="multipart/form-data",
@@ -1514,7 +1543,8 @@ def test_document_upload_writes_audit_log(tmp_path):
             .all()
         )
 
-    assert any(event.action == "uploaded" for event in audit_events)
+    uploaded_event = next(event for event in audit_events if event.action == "uploaded")
+    assert uploaded_event.payload["document_date"] == "2026-04-03"
 
 
 def test_document_upload_rejects_disallowed_extension(tmp_path):
@@ -1531,6 +1561,7 @@ def test_document_upload_rejects_disallowed_extension(tmp_path):
         "/documents",
         data={
             "company_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"kein beleg"), "notiz.txt", "text/plain"),
         },
         content_type="multipart/form-data",
@@ -1557,6 +1588,7 @@ def test_document_upload_rejects_disallowed_mimetype(tmp_path):
         "/documents",
         data={
             "company_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"kein pdf"), "rechnung.pdf", "text/plain"),
         },
         content_type="multipart/form-data",
@@ -1583,6 +1615,7 @@ def test_document_upload_rejects_oversized_file(tmp_path):
         "/documents",
         data={
             "company_id": "1",
+            "document_date": "2026-04-03",
             "document_file": (BytesIO(b"x" * 16), "gross.pdf", "application/pdf"),
         },
         content_type="multipart/form-data",
@@ -1614,6 +1647,7 @@ def test_document_upload_calls_configured_llm_endpoint(tmp_path):
             "/documents",
             data={
                 "company_id": "1",
+                "document_date": "2026-04-03",
                 "document_file": (BytesIO(b"llm-beleg"), "llm.pdf"),
             },
             content_type="multipart/form-data",
@@ -1647,6 +1681,7 @@ def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
             "/documents",
             data={
                 "company_id": "1",
+                "document_date": "2026-04-03",
                 "document_file": (BytesIO(b"llm-fehler"), "llm-fehler.pdf"),
             },
             content_type="multipart/form-data",

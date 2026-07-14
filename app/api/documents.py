@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -39,6 +39,7 @@ def _document_dict(document: Document) -> dict[str, object]:
         "is_current": document.is_current,
         "replaces_document_id": document.replaces_document_id,
         "replaced_at": document.replaced_at.isoformat() if document.replaced_at else None,
+        "document_date": document.document_date.isoformat() if document.document_date else None,
         "delete_protected": True,
         "uploaded_at": document.uploaded_at.isoformat(),
     }
@@ -67,6 +68,7 @@ def _load_upload_payload():
             {
                 "company_id": request.form.get("company_id", type=int),
                 "journal_entry_id": request.form.get("journal_entry_id", type=int),
+                "document_date": request.form.get("document_date"),
                 "file_name": file_name,
                 "mime_type": uploaded_file.mimetype or "application/octet-stream",
                 "content": content,
@@ -88,6 +90,7 @@ def _load_upload_payload():
         {
             "company_id": payload.get("company_id"),
             "journal_entry_id": payload.get("journal_entry_id"),
+            "document_date": payload.get("document_date"),
             "file_name": file_name,
             "mime_type": payload.get("mime_type") or "application/octet-stream",
             "content": content,
@@ -108,7 +111,9 @@ def list_documents_via_api():
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
-        stmt = scoped_select(Document, company_id=company_id).order_by(Document.uploaded_at.desc())
+        stmt = scoped_select(Document, company_id=company_id).order_by(
+            Document.document_date.desc(), Document.uploaded_at.desc()
+        )
         if journal_entry_id is not None:
             stmt = stmt.where(Document.journal_entry_id == journal_entry_id)
         documents = session.execute(stmt).scalars().all()
@@ -154,6 +159,11 @@ def upload_document_via_api():
     except (TypeError, ValueError):
         return jsonify({"error": "journal_entry_id must be an integer or null."}), 400
 
+    try:
+        document_date = date.fromisoformat(str(upload["document_date"] or ""))
+    except ValueError:
+        return jsonify({"error": "document_date is required in YYYY-MM-DD format."}), 400
+
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
@@ -186,6 +196,7 @@ def upload_document_via_api():
             mime_type=mime_type,
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
         )
         session.add(document)
         session.flush()
@@ -204,6 +215,7 @@ def upload_document_via_api():
                 "file_sha256": document.file_sha256,
                 "file_size_bytes": document.file_size_bytes,
                 "version_number": document.version_number,
+                "document_date": document.document_date.isoformat(),
             },
         )
         session.commit()
@@ -304,6 +316,7 @@ def replace_document_via_api(document_id: int):
             file_size_bytes=metadata.file_size_bytes,
             version_number=previous.version_number + 1,
             replaces_document_id=previous.id,
+            document_date=previous.document_date,
         )
         previous.is_current = False
         previous.replaced_at = datetime.now(timezone.utc)
@@ -323,6 +336,11 @@ def replace_document_via_api(document_id: int):
                 "replacement_file_sha256": replacement.file_sha256,
                 "previous_version_number": previous.version_number,
                 "replacement_version_number": replacement.version_number,
+                "document_date": (
+                    replacement.document_date.isoformat()
+                    if replacement.document_date
+                    else None
+                ),
             },
         )
         session.commit()

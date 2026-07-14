@@ -71,6 +71,8 @@ Jeder Testfall sollte dokumentieren:
 | T-DOC-006 | Zugeordneten Beleg loeschen | Loeschung wird verhindert oder nur als dokumentierter Sonderprozess erlaubt | automatisiert | hoch |
 | T-DOC-007 | Beleg ersetzen | Neue Version wird erzeugt, Original bleibt erhalten | automatisiert | hoch |
 | T-DOC-008 | Belegmanipulation im Dateisystem | Integritaetspruefung meldet Hashabweichung | manuell/automatisiert | hoch |
+| T-DOC-009 | Belegdatum erfassen | Belegdatum und technischer Uploadzeitpunkt werden getrennt gespeichert und exportiert | automatisiert | hoch |
+| T-DOC-010 | OCR-/E-Rechnungsdatum übernehmen | Erkanntes oder eingebettetes Rechnungsdatum wird als Belegdatum gespeichert | automatisiert | hoch |
 
 ## 6. Audit-Log
 
