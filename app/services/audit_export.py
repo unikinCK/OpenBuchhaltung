@@ -23,6 +23,7 @@ from domain.models import (
     AuditLog,
     BankTransaction,
     Company,
+    ControllingUnit,
     DepreciationEntry,
     Document,
     ElsterSubmission,
@@ -84,6 +85,7 @@ EXPORT_TABLE_MODELS = {
     "tenant": Tenant,
     "company": Company,
     "accounts": Account,
+    "controlling_units": ControllingUnit,
     "tax_codes": TaxCode,
     "fiscal_years": FiscalYear,
     "periods": Period,
@@ -102,6 +104,7 @@ EXPORT_TABLE_MODELS = {
     "elster_submissions": ElsterSubmission,
     "audit_log": AuditLog,
     "account_history": AuditLog,
+    "controlling_unit_history": AuditLog,
     "documents": Document,
     "users": User,
 }
@@ -110,6 +113,7 @@ TABLE_DESCRIPTIONS = {
     "tenant": "Mandantenstammdaten und Audit-Kettenanker.",
     "company": "Gesellschaftsstammdaten des Exportumfangs.",
     "accounts": "Kontenstamm der Gesellschaft.",
+    "controlling_units": "Kostenstellen- und Profitcenter-Stammdaten der Gesellschaft.",
     "tax_codes": "Steuerschlüssel der Gesellschaft.",
     "fiscal_years": "Geschäftsjahre der Gesellschaft.",
     "periods": "Buchungsperioden der exportierten Geschäftsjahre.",
@@ -129,6 +133,9 @@ TABLE_DESCRIPTIONS = {
     "audit_log": "Gesellschaftsbezogene Ausschnitte des verketteten Audit-Logs.",
     "account_history": (
         "Kontenstamm-Historie mit unveränderbaren Vorher-/Nachher-Snapshots."
+    ),
+    "controlling_unit_history": (
+        "Änderungshistorie der Kostenstellen und Profitcenter mit Vorher-/Nachher-Werten."
     ),
     "documents": "Belegindex, Versionen und Prüfsummen der Originaldateien.",
     "users": "Mandantenbezogene Benutzer und Rollen ohne Authentisierungsgeheimnisse.",
@@ -253,6 +260,15 @@ def build_audit_export_package(
             _model_dict(row)
             for row in _rows(
                 session, Account, Account.company_id == company.id, order_by=(Account.code,)
+            )
+        ],
+        "controlling_units": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                ControllingUnit,
+                ControllingUnit.company_id == company.id,
+                order_by=(ControllingUnit.unit_type, ControllingUnit.code),
             )
         ],
         "tax_codes": [
@@ -381,6 +397,16 @@ def build_audit_export_package(
                 AuditLog,
                 AuditLog.company_id == company.id,
                 AuditLog.entity_type == "account",
+                order_by=(AuditLog.changed_at, AuditLog.id),
+            )
+        ],
+        "controlling_unit_history": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                AuditLog,
+                AuditLog.company_id == company.id,
+                AuditLog.entity_type == "controlling_unit",
                 order_by=(AuditLog.changed_at, AuditLog.id),
             )
         ],

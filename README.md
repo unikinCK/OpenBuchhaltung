@@ -21,6 +21,9 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten mit verketteter
   Änderungshistorie, Steuercodes, mehrzeilige Journalbuchungen, Storno und
   Festschreibung.
+- **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
+  Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
+  Kostenstellenrechnung und Profitcenter-GuV.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
   UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
   Testübermittlung und ERiC-Runner-Kante sowie KSt-/GewSt-Arbeitssnapshots

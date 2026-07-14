@@ -7,6 +7,7 @@ from datetime import date
 from flask import abort, flash, redirect, render_template, request, url_for
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -26,7 +27,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, JournalEntry, JournalEntryLine, TaxCode
+from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -38,6 +39,8 @@ def journal_page():
 
         accounts = []
         tax_codes = []
+        cost_centers = []
+        profit_centers = []
         journal_entries = []
         lines_by_entry: dict[int, list[dict]] = {}
         if selected_company_id:
@@ -57,6 +60,30 @@ def journal_page():
                 .scalars()
                 .all()
             )
+            cost_centers = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(
+                        ControllingUnit.unit_type == "cost_center",
+                        ControllingUnit.is_active.is_(True),
+                    )
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            profit_centers = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(
+                        ControllingUnit.unit_type == "profit_center",
+                        ControllingUnit.is_active.is_(True),
+                    )
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
             journal_entries = (
                 session.execute(
                     scoped_select(JournalEntry, company_id=selected_company_id).order_by(
@@ -66,6 +93,8 @@ def journal_page():
                 .scalars()
                 .all()
             )
+            cost_unit = aliased(ControllingUnit)
+            profit_unit = aliased(ControllingUnit)
             line_rows = session.execute(
                 select(
                     JournalEntryLine.journal_entry_id,
@@ -75,9 +104,13 @@ def journal_page():
                     JournalEntryLine.debit_amount,
                     JournalEntryLine.credit_amount,
                     JournalEntryLine.description,
+                    cost_unit.code.label("cost_center_code"),
+                    profit_unit.code.label("profit_center_code"),
                 )
                 .join(Account, Account.id == JournalEntryLine.account_id)
                 .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+                .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
+                .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
                 .where(JournalEntry.company_id == selected_company_id)
                 .order_by(JournalEntryLine.journal_entry_id, JournalEntryLine.line_number)
             ).all()
@@ -90,6 +123,8 @@ def journal_page():
                         "debit_amount": row.debit_amount,
                         "credit_amount": row.credit_amount,
                         "description": row.description,
+                        "cost_center_code": row.cost_center_code,
+                        "profit_center_code": row.profit_center_code,
                     }
                 )
 
@@ -107,6 +142,8 @@ def journal_page():
         selected_company_id=selected_company_id,
         accounts=accounts,
         tax_codes=tax_codes,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
         journal_entries=journal_entries,
         lines_by_entry=lines_by_entry,
         reversed_by_entry=reversed_by_entry,
@@ -137,6 +174,8 @@ def create_journal_entry_from_form():
         line_amounts = request.form.getlist("line_amount")
         line_descriptions = request.form.getlist("line_description")
         line_tax_code_ids = request.form.getlist("line_tax_code_id")
+        line_cost_center_ids = request.form.getlist("line_cost_center_id")
+        line_profit_center_ids = request.form.getlist("line_profit_center_id")
 
         # Backward-compatible fallback (legacy single amount + Soll/Haben Felder)
         if not line_account_ids:
@@ -171,6 +210,12 @@ def create_journal_entry_from_form():
                 tax_code_raw = (
                     line_tax_code_ids[idx] if idx < len(line_tax_code_ids) else ""
                 ).strip()
+                cost_center_raw = (
+                    line_cost_center_ids[idx] if idx < len(line_cost_center_ids) else ""
+                ).strip()
+                profit_center_raw = (
+                    line_profit_center_ids[idx] if idx < len(line_profit_center_ids) else ""
+                ).strip()
                 if not account_raw and not amount_raw and not side_raw:
                     continue
                 if not account_raw or not amount_raw or side_raw not in {"debit", "credit"}:
@@ -187,6 +232,8 @@ def create_journal_entry_from_form():
                         credit_amount=amount if side_raw == "credit" else parse_decimal("0.00"),
                         description=description_raw or None,
                         tax_code_id=int(tax_code_raw) if tax_code_raw else None,
+                        cost_center_id=(int(cost_center_raw) if cost_center_raw else None),
+                        profit_center_id=(int(profit_center_raw) if profit_center_raw else None),
                     )
                 )
 

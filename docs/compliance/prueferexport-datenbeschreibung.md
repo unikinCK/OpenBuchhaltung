@@ -16,6 +16,8 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `schema/field_catalog.json` | Vollständiger technischer Feldkatalog aller exportierten Tabellen |
 | `data/*.json` | Fach- und Stammdaten; Listen oder Einzelobjekte gemäß Feldkatalog |
 | `data/account_history.json` | Verkettete Kontenstamm-Historie mit Vorher-/Nachher-Snapshots |
+| `data/controlling_units.json` | Kostenstellen- und Profitcenter-Stammdaten |
+| `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -40,6 +42,13 @@ Konten-Snapshot unter `payload.before` und `payload.after`, Benutzer, Zeitpunkt,
 Sequenznummer sowie die Hashverkettung. Kontonummer und Kontotyp sind nach der
 Anlage strukturell unveränderbar; Änderungen sind auf Bezeichnung und
 Aktivstatus begrenzt.
+
+Kostenstellen und Profitcenter werden mit Typ, Code, Hierarchie,
+Gültigkeitszeitraum und Aktivstatus exportiert. Die Journalzeilen enthalten die
+optionalen Schlüssel `cost_center_id` und `profit_center_id`; Stammdatenänderungen
+stehen zusätzlich mit Audit-Hashes in `controlling_unit_history.json`. Bei
+festgeschriebenen Buchungen sind die Zuordnungen Bestandteil des versionierten
+Buchungsinhaltshashs.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,

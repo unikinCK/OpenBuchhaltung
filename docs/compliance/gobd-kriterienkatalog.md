@@ -33,7 +33,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 |---|---|---|---|---|
 | AUD-001 | Vollstaendige Protokollierung | Kritische Aktionen werden protokolliert: Erstellen, Aendern, Festschreiben, Storno, Import, Export, Login, Rollen, Perioden, Abschluss. | Audit-Testmatrix | teilweise |
 | AUD-002 | Kontextdaten | Audit-Eintraege enthalten Benutzer, Rolle, Mandant, Gesellschaft, Objekt, Aktion, Zeitpunkt, Quelle und Softwareversion. | Datenmodell/Test | offen |
-| AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Kontenstamm-Historie, weitere Stammdaten folgen | teilweise |
+| AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Konten- und Controlling-Stammhistorie, weitere Stammdaten folgen | teilweise |
 | AUD-004 | Append-only | Audit-Eintraege duerfen nicht geaendert oder geloescht werden. | DB-Trigger/Test | umgesetzt |
 | AUD-005 | Hashkette | Audit-Eintraege werden kryptografisch verkettet, um nachtraegliche Manipulationen erkennbar zu machen. | Integritaetstest | umgesetzt |
 | AUD-006 | Integritaetspruefung | System kann Hashketten und Belegpruefsummen pruefen und Abweichungen melden. | CLI/API/UI/MCP-Pruefung | umgesetzt |

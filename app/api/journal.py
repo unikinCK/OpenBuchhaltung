@@ -62,6 +62,10 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
                 "account_name": line.account.name,
                 "tax_code_id": line.tax_code_id,
                 "tax_code": line.tax_code.code if line.tax_code else None,
+                "cost_center_id": line.cost_center_id,
+                "cost_center_code": line.cost_center.code if line.cost_center else None,
+                "profit_center_id": line.profit_center_id,
+                "profit_center_code": line.profit_center.code if line.profit_center else None,
                 "description": line.description,
                 "debit_amount": str(line.debit_amount),
                 "credit_amount": str(line.credit_amount),
@@ -108,6 +112,8 @@ def list_journal_entries_via_api():
             .options(
                 selectinload(JournalEntry.lines).selectinload(JournalEntryLine.account),
                 selectinload(JournalEntry.lines).selectinload(JournalEntryLine.tax_code),
+                selectinload(JournalEntry.lines).selectinload(JournalEntryLine.cost_center),
+                selectinload(JournalEntry.lines).selectinload(JournalEntryLine.profit_center),
             )
             .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
             .limit(max(1, min(limit, 500)))
@@ -191,6 +197,8 @@ def create_journal_entry_via_api():
                 )
             try:
                 raw_tax_code_id = line.get("tax_code_id")
+                raw_cost_center_id = line.get("cost_center_id")
+                raw_profit_center_id = line.get("profit_center_id")
                 lines.append(
                     JournalLineInput(
                         account_id=int(raw_account_id) if raw_account_id is not None else None,
@@ -199,6 +207,12 @@ def create_journal_entry_via_api():
                         credit_amount=parse_decimal(str(line.get("credit_amount", "0.00"))),
                         description=(line.get("description") or "").strip() or None,
                         tax_code_id=int(raw_tax_code_id) if raw_tax_code_id is not None else None,
+                        cost_center_id=(
+                            int(raw_cost_center_id) if raw_cost_center_id is not None else None
+                        ),
+                        profit_center_id=(
+                            int(raw_profit_center_id) if raw_profit_center_id is not None else None
+                        ),
                     )
                 )
             except (TypeError, ValueError) as exc:

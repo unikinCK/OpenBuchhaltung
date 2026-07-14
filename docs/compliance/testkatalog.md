@@ -89,6 +89,7 @@ Jeder Testfall sollte dokumentieren:
 | T-AUD-009 | Konto anlegen | Erstellungsereignis enthaelt `before=null` und vollstaendigen `after`-Snapshot | automatisiert | hoch |
 | T-AUD-010 | Kontobezeichnung oder Status aendern | Genau ein Ereignis enthaelt vollstaendige Vorher-/Nachher-Werte | automatisiert | hoch |
 | T-AUD-011 | Kontonummer oder Kontotyp aendern | Strukturelle Aenderung wird abgewiesen | automatisiert | hoch |
+| T-AUD-012 | Kostenstelle oder Profitcenter aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert | automatisiert | hoch |
 
 ## 7. Rollen, Mandanten und API/MCP
 
@@ -119,6 +120,17 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-011 | Exportdatei manipulieren | Paketpruefung meldet Datei- und Datenbestands-Hashabweichung | automatisiert | hoch |
 | T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
 | T-EXP-013 | Kontenaenderungshistorie exportieren | Anlage und Aenderungen sind mit Snapshots und Hashkette enthalten | automatisiert | hoch |
+| T-EXP-014 | Controlling-Daten exportieren | Einheiten, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+
+## 8.1 Kostenstellen und Profitcenter
+
+| ID | Testfall | Erwartung | Typ | Prioritaet |
+|---|---|---|---|---|
+| T-CTL-001 | Gültige Einheit kontieren | Buchungszeile speichert Kostenstelle und Profitcenter | automatisiert | hoch |
+| T-CTL-002 | Fremden oder falschen Typ kontieren | Buchung wird mandantensicher abgewiesen | automatisiert | hoch |
+| T-CTL-003 | Inaktive oder ungültige Einheit kontieren | Buchung wird abgewiesen | automatisiert | hoch |
+| T-CTL-004 | Buchung festschreiben und stornieren | Dimensionen sind gehasht und werden gespiegelt | automatisiert | hoch |
+| T-CTL-005 | Controlling-Berichte | Erlöse, Aufwand und Ergebnis stimmen je Einheit | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 

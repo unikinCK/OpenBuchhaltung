@@ -274,6 +274,18 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
     assert own_write.status_code == 201
     own_account_id = own_write.get_json()["id"]
 
+    own_unit = client.post(
+        "/api/v1/controlling-units",
+        headers={"Authorization": f"Bearer {buchhalter_token}"},
+        json={
+            "company_id": company_a_id,
+            "unit_type": "cost_center",
+            "code": "K100",
+            "name": "Eigene Kostenstelle",
+        },
+    )
+    assert own_unit.status_code == 201
+
     with app.extensions["db_session_factory"]() as session:
         company_b = session.get(Company, company_b_id)
         foreign_account = Account(
@@ -299,6 +311,18 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
     )
     assert foreign_write.status_code == 404
 
+    foreign_unit = client.post(
+        "/api/v1/controlling-units",
+        headers={"Authorization": f"Bearer {buchhalter_token}"},
+        json={
+            "company_id": company_b_id,
+            "unit_type": "profit_center",
+            "code": "P100",
+            "name": "Fremdes Profitcenter",
+        },
+    )
+    assert foreign_unit.status_code == 404
+
     foreign_update = client.patch(
         f"/api/v1/accounts/{foreign_account_id}",
         headers={"Authorization": f"Bearer {buchhalter_token}"},
@@ -323,6 +347,18 @@ def test_api_user_token_blocks_cross_tenant_writes_and_read_role(tmp_path):
         },
     )
     assert read_only_write.status_code == 403
+
+    read_only_unit = client.post(
+        "/api/v1/controlling-units",
+        headers={"Authorization": f"Bearer {pruefer_token}"},
+        json={
+            "company_id": company_a_id,
+            "unit_type": "cost_center",
+            "code": "K200",
+            "name": "Nicht erlaubt",
+        },
+    )
+    assert read_only_unit.status_code == 403
 
     read_only_update = client.patch(
         f"/api/v1/accounts/{own_account_id}",

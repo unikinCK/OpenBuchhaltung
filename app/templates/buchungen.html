@@ -62,6 +62,20 @@
                 </select>
               </div>
               <div>
+                <label>Kostenstelle</label>
+                <select name="line_cost_center_id">
+                  <option value="">Ohne Kostenstelle</option>
+                  {% for unit in cost_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Profitcenter</label>
+                <select name="line_profit_center_id">
+                  <option value="">Ohne Profitcenter</option>
+                  {% for unit in profit_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
                 <label>Zeilenbeschreibung</label>
                 <input name="line_description" />
               </div>
@@ -103,6 +117,20 @@
               {% for tax_code in tax_codes %}
                 <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
               {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Kostenstelle</label>
+            <select name="line_cost_center_id">
+              <option value="">Ohne Kostenstelle</option>
+              {% for unit in cost_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Profitcenter</label>
+            <select name="line_profit_center_id">
+              <option value="">Ohne Profitcenter</option>
+              {% for unit in profit_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
             </select>
           </div>
           <div>
@@ -187,7 +215,11 @@
                 <td></td>
                 <td></td>
                 <td>{{ line.description or "" }}</td>
-                <td>{{ line.account_code }} – {{ line.account_name }}</td>
+                <td>
+                  {{ line.account_code }} – {{ line.account_name }}
+                  {% if line.cost_center_code %}<br /><span class="muted">KST {{ line.cost_center_code }}</span>{% endif %}
+                  {% if line.profit_center_code %}<br /><span class="muted">PC {{ line.profit_center_code }}</span>{% endif %}
+                </td>
                 <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount }}{% endif %}</td>
                 <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount }}{% endif %}</td>
                 <td colspan="2"></td>

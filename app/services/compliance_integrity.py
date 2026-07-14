@@ -16,7 +16,7 @@ from app.services.audit_log import AuditIntegrityResult, verify_audit_log_integr
 from app.services.documents import verify_document_file
 from domain.models import Company, Document, JournalEntry
 
-JOURNAL_CONTENT_HASH_VERSION = 1
+JOURNAL_CONTENT_HASH_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +90,13 @@ def calculate_journal_entry_content_hash(entry: JournalEntry) -> str:
             {
                 "account_id": line.account_id,
                 "credit_amount": _amount(line.credit_amount),
+                "cost_center_id": line.cost_center_id,
                 "currency_code": line.currency_code,
                 "debit_amount": _amount(line.debit_amount),
                 "description": line.description,
                 "id": line.id,
                 "line_number": line.line_number,
+                "profit_center_id": line.profit_center_id,
                 "tax_code_id": line.tax_code_id,
                 "tenant_id": line.tenant_id,
             }

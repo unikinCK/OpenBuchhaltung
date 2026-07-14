@@ -327,6 +327,131 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="create_controlling_unit",
+        description="Legt eine Kostenstelle oder ein Profitcenter an.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "unit_type": {
+                    "type": "string",
+                    "enum": ["cost_center", "profit_center"],
+                },
+                "code": {"type": "string"},
+                "name": {"type": "string"},
+                "parent_id": {"type": ["integer", "null"]},
+                "valid_from": {"type": ["string", "null"]},
+                "valid_to": {"type": ["string", "null"]},
+                "is_active": {"type": "boolean", "default": True},
+            },
+            "required": ["company_id", "unit_type", "code", "name"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/controlling-units",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_controlling_units",
+        description="Listet Kostenstellen und Profitcenter einer Gesellschaft.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "unit_type": {
+                    "type": "string",
+                    "enum": ["cost_center", "profit_center"],
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/controlling-units",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="update_controlling_unit",
+        description=(
+            "Ändert Bezeichnung, Hierarchie, Gültigkeit oder Aktivstatus; Code und Typ "
+            "bleiben unveränderbar und Änderungen werden historisiert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "unit_id": {"type": "integer"},
+                "name": {"type": "string"},
+                "parent_id": {"type": ["integer", "null"]},
+                "valid_from": {"type": ["string", "null"]},
+                "valid_to": {"type": ["string", "null"]},
+                "is_active": {"type": "boolean"},
+            },
+            "required": ["unit_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/controlling-units/{unit_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_controlling_unit_history",
+        description="Liefert die verkettete Vorher-/Nachher-Historie einer Einheit.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "unit_id": {"type": "integer"},
+                "limit": {"type": "integer", "default": 100},
+            },
+            "required": ["unit_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/controlling-units/{unit_id}/history",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_controlling_report",
+        description="Liefert Kostenstellenrechnung oder Profitcenter-GuV mit Buchungsdrilldown.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "unit_type": {
+                    "type": "string",
+                    "enum": ["cost_center", "profit_center"],
+                },
+                "date_from": {"type": "string"},
+                "date_to": {"type": "string"},
+            },
+            "required": ["company_id", "unit_type"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/controlling-report",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="export_controlling_csv",
+        description="Exportiert Kostenstellenrechnung oder Profitcenter-GuV als CSV.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "unit_type": {
+                    "type": "string",
+                    "enum": ["cost_center", "profit_center"],
+                },
+                "date_from": {"type": "string"},
+                "date_to": {"type": "string"},
+            },
+            "required": ["company_id", "unit_type"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/exports/controlling.csv",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="create_journal_entry",
         description=(
             "Erfasst eine Buchung mit mindestens zwei Zeilen. Soll- und Haben-Summe "
@@ -377,6 +502,14 @@ TOOLS: list[ToolSpec] = [
                             },
                             "description": {"type": "string"},
                             "tax_code_id": {"type": "integer"},
+                            "cost_center_id": {
+                                "type": "integer",
+                                "description": "Optionale Kostenstellen-ID.",
+                            },
+                            "profit_center_id": {
+                                "type": "integer",
+                                "description": "Optionale Profitcenter-ID.",
+                            },
                         },
                         "anyOf": [
                             {"required": ["account_id"]},
