@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 
 from app import create_app
 from app.auth import hash_password
-from domain.models import Account, User
+from domain.models import Account, AuditLog, User
 
 CSV_CONTENT = """Kontonummer,Bezeichnung,Kontoart
 1000,Kasse,asset
@@ -51,6 +51,11 @@ def test_import_account_chart_csv_success_duplicate_and_invalid_row(tmp_path):
         accounts = session.execute(
             select(Account).where(Account.company_id == company_id).order_by(Account.code)
         ).scalars().all()
+        account_events = session.execute(
+            select(AuditLog)
+            .where(AuditLog.entity_type == "account")
+            .order_by(AuditLog.sequence_number)
+        ).scalars().all()
 
     assert report.total_rows == 4
     assert report.imported_rows == 2
@@ -63,6 +68,9 @@ def test_import_account_chart_csv_success_duplicate_and_invalid_row(tmp_path):
     assert accounts[0].hierarchy_level == 1
     assert accounts[1].hierarchy_level == 2
     assert accounts[1].parent_account_id == accounts[0].id
+    assert [event.action for event in account_events] == ["created", "created"]
+    assert account_events[0].payload["before"] is None
+    assert account_events[0].payload["after"]["code"] == "1000"
 
     with app.extensions["db_session_factory"]() as session:
         second_report = import_account_chart_csv(

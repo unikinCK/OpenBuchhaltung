@@ -17,6 +17,7 @@ from app.api.helpers import (
     forbidden,
     get_session_factory,
 )
+from app.auth import current_api_user
 from app.services.account_chart_import import (
     BUNDLED_ACCOUNT_CHART_FILES,
     AccountChartImportReport,
@@ -29,6 +30,10 @@ ALLOWED_ACCOUNT_CHART_MIME_TYPES = {
     "application/vnd.ms-excel",
     "application/octet-stream",
 }
+
+
+def _api_changed_by() -> str:
+    return (current_api_user() or {}).get("username", "api")
 
 
 def _report_dict(report: AccountChartImportReport) -> dict[str, object]:
@@ -131,7 +136,10 @@ def import_account_chart_via_api():
         try:
             if chart is not None:
                 report = import_bundled_account_chart(
-                    session=session, company_id=company_id, chart=chart
+                    session=session,
+                    company_id=company_id,
+                    chart=chart,
+                    changed_by=_api_changed_by(),
                 )
             else:
                 csv_text = content.decode("utf-8-sig")
@@ -139,6 +147,7 @@ def import_account_chart_via_api():
                     session=session,
                     company_id=company_id,
                     csv_stream=StringIO(csv_text),
+                    changed_by=_api_changed_by(),
                 )
         except UnicodeDecodeError:
             return jsonify({"error": "CSV must be UTF-8 encoded."}), 422

@@ -15,7 +15,17 @@ from app.services.audit_export import (
 )
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError
-from domain.models import AuditLog, Company, Document, FiscalYear, Period, PeriodLock, Tenant, User
+from domain.models import (
+    Account,
+    AuditLog,
+    Company,
+    Document,
+    FiscalYear,
+    Period,
+    PeriodLock,
+    Tenant,
+    User,
+)
 
 
 def _create_test_app(tmp_path: Path, **extra_config):
@@ -679,6 +689,92 @@ def test_api_list_accounts(tmp_path):
     assert isinstance(bank["id"], int)
 
 
+def test_api_updates_account_with_before_after_history(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Kontenhistorie", "company_name": "Historie GmbH"},
+    )
+    created = client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    assert created.status_code == 201
+    account_id = created.get_json()["id"]
+
+    updated = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"name": "Hausbank", "is_active": False},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["name"] == "Hausbank"
+    assert updated.get_json()["is_active"] is False
+    assert updated.get_json()["changed"] is True
+
+    unchanged = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"name": "Hausbank", "is_active": False},
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.get_json()["changed"] is False
+
+    immutable = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"code": "1201"},
+    )
+    assert immutable.status_code == 400
+    assert "immutable" in immutable.get_json()["error"]
+
+    history = client.get(f"/api/v1/accounts/{account_id}/history")
+    assert history.status_code == 200
+    entries = history.get_json()["entries"]
+    assert [entry["action"] for entry in entries] == ["updated", "created"]
+    assert entries[0]["payload"]["before"]["name"] == "Bank"
+    assert entries[0]["payload"]["before"]["is_active"] is True
+    assert entries[0]["payload"]["after"]["name"] == "Hausbank"
+    assert entries[0]["payload"]["after"]["is_active"] is False
+    assert entries[1]["payload"]["before"] is None
+    assert entries[1]["payload"]["after"]["code"] == "1200"
+    assert all(len(entry["entry_hash"]) == 64 for entry in entries)
+
+
+def test_ui_updates_account_and_shows_history(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+    client.post(
+        "/tenants",
+        data={"tenant_name": "UI Kontenhistorie", "company_name": "UI Historie GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/accounts/1/update",
+        data={"name": "Hausbank", "is_active": "false"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Konto wurde geändert".encode() in response.data
+    assert "Kontenänderungshistorie".encode() in response.data
+    assert b"Hausbank" in response.data
+    assert b"updated" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        account = session.get(Account, 1)
+        assert account.name == "Hausbank"
+        assert account.is_active is False
+
+
 def test_api_income_statement_respects_date_range(tmp_path):
     app = _create_test_app(tmp_path)
     client = _logged_in_client(app)
@@ -914,6 +1010,11 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         "/api/v1/accounts",
         json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
     )
+    account_update = client.patch(
+        "/api/v1/accounts/1",
+        json={"name": "Hausbank"},
+    )
+    assert account_update.status_code == 200
     entry_response = client.post(
         "/api/v1/journal-entries",
         json={
@@ -969,6 +1070,7 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         assert "README.txt" in names
         assert "schema/field_catalog.json" in names
         assert "data/accounts.json" in names
+        assert "data/account_history.json" in names
         assert "data/journal_entries.json" in names
         assert "data/documents.json" in names
         assert "data/users.json" in names
@@ -977,18 +1079,27 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         assert archive.read(document_paths[0]) == document_bytes
         manifest = json.loads(archive.read("manifest.json"))
         documents = json.loads(archive.read("data/documents.json"))
+        account_history = json.loads(archive.read("data/account_history.json"))
         users = json.loads(archive.read("data/users.json"))
         field_catalog = json.loads(archive.read("schema/field_catalog.json"))
 
     assert manifest["export_format_version"] == "2"
     assert manifest["table_counts"]["journal_entries"] == 1
     assert manifest["table_counts"]["documents"] == 1
+    assert manifest["table_counts"]["account_history"] == 3
     assert manifest["table_counts"]["users"] == 1
     assert manifest["totals"]["document_file_count"] == 1
     assert manifest["integrity"]["valid"] is True
     assert manifest["dataset_sha256"] == manifest_payload["dataset_sha256"]
     assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
     assert documents[0]["document_date"] == "2026-04-03"
+    assert [entry["action"] for entry in account_history] == [
+        "created",
+        "created",
+        "updated",
+    ]
+    assert account_history[-1]["payload"]["before"]["name"] == "Bank"
+    assert account_history[-1]["payload"]["after"]["name"] == "Hausbank"
     assert "storage_key" not in documents[0]
     assert users[0]["username"] == "audit-user"
     assert users[0]["role"] == "Pruefer"

@@ -33,7 +33,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 |---|---|---|---|---|
 | AUD-001 | Vollstaendige Protokollierung | Kritische Aktionen werden protokolliert: Erstellen, Aendern, Festschreiben, Storno, Import, Export, Login, Rollen, Perioden, Abschluss. | Audit-Testmatrix | teilweise |
 | AUD-002 | Kontextdaten | Audit-Eintraege enthalten Benutzer, Rolle, Mandant, Gesellschaft, Objekt, Aktion, Zeitpunkt, Quelle und Softwareversion. | Datenmodell/Test | offen |
-| AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Datenmodell/Test | offen |
+| AUD-003 | Vorher/Nachher-Werte | Aenderungen an Stammdaten und relevanten Fachdaten speichern alte und neue Werte. | Kontenstamm-Historie, weitere Stammdaten folgen | teilweise |
 | AUD-004 | Append-only | Audit-Eintraege duerfen nicht geaendert oder geloescht werden. | DB-Trigger/Test | umgesetzt |
 | AUD-005 | Hashkette | Audit-Eintraege werden kryptografisch verkettet, um nachtraegliche Manipulationen erkennbar zu machen. | Integritaetstest | umgesetzt |
 | AUD-006 | Integritaetspruefung | System kann Hashketten und Belegpruefsummen pruefen und Abweichungen melden. | CLI/API/UI/MCP-Pruefung | umgesetzt |
@@ -96,7 +96,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 ## 9. Priorisierte verbleibende Luecken
 
-1. Restluecken im Prueferexport: Kontenaenderungshistorie und Abschlussnachweise.
+1. Restluecke im Prueferexport: Abschlussnachweise.
 2. Verfahrensdokumentation und Betriebshandbuch.
 3. Traceability von Anforderungen zu Tests und Pull Requests.
 4. Externe Readiness-Pruefung vor einer moeglichen IDW-PS-880-Pruefung.

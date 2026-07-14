@@ -237,6 +237,27 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="update_account",
+        description=(
+            "Ändert die Bezeichnung oder den Aktivstatus eines Kontos. Kontonummer und "
+            "Kontotyp bleiben unveränderbar; die Änderung wird mit Vorher-/Nachher-Werten "
+            "protokolliert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "integer", "description": "ID des Kontos."},
+                "name": {"type": "string", "description": "Neue Kontobezeichnung."},
+                "is_active": {"type": "boolean", "description": "Neuer Aktivstatus."},
+            },
+            "required": ["account_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/accounts/{account_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="import_account_chart",
         description=(
             "Importiert SKR03/SKR04 oder eine eigene Kontenrahmen-CSV für eine Gesellschaft. "
@@ -280,6 +301,29 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="GET",
         path="/accounts",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_account_history",
+        description=(
+            "Liefert die unveränderbare Änderungshistorie eines Kontos mit "
+            "Vorher-/Nachher-Snapshots und Audit-Hashes."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "integer", "description": "ID des Kontos."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximale Zahl von Einträgen (1 bis 500).",
+                    "default": 100,
+                },
+            },
+            "required": ["account_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/accounts/{account_id}/history",
         arg_location="query",
     ),
     ToolSpec(

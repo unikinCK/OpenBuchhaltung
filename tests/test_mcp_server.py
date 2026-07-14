@@ -23,8 +23,10 @@ EXPECTED_TOOL_NAMES = {
     "rotate_user_api_token",
     "set_user_active",
     "create_account",
+    "update_account",
     "import_account_chart",
     "list_accounts",
+    "get_account_history",
     "create_journal_entry",
     "list_journal_entries",
     "finalize_journal_entry",
@@ -114,7 +116,7 @@ def test_tools_cover_all_api_endpoints() -> None:
     # Jedes Tool trägt ein gültiges JSON-Schema und einen HTTP-Verweis.
     for tool in TOOLS:
         assert tool.input_schema["type"] == "object"
-        assert tool.http_method in {"GET", "POST"}
+        assert tool.http_method in {"GET", "POST", "PATCH"}
         assert tool.path.startswith("/")
 
 
@@ -237,6 +239,47 @@ def test_account_chart_tool_forwards_arguments() -> None:
         "/account-chart/import",
         None,
         {"company_id": 7, "chart": "skr03"},
+    )
+
+
+def test_account_update_and_history_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 331,
+            "method": "tools/call",
+            "params": {
+                "name": "update_account",
+                "arguments": {"account_id": 9, "name": "Hausbank", "is_active": False},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "PATCH",
+        "/accounts/9",
+        None,
+        {"name": "Hausbank", "is_active": False},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 332,
+            "method": "tools/call",
+            "params": {
+                "name": "get_account_history",
+                "arguments": {"account_id": 9, "limit": 25},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/accounts/9/history",
+        {"limit": 25},
+        None,
     )
 
 
@@ -1421,7 +1464,12 @@ class _TestClientHttp:
         if method == "GET":
             response = self.client.get(url, query_string=params or {}, headers=self.headers)
         else:
-            response = self.client.post(url, json=json_body or {}, headers=self.headers)
+            response = self.client.open(
+                url,
+                method=method,
+                json=json_body or {},
+                headers=self.headers,
+            )
         body = response.get_data(as_text=True)
         content_type = response.headers.get("Content-Type", "")
         parsed = response.get_json(silent=True) if "application/json" in content_type else None
@@ -1475,6 +1523,20 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     companies = json.loads(call_tool("list_companies", {})["content"][0]["text"])
     # Konten werden der Reihe nach angelegt.
     bank_id, receivable_id, revenue_id = 1, 2, 3
+
+    updated_account = json.loads(
+        call_tool("update_account", {"account_id": bank_id, "name": "Hausbank"})[
+            "content"
+        ][0]["text"]
+    )
+    assert updated_account["name"] == "Hausbank"
+    account_history = json.loads(
+        call_tool("get_account_history", {"account_id": bank_id})["content"][0]["text"]
+    )
+    assert [entry["action"] for entry in account_history["entries"]] == [
+        "updated",
+        "created",
+    ]
 
     entry = call_tool(
         "create_journal_entry",

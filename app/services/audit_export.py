@@ -101,6 +101,7 @@ EXPORT_TABLE_MODELS = {
     "income_tax_returns": IncomeTaxReturn,
     "elster_submissions": ElsterSubmission,
     "audit_log": AuditLog,
+    "account_history": AuditLog,
     "documents": Document,
     "users": User,
 }
@@ -126,6 +127,9 @@ TABLE_DESCRIPTIONS = {
     "income_tax_returns": "Festgehaltene Körperschaft- und Gewerbesteuerberechnungen.",
     "elster_submissions": "ELSTER-Nutzdaten und Übermittlungsprotokolle.",
     "audit_log": "Gesellschaftsbezogene Ausschnitte des verketteten Audit-Logs.",
+    "account_history": (
+        "Kontenstamm-Historie mit unveränderbaren Vorher-/Nachher-Snapshots."
+    ),
     "documents": "Belegindex, Versionen und Prüfsummen der Originaldateien.",
     "users": "Mandantenbezogene Benutzer und Rollen ohne Authentisierungsgeheimnisse.",
 }
@@ -367,6 +371,16 @@ def build_audit_export_package(
                 AuditLog,
                 AuditLog.company_id == company.id,
                 _date_range(AuditLog.changed_at, date_from, date_to),
+                order_by=(AuditLog.changed_at, AuditLog.id),
+            )
+        ],
+        "account_history": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                AuditLog,
+                AuditLog.company_id == company.id,
+                AuditLog.entity_type == "account",
                 order_by=(AuditLog.changed_at, AuditLog.id),
             )
         ],

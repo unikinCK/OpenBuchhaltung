@@ -15,6 +15,7 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `README.txt` | Kurzanleitung im Exportpaket |
 | `schema/field_catalog.json` | Vollständiger technischer Feldkatalog aller exportierten Tabellen |
 | `data/*.json` | Fach- und Stammdaten; Listen oder Einzelobjekte gemäß Feldkatalog |
+| `data/account_history.json` | Verkettete Kontenstamm-Historie mit Vorher-/Nachher-Snapshots |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -32,6 +33,13 @@ Der Audit-Log-Export ist auf die Gesellschaft gefiltert. Die im Manifest
 enthaltene Audit-Integritätsprüfung bewertet dagegen die vollständige
 Mandanten-Hashkette zum Exportzeitpunkt, weil einzelne Gesellschaftseinträge in
 der mandantenweiten Kette nicht zwingend zusammenhängend sind.
+
+Kontenanlagen und Änderungen werden zusätzlich als eigener Prüfdatenbestand
+`account_history.json` ausgegeben. Jeder Eintrag enthält den vollständigen
+Konten-Snapshot unter `payload.before` und `payload.after`, Benutzer, Zeitpunkt,
+Sequenznummer sowie die Hashverkettung. Kontonummer und Kontotyp sind nach der
+Anlage strukturell unveränderbar; Änderungen sind auf Bezeichnung und
+Aktivstatus begrenzt.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,

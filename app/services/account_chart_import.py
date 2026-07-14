@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.account_hierarchy import resolve_parent_account_id
+from app.services.accounts import log_account_created
 from domain.models import Account, Company
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def import_account_chart_csv(
     session: Session,
     company_id: int,
     csv_stream: TextIO,
+    changed_by: str = "account-chart-import",
 ) -> AccountChartImportReport:
     """Import account chart rows from a CSV stream for one company."""
     company = session.get(Company, company_id)
@@ -99,6 +101,8 @@ def import_account_chart_csv(
             ),
         )
         session.add(account)
+        session.flush()
+        log_account_created(session=session, account=account, changed_by=changed_by)
         seen_codes.add(row["code"])
         report.imported_rows += 1
 
@@ -107,21 +111,37 @@ def import_account_chart_csv(
 
 
 def import_account_chart_file(
-    *, session: Session, company_id: int, csv_path: str | Path
+    *,
+    session: Session,
+    company_id: int,
+    csv_path: str | Path,
+    changed_by: str = "account-chart-import",
 ) -> AccountChartImportReport:
     with Path(csv_path).open("r", encoding="utf-8", newline="") as csv_stream:
         return import_account_chart_csv(
-            session=session, company_id=company_id, csv_stream=csv_stream
+            session=session,
+            company_id=company_id,
+            csv_stream=csv_stream,
+            changed_by=changed_by,
         )
 
 
 def import_bundled_account_chart(
-    *, session: Session, company_id: int, chart: str
+    *,
+    session: Session,
+    company_id: int,
+    chart: str,
+    changed_by: str = "account-chart-import",
 ) -> AccountChartImportReport:
     csv_path = BUNDLED_ACCOUNT_CHART_FILES.get(chart)
     if csv_path is None:
         raise ValueError(f"Unknown bundled account chart: {chart}")
-    return import_account_chart_file(session=session, company_id=company_id, csv_path=csv_path)
+    return import_account_chart_file(
+        session=session,
+        company_id=company_id,
+        csv_path=csv_path,
+        changed_by=changed_by,
+    )
 
 
 def _resolve_header_mapping(field_names: list[str]) -> dict[str, str]:

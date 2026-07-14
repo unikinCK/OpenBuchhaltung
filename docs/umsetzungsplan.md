@@ -367,6 +367,14 @@ UI, REST-API und MCP angeboten und gepflegt.
       Versionen erben das fachliche Datum. Belegliste, Audit-Log, Feldkatalog und
       Prüferexport weisen Beleg- und Uploaddatum getrennt aus; Altdaten bleiben
       transparent `null` statt ein Datum zu erfinden.)*
+- [x] Kontenänderungshistorie mit Vorher-/Nachher-Snapshots *(Compliance-
+      Härtung: Einzelanlage und Kontenrahmenimport erzeugen je Konto einen
+      vollständigen `created`-Snapshot in der verketteten Audit-Historie;
+      Bezeichnung und Aktivstatus sind über UI/API/MCP kontrolliert änderbar,
+      Kontonummer und Kontotyp bleiben strukturell unveränderbar. Echte
+      Änderungen erzeugen atomar einen `updated`-Eintrag mit vollständigem
+      `before`/`after`; No-op-Updates erzeugen keinen Eintrag. Die Historie ist
+      in UI, REST, MCP und als `account_history.json` im Prüferexport verfügbar.)*
 
 ## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
 
@@ -419,6 +427,33 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 - [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
       LSt-Bescheinigungen *(setzt amtliche Lohnsteuerberechnung und ELSTER-
       Verfahren auf dem Lohnbuchhaltung-MVP voraus)*
+
+## Phase 4 – Internes Rechnungswesen (Backlog)
+
+- [ ] **Kostenstellen- und Profitcenterrechnung** *(empfohlener nächster
+      fachlicher Ausbau in einem eigenen Inkrement: gemeinsames,
+      gesellschaftsbezogenes Dimensionsmodell mit Typ `cost_center` oder
+      `profit_center`, Code, Bezeichnung, Hierarchie, Gültigkeitszeitraum und
+      Aktivstatus. Buchungszeilen können zunächst optional genau einer
+      Kostenstelle und einem Profitcenter zugeordnet werden; unzugeordnete
+      Altbuchungen bleiben transparent leer. Erfassung und Validierung werden
+      durchgängig in manuelle und automatische Buchungspfade integriert. Der
+      MVP umfasst Stammdatenpflege mit Vorher-/Nachher-Historie,
+      mandantensichere UI/API/MCP-Schnittstellen, Zeitraum-/Kontenberichte je
+      Kostenstelle bzw. Profitcenter sowie Aufnahme in CSV- und Prüferexport.
+      Verteilungen einer Buchungszeile, Umlagen, Plankosten, Budgets und
+      Soll-Ist-Vergleiche folgen als getrennte Ausbaustufen.)*
+
+  Empfohlene Lieferreihenfolge:
+
+  1. Dimensions- und Stammdatenmodell inklusive Migration, Audit-Historie und
+     Gültigkeitsregeln.
+  2. Optionale Kontierung auf `JournalEntryLine` sowie Unterstützung in
+     manuellen Buchungen, Importen und automatischen Buchungsquellen.
+  3. Kostenstellenbericht und Profitcenter-GuV mit Drill-down auf Buchungen.
+  4. Prüferexport, CSV-Export und vollständige UI/API/MCP-Parität.
+  5. Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
+     Soll-Ist-Auswertungen.
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)

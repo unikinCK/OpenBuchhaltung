@@ -18,8 +18,9 @@ können, was gebucht, exportiert und protokolliert wird.
 
 ## Was kann OpenBuchhaltung?
 
-- **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten, Steuercodes,
-  mehrzeilige Journalbuchungen, Storno und Festschreibung.
+- **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten mit verketteter
+  Änderungshistorie, Steuercodes, mehrzeilige Journalbuchungen, Storno und
+  Festschreibung.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
   UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
   Testübermittlung und ERiC-Runner-Kante sowie KSt-/GewSt-Arbeitssnapshots
