@@ -49,6 +49,8 @@ def _fixed_asset_dict(session, asset) -> dict[str, object]:
         "book_value": str(current_book_value(session=session, asset=asset)),
         "asset_account_id": asset.asset_account_id,
         "depreciation_account_id": asset.depreciation_account_id,
+        "cost_center_id": asset.cost_center_id,
+        "profit_center_id": asset.profit_center_id,
     }
 
 
@@ -97,6 +99,8 @@ def create_fixed_asset_via_api():
             asset_account_code=payload.get("asset_account_code"),
             depreciation_account_id=payload.get("depreciation_account_id"),
             depreciation_account_code=payload.get("depreciation_account_code"),
+            cost_center_id=payload.get("cost_center_id"),
+            profit_center_id=payload.get("profit_center_id"),
             changed_by=(current_api_user() or {}).get("username", "api"),
         )
     except (JournalEntryCreationError, ValueError) as exc:

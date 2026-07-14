@@ -23,7 +23,9 @@ können, was gebucht, exportiert und protokolliert wird.
   Festschreibung.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
-  Kostenstellenrechnung und Profitcenter-GuV.
+  Kostenstellenrechnung und Profitcenter-GuV. Bank-, OCR- und E-Rechnungsbuchungen
+  können direkt kontiert werden; Anlagen und Mitarbeiter tragen optionale
+  Standardzuordnungen für ihre automatischen Aufwandsbuchungen.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
   UStVA- und USt-Jahreserklärungs-Snapshots mit ELSTER-Preflight,
   Testübermittlung und ERiC-Runner-Kante sowie KSt-/GewSt-Arbeitssnapshots
@@ -230,8 +232,10 @@ Auftraggeber/Empfänger; Trennzeichen `,` oder `;`). Re-Importe werden deduplizi
 
 Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
 (Vorschläge per Betrags-Matching auf dem Bankkonto) oder **direkt verbucht** werden:
-Gegenkonto wählen, optional Steuercode — der Bruttobetrag wird dann automatisch in
-Netto + Steuer zerlegt. Beispiel-CSV: `data/demo/bank_demo.csv`.
+Gegenkonto wählen, optional Steuercode, Kostenstelle und Profitcenter — der
+Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt. Die Dimensionen
+liegen auf Gegenkonto und automatisch erzeugter Steuerzeile, nicht auf dem
+Bankkonto. Beispiel-CSV: `data/demo/bank_demo.csv`.
 
 ## Offene Posten (OPOS)
 
@@ -261,7 +265,9 @@ Wirtschaftsjahr wird als Direktabschreibung gebucht
 (*Soll Abschreibungen an Anlagekonto*); zusätzlich gibt es die **außerplanmäßige
 Abschreibung/AfaA** (§ 253 Abs. 3 HGB, § 7 Abs. 1 S. 7 EStG) und den
 **Anlagenabgang** (Ausbuchung des Restbuchwerts). Alle Aktionen laufen ins
-Audit-Log. REST: `POST/GET /api/v1/fixed-assets`,
+Audit-Log. Eine optionale Standard-Kostenstelle und ein Standard-Profitcenter
+werden bei AfA, AfaA und Restbuchwert-Ausbuchung auf die Aufwandszeile übernommen.
+REST: `POST/GET /api/v1/fixed-assets`,
 `GET /api/v1/fixed-assets/<id>/schedule`,
 `POST /api/v1/fixed-assets/<id>/depreciation`.
 
@@ -287,6 +293,8 @@ Der Parser liest Rechnungsnummer, Datum, Lieferant sowie Netto-, Steuer- und
 Bruttobetrag aus und bucht: Netto auf das gewählte Aufwandskonto (Soll), Steuer auf
 das Steuerkonto des gewählten Steuercodes (Soll) und Brutto auf das Kreditorenkonto
 (Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
+Kostenstelle und Profitcenter können beim Import für die Netto-Aufwandszeile
+mitgegeben werden; Steuer- und Kreditorenzeile bleiben unzugeordnet.
 Beispieldateien: `data/demo/erechnung_ubl.xml`, `data/demo/erechnung_cii.xml`.
 
 Umgekehrt lässt sich auf derselben Seite eine **Ausgangsrechnung als E-Rechnung
@@ -468,7 +476,8 @@ und als Eingangsrechnung vorbuchen:
 4. **Vorschlag & Buchung:** Die erkannten Felder werden angezeigt (inkl. KI-Kontroll-
    Status) und als editierbarer Buchungsvorschlag vorbelegt (Netto → Aufwandskonto,
    Vorsteuer → Steuerkonto, Brutto → Kreditor). Nach Freigabe wird gebucht und der
-   gespeicherte Beleg mit der Buchung verknüpft. Alle Schritte werden als Audit-Events
+   gespeicherte Beleg mit der Buchung verknüpft. Kostenstelle und Profitcenter
+   können dabei der Netto-Aufwandszeile zugewiesen werden. Alle Schritte werden als Audit-Events
    (`ocr_analyzed` mit `control_status`, `ocr_booked`) protokolliert.
 
 ## End-to-End-Kernflows

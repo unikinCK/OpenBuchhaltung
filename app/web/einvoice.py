@@ -42,7 +42,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, Document, TaxCode
+from domain.models import Account, ControllingUnit, Document, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -55,6 +55,8 @@ def einvoice_page():
         expense_accounts = []
         creditor_accounts = []
         tax_codes = []
+        cost_centers = []
+        profit_centers = []
         if selected_company_id:
             accounts = (
                 session.execute(
@@ -76,6 +78,17 @@ def einvoice_page():
                 .scalars()
                 .all()
             )
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
 
     return render_template(
         "erechnung.html",
@@ -84,6 +97,8 @@ def einvoice_page():
         expense_accounts=expense_accounts,
         creditor_accounts=creditor_accounts,
         tax_codes=tax_codes,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
         today=date.today().isoformat(),
     )
 
@@ -94,6 +109,8 @@ def einvoice_book_action():
     expense_account_id = request.form.get("expense_account_id", type=int)
     creditor_account_id = request.form.get("creditor_account_id", type=int)
     tax_code_id = request.form.get("tax_code_id", type=int)
+    cost_center_id = request.form.get("cost_center_id", type=int)
+    profit_center_id = request.form.get("profit_center_id", type=int)
     uploaded_file = request.files.get("einvoice_xml")
 
     if (
@@ -131,6 +148,8 @@ def einvoice_book_action():
                 debit_amount=invoice.net_total,
                 credit_amount=zero,
                 description=f"{invoice.seller_name} {invoice.invoice_number}".strip(),
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
             )
         ]
         if invoice.tax_total > zero:
@@ -218,6 +237,8 @@ def einvoice_book_action():
                 "grand_total": str(invoice.grand_total),
                 "document_id": document.id,
                 "document_date": document.document_date.isoformat(),
+                "cost_center_id": cost_center_id,
+                "profit_center_id": profit_center_id,
             },
         )
         session.commit()

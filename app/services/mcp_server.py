@@ -907,6 +907,14 @@ TOOLS: list[ToolSpec] = [
                 "description": {"type": "string", "description": "Buchungstext."},
                 "net_amount": {"type": "string", "description": "Nettobetrag."},
                 "tax_amount": {"type": "string", "description": "Steuerbetrag."},
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Optionale Kostenstelle der Aufwandszeile.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Optionales Profitcenter der Aufwandszeile.",
+                },
             },
             "required": [
                 "company_id",
@@ -935,6 +943,14 @@ TOOLS: list[ToolSpec] = [
                 "expense_account_id": {"type": "integer", "description": "Aufwandskonto."},
                 "creditor_account_id": {"type": "integer", "description": "Kreditorenkonto."},
                 "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Optionale Kostenstelle der Aufwandszeile.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Optionales Profitcenter der Aufwandszeile.",
+                },
                 "file_name": {"type": "string", "description": "Originaler XML-Dateiname."},
                 "mime_type": {
                     "type": "string",
@@ -1066,6 +1082,14 @@ TOOLS: list[ToolSpec] = [
                 "contra_account_id": {"type": "integer", "description": "Gegenkonto."},
                 "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
                 "description": {"type": "string", "description": "Optionaler Buchungstext."},
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Optionale Kostenstelle des Gegenkontos.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Optionales Profitcenter des Gegenkontos.",
+                },
             },
             "required": ["transaction_id", "contra_account_id"],
             "additionalProperties": False,
@@ -1875,6 +1899,14 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Sozialversicherungs-Verbindlichkeit.",
                 },
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Standard-Kostenstelle für Aufwandsbuchungen.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Standard-Profitcenter für Aufwandsbuchungen.",
+                },
             },
             "required": [
                 "company_id",
@@ -2007,6 +2039,14 @@ TOOLS: list[ToolSpec] = [
                 "depreciation_account_code": {
                     "type": "string",
                     "description": "Kontonummer des Abschreibungskontos, z. B. '4830'.",
+                },
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Standard-Kostenstelle für AfA-Aufwand.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Standard-Profitcenter für AfA-Aufwand.",
                 },
             },
             "required": [

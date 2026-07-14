@@ -69,6 +69,8 @@ def _employee_dict(employee) -> dict[str, object]:
         "social_security_liability_account_id": (
             employee.social_security_liability_account_id
         ),
+        "cost_center_id": employee.cost_center_id,
+        "profit_center_id": employee.profit_center_id,
     }
 
 
@@ -170,6 +172,8 @@ def create_payroll_employee_via_api():
             social_security_liability_account_code=payload.get(
                 "social_security_liability_account_code"
             ),
+            cost_center_id=payload.get("cost_center_id"),
+            profit_center_id=payload.get("profit_center_id"),
             changed_by=_api_changed_by(),
         )
     except (TypeError, ValueError):

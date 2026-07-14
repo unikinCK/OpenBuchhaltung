@@ -451,9 +451,13 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
      transparent unzugeordnet.
   3. [x] Kostenstellenbericht und Profitcenter-GuV mit Konten-Drill-down.
   4. [x] Prüferexport, CSV-Export und UI/API/MCP-Parität des MVP.
-  5. [ ] Folgeausbau: Kontierung in den Fachmasken für Bank, E-Rechnung, OCR,
-     Anlagen und Lohn sowie konfigurierbare Vorschlagsregeln.
-  6. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
+  5. [x] Kontierung in den Fachmasken für Bank, E-Rechnung und OCR sowie dauerhafte
+     Standardzuordnungen an Anlagen und Mitarbeitern. Automatische Aufwandszeilen
+     übernehmen die Dimensionen, Gegen-/Verbindlichkeitszeilen bleiben unzugeordnet;
+     Lohnaufwand wird je Kontierung getrennt verdichtet. UI, REST, MCP, Audit und
+     Migration sind abgedeckt.
+  6. [ ] Folgeausbau: konfigurierbare Vorschlagsregeln für automatische Quellen.
+  7. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
      Soll-Ist-Auswertungen.
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)

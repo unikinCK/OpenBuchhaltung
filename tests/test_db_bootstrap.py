@@ -137,3 +137,23 @@ def test_journal_hash_migration_roundtrip_preserves_earlier_guards(tmp_path: Pat
         "obk_journal_entry_hash_required_on_insert",
         "obk_journal_entry_hash_required_on_update",
     } <= _sqlite_trigger_names(engine)
+
+
+def test_automatic_source_dimensions_migration_roundtrip(tmp_path: Path):
+    db_path = tmp_path / "automatic-source-dimensions-roundtrip.db"
+    engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+    config = _alembic_config(engine)
+
+    command.upgrade(config, "head")
+    for table_name in ("fixed_asset", "payroll_employee"):
+        columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+        assert {"cost_center_id", "profit_center_id"} <= columns
+
+    command.downgrade(config, "20260714_0023")
+    for table_name in ("fixed_asset", "payroll_employee"):
+        columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+        assert "cost_center_id" not in columns
+        assert "profit_center_id" not in columns
+
+    command.upgrade(config, "head")
+    assert _alembic_version(db_path) == _alembic_head_revision()

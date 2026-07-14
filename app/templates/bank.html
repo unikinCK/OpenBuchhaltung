@@ -93,6 +93,18 @@
                         <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
                       {% endfor %}
                     </select>
+                    <select name="cost_center_id">
+                      <option value="">Ohne Kostenstelle</option>
+                      {% for unit in cost_centers %}
+                        <option value="{{ unit.id }}">KSt {{ unit.code }} – {{ unit.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="profit_center_id">
+                      <option value="">Ohne Profitcenter</option>
+                      {% for unit in profit_centers %}
+                        <option value="{{ unit.id }}">PC {{ unit.code }} – {{ unit.name }}</option>
+                      {% endfor %}
+                    </select>
                     <button type="submit" class="secondary" style="margin:0;">Buchen</button>
                   </form>
                 {% elif tx.journal_entry_id %}

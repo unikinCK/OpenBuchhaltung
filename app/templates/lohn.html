@@ -96,6 +96,18 @@
               {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>{% endfor %}
             </select>
           </label>
+          <label>Standard-Kostenstelle
+            <select name="cost_center_id">
+              <option value="">Ohne Kostenstelle</option>
+              {% for unit in cost_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Standard-Profitcenter
+            <select name="profit_center_id">
+              <option value="">Ohne Profitcenter</option>
+              {% for unit in profit_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+            </select>
+          </label>
         </div>
         <button type="submit">Mitarbeiter speichern</button>
       </form>

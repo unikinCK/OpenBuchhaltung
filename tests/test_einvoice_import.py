@@ -12,7 +12,15 @@ from sqlalchemy import select
 from app import create_app
 from app.auth import hash_password
 from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
-from domain.models import Account, AuditLog, Document, JournalEntry, JournalEntryLine, User
+from domain.models import (
+    Account,
+    AuditLog,
+    ControllingUnit,
+    Document,
+    JournalEntry,
+    JournalEntryLine,
+    User,
+)
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "data" / "demo"
 
@@ -118,6 +126,25 @@ def test_einvoice_upload_books_entry_and_stores_document(tmp_path):
         from domain.models import TaxCode
 
         tax_code_id = session.execute(select(TaxCode.id)).scalar_one()
+        expense = session.get(Account, expense_id)
+        cost_center = ControllingUnit(
+            tenant_id=expense.tenant_id,
+            company_id=expense.company_id,
+            unit_type="cost_center",
+            code="K500",
+            name="Beschaffung",
+        )
+        profit_center = ControllingUnit(
+            tenant_id=expense.tenant_id,
+            company_id=expense.company_id,
+            unit_type="profit_center",
+            code="P500",
+            name="Kerngeschäft",
+        )
+        session.add_all([cost_center, profit_center])
+        session.commit()
+        cost_center_id = cost_center.id
+        profit_center_id = profit_center.id
 
     xml_bytes = (DEMO_DIR / "erechnung_cii.xml").read_bytes()
     response = client.post(
@@ -127,6 +154,8 @@ def test_einvoice_upload_books_entry_and_stores_document(tmp_path):
             "expense_account_id": str(expense_id),
             "creditor_account_id": str(creditor_id),
             "tax_code_id": str(tax_code_id),
+            "cost_center_id": str(cost_center_id),
+            "profit_center_id": str(profit_center_id),
             "einvoice_xml": (BytesIO(xml_bytes), "rechnung.xml"),
         },
         content_type="multipart/form-data",
@@ -151,6 +180,10 @@ def test_einvoice_upload_books_entry_and_stores_document(tmp_path):
         assert by_code["4200"].debit_amount == Decimal("1000.00")
         assert by_code["1576"].debit_amount == Decimal("190.00")
         assert by_code["1600"].credit_amount == Decimal("1190.00")
+        assert by_code["4200"].cost_center_id == cost_center_id
+        assert by_code["4200"].profit_center_id == profit_center_id
+        assert by_code["1576"].cost_center_id is None
+        assert by_code["1600"].profit_center_id is None
 
         document = session.execute(select(Document)).scalar_one()
         assert document.journal_entry_id == entry.id
@@ -200,6 +233,25 @@ def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
         from domain.models import TaxCode
 
         tax_code_id = session.execute(select(TaxCode.id)).scalar_one()
+        expense = session.get(Account, expense_id)
+        cost_center = ControllingUnit(
+            tenant_id=expense.tenant_id,
+            company_id=expense.company_id,
+            unit_type="cost_center",
+            code="K501",
+            name="API-Beschaffung",
+        )
+        profit_center = ControllingUnit(
+            tenant_id=expense.tenant_id,
+            company_id=expense.company_id,
+            unit_type="profit_center",
+            code="P501",
+            name="API-Kerngeschäft",
+        )
+        session.add_all([cost_center, profit_center])
+        session.commit()
+        cost_center_id = cost_center.id
+        profit_center_id = profit_center.id
 
     xml_bytes = (DEMO_DIR / "erechnung_cii.xml").read_bytes()
     response = client.post(
@@ -212,6 +264,8 @@ def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
             "file_name": "rechnung.xml",
             "mime_type": "application/xml",
             "content_base64": base64.b64encode(xml_bytes).decode("ascii"),
+            "cost_center_id": cost_center_id,
+            "profit_center_id": profit_center_id,
         },
     )
     assert response.status_code == 201
@@ -227,5 +281,11 @@ def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
         assert document.journal_entry_id == entry.id
         assert document.document_date == date(2026, 6, 15)
         assert entry.entry_date == date(2026, 6, 15)
+        expense_line = next(line for line in entry.lines if line.account_id == expense_id)
+        other_lines = [line for line in entry.lines if line.account_id != expense_id]
+        assert expense_line.cost_center_id == cost_center_id
+        assert expense_line.profit_center_id == profit_center_id
+        assert all(line.cost_center_id is None for line in other_lines)
+        assert all(line.profit_center_id is None for line in other_lines)
         audit = session.execute(select(AuditLog).where(AuditLog.entity_type == "einvoice"))
         assert audit.scalar_one().action == "imported"

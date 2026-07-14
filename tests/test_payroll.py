@@ -26,6 +26,7 @@ from domain.models import (
     AuditLog,
     Base,
     Company,
+    ControllingUnit,
     JournalEntry,
     JournalEntryLine,
     PayrollRun,
@@ -149,6 +150,57 @@ def test_payroll_run_posts_balanced_journal_entry() -> None:
             select(AuditLog.action).where(AuditLog.entity_type == "payroll_run")
         ).scalars().all()
         assert actions == ["created", "posted"]
+
+
+def test_payroll_expenses_keep_employee_controlling_dimensions() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        company, accounts = _seed(session)
+        cost_center = ControllingUnit(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            unit_type="cost_center",
+            code="K300",
+            name="Entwicklung",
+        )
+        profit_center = ControllingUnit(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            unit_type="profit_center",
+            code="P300",
+            name="Software",
+        )
+        session.add_all([cost_center, profit_center])
+        session.commit()
+        employee_input = _employee_input(company)
+        employee_input.cost_center_id = cost_center.id
+        employee_input.profit_center_id = profit_center.id
+        create_payroll_employee(session=session, payload=employee_input)
+        run = create_payroll_run(
+            session=session,
+            payload=PayrollRunInput(
+                company_id=company.id,
+                period_label="2026-06",
+                payment_date=date(2026, 6, 30),
+                changed_by="pytest",
+            ),
+        )
+        posted = post_payroll_run(
+            session=session, payroll_run_id=run.id, changed_by="pytest"
+        )
+        lines = session.execute(
+            select(JournalEntryLine).where(
+                JournalEntryLine.journal_entry_id == posted.journal_entry_id
+            )
+        ).scalars().all()
+        expense_ids = {accounts["4120"].id, accounts["4130"].id}
+        expense_lines = [line for line in lines if line.account_id in expense_ids]
+        liability_lines = [line for line in lines if line.account_id not in expense_ids]
+        assert all(line.cost_center_id == cost_center.id for line in expense_lines)
+        assert all(line.profit_center_id == profit_center.id for line in expense_lines)
+        assert all(line.cost_center_id is None for line in liability_lines)
+        assert all(line.profit_center_id is None for line in liability_lines)
 
 
 def _create_test_app(tmp_path: Path):
