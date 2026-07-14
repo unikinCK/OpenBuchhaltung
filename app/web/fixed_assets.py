@@ -30,7 +30,7 @@ from app.web.helpers import (
     require_company_access,
     safe_optional_decimal,
 )
-from domain.models import Account, FixedAsset
+from domain.models import Account, ControllingUnit, FixedAsset
 from domain.services import depreciation as afa
 
 
@@ -45,6 +45,8 @@ def fixed_assets_page():
         asset_views = []
         selected_asset = None
         schedule = []
+        cost_centers = []
+        profit_centers = []
         total_book_value = Decimal("0.00")
         if selected_company_id:
             accounts = (
@@ -57,6 +59,17 @@ def fixed_assets_page():
                 .all()
             )
             assets = list_fixed_assets(session=session, company_id=selected_company_id)
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             for asset in assets:
                 book_value = current_book_value(session=session, asset=asset)
                 if asset.status != "disposed":
@@ -79,6 +92,8 @@ def fixed_assets_page():
         companies=companies,
         selected_company_id=selected_company_id,
         accounts=accounts,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
         asset_views=asset_views,
         selected_asset=selected_asset,
         schedule=schedule,
@@ -139,6 +154,8 @@ def create_fixed_asset_action():
                     keep_memo_value=request.form.get("keep_memo_value") == "1",
                     asset_account_id=asset_account_id,
                     depreciation_account_id=depreciation_account_id,
+                    cost_center_id=request.form.get("cost_center_id", type=int),
+                    profit_center_id=request.form.get("profit_center_id", type=int),
                     notes=request.form.get("notes", "").strip() or None,
                     changed_by=changed_by(),
                 ),

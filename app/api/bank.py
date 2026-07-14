@@ -265,6 +265,16 @@ def book_bank_transaction_via_api(transaction_id: int):
         tax_code_id = (
             int(payload["tax_code_id"]) if payload.get("tax_code_id") is not None else None
         )
+        cost_center_id = (
+            int(payload["cost_center_id"])
+            if payload.get("cost_center_id") not in (None, "")
+            else None
+        )
+        profit_center_id = (
+            int(payload["profit_center_id"])
+            if payload.get("profit_center_id") not in (None, "")
+            else None
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "contra_account_id must be an integer."}), 400
     description = (payload.get("description") or "").strip() or None
@@ -281,6 +291,8 @@ def book_bank_transaction_via_api(transaction_id: int):
                 contra_account_id=contra_account_id,
                 tax_code_id=tax_code_id,
                 description=description,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
                 changed_by=_api_changed_by(),
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:

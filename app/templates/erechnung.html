@@ -33,6 +33,22 @@
           {% endfor %}
         </select>
 
+        <label for="cost_center_id">Kostenstelle (Aufwandszeile)</label>
+        <select id="cost_center_id" name="cost_center_id">
+          <option value="">Ohne Kostenstelle</option>
+          {% for unit in cost_centers %}
+            <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="profit_center_id">Profitcenter (Aufwandszeile)</label>
+        <select id="profit_center_id" name="profit_center_id">
+          <option value="">Ohne Profitcenter</option>
+          {% for unit in profit_centers %}
+            <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+          {% endfor %}
+        </select>
+
         <label for="tax_code_id">Steuercode (für Vorsteuer)</label>
         <select id="tax_code_id" name="tax_code_id">
           <option value="">Ohne Steuer</option>

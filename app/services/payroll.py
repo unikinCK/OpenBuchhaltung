@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
+from app.services.controlling import ControllingError, validate_controlling_assignment
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -63,6 +64,8 @@ class PayrollEmployeeInput:
     solidarity_surcharge_rate: Decimal = Decimal("0.00")
     employee_social_security_rate: Decimal = Decimal("0.00")
     employer_social_security_rate: Decimal = Decimal("0.00")
+    cost_center_id: int | None = None
+    profit_center_id: int | None = None
     changed_by: str = "system"
 
 
@@ -96,6 +99,25 @@ def create_payroll_employee(
         raise PayrollError("Austrittsdatum darf nicht vor Eintritt liegen.")
     if payload.status not in {"active", "inactive"}:
         raise PayrollError("Status muss active oder inactive sein.")
+
+    try:
+        assignment_date = max(payload.employment_start, date.today())
+        validate_controlling_assignment(
+            session=session,
+            company_id=company.id,
+            entry_date=assignment_date,
+            unit_id=payload.cost_center_id,
+            expected_type="cost_center",
+        )
+        validate_controlling_assignment(
+            session=session,
+            company_id=company.id,
+            entry_date=assignment_date,
+            unit_id=payload.profit_center_id,
+            expected_type="profit_center",
+        )
+    except ControllingError as exc:
+        raise PayrollError(str(exc)) from exc
 
     employee = PayrollEmployee(
         tenant_id=company.tenant_id,
@@ -154,6 +176,8 @@ def create_payroll_employee(
             account_code=payload.social_security_liability_account_code,
             label="SV-Verbindlichkeitskonto",
         ),
+        cost_center_id=payload.cost_center_id,
+        profit_center_id=payload.profit_center_id,
     )
     session.add(employee)
     session.flush()
@@ -169,6 +193,8 @@ def create_payroll_employee(
             "employee_number": employee.employee_number,
             "status": employee.status,
             "gross_monthly_salary": str(employee.gross_monthly_salary),
+            "cost_center_id": employee.cost_center_id,
+            "profit_center_id": employee.profit_center_id,
         },
     )
     session.commit()
@@ -455,14 +481,24 @@ def _payroll_employees_for_run(
 
 
 def _journal_lines_for_run(run: PayrollRun) -> list[JournalLineInput]:
-    debit_totals: dict[int, Decimal] = {}
+    debit_totals: dict[tuple[int, int | None, int | None], Decimal] = {}
     credit_totals: dict[int, Decimal] = {}
     for line in run.lines:
         employee = line.employee
-        _add(debit_totals, employee.wage_expense_account_id, line.gross_pay)
-        _add(
+        dimension_key = (
+            employee.cost_center_id,
+            employee.profit_center_id,
+        )
+        _add_dimensioned(
+            debit_totals,
+            employee.wage_expense_account_id,
+            *dimension_key,
+            line.gross_pay,
+        )
+        _add_dimensioned(
             debit_totals,
             employee.employer_social_security_expense_account_id,
+            *dimension_key,
             line.employer_social_security,
         )
         _add(credit_totals, employee.payroll_liability_account_id, line.net_pay)
@@ -482,8 +518,12 @@ def _journal_lines_for_run(run: PayrollRun) -> list[JournalLineInput]:
             account_id=account_id,
             debit_amount=amount,
             description=f"Lohnlauf {run.period_label}",
+            cost_center_id=cost_center_id,
+            profit_center_id=profit_center_id,
         )
-        for account_id, amount in sorted(debit_totals.items())
+        for (account_id, cost_center_id, profit_center_id), amount in sorted(
+            debit_totals.items(), key=lambda item: tuple(value or 0 for value in item[0])
+        )
         if amount > Decimal("0.00")
     ]
     journal_lines.extend(
@@ -554,3 +594,14 @@ def _tax_class(value: int) -> int:
 
 def _add(target: dict[int, Decimal], account_id: int, amount: Decimal) -> None:
     target[account_id] = target.get(account_id, Decimal("0.00")) + _money(amount)
+
+
+def _add_dimensioned(
+    target: dict[tuple[int, int | None, int | None], Decimal],
+    account_id: int,
+    cost_center_id: int | None,
+    profit_center_id: int | None,
+    amount: Decimal,
+) -> None:
+    key = (account_id, cost_center_id, profit_center_id)
+    target[key] = target.get(key, Decimal("0.00")) + _money(amount)

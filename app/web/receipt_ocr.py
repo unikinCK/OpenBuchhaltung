@@ -33,7 +33,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, Document, TaxCode
+from domain.models import Account, ControllingUnit, Document, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -72,10 +72,23 @@ def _render_receipt_ocr_page(
         expense_accounts: list = []
         creditor_accounts: list = []
         tax_codes: list = []
+        cost_centers: list = []
+        profit_centers: list = []
         if selected_company_id:
             expense_accounts, creditor_accounts, tax_codes = _receipt_account_context(
                 session, selected_company_id
             )
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
     return render_template(
         "belege_ocr.html",
         companies=companies,
@@ -83,6 +96,8 @@ def _render_receipt_ocr_page(
         expense_accounts=expense_accounts,
         creditor_accounts=creditor_accounts,
         tax_codes=tax_codes,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
         extraction=extraction,
         document_id=document_id,
         document_name=document_name,
@@ -241,6 +256,8 @@ def receipt_ocr_book():
     tax_code_id = request.form.get("tax_code_id", type=int)
     entry_date_raw = request.form.get("entry_date", "").strip()
     description = request.form.get("description", "").strip()
+    cost_center_id = request.form.get("cost_center_id", type=int)
+    profit_center_id = request.form.get("profit_center_id", type=int)
 
     try:
         net_amount = parse_decimal(request.form.get("net_amount") or "0")
@@ -284,6 +301,8 @@ def receipt_ocr_book():
                 debit_amount=net_amount,
                 credit_amount=zero,
                 description=description or None,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
             )
         ]
         if tax_amount > zero:
@@ -342,6 +361,8 @@ def receipt_ocr_book():
                 "tax_amount": str(tax_amount),
                 "gross_amount": str(gross_amount),
                 "document_date": document.document_date.isoformat(),
+                "cost_center_id": cost_center_id,
+                "profit_center_id": profit_center_id,
             },
         )
         session.commit()

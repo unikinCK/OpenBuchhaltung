@@ -25,6 +25,7 @@ from domain.models import (
     AuditLog,
     Base,
     Company,
+    ControllingUnit,
     DepreciationEntry,
     FixedAsset,
     JournalEntryLine,
@@ -115,6 +116,58 @@ def test_post_depreciation_creates_balanced_entry(session: Session) -> None:
     credit = {line.account_id: line.credit_amount for line in lines if line.credit_amount > 0}
     assert debit == {afa_expense.id: Decimal("2400.00")}
     assert credit == {machine.id: Decimal("2400.00")}
+
+
+def test_depreciation_inherits_asset_controlling_defaults(session: Session) -> None:
+    company, machine, afa_expense = _seed(session)
+    cost_center = ControllingUnit(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        unit_type="cost_center",
+        code="K200",
+        name="Produktion",
+    )
+    profit_center = ControllingUnit(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        unit_type="profit_center",
+        code="P200",
+        name="Maschinenbau",
+    )
+    session.add_all([cost_center, profit_center])
+    session.commit()
+    asset = create_fixed_asset(
+        session=session,
+        payload=FixedAssetInput(
+            company_id=company.id,
+            asset_number="A-CO-1",
+            name="Kontierte Maschine",
+            acquisition_date=date(2026, 1, 1),
+            acquisition_cost=Decimal("12000.00"),
+            method="linear",
+            useful_life_months=60,
+            asset_account_id=machine.id,
+            depreciation_account_id=afa_expense.id,
+            cost_center_id=cost_center.id,
+            profit_center_id=profit_center.id,
+            changed_by="pytest",
+        ),
+    )
+
+    depreciation = post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    lines = session.execute(
+        select(JournalEntryLine).where(
+            JournalEntryLine.journal_entry_id == depreciation.journal_entry_id
+        )
+    ).scalars().all()
+    expense_line = next(line for line in lines if line.account_id == afa_expense.id)
+    asset_line = next(line for line in lines if line.account_id == machine.id)
+    assert expense_line.cost_center_id == cost_center.id
+    assert expense_line.profit_center_id == profit_center.id
+    assert asset_line.cost_center_id is None
+    assert asset_line.profit_center_id is None
 
 
 def test_post_depreciation_is_idempotent_per_year(session: Session) -> None:

@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
+from app.services.controlling import ControllingError, validate_controlling_assignment
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -53,6 +54,8 @@ class FixedAssetInput:
     asset_account_code: str | None = None
     depreciation_account_id: int | None = None
     depreciation_account_code: str | None = None
+    cost_center_id: int | None = None
+    profit_center_id: int | None = None
 
 
 def _resolve_account(
@@ -124,6 +127,24 @@ def create_fixed_asset(*, session: Session, payload: FixedAssetInput) -> FixedAs
     )
 
     in_service = payload.in_service_date or payload.acquisition_date
+    assignment_date = max(in_service, date.today())
+    try:
+        validate_controlling_assignment(
+            session=session,
+            company_id=company.id,
+            entry_date=assignment_date,
+            unit_id=payload.cost_center_id,
+            expected_type="cost_center",
+        )
+        validate_controlling_assignment(
+            session=session,
+            company_id=company.id,
+            entry_date=assignment_date,
+            unit_id=payload.profit_center_id,
+            expected_type="profit_center",
+        )
+    except ControllingError as exc:
+        raise FixedAssetError(str(exc)) from exc
     asset = FixedAsset(
         tenant_id=company.tenant_id,
         company_id=company.id,
@@ -140,6 +161,8 @@ def create_fixed_asset(*, session: Session, payload: FixedAssetInput) -> FixedAs
         keep_memo_value=payload.keep_memo_value,
         asset_account_id=asset_account.id,
         depreciation_account_id=depreciation_account.id,
+        cost_center_id=payload.cost_center_id,
+        profit_center_id=payload.profit_center_id,
         status="active",
         notes=(payload.notes or "").strip() or None,
     )
@@ -165,6 +188,8 @@ def create_fixed_asset(*, session: Session, payload: FixedAssetInput) -> FixedAs
             "name": asset.name,
             "method": asset.method,
             "acquisition_cost": str(asset.acquisition_cost),
+            "cost_center_id": asset.cost_center_id,
+            "profit_center_id": asset.profit_center_id,
         },
     )
     session.commit()
@@ -263,6 +288,8 @@ def _book_depreciation(
                     debit_amount=amount,
                     credit_amount=Decimal("0.00"),
                     description=f"Abschreibung {asset.asset_number}",
+                    cost_center_id=asset.cost_center_id,
+                    profit_center_id=asset.profit_center_id,
                 ),
                 JournalLineInput(
                     account_id=asset.asset_account_id,
@@ -305,6 +332,8 @@ def _book_depreciation(
             "amount": str(amount),
             "book_value_after": str(book_value_after),
             "journal_entry_id": entry.id,
+            "cost_center_id": asset.cost_center_id,
+            "profit_center_id": asset.profit_center_id,
         },
     )
     session.commit()

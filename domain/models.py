@@ -606,6 +606,12 @@ class FixedAsset(Base):
     depreciation_account_id: Mapped[int] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
     )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     disposal_date: Mapped[date | None] = mapped_column(Date)
     disposal_proceeds: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -617,6 +623,12 @@ class FixedAsset(Base):
     company: Mapped[Company] = relationship()
     asset_account: Mapped[Account] = relationship(foreign_keys=[asset_account_id])
     depreciation_account: Mapped[Account] = relationship(foreign_keys=[depreciation_account_id])
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id]
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id]
+    )
     depreciation_entries: Mapped[list[DepreciationEntry]] = relationship(
         back_populates="fixed_asset", cascade="all, delete-orphan"
     )
@@ -878,6 +890,12 @@ class PayrollEmployee(Base):
     social_security_liability_account_id: Mapped[int] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
     )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -895,6 +913,12 @@ class PayrollEmployee(Base):
     )
     social_security_liability_account: Mapped[Account] = relationship(
         foreign_keys=[social_security_liability_account_id]
+    )
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id]
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id]
     )
     payroll_lines: Mapped[list[PayrollRunLine]] = relationship(back_populates="employee")
 

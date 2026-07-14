@@ -22,7 +22,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, BankTransaction, JournalEntry, TaxCode
+from domain.models import Account, BankTransaction, ControllingUnit, JournalEntry, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -36,6 +36,8 @@ def bank_page():
         contra_accounts = []
         tax_codes = []
         transactions = []
+        cost_centers = []
+        profit_centers = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
         if selected_company_id:
             accounts = (
@@ -65,6 +67,17 @@ def bank_page():
                 .scalars()
                 .all()
             )
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             for transaction in transactions:
                 if transaction.status == "open":
                     suggestions_by_tx[transaction.id] = suggest_matches(
@@ -80,6 +93,8 @@ def bank_page():
         tax_codes=tax_codes,
         transactions=transactions,
         suggestions_by_tx=suggestions_by_tx,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
     )
 
 
@@ -167,6 +182,8 @@ def bank_book_action(transaction_id: int):
                 transaction_id=transaction_id,
                 contra_account_id=contra_account_id,
                 tax_code_id=tax_code_id,
+                cost_center_id=request.form.get("cost_center_id", type=int),
+                profit_center_id=request.form.get("profit_center_id", type=int),
                 changed_by=changed_by(),
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:

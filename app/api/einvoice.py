@@ -77,6 +77,8 @@ def _load_import_payload():
                 "expense_account_id": request.form.get("expense_account_id", type=int),
                 "creditor_account_id": request.form.get("creditor_account_id", type=int),
                 "tax_code_id": request.form.get("tax_code_id", type=int),
+                "cost_center_id": request.form.get("cost_center_id", type=int),
+                "profit_center_id": request.form.get("profit_center_id", type=int),
                 "file_name": secure_filename(uploaded_file.filename),
                 "mime_type": uploaded_file.mimetype or "application/xml",
                 "content": uploaded_file.read(),
@@ -99,6 +101,8 @@ def _load_import_payload():
             "expense_account_id": payload.get("expense_account_id"),
             "creditor_account_id": payload.get("creditor_account_id"),
             "tax_code_id": payload.get("tax_code_id"),
+            "cost_center_id": payload.get("cost_center_id"),
+            "profit_center_id": payload.get("profit_center_id"),
             "file_name": secure_filename((payload.get("file_name") or "").strip()),
             "mime_type": payload.get("mime_type") or "application/xml",
             "content": content,
@@ -177,6 +181,16 @@ def import_einvoice_via_api():
         tax_code_id = (
             int(upload["tax_code_id"]) if upload.get("tax_code_id") is not None else None
         )
+        cost_center_id = (
+            int(upload["cost_center_id"])
+            if upload.get("cost_center_id") not in (None, "")
+            else None
+        )
+        profit_center_id = (
+            int(upload["profit_center_id"])
+            if upload.get("profit_center_id") not in (None, "")
+            else None
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "company_id and account IDs are required."}), 400
 
@@ -213,6 +227,8 @@ def import_einvoice_via_api():
                 debit_amount=invoice.net_total,
                 credit_amount=zero,
                 description=f"{invoice.seller_name} {invoice.invoice_number}".strip(),
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
             )
         ]
         if invoice.tax_total > zero:
@@ -293,6 +309,8 @@ def import_einvoice_via_api():
                 "grand_total": str(invoice.grand_total),
                 "document_id": document.id,
                 "document_date": document.document_date.isoformat(),
+                "cost_center_id": cost_center_id,
+                "profit_center_id": profit_center_id,
             },
         )
         session.commit()

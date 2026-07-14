@@ -252,6 +252,8 @@ def book_transaction(
     changed_by: str,
     tax_code_id: int | None = None,
     description: str | None = None,
+    cost_center_id: int | None = None,
+    profit_center_id: int | None = None,
 ) -> BankTransaction:
     """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto)."""
     transaction = session.get(BankTransaction, transaction_id)
@@ -284,6 +286,8 @@ def book_transaction(
         debit_amount=zero if incoming else contra_net,
         credit_amount=contra_net if incoming else zero,
         tax_code_id=tax_code_id,
+        cost_center_id=cost_center_id,
+        profit_center_id=profit_center_id,
     )
 
     entry = create_journal_entry(
@@ -309,7 +313,12 @@ def book_transaction(
         entity_id=str(transaction.id),
         action="booked",
         changed_by=changed_by,
-        payload={"journal_entry_id": entry.id, "posting_number": entry.posting_number},
+        payload={
+            "journal_entry_id": entry.id,
+            "posting_number": entry.posting_number,
+            "cost_center_id": cost_center_id,
+            "profit_center_id": profit_center_id,
+        },
     )
     session.commit()
     session.refresh(transaction)

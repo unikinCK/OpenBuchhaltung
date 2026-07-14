@@ -20,7 +20,16 @@ from app.services.receipt_ocr import (
     extract_document_text,
     extract_receipt_fields_llm,
 )
-from domain.models import Account, AuditLog, Company, Document, JournalEntry, TaxCode, Tenant
+from domain.models import (
+    Account,
+    AuditLog,
+    Company,
+    ControllingUnit,
+    Document,
+    JournalEntry,
+    TaxCode,
+    Tenant,
+)
 
 # ---------------------------------------------------------------------------
 # Stufe 2: heuristische Analyse (rein, deterministisch)
@@ -490,6 +499,25 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
         tax_code_id = session.query(TaxCode).one().id
         expense_id = session.query(Account).filter_by(code="6300").one().id
         creditor_id = session.query(Account).filter_by(code="1600").one().id
+        company = session.get(Company, company_id)
+        cost_center = ControllingUnit(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            unit_type="cost_center",
+            code="K400",
+            name="Einkauf",
+        )
+        profit_center = ControllingUnit(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            unit_type="profit_center",
+            code="P400",
+            name="Handel",
+        )
+        session.add_all([cost_center, profit_center])
+        session.commit()
+        cost_center_id = cost_center.id
+        profit_center_id = profit_center.id
 
     book = client.post(
         "/belege/ocr/buchen",
@@ -503,6 +531,8 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
             "description": "Muster Lieferant 2026-4711",
             "net_amount": "200.00",
             "tax_amount": "38.00",
+            "cost_center_id": cost_center_id,
+            "profit_center_id": profit_center_id,
         },
         follow_redirects=True,
     )
@@ -514,6 +544,12 @@ def test_ocr_flow_upload_suggest_and_book(tmp_path):
         document = session.get(Document, document_id)
         assert document.journal_entry_id == entry.id
         assert document.document_date == entry.entry_date == date(2026, 7, 8)
+        expense_line = next(line for line in entry.lines if line.account_id == expense_id)
+        other_lines = [line for line in entry.lines if line.account_id != expense_id]
+        assert expense_line.cost_center_id == cost_center_id
+        assert expense_line.profit_center_id == profit_center_id
+        assert all(line.cost_center_id is None for line in other_lines)
+        assert all(line.profit_center_id is None for line in other_lines)
         total_debit = sum(line.debit_amount for line in entry.lines)
         total_credit = sum(line.credit_amount for line in entry.lines)
         assert total_debit == total_credit == Decimal("238.00")

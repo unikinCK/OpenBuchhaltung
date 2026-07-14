@@ -247,6 +247,16 @@ def book_receipt_ocr_suggestion_via_api():
         tax_code_id = (
             int(payload["tax_code_id"]) if payload.get("tax_code_id") is not None else None
         )
+        cost_center_id = (
+            int(payload["cost_center_id"])
+            if payload.get("cost_center_id") not in (None, "")
+            else None
+        )
+        profit_center_id = (
+            int(payload["profit_center_id"])
+            if payload.get("profit_center_id") not in (None, "")
+            else None
+        )
         entry_date = date.fromisoformat(payload.get("entry_date") or date.today().isoformat())
         net_amount = parse_decimal(str(payload.get("net_amount") or "0"))
         tax_amount = parse_decimal(str(payload.get("tax_amount") or "0"))
@@ -279,6 +289,8 @@ def book_receipt_ocr_suggestion_via_api():
                 debit_amount=net_amount,
                 credit_amount=zero,
                 description=description,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
             )
         ]
         if tax_amount > zero:
@@ -334,6 +346,8 @@ def book_receipt_ocr_suggestion_via_api():
                 "tax_amount": str(tax_amount),
                 "gross_amount": str(gross_amount),
                 "document_date": document.document_date.isoformat(),
+                "cost_center_id": cost_center_id,
+                "profit_center_id": profit_center_id,
             },
         )
         session.commit()

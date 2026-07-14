@@ -32,6 +32,7 @@ from domain.models import (
     BankTransaction,
     Base,
     Company,
+    ControllingUnit,
     JournalEntryLine,
     TaxCode,
     Tenant,
@@ -203,6 +204,22 @@ def test_suggest_and_match_transaction(session: Session) -> None:
 
 def test_book_transaction_with_tax_code_splits_gross(session: Session) -> None:
     company, bank, rent = _seed_company(session)
+    cost_center = ControllingUnit(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        unit_type="cost_center",
+        code="K100",
+        name="Verwaltung",
+    )
+    profit_center = ControllingUnit(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        unit_type="profit_center",
+        code="P100",
+        name="Zentrale",
+    )
+    session.add_all([cost_center, profit_center])
+    session.commit()
     ensure_default_tax_codes(session=session, company=company)
     vst19 = session.execute(
         select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
@@ -224,6 +241,8 @@ def test_book_transaction_with_tax_code_splits_gross(session: Session) -> None:
         transaction_id=outgoing.id,
         contra_account_id=rent.id,
         tax_code_id=vst19.id,
+        cost_center_id=cost_center.id,
+        profit_center_id=profit_center.id,
         changed_by="tester",
     )
     assert booked.status == "booked"
@@ -238,6 +257,10 @@ def test_book_transaction_with_tax_code_splits_gross(session: Session) -> None:
     assert lines[0].credit_amount == Decimal("595.00")
     assert lines[1].debit_amount == Decimal("500.00")
     assert lines[2].debit_amount == Decimal("95.00")
+    assert lines[0].cost_center_id is None
+    assert lines[0].profit_center_id is None
+    assert all(line.cost_center_id == cost_center.id for line in lines[1:])
+    assert all(line.profit_center_id == profit_center.id for line in lines[1:])
 
 
 def test_net_from_gross_edge_cases() -> None:

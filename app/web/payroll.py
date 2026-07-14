@@ -27,7 +27,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, PayrollRun
+from domain.models import Account, ControllingUnit, PayrollRun
 
 
 @main_bp.get("/lohn")
@@ -38,6 +38,8 @@ def payroll_page():
         accounts = []
         employees = []
         runs = []
+        cost_centers = []
+        profit_centers = []
         if selected_company_id:
             accounts = (
                 session.execute(
@@ -52,6 +54,17 @@ def payroll_page():
                 session=session, company_id=selected_company_id
             )
             runs = list_payroll_runs(session=session, company_id=selected_company_id)
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
 
     today = date.today()
     return render_template(
@@ -61,6 +74,8 @@ def payroll_page():
         accounts=accounts,
         employees=employees,
         runs=runs,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
         payroll_readiness=payroll_compliance_readiness(current_app.config),
         default_period=f"{today.year}-{today.month:02d}",
         today=today.isoformat(),
@@ -126,6 +141,8 @@ def create_payroll_employee_action():
                 "social_security_number", ""
             ).strip()
             or None,
+            cost_center_id=request.form.get("cost_center_id", type=int),
+            profit_center_id=request.form.get("profit_center_id", type=int),
             changed_by=changed_by(),
         )
     except ValueError:
