@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
 from app.services.compliance_integrity import seal_journal_entry
+from app.services.controlling import ControllingError, validate_controlling_assignment
 from domain.models import (
     Account,
     Company,
@@ -42,6 +43,8 @@ class JournalLineInput:
     description: str | None = None
     tax_code_id: int | None = None
     account_code: str | None = None
+    cost_center_id: int | None = None
+    profit_center_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -180,6 +183,23 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
             raise JournalEntryCreationError("Konto für Buchungszeile nicht gefunden.")
         if not account.is_active:
             raise JournalEntryCreationError("Inaktive Konten dürfen nicht bebucht werden.")
+        try:
+            validate_controlling_assignment(
+                session=session,
+                company_id=company.id,
+                entry_date=payload.entry_date,
+                unit_id=line.cost_center_id,
+                expected_type="cost_center",
+            )
+            validate_controlling_assignment(
+                session=session,
+                company_id=company.id,
+                entry_date=payload.entry_date,
+                unit_id=line.profit_center_id,
+                expected_type="profit_center",
+            )
+        except ControllingError as exc:
+            raise JournalEntryCreationError(str(exc)) from exc
 
     fiscal_year = _get_or_create_fiscal_year(
         session=session,
@@ -229,6 +249,8 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
             "description": line.description,
             "currency_code": company.currency_code,
             "tax_code_id": line.tax_code_id,
+            "cost_center_id": line.cost_center_id,
+            "profit_center_id": line.profit_center_id,
         }
         if line.debit_amount > Decimal("0.00"):
             line_payload["debit_amount"] = line.debit_amount
@@ -366,6 +388,8 @@ def _expand_tax_lines(
                 credit_amount=tax_amount if not is_debit else Decimal("0.00"),
                 description=f"{tax_code.code} {tax_code.rate}% auf {net_amount}",
                 tax_code_id=tax_code.id,
+                cost_center_id=line.cost_center_id,
+                profit_center_id=line.profit_center_id,
             )
         )
 
@@ -738,6 +762,8 @@ def reverse_journal_entry(
             credit_amount=line.debit_amount,
             description=line.description,
             tax_code_id=line.tax_code_id,
+            cost_center_id=line.cost_center_id,
+            profit_center_id=line.profit_center_id,
         )
         for line in sorted(original.lines, key=lambda line: line.line_number)
     ]

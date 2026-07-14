@@ -7,13 +7,15 @@ from datetime import date, datetime, timezone
 from io import StringIO
 
 from flask import Response, current_app, jsonify, request
+from sqlalchemy.orm import aliased
 
 from app.api.blueprint import api_bp
 from app.api.helpers import DateArgError, api_scoped_company, date_arg, get_session_factory
 from app.services.audit_export import build_audit_export_package
+from app.services.controlling import ControllingError, controlling_result_report
 from app.services.datev_export import DatevExportOptions, build_datev_export
 from app.services.reports import trial_balance_for_company
-from domain.models import Account, JournalEntry, JournalEntryLine
+from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine
 
 
 def _bool_arg(name: str, *, default: bool = False) -> bool:
@@ -70,6 +72,8 @@ def export_journal_csv():
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
+        cost_unit = aliased(ControllingUnit)
+        profit_unit = aliased(ControllingUnit)
         journal_rows = (
             session.query(
                 JournalEntry.id,
@@ -81,9 +85,13 @@ def export_journal_csv():
                 Account.name,
                 JournalEntryLine.debit_amount,
                 JournalEntryLine.credit_amount,
+                cost_unit.code.label("cost_center_code"),
+                profit_unit.code.label("profit_center_code"),
             )
             .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
             .join(Account, Account.id == JournalEntryLine.account_id)
+            .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
+            .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
             .filter(JournalEntry.company_id == company_id)
             .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
             .all()
@@ -101,6 +109,8 @@ def export_journal_csv():
             "account_name",
             "debit_amount",
             "credit_amount",
+            "cost_center_code",
+            "profit_center_code",
         ]
     )
     for row in journal_rows:
@@ -114,10 +124,81 @@ def export_journal_csv():
                 row.name,
                 row.debit_amount,
                 row.credit_amount,
+                row.cost_center_code,
+                row.profit_center_code,
             ]
         )
 
     file_name = f"journal-company-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/controlling.csv")
+def export_controlling_csv():
+    company_id = request.args.get("company_id", type=int)
+    unit_type = (request.args.get("unit_type") or "cost_center").strip()
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            report = controlling_result_report(
+                session=session,
+                company_id=company_id,
+                unit_type=unit_type,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except ControllingError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(
+        [
+            "unit_type",
+            "unit_code",
+            "unit_name",
+            "account_code",
+            "account_name",
+            "account_type",
+            "amount",
+            "total_revenue",
+            "total_expense",
+            "net_income",
+        ]
+    )
+    for bucket in [*report["units"], report["unassigned"]]:
+        unit = bucket["unit"] or {}
+        account_rows = bucket["accounts"] or [None]
+        for account in account_rows:
+            writer.writerow(
+                [
+                    unit_type,
+                    unit.get("code", ""),
+                    unit.get("name", "Nicht zugeordnet"),
+                    account["code"] if account else "",
+                    account["name"] if account else "",
+                    account["account_type"] if account else "",
+                    account["amount"] if account else "",
+                    bucket["total_revenue"],
+                    bucket["total_expense"],
+                    bucket["net_income"],
+                ]
+            )
+    file_name = f"controlling-{unit_type}-{company_id}-{date.today().isoformat()}.csv"
     return Response(
         csv_buffer.getvalue(),
         mimetype="text/csv; charset=utf-8",

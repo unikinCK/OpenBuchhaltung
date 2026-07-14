@@ -430,29 +430,30 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 
 ## Phase 4 – Internes Rechnungswesen (Backlog)
 
-- [ ] **Kostenstellen- und Profitcenterrechnung** *(empfohlener nächster
-      fachlicher Ausbau in einem eigenen Inkrement: gemeinsames,
+- [x] **Kostenstellen- und Profitcenterrechnung – MVP** *(gemeinsames,
       gesellschaftsbezogenes Dimensionsmodell mit Typ `cost_center` oder
       `profit_center`, Code, Bezeichnung, Hierarchie, Gültigkeitszeitraum und
-      Aktivstatus. Buchungszeilen können zunächst optional genau einer
+      Aktivstatus. Buchungszeilen können optional genau einer
       Kostenstelle und einem Profitcenter zugeordnet werden; unzugeordnete
-      Altbuchungen bleiben transparent leer. Erfassung und Validierung werden
-      durchgängig in manuelle und automatische Buchungspfade integriert. Der
-      MVP umfasst Stammdatenpflege mit Vorher-/Nachher-Historie,
+      Altbuchungen bleiben transparent leer. Der MVP umfasst validierte
+      Erfassung in UI, REST und MCP, Stammdatenpflege mit Vorher-/Nachher-Historie,
       mandantensichere UI/API/MCP-Schnittstellen, Zeitraum-/Kontenberichte je
       Kostenstelle bzw. Profitcenter sowie Aufnahme in CSV- und Prüferexport.
-      Verteilungen einer Buchungszeile, Umlagen, Plankosten, Budgets und
-      Soll-Ist-Vergleiche folgen als getrennte Ausbaustufen.)*
+      Kontierungen werden in Festschreibungs-Hashversion 2 versiegelt und beim
+      Storno gespiegelt.)*
 
   Empfohlene Lieferreihenfolge:
 
-  1. Dimensions- und Stammdatenmodell inklusive Migration, Audit-Historie und
+  1. [x] Dimensions- und Stammdatenmodell inklusive Migration, Audit-Historie und
      Gültigkeitsregeln.
-  2. Optionale Kontierung auf `JournalEntryLine` sowie Unterstützung in
-     manuellen Buchungen, Importen und automatischen Buchungsquellen.
-  3. Kostenstellenbericht und Profitcenter-GuV mit Drill-down auf Buchungen.
-  4. Prüferexport, CSV-Export und vollständige UI/API/MCP-Parität.
-  5. Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
+  2. [x] Optionale Kontierung auf `JournalEntryLine` in manueller UI- und
+     API/MCP-Buchung; bestehende automatische Buchungsquellen bleiben
+     transparent unzugeordnet.
+  3. [x] Kostenstellenbericht und Profitcenter-GuV mit Konten-Drill-down.
+  4. [x] Prüferexport, CSV-Export und UI/API/MCP-Parität des MVP.
+  5. [ ] Folgeausbau: Kontierung in den Fachmasken für Bank, E-Rechnung, OCR,
+     Anlagen und Lohn sowie konfigurierbare Vorschlagsregeln.
+  6. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
      Soll-Ist-Auswertungen.
 
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)

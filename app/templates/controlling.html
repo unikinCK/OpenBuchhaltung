@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Controlling – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Kostenstellen und Profitcenter</h1>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <h2>Controlling-Einheit anlegen</h2>
+      <form method="post" action="{{ url_for('main.create_controlling_unit_from_form') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <select name="unit_type" required>
+          <option value="cost_center">Kostenstelle</option>
+          <option value="profit_center">Profitcenter</option>
+        </select>
+        <input name="code" placeholder="Code" required />
+        <input name="name" placeholder="Bezeichnung" required />
+        <input name="valid_from" type="date" aria-label="Gültig ab" />
+        <input name="valid_to" type="date" aria-label="Gültig bis" />
+        <button type="submit">Anlegen</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Stammdaten</h2>
+      {% if units %}
+        <table>
+          <thead><tr><th>Typ</th><th>Code</th><th>Änderbare Stammdaten</th></tr></thead>
+          <tbody>
+            {% for unit in units %}
+              <tr>
+                <td>{{ "Kostenstelle" if unit.unit_type == "cost_center" else "Profitcenter" }}</td>
+                <td><strong>{{ unit.code }}</strong></td>
+                <td>
+                  <form method="post" action="{{ url_for('main.update_controlling_unit_from_form', unit_id=unit.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input name="name" value="{{ unit.name }}" required />
+                    <select name="parent_id" aria-label="Übergeordnete Einheit">
+                      <option value="">Keine übergeordnete Einheit</option>
+                      {% for candidate in units if candidate.unit_type == unit.unit_type and candidate.id != unit.id %}
+                        <option value="{{ candidate.id }}" {% if candidate.id == unit.parent_id %}selected{% endif %}>{{ candidate.code }} – {{ candidate.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <input name="valid_from" type="date" value="{{ unit.valid_from.isoformat() if unit.valid_from else '' }}" aria-label="Gültig ab" />
+                    <input name="valid_to" type="date" value="{{ unit.valid_to.isoformat() if unit.valid_to else '' }}" aria-label="Gültig bis" />
+                    <select name="is_active">
+                      <option value="true" {% if unit.is_active %}selected{% endif %}>aktiv</option>
+                      <option value="false" {% if not unit.is_active %}selected{% endif %}>inaktiv</option>
+                    </select>
+                    <button type="submit">Speichern</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Kostenstellen oder Profitcenter vorhanden.</p>
+      {% endif %}
+    </section>
+
+    {% for title, report in [("Kostenstellenrechnung", cost_center_report), ("Profitcenter-GuV", profit_center_report)] %}
+      <section class="card">
+        <h2>{{ title }}</h2>
+        <p><a href="{{ url_for('api.export_controlling_csv', company_id=selected_company_id, unit_type=report.unit_type) }}">Als CSV exportieren</a></p>
+        {% if report and report.units %}
+          <table>
+            <thead><tr><th>Einheit</th><th class="num">Erlöse</th><th class="num">Aufwand</th><th class="num">Ergebnis</th></tr></thead>
+            <tbody>
+              {% for bucket in report.units %}
+                <tr>
+                  <td>{{ bucket.unit.code }} – {{ bucket.unit.name }}</td>
+                  <td class="num">{{ bucket.total_revenue }}</td>
+                  <td class="num">{{ bucket.total_expense }}</td>
+                  <td class="num"><strong>{{ bucket.net_income }}</strong></td>
+                </tr>
+                {% for account in bucket.accounts %}
+                  <tr class="entry-lines"><td>{{ account.code }} – {{ account.name }}</td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
+                {% endfor %}
+              {% endfor %}
+              <tr><td>Nicht zugeordnet</td><td class="num">{{ report.unassigned.total_revenue }}</td><td class="num">{{ report.unassigned.total_expense }}</td><td class="num"><strong>{{ report.unassigned.net_income }}</strong></td></tr>
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">Noch keine Einheiten angelegt.</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+
+    <section class="card">
+      <h2>Änderungshistorie</h2>
+      {% if events %}
+        <table>
+          <thead><tr><th>Zeitpunkt</th><th>ID</th><th>Aktion</th><th>Benutzer</th><th>Vorher</th><th>Nachher</th></tr></thead>
+          <tbody>
+            {% for event in events %}
+              <tr><td>{{ event.changed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ event.entity_id }}</td><td>{{ event.action }}</td><td>{{ event.changed_by }}</td><td><code>{{ event.payload.before if event.payload else '–' }}</code></td><td><code>{{ event.payload.after if event.payload else '–' }}</code></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine protokollierten Änderungen.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

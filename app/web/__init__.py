@@ -10,6 +10,7 @@ from app.web import (  # noqa: F401
     admin,
     audit_log,
     bank,
+    controlling,
     dashboard,
     documents,
     einvoice,

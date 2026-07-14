@@ -90,6 +90,9 @@ class Company(Base):
     income_tax_returns: Mapped[list[IncomeTaxReturn]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    controlling_units: Mapped[list[ControllingUnit]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
 
 
 class FiscalYear(Base):
@@ -229,6 +232,58 @@ class Account(Base):
         return padded[0], padded[1], padded[2], padded[3], level
 
 
+class ControllingUnit(Base):
+    __tablename__ = "controlling_unit"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "unit_type",
+            "code",
+            name="uq_controlling_unit_company_type_code",
+        ),
+        CheckConstraint(
+            "unit_type IN ('cost_center', 'profit_center')",
+            name="ck_controlling_unit_type",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_from IS NULL OR valid_from <= valid_to",
+            name="ck_controlling_unit_validity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    unit_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    code: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="SET NULL")
+    )
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="controlling_units")
+    parent: Mapped[ControllingUnit | None] = relationship(
+        remote_side="ControllingUnit.id", back_populates="children"
+    )
+    children: Mapped[list[ControllingUnit]] = relationship(back_populates="parent")
+    cost_center_lines: Mapped[list[JournalEntryLine]] = relationship(
+        foreign_keys="JournalEntryLine.cost_center_id", back_populates="cost_center"
+    )
+    profit_center_lines: Mapped[list[JournalEntryLine]] = relationship(
+        foreign_keys="JournalEntryLine.profit_center_id", back_populates="profit_center"
+    )
+
+
 class TaxCode(Base):
     __tablename__ = "tax_code"
     __table_args__ = (
@@ -267,7 +322,7 @@ class JournalEntry(Base):
             "AND content_hash_version IS NULL) OR "
             "(is_finalized = true AND content_hash IS NOT NULL "
             "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
-            "AND content_hash_version = 1))",
+            "AND content_hash_version = 2))",
             name="ck_journal_entry_finalized_content_hash",
         ),
     )
@@ -344,6 +399,12 @@ class JournalEntryLine(Base):
         ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
     )
     tax_code_id: Mapped[int | None] = mapped_column(ForeignKey("tax_code.id", ondelete="RESTRICT"))
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
     description: Mapped[str | None] = mapped_column(String(255))
     debit_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0.00")
@@ -356,6 +417,12 @@ class JournalEntryLine(Base):
     journal_entry: Mapped[JournalEntry] = relationship(back_populates="lines")
     account: Mapped[Account] = relationship(back_populates="journal_lines")
     tax_code: Mapped[TaxCode | None] = relationship(back_populates="journal_lines")
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id], back_populates="cost_center_lines"
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id], back_populates="profit_center_lines"
+    )
 
     @validates("debit_amount", "credit_amount")
     def validate_debit_credit(self, key: str, value: Decimal) -> Decimal:
