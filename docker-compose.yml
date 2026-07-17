@@ -9,6 +9,12 @@ services:
     environment:
       - APP_ENV=development
       - DATABASE_URL=postgresql+psycopg://openbuchhaltung:openbuchhaltung@db:5432/openbuchhaltung
+      # Globaler API-Token. Muss mit OPENBUCHHALTUNG_API_TOKEN des mcp-Service
+      # übereinstimmen, sonst lehnt die API dessen Aufrufe mit 401 ab. Leer =
+      # kein globaler Token; die API-Auth bleibt trotzdem an (API_REQUIRE_AUTH
+      # Default 1). Für Entwicklung ohne Token: API_REQUIRE_AUTH=0 setzen.
+      - API_AUTH_TOKEN=${API_AUTH_TOKEN:-}
+      - API_REQUIRE_AUTH=${API_REQUIRE_AUTH:-1}
     depends_on:
       db:
         condition: service_healthy
