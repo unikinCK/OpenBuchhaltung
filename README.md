@@ -638,7 +638,8 @@ Requests ohne bzw. mit falschem Token werden mit **401** abgelehnt.
 
 ```bash
 export MCP_HTTP_AUTH_TOKEN="$(openssl rand -hex 32)"   # Eingangstoken des MCP-Endpunkts
-export OPENBUCHHALTUNG_API_TOKEN="obk_..."             # nur nötig bei API_REQUIRE_AUTH=1
+export API_AUTH_TOKEN="$(openssl rand -hex 32)"        # globaler Backend-Token der App
+export OPENBUCHHALTUNG_API_TOKEN="$API_AUTH_TOKEN"     # derselbe Wert für den mcp-Service
 docker compose --profile mcp up -d
 # Test vom Host aus:
 curl -X POST http://localhost:8090/mcp \
@@ -647,10 +648,36 @@ curl -X POST http://localhost:8090/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Statt `export` lassen sich beide Variablen (und `COMPOSE_PROFILES=mcp`, damit der
+Statt `export` lassen sich die Variablen (und `COMPOSE_PROFILES=mcp`, damit der
 Service auch bei künftigen `docker compose up -d` immer mitstartet) dauerhaft in
 einer `.env`-Datei neben der `docker-compose.yml` hinterlegen — Docker Compose
 liest sie automatisch. Die `.env` gehört nicht ins Repository.
+
+> **Häufiger Fehler — MCP verbindet, aber Tool-Aufrufe liefern „Unauthorized":**
+> Das betrifft die **zweite** Auth-Ebene. Es gibt zwei getrennte Token-Prüfungen:
+>
+> 1. **MCP-Client → MCP-Server:** `MCP_HTTP_AUTH_TOKEN` (Bearer). Stimmt es, ist die
+>    Verbindung da und `tools/list` funktioniert.
+> 2. **MCP-Server → REST-API:** Der MCP-Server ruft intern `/api/v1` auf und hängt
+>    dabei `OPENBUCHHALTUNG_API_TOKEN` als Bearer an. Die App prüft diesen gegen ihren
+>    eigenen `API_AUTH_TOKEN`.
+>
+> Kommt „Unauthorized" **erst beim Ausführen eines Tools** (z. B.
+> `create_tenant_with_company`, `list_companies`), passt Ebene 1, aber Ebene 2 nicht:
+> `OPENBUCHHALTUNG_API_TOKEN` (mcp-Service) und `API_AUTH_TOKEN` (app-Service) müssen
+> **denselben Wert** haben. Aktionen mit globalem Scope wie das Anlegen eines Mandanten
+> verlangen zwingend diesen globalen Token — ein tenant-gebundenes Benutzer-Token
+> genügt dafür nicht. Für lokale Entwicklung ganz ohne Token: `API_REQUIRE_AUTH=0`
+> setzen (dann ist die API offen — nur für vertrauenswürdige Umgebungen).
+
+Insgesamt sind es also **drei** Werte in der `.env`:
+
+```dotenv
+COMPOSE_PROFILES=mcp
+MCP_HTTP_AUTH_TOKEN=<Token A — schützt den MCP-Endpunkt gegenüber Clients>
+API_AUTH_TOKEN=<Token B — globaler Backend-Token der App>
+OPENBUCHHALTUNG_API_TOKEN=<identisch zu Token B>
+```
 
 Es sind zwei getrennte Tokens: `MCP_HTTP_AUTH_TOKEN` schützt den MCP-Endpunkt
 gegenüber MCP-Clients (z. B. Claude Desktop); `OPENBUCHHALTUNG_API_TOKEN` ist das
