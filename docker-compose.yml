@@ -3,7 +3,10 @@ services:
     build: .
     command: python run.py
     ports:
-      - "127.0.0.1:8000:8000"
+      # Standardmäßig nur lokal (Loopback). Für Remote-Zugriff APP_BIND_HOST=0.0.0.0
+      # setzen — dann ist die UI im Netz erreichbar (nur hinter Firewall/VPN/Tailscale
+      # oder Reverse-Proxy mit Auth sinnvoll, die App enthält Finanzdaten).
+      - "${APP_BIND_HOST:-127.0.0.1}:8000:8000"
     volumes:
       - ./:/app
     environment:

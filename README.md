@@ -123,6 +123,20 @@ enthaltene PostgreSQL-Datenbank und veröffentlicht PostgreSQL/Redis nicht auf d
 Host. Für einen Produktionsstart steht die separate, fail-fast konfigurierte Datei
 `docker-compose.production.yml` zur Verfügung.
 
+Die UI ist damit **nur auf dem Host selbst** (localhost) erreichbar — ein Browser
+auf einem anderen Gerät kommt nicht an `127.0.0.1:8000` heran. Für Remote-Zugriff:
+
+```bash
+# In der .env neben der docker-compose.yml, dann `docker compose up -d`:
+APP_BIND_HOST=0.0.0.0   # bindet die UI auf allen Interfaces
+```
+
+> ⚠️ `APP_BIND_HOST=0.0.0.0` veröffentlicht die UI im Netz. Da die App Finanzdaten
+> enthält, nur hinter Firewall/VPN, Tailscale oder einem Reverse-Proxy mit Auth
+> nutzen. Alternativen ohne offene Bindung: Tailscale Serve
+> (`tailscale serve --bg --https=443 http://127.0.0.1:8000`) oder ein SSH-Tunnel
+> vom Client (`ssh -L 8000:127.0.0.1:8000 <host>`, dann `http://localhost:8000`).
+
 **Compose-Profile:** Ohne weitere Angabe startet `docker compose up` nur die
 Kern-Services **`app`** und **`db`**. Alle übrigen Services sind opt-in über
 [Compose-Profile](https://docs.docker.com/compose/how-tos/profiles/) — ein
