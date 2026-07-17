@@ -123,6 +123,31 @@ enthaltene PostgreSQL-Datenbank und veröffentlicht PostgreSQL/Redis nicht auf d
 Host. Für einen Produktionsstart steht die separate, fail-fast konfigurierte Datei
 `docker-compose.production.yml` zur Verfügung.
 
+**Compose-Profile:** Ohne weitere Angabe startet `docker compose up` nur die
+Kern-Services **`app`** und **`db`**. Alle übrigen Services sind opt-in über
+[Compose-Profile](https://docs.docker.com/compose/how-tos/profiles/) — ein
+schlichtes `docker compose up -d` startet sie bewusst **nicht** mit:
+
+| Profil | Services | Zweck |
+|---|---|---|
+| `mcp` | `mcp` | MCP-Server (Streamable HTTP) auf `127.0.0.1:8090` |
+| `proxy` | `mcp`, `caddy` | HTTPS-Reverse-Proxy (Let's Encrypt) vor dem MCP-Server |
+| `dev-tools` | `worker`, `redis`, `adminer` | Entwicklungs-Hilfsdienste |
+
+Profile werden per Flag oder Umgebungsvariable aktiviert (mehrere möglich):
+```bash
+# einmalig per Flag
+docker compose --profile mcp up -d
+
+# dauerhaft per Umgebungsvariable, z. B. in einer .env-Datei neben der Compose-Datei
+COMPOSE_PROFILES=mcp docker compose up -d
+```
+Der `mcp`-Service benötigt zwingend `MCP_HTTP_AUTH_TOKEN` (Details unter
+[Transport 2 in Docker Compose](#transport-2-in-docker-compose)) — ohne Token
+beendet sich der Container sofort wieder. Auch `docker compose down`/`stop`/`ps`
+wirken nur auf Services der aktiven Profile; zum Stoppen des MCP-Stacks also
+ebenfalls das Profil angeben (`docker compose --profile mcp down`).
+
 Produktionsbeispiel (Secrets nicht ins Repository schreiben):
 ```bash
 export SECRET_KEY="$(openssl rand -hex 32)"
@@ -596,24 +621,42 @@ Origins erlaubt — sinnvoll hinter einem vertrauenswürdigen Proxy mit eigenem 
 
 ### Transport 2 in Docker Compose
 
-Der Streamable-HTTP-Transport ist als opt-in `mcp`-Service in der `docker-compose.yml`
-enthalten. Er baut dasselbe Image, spricht die App über das Compose-Netz an
+Der Streamable-HTTP-Transport ist als `mcp`-Service in der `docker-compose.yml`
+enthalten, aber **opt-in über das Compose-Profil `mcp`**: Ein `docker compose up -d`
+ohne Profilangabe startet nur `app` und `db` — der MCP-Container fehlt dann
+absichtlich. Er baut dasselbe Image, spricht die App über das Compose-Netz an
 (`OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1`) und ist auf dem Host unter
-**Port 8090** (nur an `127.0.0.1` gebunden) erreichbar:
+**Port 8090** (nur an `127.0.0.1` gebunden) erreichbar.
+
+**Auth ist Pflicht:** Im Container bindet der Server an `0.0.0.0` (sonst wäre der
+Port nicht aus dem Container heraus erreichbar). Bei Bindung an eine
+Nicht-Loopback-Adresse verweigert `app.services.mcp_http` den Start ohne
+`MCP_HTTP_AUTH_TOKEN` — ein ohne Token gestarteter `mcp`-Container beendet sich
+also sofort wieder (fail-fast, sichtbar via `docker compose --profile mcp logs mcp`).
+Jeder Request muss das Token als `Authorization: Bearer <token>` mitschicken;
+Requests ohne bzw. mit falschem Token werden mit **401** abgelehnt.
 
 ```bash
-export MCP_HTTP_AUTH_TOKEN="ein-langes-zufaelliges-token"
-export OPENBUCHHALTUNG_API_TOKEN="obk_..."
-docker compose --profile mcp up mcp
+export MCP_HTTP_AUTH_TOKEN="$(openssl rand -hex 32)"   # Eingangstoken des MCP-Endpunkts
+export OPENBUCHHALTUNG_API_TOKEN="obk_..."             # nur nötig bei API_REQUIRE_AUTH=1
+docker compose --profile mcp up -d
 # Test vom Host aus:
 curl -X POST http://localhost:8090/mcp \
-  -H 'Authorization: Bearer ein-langes-zufaelliges-token' \
+  -H "Authorization: Bearer $MCP_HTTP_AUTH_TOKEN" \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Bei aktiver API-Authentifizierung (`API_REQUIRE_AUTH=1`) wird der Token über die
-Host-Umgebungsvariable `OPENBUCHHALTUNG_API_TOKEN` durchgereicht.
+Statt `export` lassen sich beide Variablen (und `COMPOSE_PROFILES=mcp`, damit der
+Service auch bei künftigen `docker compose up -d` immer mitstartet) dauerhaft in
+einer `.env`-Datei neben der `docker-compose.yml` hinterlegen — Docker Compose
+liest sie automatisch. Die `.env` gehört nicht ins Repository.
+
+Es sind zwei getrennte Tokens: `MCP_HTTP_AUTH_TOKEN` schützt den MCP-Endpunkt
+gegenüber MCP-Clients (z. B. Claude Desktop); `OPENBUCHHALTUNG_API_TOKEN` ist das
+Backend-Token, mit dem der MCP-Server selbst die REST-API aufruft, und wird nur
+bei aktiver API-Authentifizierung (`API_REQUIRE_AUTH=1`) benötigt. Beide sollten
+unterschiedliche Werte haben.
 
 ### HTTPS-Zugang für Claude-Desktop-Custom-Connectoren
 
@@ -660,6 +703,10 @@ Caddy holt automatisch ein Let's-Encrypt-Zertifikat und proxyt auf `mcp:8090`; d
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
 hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.
+Der Client muss das gesetzte `MCP_HTTP_AUTH_TOKEN` bei jedem Request als
+`Authorization: Bearer <token>`-Header mitsenden; ohne gültigen Token antwortet der
+Server mit 401. OAuth bietet der Server bewusst nicht an (Discovery-Pfade unter
+`/.well-known/…` liefern 404, der Client verbindet dann ohne OAuth).
 
 Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
 ```json
