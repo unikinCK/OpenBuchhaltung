@@ -8,7 +8,8 @@
   "leistung": "Leistung (§ 7 Abs. 1 S. 6 EStG)",
   "gwg": "GWG-Sofortabschreibung (§ 6 Abs. 2 EStG)",
   "sammelposten": "Sammelposten/Pool (§ 6 Abs. 2a EStG)",
-  "manuell": "Manuell / nur außerplanmäßig"
+  "manuell": "Manuell / nur außerplanmäßig",
+  "digital": "Digitale WG – Sofort-AfA (BMF 22.02.2022)"
 } %}
 
 {# Verfahren inkl. der Parameter anzeigen, die es erst eindeutig machen –
@@ -213,6 +214,12 @@
             <strong>Korrigieren:</strong>
             <input name="name" value="{{ selected_asset.name }}" style="width:16rem;" />
             <input name="acquisition_cost" inputmode="decimal" value="{{ selected_asset.acquisition_cost }}" style="width:8rem;" title="Anschaffungskosten (nur ohne gebuchte AfA änderbar)" />
+            <select name="method" title="AfA-Verfahren (nur ohne gebuchte AfA änderbar)">
+              {% for method in methods %}
+                <option value="{{ method }}" {% if method == selected_asset.method %}selected{% endif %}>{{ method_labels[method] }}</option>
+              {% endfor %}
+            </select>
+            <input name="useful_life_months" inputmode="numeric" value="{{ selected_asset.useful_life_months or '' }}" placeholder="ND (Monate)" style="width:7rem;" title="Nutzungsdauer in Monaten (nur ohne gebuchte AfA änderbar)" />
             <button type="submit" class="secondary">Speichern</button>
           </form>
 

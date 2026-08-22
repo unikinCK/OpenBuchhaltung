@@ -2118,7 +2118,9 @@ TOOLS: list[ToolSpec] = [
             "method: 'linear' (lineare AfA, zeitanteilig im Zugangsjahr), 'degressive' "
             "(geometrisch-degressiv mit Übergang zur linearen AfA, benötigt degressive_rate), "
             "'leistung' (Leistungs-AfA, benötigt total_units), 'gwg' (Sofortabschreibung "
-            "≤ 800 €), 'sammelposten' (Poolabschreibung über 5 Jahre) oder 'manuell'. "
+            "≤ 800 €), 'sammelposten' (Poolabschreibung über 5 Jahre), 'digital' "
+            "(digitale Wirtschaftsgüter lt. BMF v. 22.02.2022: Nutzungsdauer 1 Jahr, "
+            "volle AfA im Zugangsjahr, ohne Betragsgrenze) oder 'manuell'. "
             "Anlage- und Abschreibungskonto per interner ID oder Kontonummer (z. B. '0400'/'4830')."
         ),
         input_schema={
@@ -2141,7 +2143,15 @@ TOOLS: list[ToolSpec] = [
                 },
                 "method": {
                     "type": "string",
-                    "enum": ["linear", "degressive", "leistung", "gwg", "sammelposten", "manuell"],
+                    "enum": [
+                        "linear",
+                        "degressive",
+                        "leistung",
+                        "gwg",
+                        "sammelposten",
+                        "manuell",
+                        "digital",
+                    ],
                     "description": "AfA-Verfahren.",
                 },
                 "useful_life_months": {
@@ -2303,6 +2313,25 @@ TOOLS: list[ToolSpec] = [
                 "acquisition_cost": {
                     "type": "string",
                     "description": "Korrigierte Anschaffungskosten (z. B. '1324.41').",
+                },
+                "method": {
+                    "type": "string",
+                    "description": "Neues AfA-Verfahren (nur solange keine AfA gebucht).",
+                    "enum": [
+                        "linear",
+                        "degressive",
+                        "leistung",
+                        "gwg",
+                        "sammelposten",
+                        "manuell",
+                        "digital",
+                    ],
+                },
+                "useful_life_months": {
+                    "type": "integer",
+                    "description": (
+                        "Neue Nutzungsdauer in Monaten (nur solange keine AfA gebucht)."
+                    ),
                 },
                 "notes": {"type": "string", "description": "Neue Notizen."},
             },

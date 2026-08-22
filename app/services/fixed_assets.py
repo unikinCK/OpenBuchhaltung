@@ -233,13 +233,16 @@ def update_fixed_asset(
     changed_by: str,
     name: str | None = None,
     acquisition_cost: Decimal | None = None,
+    method: str | None = None,
+    useful_life_months: int | None = None,
     notes: str | None = None,
 ) -> FixedAsset:
     """Korrigiert Stammdaten eines Anlageguts (z. B. falsche Bezeichnung oder AK).
 
-    Die Anschaffungskosten sind nur änderbar, solange noch keine Abschreibungen
-    gebucht wurden (nachträgliche Minderung/Erhöhung, etwa durch eine
-    Rechnungskorrektur); die zugehörige Hauptbuch-Korrektur erfolgt separat als
+    Anschaffungskosten, AfA-Verfahren und Nutzungsdauer sind nur änderbar,
+    solange noch keine Abschreibungen gebucht wurden (z. B. nachträgliche
+    AK-Minderung durch Rechnungskorrektur oder Umstellung auf die digitale
+    Sofort-AfA); die zugehörige Hauptbuch-Korrektur erfolgt separat als
     reguläre Buchung.
     """
     asset = session.get(FixedAsset, fixed_asset_id)
@@ -248,6 +251,12 @@ def update_fixed_asset(
     _guard_active(asset)
 
     changes: dict[str, dict[str, str | None]] = {}
+
+    def _guard_plan_change(label: str) -> None:
+        if _has_depreciation_entries(session, asset.id):
+            raise FixedAssetError(
+                f"{label} nicht mehr änderbar, sobald Abschreibungen gebucht wurden."
+            )
 
     if name is not None:
         new_name = name.strip()
@@ -262,18 +271,42 @@ def update_fixed_asset(
         if new_cost <= Decimal("0.00"):
             raise FixedAssetError("Anschaffungskosten müssen größer 0 sein.")
         if new_cost != asset.acquisition_cost:
-            if _has_depreciation_entries(session, asset.id):
-                raise FixedAssetError(
-                    "Anschaffungskosten sind nicht mehr änderbar, sobald "
-                    "Abschreibungen gebucht wurden."
-                )
+            _guard_plan_change("Anschaffungskosten sind")
             changes["acquisition_cost"] = {
                 "old": str(asset.acquisition_cost),
                 "new": str(new_cost),
             }
             asset.acquisition_cost = new_cost
-            if asset.method not in {afa.LEISTUNG, afa.MANUELL}:
+
+    if method is not None:
+        new_method = method.strip()
+        if new_method not in afa.METHODS:
+            raise FixedAssetError(
+                "Unbekanntes AfA-Verfahren. Erlaubt: " + ", ".join(sorted(afa.METHODS))
+            )
+        if new_method != asset.method:
+            _guard_plan_change("Das AfA-Verfahren ist")
+            changes["method"] = {"old": asset.method, "new": new_method}
+            asset.method = new_method
+
+    if useful_life_months is not None:
+        if useful_life_months <= 0:
+            raise FixedAssetError("Nutzungsdauer (Monate) muss größer 0 sein.")
+        if useful_life_months != asset.useful_life_months:
+            _guard_plan_change("Die Nutzungsdauer ist")
+            changes["useful_life_months"] = {
+                "old": str(asset.useful_life_months) if asset.useful_life_months else None,
+                "new": str(useful_life_months),
+            }
+            asset.useful_life_months = useful_life_months
+
+    if changes.keys() & {"acquisition_cost", "method", "useful_life_months"}:
+        # Geänderte Plan-Parameter früh validieren (z. B. fehlende Nutzungsdauer).
+        if asset.method not in {afa.LEISTUNG, afa.MANUELL}:
+            try:
                 afa.compute_schedule(_asset_params(asset))
+            except afa.DepreciationError as exc:
+                raise FixedAssetError(str(exc)) from exc
 
     if notes is not None:
         new_notes = notes.strip() or None

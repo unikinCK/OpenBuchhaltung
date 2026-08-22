@@ -628,7 +628,8 @@ class FixedAsset(Base):
         CheckConstraint("acquisition_cost > 0", name="ck_fixed_asset_cost_positive"),
         CheckConstraint("residual_value >= 0", name="ck_fixed_asset_residual_non_negative"),
         CheckConstraint(
-            "method IN ('linear', 'degressive', 'leistung', 'gwg', 'sammelposten', 'manuell')",
+            "method IN ('linear', 'degressive', 'leistung', 'gwg', 'sammelposten', "
+            "'manuell', 'digital')",
             name="ck_fixed_asset_method_known",
         ),
         CheckConstraint(

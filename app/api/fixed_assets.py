@@ -324,8 +324,16 @@ def update_fixed_asset_via_api(asset_id: int):
             if payload.get("acquisition_cost") is not None
             else None
         )
+        useful_life_months = (
+            int(payload["useful_life_months"])
+            if payload.get("useful_life_months") is not None
+            else None
+        )
     except (TypeError, ValueError, JournalEntryCreationError):
-        return jsonify({"error": "acquisition_cost must be a valid amount."}), 400
+        return (
+            jsonify({"error": "acquisition_cost and useful_life_months must be valid."}),
+            400,
+        )
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -338,6 +346,8 @@ def update_fixed_asset_via_api(asset_id: int):
                 fixed_asset_id=asset_id,
                 name=payload.get("name"),
                 acquisition_cost=acquisition_cost,
+                method=payload.get("method"),
+                useful_life_months=useful_life_months,
                 notes=payload.get("notes"),
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )
