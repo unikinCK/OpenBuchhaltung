@@ -2288,6 +2288,51 @@ TOOLS: list[ToolSpec] = [
         path="/fixed-assets/{asset_id}/disposal",
         arg_location="json",
     ),
+    ToolSpec(
+        name="update_fixed_asset",
+        description=(
+            "Korrigiert Stammdaten eines Anlageguts (Bezeichnung, Anschaffungskosten, "
+            "Notizen). Anschaffungskosten sind nur änderbar, solange keine AfA gebucht "
+            "wurde; die Hauptbuch-Korrektur erfolgt separat als reguläre Buchung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+                "name": {"type": "string", "description": "Neue Bezeichnung."},
+                "acquisition_cost": {
+                    "type": "string",
+                    "description": "Korrigierte Anschaffungskosten (z. B. '1324.41').",
+                },
+                "notes": {"type": "string", "description": "Neue Notizen."},
+            },
+            "required": ["asset_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/fixed-assets/{asset_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="cancel_fixed_asset",
+        description=(
+            "Storniert ein fälschlich angelegtes Anlagegut ohne Abgangsbuchung "
+            "(z. B. retournierte oder weiterverkaufte Käufe). Nur möglich, solange "
+            "keine AfA gebucht wurde; die Hauptbuch-Korrektur erfolgt separat."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "integer", "description": "ID des Anlageguts."},
+                "reason": {"type": "string", "description": "Optionaler Stornogrund."},
+            },
+            "required": ["asset_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fixed-assets/{asset_id}/cancel",
+        arg_location="json",
+    ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}

@@ -13,12 +13,15 @@ from app.auth import hash_password
 from app.services.fixed_assets import (
     FixedAssetError,
     FixedAssetInput,
+    cancel_fixed_asset,
     create_fixed_asset,
     current_book_value,
     depreciation_schedule,
     dispose_fixed_asset,
+    list_fixed_assets,
     post_depreciation,
     record_impairment,
+    update_fixed_asset,
 )
 from domain.models import (
     Account,
@@ -441,3 +444,221 @@ def test_fixed_assets_api_impairment_and_disposal(tmp_path: Path) -> None:
     assert disposal.status_code == 200
     assert disposal.get_json()["status"] == "disposed"
     assert disposal.get_json()["book_value"] == "0.00"
+
+
+def test_update_fixed_asset_corrects_name_and_cost(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+
+    updated = update_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        name="Apple MacBook Air 13\" M5",
+        acquisition_cost=Decimal("1324.41"),
+        changed_by="pytest",
+    )
+    assert updated.name == "Apple MacBook Air 13\" M5"
+    assert updated.acquisition_cost == Decimal("1324.41")
+    assert current_book_value(session=session, asset=updated) == Decimal("1324.41")
+
+    audit = session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "fixed_asset", AuditLog.action == "updated"
+        )
+    ).scalar_one()
+    assert audit.payload["changes"]["acquisition_cost"]["new"] == "1324.41"
+
+
+def test_update_fixed_asset_cost_blocked_after_depreciation(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+
+    # Name bleibt änderbar, AK nicht mehr.
+    updated = update_fixed_asset(
+        session=session, fixed_asset_id=asset.id, name="Neuer Name", changed_by="pytest"
+    )
+    assert updated.name == "Neuer Name"
+    with pytest.raises(FixedAssetError, match="Abschreibungen gebucht"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            acquisition_cost=Decimal("9999.00"),
+            changed_by="pytest",
+        )
+
+
+def test_update_fixed_asset_requires_changes(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    with pytest.raises(FixedAssetError, match="Keine Änderungen"):
+        update_fixed_asset(session=session, fixed_asset_id=asset.id, changed_by="pytest")
+
+
+def test_cancel_fixed_asset_without_booking(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+
+    cancelled = cancel_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        reason="Gerät weiterverkauft, gehört nicht ins Anlagevermögen",
+        changed_by="pytest",
+    )
+    assert cancelled.status == "cancelled"
+    assert "weiterverkauft" in (cancelled.notes or "")
+
+    # Kein Abgang gebucht: keine Abschreibungszeilen entstanden.
+    entries = session.execute(
+        select(DepreciationEntry).where(DepreciationEntry.fixed_asset_id == asset.id)
+    ).scalars().all()
+    assert entries == []
+
+    # Stornierte Anlagen sind für AfA/Abgang gesperrt und fliegen aus der aktiven Liste.
+    with pytest.raises(FixedAssetError, match="storniert"):
+        post_depreciation(
+            session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+        )
+    with pytest.raises(FixedAssetError, match="storniert"):
+        dispose_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            disposal_date=date(2026, 12, 31),
+            changed_by="pytest",
+        )
+    active = list_fixed_assets(
+        session=session, company_id=company.id, include_disposed=False
+    )
+    assert asset.id not in [a.id for a in active]
+
+    actions = session.execute(
+        select(AuditLog.action).where(AuditLog.entity_type == "fixed_asset")
+    ).scalars().all()
+    assert "cancelled" in actions
+
+
+def test_cancel_fixed_asset_blocked_after_depreciation(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    with pytest.raises(FixedAssetError, match="Anlagenabgang"):
+        cancel_fixed_asset(session=session, fixed_asset_id=asset.id, changed_by="pytest")
+
+
+def test_fixed_assets_api_update_and_cancel(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Anlagen API 2", "company_name": "Anlagen API 2 GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "0400", "name": "BGA", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    created = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": 1,
+            "asset_number": "A-API-2",
+            "name": "Apple iMac 24 M4",
+            "acquisition_date": "2026-03-20",
+            "acquisition_cost": "1394.12",
+            "method": "linear",
+            "useful_life_months": 12,
+            "asset_account_id": 1,
+            "depreciation_account_id": 2,
+        },
+    )
+    assert created.status_code == 201
+    asset_id = created.get_json()["id"]
+
+    updated = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}",
+        json={"name": "Apple MacBook Air 13 M5", "acquisition_cost": "1324.41"},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["name"] == "Apple MacBook Air 13 M5"
+    assert updated.get_json()["acquisition_cost"] == "1324.41"
+
+    no_changes = client.patch(f"/api/v1/fixed-assets/{asset_id}", json={})
+    assert no_changes.status_code == 422
+
+    cancelled = client.post(
+        f"/api/v1/fixed-assets/{asset_id}/cancel",
+        json={"reason": "fälschlich als Anlage erfasst"},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["status"] == "cancelled"
+
+    again = client.post(f"/api/v1/fixed-assets/{asset_id}/cancel", json={})
+    assert again.status_code == 422
+
+
+def test_fixed_assets_ui_update_and_cancel(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "Anlagen UI 2", "company_name": "UI 2 GmbH"})
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "0400", "name": "BGA", "account_type": "asset"},
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    client.post(
+        "/anlagen",
+        data={
+            "company_id": "1",
+            "asset_number": "A-UI-2",
+            "name": "Falsches Gerät",
+            "acquisition_date": "2026-03-20",
+            "acquisition_cost": "1394.12",
+            "method": "linear",
+            "useful_life_months": "12",
+            "asset_account_id": "1",
+            "depreciation_account_id": "2",
+        },
+    )
+
+    update = client.post(
+        "/anlagen/1/bearbeiten",
+        data={"company_id": "1", "name": "Richtiges Gerät", "acquisition_cost": "1324.41"},
+        follow_redirects=True,
+    )
+    assert update.status_code == 200
+    assert "Richtiges Gerät".encode() in update.data
+
+    cancel = client.post(
+        "/anlagen/1/stornieren",
+        data={"company_id": "1", "reason": "Testkorrektur"},
+        follow_redirects=True,
+    )
+    assert cancel.status_code == 200
+    assert b"storniert" in cancel.data
+
+    with app.extensions["db_session_factory"]() as db_session:
+        asset = db_session.get(FixedAsset, 1)
+        assert asset.status == "cancelled"
+        assert asset.name == "Richtiges Gerät"

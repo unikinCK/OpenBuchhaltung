@@ -141,6 +141,7 @@
               <td>
                 {% if asset.status == "active" %}<span class="badge">aktiv</span>
                 {% elif asset.status == "fully_depreciated" %}<span class="badge">abgeschrieben</span>
+                {% elif asset.status == "cancelled" %}<span class="badge">storniert</span>
                 {% else %}<span class="badge">Abgang</span>{% endif %}
               </td>
               <td>
@@ -195,7 +196,25 @@
         <p class="muted">Für dieses Verfahren wird kein automatischer Mehrjahresplan berechnet (Leistungs-AfA benötigt Jahresmengen, „manuell“ nur außerplanmäßig).</p>
       {% endif %}
 
-      {% if selected_asset.status != "disposed" %}
+      {% if selected_asset.status not in ("disposed", "cancelled") %}
+        <div class="action-row">
+          <form method="post" action="{{ url_for('main.update_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <strong>Korrigieren:</strong>
+            <input name="name" value="{{ selected_asset.name }}" style="width:16rem;" />
+            <input name="acquisition_cost" inputmode="decimal" value="{{ selected_asset.acquisition_cost }}" style="width:8rem;" title="Anschaffungskosten (nur ohne gebuchte AfA änderbar)" />
+            <button type="submit" class="secondary">Speichern</button>
+          </form>
+
+          <form method="post" action="{{ url_for('main.cancel_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <strong>Storno:</strong>
+            <input name="reason" placeholder="Grund (z. B. fälschlich als Anlage erfasst)" style="width:20rem;" />
+            <button type="submit" class="secondary">Stornieren (ohne Buchung)</button>
+          </form>
+        </div>
         <div class="action-row">
           <form method="post" action="{{ url_for('main.depreciate_fixed_asset_action', asset_id=selected_asset.id) }}" class="inline-form">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -227,7 +246,11 @@
           </form>
         </div>
       {% else %}
-        <p class="muted">Abgegangen am {{ selected_asset.disposal_date.isoformat() }}{% if selected_asset.disposal_proceeds %}, Erlös {{ selected_asset.disposal_proceeds }}{% endif %}.</p>
+        {% if selected_asset.status == "cancelled" %}
+          <p class="muted">Storniert{% if selected_asset.notes %} – {{ selected_asset.notes }}{% endif %}.</p>
+        {% else %}
+          <p class="muted">Abgegangen am {{ selected_asset.disposal_date.isoformat() }}{% if selected_asset.disposal_proceeds %}, Erlös {{ selected_asset.disposal_proceeds }}{% endif %}.</p>
+        {% endif %}
       {% endif %}
 
       {% if selected_asset.depreciation_entries %}

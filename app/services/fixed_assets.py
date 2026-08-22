@@ -211,8 +211,142 @@ def list_fixed_assets(
         .order_by(FixedAsset.asset_number, FixedAsset.id)
     )
     if not include_disposed:
-        stmt = stmt.where(FixedAsset.status != "disposed")
+        stmt = stmt.where(FixedAsset.status.not_in(["disposed", "cancelled"]))
     return session.execute(stmt).scalars().all()
+
+
+def _has_depreciation_entries(session: Session, fixed_asset_id: int) -> bool:
+    return (
+        session.execute(
+            select(DepreciationEntry.id).where(
+                DepreciationEntry.fixed_asset_id == fixed_asset_id
+            )
+        ).first()
+        is not None
+    )
+
+
+def update_fixed_asset(
+    *,
+    session: Session,
+    fixed_asset_id: int,
+    changed_by: str,
+    name: str | None = None,
+    acquisition_cost: Decimal | None = None,
+    notes: str | None = None,
+) -> FixedAsset:
+    """Korrigiert Stammdaten eines Anlageguts (z. B. falsche Bezeichnung oder AK).
+
+    Die Anschaffungskosten sind nur änderbar, solange noch keine Abschreibungen
+    gebucht wurden (nachträgliche Minderung/Erhöhung, etwa durch eine
+    Rechnungskorrektur); die zugehörige Hauptbuch-Korrektur erfolgt separat als
+    reguläre Buchung.
+    """
+    asset = session.get(FixedAsset, fixed_asset_id)
+    if asset is None:
+        raise FixedAssetError("Anlagegut nicht gefunden.")
+    _guard_active(asset)
+
+    changes: dict[str, dict[str, str | None]] = {}
+
+    if name is not None:
+        new_name = name.strip()
+        if not new_name:
+            raise FixedAssetError("Die Bezeichnung darf nicht leer sein.")
+        if new_name != asset.name:
+            changes["name"] = {"old": asset.name, "new": new_name}
+            asset.name = new_name
+
+    if acquisition_cost is not None:
+        new_cost = acquisition_cost.quantize(CENT)
+        if new_cost <= Decimal("0.00"):
+            raise FixedAssetError("Anschaffungskosten müssen größer 0 sein.")
+        if new_cost != asset.acquisition_cost:
+            if _has_depreciation_entries(session, asset.id):
+                raise FixedAssetError(
+                    "Anschaffungskosten sind nicht mehr änderbar, sobald "
+                    "Abschreibungen gebucht wurden."
+                )
+            changes["acquisition_cost"] = {
+                "old": str(asset.acquisition_cost),
+                "new": str(new_cost),
+            }
+            asset.acquisition_cost = new_cost
+            if asset.method not in {afa.LEISTUNG, afa.MANUELL}:
+                afa.compute_schedule(_asset_params(asset))
+
+    if notes is not None:
+        new_notes = notes.strip() or None
+        if new_notes != asset.notes:
+            changes["notes"] = {"old": asset.notes, "new": new_notes}
+            asset.notes = new_notes
+
+    if not changes:
+        raise FixedAssetError("Keine Änderungen angegeben.")
+
+    log_audit_event(
+        session=session,
+        tenant_id=asset.tenant_id,
+        company_id=asset.company_id,
+        entity_type="fixed_asset",
+        entity_id=str(asset.id),
+        action="updated",
+        changed_by=changed_by,
+        payload={"asset_number": asset.asset_number, "changes": changes},
+    )
+    session.commit()
+    session.refresh(asset)
+    return asset
+
+
+def cancel_fixed_asset(
+    *,
+    session: Session,
+    fixed_asset_id: int,
+    changed_by: str,
+    reason: str | None = None,
+) -> FixedAsset:
+    """Storniert ein fälschlich angelegtes Anlagegut ohne Abgangsbuchung.
+
+    Anders als der Anlagenabgang (:func:`dispose_fixed_asset`) wird kein
+    Restbuchwert ausgebucht – der Storno ist für Güter gedacht, die nie ins
+    Anlagevermögen gehörten (z. B. retournierte oder weiterverkaufte Käufe).
+    Die zugehörige Hauptbuch-Korrektur erfolgt separat als reguläre Buchung.
+    Nur möglich, solange keine Abschreibungen gebucht wurden.
+    """
+    asset = session.get(FixedAsset, fixed_asset_id)
+    if asset is None:
+        raise FixedAssetError("Anlagegut nicht gefunden.")
+    _guard_active(asset)
+    if _has_depreciation_entries(session, asset.id):
+        raise FixedAssetError(
+            "Für das Anlagegut wurden bereits Abschreibungen gebucht – "
+            "bitte einen Anlagenabgang buchen statt zu stornieren."
+        )
+
+    asset.status = "cancelled"
+    if reason and reason.strip():
+        suffix = f"Storniert: {reason.strip()}"
+        asset.notes = f"{asset.notes}\n{suffix}" if asset.notes else suffix
+
+    log_audit_event(
+        session=session,
+        tenant_id=asset.tenant_id,
+        company_id=asset.company_id,
+        entity_type="fixed_asset",
+        entity_id=str(asset.id),
+        action="cancelled",
+        changed_by=changed_by,
+        payload={
+            "asset_number": asset.asset_number,
+            "name": asset.name,
+            "acquisition_cost": str(asset.acquisition_cost),
+            "reason": (reason or "").strip() or None,
+        },
+    )
+    session.commit()
+    session.refresh(asset)
+    return asset
 
 
 def posted_depreciation_total(*, session: Session, fixed_asset_id: int) -> Decimal:
@@ -344,6 +478,8 @@ def _book_depreciation(
 def _guard_active(asset: FixedAsset) -> None:
     if asset.status == "disposed":
         raise FixedAssetError("Das Anlagegut ist bereits abgegangen.")
+    if asset.status == "cancelled":
+        raise FixedAssetError("Das Anlagegut ist storniert.")
 
 
 def _existing_kind(session: Session, asset_id: int, fiscal_year: int, kind: str) -> bool:
