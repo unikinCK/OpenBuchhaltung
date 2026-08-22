@@ -11,6 +11,15 @@
   "manuell": "Manuell / nur außerplanmäßig"
 } %}
 
+{# Verfahren inkl. der Parameter anzeigen, die es erst eindeutig machen –
+   "Linear" allein sagt nicht, ob über 12 oder 60 Monate abgeschrieben wird. #}
+{% macro method_with_params(asset) -%}
+  {{ method_labels.get(asset.method, asset.method) }}
+  {%- if asset.method in ("linear", "degressive") and asset.useful_life_months %} · {{ asset.useful_life_months }} Monate{% endif %}
+  {%- if asset.method == "degressive" and asset.degressive_rate %} · {{ asset.degressive_rate }} % p. a.{% endif %}
+  {%- if asset.method == "leistung" and asset.total_units %} · {{ asset.total_units }} Einheiten{% endif %}
+{%- endmacro %}
+
 {% block content %}
   <h1 class="page-title">Anlagenbuchhaltung</h1>
 
@@ -134,7 +143,7 @@
             <tr>
               <td>{{ asset.asset_number }}</td>
               <td>{{ asset.name }}</td>
-              <td>{{ method_labels.get(asset.method, asset.method) }}</td>
+              <td>{{ method_with_params(asset) }}</td>
               <td>{{ asset.in_service_date.isoformat() }}</td>
               <td class="num">{{ asset.acquisition_cost }}</td>
               <td class="num">{{ "%.2f"|format(view.book_value) }}</td>

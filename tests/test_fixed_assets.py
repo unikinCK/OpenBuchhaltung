@@ -378,6 +378,8 @@ def test_fixed_assets_ui_create_and_depreciate(tmp_path: Path) -> None:
     )
     assert create_response.status_code == 200
     assert b"A-UI-1" in create_response.data
+    # Verfahren wird inkl. Nutzungsdauer angezeigt (macht "Linear" erst eindeutig).
+    assert "Linear (§ 7 Abs. 1 EStG) · 60 Monate".encode() in create_response.data
 
     depreciate_response = client.post(
         "/anlagen/1/abschreiben",
