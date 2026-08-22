@@ -757,8 +757,10 @@ TOOLS: list[ToolSpec] = [
         name="upload_document",
         description=(
             "Lädt einen Beleg hoch. content_base64 enthält den Dateiinhalt als Base64; "
-            "erlaubt sind PDF, JPG und PNG. Das Belegdatum wird getrennt vom "
-            "Uploadzeitpunkt gespeichert."
+            "erlaubt sind PDF, JPG und PNG. Der Inhalt muss unverändert und "
+            "vollständig sein: Zu kleine oder zum Dateityp unpassende Dateien "
+            "(fehlende PDF-/JPEG-/PNG-Signatur) werden abgelehnt. Das Belegdatum "
+            "wird getrennt vom Uploadzeitpunkt gespeichert."
         ),
         input_schema={
             "type": "object",

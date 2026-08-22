@@ -5,6 +5,8 @@ import io
 import json
 from pathlib import Path
 
+from document_files import pdf_document_bytes
+
 from app import create_app
 from app.services.mcp_server import (
     TOOLS,
@@ -1582,7 +1584,7 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
             "file_name": "mcp-beleg.pdf",
             "mime_type": "application/pdf",
             "document_date": "2026-04-03",
-            "content_base64": base64.b64encode(b"%PDF-1.4\n%%EOF\n").decode("ascii"),
+            "content_base64": base64.b64encode(pdf_document_bytes(b"mcp-beleg")).decode("ascii"),
         },
     )
     assert document_upload["isError"] is False
@@ -1612,7 +1614,9 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
                 "document_id": document_id,
                 "file_name": "mcp-beleg-v2.pdf",
                 "mime_type": "application/pdf",
-                "content_base64": base64.b64encode(b"%PDF-1.4\nv2\n%%EOF\n").decode("ascii"),
+                "content_base64": base64.b64encode(pdf_document_bytes(b"mcp-v2")).decode(
+                    "ascii"
+                ),
             },
         )["content"][0]["text"]
     )

@@ -7,6 +7,8 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+from document_files import pdf_document_bytes
+
 from app import create_app
 from app.auth import hash_password
 from app.services.audit_export import (
@@ -1029,7 +1031,7 @@ def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_pat
         },
     )
     entry_id = entry_response.get_json()["id"]
-    document_bytes = b"%PDF-1.4\naudit-export\n%%EOF\n"
+    document_bytes = pdf_document_bytes(b"audit-export")
     upload_response = client.post(
         "/api/v1/documents",
         json={
@@ -1316,7 +1318,7 @@ def test_can_upload_document_and_link_to_journal_entry(tmp_path):
             "company_id": "1",
             "journal_entry_id": "1",
             "document_date": "2026-04-03",
-            "document_file": (BytesIO(b"rechnung"), "rechnung.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"rechnung")), "rechnung.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -1369,7 +1371,7 @@ def test_can_link_and_unlink_document_after_upload(tmp_path):
         data={
             "company_id": "1",
             "document_date": "2026-04-03",
-            "document_file": (BytesIO(b"beleg"), "beleg.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg")), "beleg.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -1413,7 +1415,7 @@ def test_link_document_rejects_missing_journal_entry(tmp_path):
         data={
             "company_id": "1",
             "document_date": "2026-04-03",
-            "document_file": (BytesIO(b"beleg"), "beleg.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg")), "beleg.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -1444,7 +1446,7 @@ def test_document_download_returns_file(tmp_path):
         data={
             "company_id": "1",
             "document_date": "2026-04-03",
-            "document_file": (BytesIO(b"testbeleg"), "beleg.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"testbeleg")), "beleg.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -1453,7 +1455,7 @@ def test_document_download_returns_file(tmp_path):
 
     response = client.get("/documents/1/download")
     assert response.status_code == 200
-    assert response.data == b"testbeleg"
+    assert response.data == pdf_document_bytes(b"testbeleg")
 
 
 def test_api_document_upload_link_list_and_download(tmp_path):
@@ -1487,7 +1489,7 @@ def test_api_document_upload_link_list_and_download(tmp_path):
     assert entry_response.status_code == 201
     entry_id = entry_response.get_json()["id"]
 
-    file_bytes = b"%PDF-1.4\napi beleg\n%%EOF\n"
+    file_bytes = pdf_document_bytes(b"api beleg")
     missing_date_response = client.post(
         "/api/v1/documents",
         json={
@@ -1543,7 +1545,7 @@ def test_api_document_upload_link_list_and_download(tmp_path):
     assert download_response.status_code == 200
     assert download_response.data == file_bytes
 
-    replacement_bytes = b"%PDF-1.4\napi beleg version 2\n%%EOF\n"
+    replacement_bytes = pdf_document_bytes(b"api beleg version 2")
     replace_response = client.post(
         f"/api/v1/documents/{document_id}/replace",
         json={
@@ -1639,7 +1641,7 @@ def test_document_upload_writes_audit_log(tmp_path):
         data={
             "company_id": "1",
             "document_date": "2026-04-03",
-            "document_file": (BytesIO(b"beleg-audit"), "audit.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg-audit")), "audit.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -1739,6 +1741,132 @@ def test_document_upload_rejects_oversized_file(tmp_path):
         assert session.query(Document).count() == 0
 
 
+def test_document_upload_rejects_too_small_file(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Klein", "company_name": "Mandant Klein GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"%PDF-1.4\n%%EOF\n"), "mini.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg ist zu klein" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_content_not_matching_type(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Defekt", "company_name": "Mandant Defekt GmbH"},
+        follow_redirects=True,
+    )
+
+    broken_bytes = b"\x00" * 2048
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(broken_bytes), "kaputt.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"passt nicht zum Dateityp" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_stores_file_bytes_unchanged(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Original", "company_name": "Mandant Original GmbH"},
+        follow_redirects=True,
+    )
+
+    original_bytes = pdf_document_bytes(b"originalgetreu")
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(original_bytes), "original.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        document = session.query(Document).one()
+        stored_bytes = Path(document.storage_key).read_bytes()
+        assert stored_bytes == original_bytes
+        assert document.file_size_bytes == len(original_bytes)
+        assert document.file_sha256 == hashlib.sha256(original_bytes).hexdigest()
+
+
+def test_api_document_upload_rejects_small_or_mismatched_content(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant API Val", "company_name": "Mandant API Val GmbH"},
+        follow_redirects=True,
+    )
+
+    too_small = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "mini.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(b"%PDF-1.4\n%%EOF\n").decode("ascii"),
+        },
+    )
+    assert too_small.status_code == 422
+    assert "too small" in too_small.get_json()["error"]
+
+    mismatched = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "kaputt.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(b"\x00" * 2048).decode("ascii"),
+        },
+    )
+    assert mismatched.status_code == 422
+    assert "does not match" in mismatched.get_json()["error"]
+
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
 def test_document_upload_calls_configured_llm_endpoint(tmp_path):
     app = _create_test_app(tmp_path)
     app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
@@ -1759,7 +1887,7 @@ def test_document_upload_calls_configured_llm_endpoint(tmp_path):
             data={
                 "company_id": "1",
                 "document_date": "2026-04-03",
-                "document_file": (BytesIO(b"llm-beleg"), "llm.pdf"),
+                "document_file": (BytesIO(pdf_document_bytes(b"llm-beleg")), "llm.pdf"),
             },
             content_type="multipart/form-data",
             follow_redirects=True,
@@ -1793,7 +1921,10 @@ def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
             data={
                 "company_id": "1",
                 "document_date": "2026-04-03",
-                "document_file": (BytesIO(b"llm-fehler"), "llm-fehler.pdf"),
+                "document_file": (
+                    BytesIO(pdf_document_bytes(b"llm-fehler")),
+                    "llm-fehler.pdf",
+                ),
             },
             content_type="multipart/form-data",
             follow_redirects=True,

@@ -8,6 +8,10 @@ from pathlib import Path
 from flask import abort, current_app, request
 
 from app.auth import current_tenant_id, current_user
+from app.services.documents import (
+    DOCUMENT_SIGNATURE_PROBE_BYTES,
+    document_content_error_code,
+)
 from app.services.journal_entries import parse_decimal
 from app.services.scoping import scoped_select
 from domain.models import Company, FiscalYear, Period
@@ -92,6 +96,30 @@ def _uploaded_file_size(uploaded_file) -> int | None:
     return size
 
 
+def _uploaded_file_head(uploaded_file, num_bytes: int) -> bytes | None:
+    stream = uploaded_file.stream
+    if not hasattr(stream, "tell") or not hasattr(stream, "seek"):
+        return None
+    current_position = stream.tell()
+    stream.seek(0)
+    head = stream.read(num_bytes)
+    stream.seek(current_position)
+    return head
+
+
+DOCUMENT_UPLOAD_ERROR_MESSAGES = {
+    "too_large": "Der Beleg ist zu groß.",
+    "too_small": (
+        "Der Beleg ist zu klein und wirkt unvollständig – bitte die Originaldatei "
+        "ohne zusätzliche Komprimierung hochladen."
+    ),
+    "signature_mismatch": (
+        "Der Dateiinhalt passt nicht zum Dateityp – der Beleg ist vermutlich "
+        "beschädigt oder wurde beim Verkleinern zerstört."
+    ),
+}
+
+
 def document_upload_error(uploaded_file, file_name: str) -> str | None:
     extension = Path(file_name).suffix.lower()
     if extension not in ALLOWED_DOCUMENT_EXTENSIONS:
@@ -101,10 +129,19 @@ def document_upload_error(uploaded_file, file_name: str) -> str | None:
     if mimetype not in ALLOWED_DOCUMENT_MIME_TYPES:
         return "Der Dateityp des Belegs ist nicht erlaubt."
 
-    max_bytes = current_app.config.get("DOCUMENT_MAX_UPLOAD_BYTES")
     file_size = _uploaded_file_size(uploaded_file)
-    if max_bytes and file_size is not None and file_size > max_bytes:
-        return "Der Beleg ist zu groß."
+    if file_size is None:
+        return None
+    head = _uploaded_file_head(uploaded_file, DOCUMENT_SIGNATURE_PROBE_BYTES)
+    error_code = document_content_error_code(
+        mime_type=mimetype,
+        content_head=head or b"",
+        content_size=file_size,
+        max_bytes=current_app.config.get("DOCUMENT_MAX_UPLOAD_BYTES"),
+        min_bytes=current_app.config.get("DOCUMENT_MIN_UPLOAD_BYTES"),
+    )
+    if error_code:
+        return DOCUMENT_UPLOAD_ERROR_MESSAGES[error_code]
 
     return None
 

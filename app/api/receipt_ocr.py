@@ -16,7 +16,11 @@ from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
-from app.services.documents import document_file_metadata
+from app.services.documents import (
+    DOCUMENT_SIGNATURE_PROBE_BYTES,
+    document_content_error_code,
+    document_file_metadata,
+)
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -95,6 +99,13 @@ def _load_upload_payload():
     )
 
 
+_CONTENT_ERROR_MESSAGES = {
+    "too_large": "Document is too large.",
+    "too_small": "Document is too small and looks incomplete or over-compressed.",
+    "signature_mismatch": "Document content does not match the declared file type.",
+}
+
+
 def _validate_upload(*, file_name: str, mime_type: str, content: bytes) -> str | None:
     if not file_name:
         return "file_name is required."
@@ -102,9 +113,15 @@ def _validate_upload(*, file_name: str, mime_type: str, content: bytes) -> str |
         return "Only PDF, JPG and PNG documents may be uploaded."
     if mime_type not in ALLOWED_DOCUMENT_MIME_TYPES:
         return "Document MIME type is not allowed."
-    max_bytes = current_app.config.get("DOCUMENT_MAX_UPLOAD_BYTES")
-    if max_bytes and len(content) > max_bytes:
-        return "Document is too large."
+    error_code = document_content_error_code(
+        mime_type=mime_type,
+        content_head=content[:DOCUMENT_SIGNATURE_PROBE_BYTES],
+        content_size=len(content),
+        max_bytes=current_app.config.get("DOCUMENT_MAX_UPLOAD_BYTES"),
+        min_bytes=current_app.config.get("DOCUMENT_MIN_UPLOAD_BYTES"),
+    )
+    if error_code:
+        return _CONTENT_ERROR_MESSAGES[error_code]
     return None
 
 

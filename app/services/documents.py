@@ -8,6 +8,39 @@ from pathlib import Path
 
 from domain.models import Document
 
+# Magic Bytes je erlaubtem MIME-Type: Dateien, deren Inhalt nicht zum Typ passt
+# (z. B. durch zu aggressive Client-Komprimierung zerstoerte Uploads), werden
+# abgelehnt.
+DOCUMENT_CONTENT_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "application/pdf": (b"%PDF-",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+}
+DOCUMENT_SIGNATURE_PROBE_BYTES = 8
+
+
+def document_content_error_code(
+    *,
+    mime_type: str,
+    content_head: bytes,
+    content_size: int,
+    max_bytes: int | None,
+    min_bytes: int | None,
+) -> str | None:
+    """Prueft Groesse und Dateisignatur eines Beleg-Uploads.
+
+    Liefert einen Fehlercode ("too_large", "too_small", "signature_mismatch")
+    oder ``None``, wenn der Inhalt plausibel ist.
+    """
+    if max_bytes and content_size > max_bytes:
+        return "too_large"
+    if min_bytes and content_size < min_bytes:
+        return "too_small"
+    signatures = DOCUMENT_CONTENT_SIGNATURES.get(mime_type)
+    if signatures and not any(content_head.startswith(sig) for sig in signatures):
+        return "signature_mismatch"
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class DocumentFileMetadata:
