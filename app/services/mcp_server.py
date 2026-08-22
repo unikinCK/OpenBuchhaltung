@@ -933,6 +933,136 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="create_receipt_match_suggestion",
+        description=(
+            "Gleicht einen unverknüpften Beleg (LLM-gestützt, sonst regelbasiert) mit "
+            "vorhandenen Buchungen ab. Ergebnis: Match-Vorschlag auf eine Buchung oder "
+            "Vorschlag für eine neue Buchung; beides muss anschließend freigegeben werden."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID des unverknüpften Belegs.",
+                },
+            },
+            "required": ["company_id", "document_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-matching/suggestions",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_receipt_match_suggestions",
+        description=(
+            "Listet Belegabgleich-Vorschläge einer Gesellschaft, optional nach Status "
+            "(offen, freigegeben, abgelehnt) gefiltert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "status": {
+                    "type": "string",
+                    "description": "Optionaler Statusfilter: offen, freigegeben, abgelehnt.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximale Anzahl (Standard 50).",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/receipt-matching/suggestions",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="approve_receipt_match_suggestion",
+        description=(
+            "Gibt einen Belegabgleich-Vorschlag frei. Match-Vorschläge verknüpfen den "
+            "Beleg mit der (per journal_entry_id änderbaren) Buchung; New-Booking-"
+            "Vorschläge erzeugen aus den übergebenen Feldern eine neue Buchung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "suggestion_id": {"type": "integer", "description": "ID des Vorschlags."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "journal_entry_id": {
+                    "type": "integer",
+                    "description": (
+                        "Nur Match-Vorschläge: abweichende Buchung statt der "
+                        "vorgeschlagenen verknüpfen."
+                    ),
+                },
+                "expense_account_id": {
+                    "type": "integer",
+                    "description": "Nur New-Booking: Aufwandskonto.",
+                },
+                "creditor_account_id": {
+                    "type": "integer",
+                    "description": "Nur New-Booking: Kreditorenkonto.",
+                },
+                "tax_code_id": {
+                    "type": "integer",
+                    "description": "Nur New-Booking: optionaler Steuercode.",
+                },
+                "entry_date": {
+                    "type": "string",
+                    "description": "Nur New-Booking: Buchungsdatum JJJJ-MM-TT.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Nur New-Booking: Buchungstext.",
+                },
+                "net_amount": {
+                    "type": "string",
+                    "description": "Nur New-Booking: Nettobetrag.",
+                },
+                "tax_amount": {
+                    "type": "string",
+                    "description": "Nur New-Booking: Steuerbetrag.",
+                },
+                "cost_center_id": {
+                    "type": "integer",
+                    "description": "Nur New-Booking: optionale Kostenstelle.",
+                },
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Nur New-Booking: optionales Profitcenter.",
+                },
+            },
+            "required": ["suggestion_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-matching/suggestions/{suggestion_id}/approve",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="reject_receipt_match_suggestion",
+        description=(
+            "Lehnt einen offenen Belegabgleich-Vorschlag ab; der Beleg bleibt unverknüpft."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "suggestion_id": {"type": "integer", "description": "ID des Vorschlags."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["suggestion_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-matching/suggestions/{suggestion_id}/reject",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="import_einvoice",
         description=(
             "Importiert eine E-Rechnung (XRechnung/ZUGFeRD XML), bucht sie und "

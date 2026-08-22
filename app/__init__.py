@@ -50,6 +50,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         RECEIPT_LLM_MODEL=os.environ.get(
             "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
         ),
+        # LLM für den Belegabgleich (Beleg ↔ vorhandene Buchungen);
+        # Fallback-Kette über den Beleg-Extraktions- auf den Beleg-LLM-Endpoint.
+        RECEIPT_MATCH_LLM_ENDPOINT_URL=os.environ.get("RECEIPT_MATCH_LLM_ENDPOINT_URL")
+        or os.environ.get("RECEIPT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_MATCH_LLM_MODEL=os.environ.get(
+            "RECEIPT_MATCH_LLM_MODEL",
+            os.environ.get(
+                "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+            ),
+        ),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
         # per API_REQUIRE_AUTH=0.

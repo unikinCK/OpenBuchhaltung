@@ -22,6 +22,7 @@ from app.api import (  # noqa: F401
     open_items,
     payroll,
     periods,
+    receipt_matching,
     receipt_ocr,
     reports,
     system,

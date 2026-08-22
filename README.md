@@ -523,6 +523,50 @@ und als Eingangsrechnung vorbuchen:
    können dabei der Netto-Aufwandszeile zugewiesen werden. Alle Schritte werden als Audit-Events
    (`ocr_analyzed` mit `control_status`, `ocr_booked`) protokolliert.
 
+## Belegabgleich (Beleg ↔ Buchung, LLM-gestützt)
+
+Unter **Belegabgleich** werden hochgeladene Belege ohne Buchungsverknüpfung mit den
+vorhandenen Buchungen abgeglichen. Jeder Vorschlag muss vom Anwender freigegeben
+(und kann dabei geändert) oder abgelehnt werden:
+
+1. **Belegdaten gewinnen:** Der gespeicherte Beleg durchläuft erneut die
+   Beleg-OCR-Pipeline (Bruttobetrag, Datum, Lieferant, Rechnungsnummer …).
+2. **Kandidaten finden (regelbasiert):** Buchungen der Gesellschaft ohne
+   Belegverknüpfung mit passendem Zeilenbetrag (bzw. die jüngsten unverknüpften
+   Buchungen, wenn kein Betrag erkannt wurde). Stornobuchungen sind ausgenommen.
+3. **Entscheiden (LLM mit Fallback):** Ist ein LLM-Endpoint konfiguriert, wählt das
+   Sprachmodell aus den Kandidaten die passende Buchung (oder keine) und begründet
+   die Wahl inkl. Zuverlässigkeit:
+
+   ```bash
+   export RECEIPT_MATCH_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
+   export RECEIPT_MATCH_LLM_MODEL="gpt-4.1-mini"
+   ```
+
+   Ohne gesetzte `RECEIPT_MATCH_LLM_*`-Variablen fällt der Abgleich auf
+   `RECEIPT_LLM_ENDPOINT_URL` bzw. `DOCUMENT_LLM_ENDPOINT_URL` zurück. LLM-Fehler
+   (auch halluzinierte Buchungs-IDs außerhalb der Kandidatenliste) blockieren nie:
+   es greift die regelbasierte Entscheidung "eindeutiger Betragstreffer", der Grund
+   vermerkt den Ausfall.
+4. **Freigeben, ändern oder ablehnen:**
+   - **Match-Vorschlag:** Der Beleg wird nach Freigabe mit der Buchung verknüpft;
+     vor der Freigabe kann eine andere Buchung gewählt werden (das Audit-Event
+     protokolliert Original- und Endauswahl).
+   - **Neue Buchung:** Findet der Abgleich keine passende Buchung, entsteht aus den
+     Belegdaten ein editierbarer Vorschlag für eine Eingangsrechnungsbuchung
+     (Netto → Aufwand, Vorsteuer → Steuerkonto, Brutto → Kreditor, optional
+     Kostenstelle/Profitcenter). Die Freigabe bucht und verknüpft den Beleg.
+   - **Ablehnen:** Der Beleg bleibt unverknüpft; ein erneuter Abgleich ist möglich.
+
+   Alle Schritte werden als Audit-Events protokolliert
+   (`receipt_match_suggestion/created|approved|booked|rejected`).
+
+Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), REST-API
+(`POST/GET /api/v1/receipt-matching/suggestions`,
+`POST /api/v1/receipt-matching/suggestions/<id>/approve|reject`) und MCP-Tools
+(`create_receipt_match_suggestion`, `list_receipt_match_suggestions`,
+`approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`).
+
 ## End-to-End-Kernflows
 
 Ausführen der E2E-Suite lokal:

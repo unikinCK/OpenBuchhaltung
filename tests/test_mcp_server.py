@@ -78,6 +78,10 @@ EXPECTED_TOOL_NAMES = {
     "download_document",
     "create_receipt_ocr_suggestion",
     "book_receipt_ocr_suggestion",
+    "create_receipt_match_suggestion",
+    "list_receipt_match_suggestions",
+    "approve_receipt_match_suggestion",
+    "reject_receipt_match_suggestion",
     "import_einvoice",
     "export_einvoice",
     "list_bank_transactions",
@@ -1031,6 +1035,86 @@ def test_receipt_ocr_tools_forward_arguments() -> None:
             "net_amount": "100.00",
             "tax_amount": "19.00",
         },
+    )
+
+
+def test_receipt_matching_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "create_receipt_match_suggestion",
+                "arguments": {"company_id": 7, "document_id": 3},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions",
+        None,
+        {"company_id": 7, "document_id": 3},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 56,
+            "method": "tools/call",
+            "params": {
+                "name": "list_receipt_match_suggestions",
+                "arguments": {"company_id": 7, "status": "offen"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/receipt-matching/suggestions",
+        {"company_id": 7, "status": "offen"},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 57,
+            "method": "tools/call",
+            "params": {
+                "name": "approve_receipt_match_suggestion",
+                "arguments": {
+                    "suggestion_id": 11,
+                    "company_id": 7,
+                    "journal_entry_id": 9,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions/11/approve",
+        None,
+        {"company_id": 7, "journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 58,
+            "method": "tools/call",
+            "params": {
+                "name": "reject_receipt_match_suggestion",
+                "arguments": {"suggestion_id": 11, "company_id": 7},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions/11/reject",
+        None,
+        {"company_id": 7},
     )
 
 
