@@ -256,11 +256,15 @@ Die App setzt Security-Header (`X-Content-Type-Options`, `Referrer-Policy`,
 export SESSION_COOKIE_SECURE=1
 ```
 
-Beleguploads sind auf PDF/JPG/PNG begrenzt. Die maximale Uploadgröße liegt
-standardmäßig bei 10 MiB und kann angepasst werden:
+Beleguploads sind auf PDF/JPG/PNG begrenzt. Belege werden unverändert
+gespeichert (keine serverseitige Komprimierung). Damit zu stark komprimierte,
+abgeschnittene oder kaputte Dateien nicht unbemerkt als Beleg landen, prüft der
+Upload zusätzlich eine Mindestgröße sowie die Dateisignatur (Magic Bytes von
+PDF/JPEG/PNG passend zum MIME-Type). Beide Grenzen sind konfigurierbar:
 
 ```bash
 export DOCUMENT_MAX_UPLOAD_BYTES=10485760
+export DOCUMENT_MIN_UPLOAD_BYTES=1024
 ```
 
 ## Bank-CSV-Import

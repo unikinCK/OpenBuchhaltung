@@ -21,6 +21,7 @@ DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local"}
 def create_app(test_config: dict | None = None) -> Flask:
     """Application factory for OpenBuchhaltung."""
     document_max_upload_bytes = int(os.environ.get("DOCUMENT_MAX_UPLOAD_BYTES", "10485760"))
+    document_min_upload_bytes = int(os.environ.get("DOCUMENT_MIN_UPLOAD_BYTES", "1024"))
     app = Flask(__name__)
     app.config.from_mapping(
         APP_ENV=os.environ.get("APP_ENV") or os.environ.get("FLASK_ENV") or "production",
@@ -32,6 +33,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         MCP_SERVER_URL=os.environ.get("MCP_SERVER_URL"),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
         DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
+        DOCUMENT_MIN_UPLOAD_BYTES=document_min_upload_bytes,
         MAX_CONTENT_LENGTH=document_max_upload_bytes,
         DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
         DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),

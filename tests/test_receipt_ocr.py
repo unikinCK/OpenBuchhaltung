@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from document_files import MIN_DOCUMENT_BYTES
 
 from app import create_app
 from app.auth import hash_password
@@ -116,18 +117,24 @@ def test_analyze_empty_text():
 
 
 def _pdf_with_text(lines: list[str]) -> bytes:
-    """Minimales PDF mit einer echten Textebene (unkomprimierter Content-Stream)."""
+    """Minimales PDF mit einer echten Textebene (unkomprimierter Content-Stream).
+
+    Wird per Kommentarzeile auf die Upload-Mindestgröße aufgefüllt, damit die
+    Dateien auch die Upload-Validierung (DOCUMENT_MIN_UPLOAD_BYTES) passieren.
+    """
     shows = " ".join(f"({line}) Tj 0 -14 Td" for line in lines)
     content = f"BT /F1 12 Tf 50 800 Td {shows} ET".encode("latin-1")
-    return (
+    pdf = (
         b"%PDF-1.4\n"
         b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
         b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
         b"3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n"
         b"4 0 obj<</Length " + str(len(content)).encode("ascii") + b">>\nstream\n"
         + content
-        + b"\nendstream endobj\n%%EOF"
+        + b"\nendstream endobj\n"
     )
+    padding = max(0, MIN_DOCUMENT_BYTES - len(pdf) - len(b"%\n%%EOF"))
+    return pdf + b"%" + b"0" * padding + b"\n%%EOF"
 
 
 def test_extract_text_from_plain_text():

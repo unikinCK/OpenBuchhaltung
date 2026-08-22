@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from document_files import pdf_document_bytes
 
 from app import create_app
 from app.auth import hash_password
@@ -77,7 +78,10 @@ def test_e2e_happy_path_core_flow(e2e_app):
             "company_id": "1",
             "journal_entry_id": "1",
             "document_date": "2026-04-09",
-            "document_file": (BytesIO(b"e2e-rechnung"), "rechnung-e2e.pdf"),
+            "document_file": (
+                BytesIO(pdf_document_bytes(b"e2e-rechnung")),
+                "rechnung-e2e.pdf",
+            ),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
@@ -144,7 +148,7 @@ def test_e2e_negative_document_link_to_missing_journal_entry(e2e_app):
             "company_id": "1",
             "journal_entry_id": "999",
             "document_date": "2026-04-09",
-            "document_file": (BytesIO(b"doc"), "neg-e2e.pdf"),
+            "document_file": (BytesIO(pdf_document_bytes(b"doc")), "neg-e2e.pdf"),
         },
         content_type="multipart/form-data",
         follow_redirects=True,
