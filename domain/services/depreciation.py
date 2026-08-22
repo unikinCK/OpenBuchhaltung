@@ -18,6 +18,9 @@ Unterstützte Verfahren:
                      je Jahr.
 * ``gwg``          – Sofortabschreibung geringwertiger Wirtschaftsgüter
                      (§ 6 Abs. 2 EStG): volle Abschreibung im Zugangsjahr.
+* ``digital``      – Digitale Wirtschaftsgüter (Computerhardware/Software,
+                     BMF-Schreiben v. 22.02.2022): Nutzungsdauer 1 Jahr,
+                     volle AfA im Zugangsjahr ohne pro-rata-Kürzung zulässig.
 * ``sammelposten`` – Poolabschreibung (§ 6 Abs. 2a EStG): gleichmäßig über
                      fünf Jahre (20 % p. a.), ohne Monatsanteil und ohne
                      Berücksichtigung von Abgängen.
@@ -41,16 +44,17 @@ LINEAR = "linear"
 DEGRESSIVE = "degressive"
 LEISTUNG = "leistung"
 GWG = "gwg"
+DIGITAL = "digital"
 SAMMELPOSTEN = "sammelposten"
 MANUELL = "manuell"
 
 METHODS: frozenset[str] = frozenset(
-    {LINEAR, DEGRESSIVE, LEISTUNG, GWG, SAMMELPOSTEN, MANUELL}
+    {LINEAR, DEGRESSIVE, LEISTUNG, GWG, SAMMELPOSTEN, MANUELL, DIGITAL}
 )
 
 # Verfahren, die einen automatisch berechenbaren Mehrjahresplan besitzen.
 SCHEDULED_METHODS: frozenset[str] = frozenset(
-    {LINEAR, DEGRESSIVE, LEISTUNG, GWG, SAMMELPOSTEN}
+    {LINEAR, DEGRESSIVE, LEISTUNG, GWG, SAMMELPOSTEN, DIGITAL}
 )
 
 # Gesetzliche Grenzwerte (Netto) für die Sofort-/Poolabschreibung – als
@@ -136,6 +140,8 @@ def compute_schedule(params: AssetParams) -> list[ScheduleRow]:
         return []
     if params.method == GWG:
         return _schedule_gwg(params)
+    if params.method == DIGITAL:
+        return _schedule_digital(params)
     if params.method == SAMMELPOSTEN:
         return _schedule_sammelposten(params)
     if params.method == LEISTUNG:
@@ -306,6 +312,34 @@ def _schedule_gwg(params: AssetParams) -> list[ScheduleRow]:
             book_value_end=Decimal("0.00"),
             cumulative=cost,
             note="Sofortabschreibung GWG (§ 6 Abs. 2 EStG)",
+        )
+    ]
+
+
+def _schedule_digital(params: AssetParams) -> list[ScheduleRow]:
+    """Digitale Wirtschaftsgüter: volle Jahres-AfA im Zugangsjahr.
+
+    Das BMF-Schreiben v. 22.02.2022 lässt für Computerhardware und Software eine
+    Nutzungsdauer von einem Jahr zu und beanstandet nicht, wenn die AfA
+    abweichend von § 7 Abs. 1 Satz 4 EStG im Jahr der Anschaffung in voller
+    Höhe vorgenommen wird. Anders als GWG ohne Betragsgrenze.
+    """
+    cost = _q(params.acquisition_cost)
+    floor = floor_value(params)
+    depreciation = _q(cost - floor)
+    year = params.in_service_date.year
+    return [
+        ScheduleRow(
+            year=year,
+            months=12,
+            book_value_start=cost,
+            depreciation=depreciation,
+            book_value_end=floor,
+            cumulative=depreciation,
+            note=(
+                "Digitale Wirtschaftsgüter: ND 1 Jahr, volle AfA im Zugangsjahr "
+                "(BMF v. 22.02.2022)"
+            ),
         )
     ]
 

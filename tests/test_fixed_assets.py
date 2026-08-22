@@ -664,3 +664,145 @@ def test_fixed_assets_ui_update_and_cancel(tmp_path: Path) -> None:
         asset = db_session.get(FixedAsset, 1)
         assert asset.status == "cancelled"
         assert asset.name == "Richtiges Gerät"
+
+
+def test_digital_method_full_writeoff_in_acquisition_year(session: Session) -> None:
+    company, machine, afa_expense = _seed(session)
+    asset = create_fixed_asset(
+        session=session,
+        payload=FixedAssetInput(
+            company_id=company.id,
+            asset_number="A-DIG-1",
+            name="MacBook Air 13 M5",
+            acquisition_date=date(2026, 3, 20),
+            acquisition_cost=Decimal("1324.41"),
+            method="digital",
+            asset_account_code="0400",
+            depreciation_account_code="4830",
+            changed_by="pytest",
+        ),
+    )
+    rows = depreciation_schedule(asset)
+    # Volle AfA im Zugangsjahr trotz Inbetriebnahme im März (BMF v. 22.02.2022).
+    assert len(rows) == 1
+    assert rows[0].year == 2026
+    assert rows[0].depreciation == Decimal("1324.41")
+    assert rows[0].book_value_end == Decimal("0.00")
+    assert "BMF" in rows[0].note
+
+    entry = post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    assert entry.amount == Decimal("1324.41")
+    assert current_book_value(session=session, asset=asset) == Decimal("0.00")
+    session.refresh(asset)
+    assert asset.status == "fully_depreciated"
+
+
+def test_update_method_to_digital_before_depreciation(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)  # linear, 60 Monate
+
+    updated = update_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        method="digital",
+        useful_life_months=12,
+        changed_by="pytest",
+    )
+    assert updated.method == "digital"
+    assert updated.useful_life_months == 12
+    rows = depreciation_schedule(updated)
+    assert len(rows) == 1
+    assert rows[0].depreciation == Decimal("12000.00")
+
+    audit = session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "fixed_asset", AuditLog.action == "updated"
+        )
+    ).scalar_one()
+    assert audit.payload["changes"]["method"] == {"old": "linear", "new": "digital"}
+
+
+def test_update_method_blocked_after_depreciation(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    with pytest.raises(FixedAssetError, match="Verfahren"):
+        update_fixed_asset(
+            session=session, fixed_asset_id=asset.id, method="digital", changed_by="pytest"
+        )
+    with pytest.raises(FixedAssetError, match="Nutzungsdauer"):
+        update_fixed_asset(
+            session=session, fixed_asset_id=asset.id, useful_life_months=12, changed_by="pytest"
+        )
+
+
+def test_update_to_invalid_method_or_missing_life_rejected(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    with pytest.raises(FixedAssetError, match="Unbekanntes AfA-Verfahren"):
+        update_fixed_asset(
+            session=session, fixed_asset_id=asset.id, method="turbo", changed_by="pytest"
+        )
+    with pytest.raises(FixedAssetError, match="Nutzungsdauer"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            useful_life_months=-3,
+            changed_by="pytest",
+        )
+
+
+def test_fixed_assets_api_patch_method(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Anlagen API 3", "company_name": "Anlagen API 3 GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "0400", "name": "BGA", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    created = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": 1,
+            "asset_number": "A-API-3",
+            "name": "iPhone 17 Pro",
+            "acquisition_date": "2026-07-03",
+            "acquisition_cost": "952.88",
+            "method": "linear",
+            "useful_life_months": 60,
+            "asset_account_id": 1,
+            "depreciation_account_id": 2,
+        },
+    )
+    assert created.status_code == 201
+    asset_id = created.get_json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}",
+        json={"method": "digital", "useful_life_months": 12},
+    )
+    assert patched.status_code == 200
+    body = patched.get_json()
+    assert body["method"] == "digital"
+    assert body["useful_life_months"] == 12
+
+    schedule = client.get(f"/api/v1/fixed-assets/{asset_id}/schedule")
+    rows = schedule.get_json()["schedule"]
+    assert len(rows) == 1
+    assert rows[0]["depreciation"] == "952.88"

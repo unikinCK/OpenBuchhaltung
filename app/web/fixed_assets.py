@@ -301,12 +301,23 @@ def update_fixed_asset_action(asset_id: int):
         acquisition_cost = safe_optional_decimal(request.form.get("acquisition_cost", ""))
         name = request.form.get("name")
         notes = request.form.get("notes")
+        method = (request.form.get("method") or "").strip() or None
+        useful_life_raw = (request.form.get("useful_life_months") or "").strip()
+        try:
+            useful_life_months = int(useful_life_raw) if useful_life_raw else None
+        except ValueError:
+            flash("Nutzungsdauer ist ungültig.", "error")
+            return redirect(
+                url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
+            )
         try:
             update_fixed_asset(
                 session=session,
                 fixed_asset_id=asset_id,
                 name=name,
                 acquisition_cost=acquisition_cost,
+                method=method,
+                useful_life_months=useful_life_months,
                 notes=notes,
                 changed_by=changed_by(),
             )
