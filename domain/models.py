@@ -477,6 +477,65 @@ class Document(Base):
     replaces_document: Mapped[Document | None] = relationship(remote_side="Document.id")
 
 
+class ReceiptMatchSuggestion(Base):
+    """Abgleichsvorschlag zwischen einem Beleg-Upload und den Buchungen.
+
+    ``suggestion_type`` = ``"match"``: der Beleg passt zu einer vorhandenen
+    Buchung (``journal_entry_id``). ``suggestion_type`` = ``"new_booking"``:
+    keine passende Buchung gefunden – aus den Belegdaten wird eine neue
+    Buchung vorgeschlagen. Nach der Freigabe verweist ``journal_entry_id``
+    auf die verknüpfte bzw. neu erzeugte Buchung.
+    """
+
+    __tablename__ = "receipt_match_suggestion"
+    __table_args__ = (
+        CheckConstraint(
+            "suggestion_type IN ('match', 'new_booking')",
+            name="ck_receipt_match_suggestion_type",
+        ),
+        CheckConstraint(
+            "status IN ('offen', 'freigegeben', 'abgelehnt')",
+            name="ck_receipt_match_suggestion_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), nullable=False
+    )
+    suggestion_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="niedrig")
+    reason: Mapped[str | None] = mapped_column(Text)
+    llm_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="offen")
+    # Aus dem Beleg extrahierte Felder (Grundlage des Buchungsvorschlags).
+    supplier: Mapped[str | None] = mapped_column(String(120))
+    invoice_number: Mapped[str | None] = mapped_column(String(50))
+    invoice_date: Mapped[date | None] = mapped_column(Date)
+    net_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    gross_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(120))
+
+    document: Mapped[Document] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
 class BankTransaction(Base):
     __tablename__ = "bank_transaction"
     __table_args__ = (

@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}Belegabgleich – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Belegabgleich</h1>
+
+  <section class="card">
+    <h2>Unverknüpfte Belege</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% else %}
+      <p class="muted">
+        Für jeden Beleg ohne Buchungsverknüpfung schlägt OpenBuchhaltung – falls ein
+        LLM-Endpoint konfiguriert ist, KI-gestützt – eine passende vorhandene Buchung
+        vor. Findet der Abgleich keine, entsteht ein Vorschlag für eine neue Buchung.
+        Jeder Vorschlag muss unten geprüft und freigegeben oder abgelehnt werden.
+      </p>
+      {% if unmatched_documents %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Beleg</th>
+                <th>Belegdatum</th>
+                <th>Hochgeladen</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for document in unmatched_documents %}
+                <tr>
+                  <td>{{ document.file_name }}</td>
+                  <td>{{ document.document_date.isoformat() if document.document_date else '–' }}</td>
+                  <td>{{ document.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                  <td>
+                    <form method="post" action="{{ url_for('main.receipt_matching_suggest') }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                      <input type="hidden" name="document_id" value="{{ document.id }}" />
+                      <button type="submit">Abgleich starten</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Keine unverknüpften Belege ohne offenen Vorschlag –
+          neue Belege unter <a href="{{ url_for('main.documents_page', company_id=selected_company_id) }}">Belege</a>
+          oder <a href="{{ url_for('main.receipt_ocr_page', company_id=selected_company_id) }}">Beleg-OCR</a> hochladen.</p>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  {% if open_suggestions %}
+    <section class="card">
+      <h2>Offene Vorschläge ({{ open_suggestions|length }})</h2>
+      {% for suggestion in open_suggestions %}
+        {% set document = documents_by_id.get(suggestion.document_id) %}
+        <section class="card">
+          <h3>
+            {{ document.file_name if document else 'Beleg #' ~ suggestion.document_id }}
+            · <span class="badge">{{ 'Buchung gefunden' if suggestion.suggestion_type == 'match' else 'Neue Buchung' }}</span>
+            · Zuverlässigkeit: <span class="badge">{{ suggestion.confidence }}</span>
+            {% if suggestion.llm_used %}· <span class="badge">KI-gestützt</span>{% endif %}
+          </h3>
+          {% if suggestion.reason %}
+            <p class="muted">{{ suggestion.reason }}</p>
+          {% endif %}
+          <table>
+            <tbody>
+              <tr><th>Lieferant</th><td>{{ suggestion.supplier or '–' }}</td></tr>
+              <tr><th>Rechnungsnummer</th><td>{{ suggestion.invoice_number or '–' }}</td></tr>
+              <tr><th>Rechnungsdatum</th><td>{{ suggestion.invoice_date.isoformat() if suggestion.invoice_date else '–' }}</td></tr>
+              <tr><th>Netto</th><td class="num">{{ suggestion.net_amount if suggestion.net_amount is not none else '–' }}</td></tr>
+              <tr><th>Steuer{% if suggestion.tax_rate is not none %} ({{ suggestion.tax_rate }}%){% endif %}</th><td class="num">{{ suggestion.tax_amount if suggestion.tax_amount is not none else '–' }}</td></tr>
+              <tr><th>Brutto</th><td class="num">{{ suggestion.gross_amount if suggestion.gross_amount is not none else '–' }}</td></tr>
+            </tbody>
+          </table>
+
+          {% if suggestion.suggestion_type == 'match' %}
+            {% set proposed = entries_by_id.get(suggestion.journal_entry_id) %}
+            {% if proposed %}
+              <p>
+                Vorgeschlagene Buchung: <strong>{{ proposed.posting_number }}</strong>
+                vom {{ proposed.entry_date.isoformat() }} – {{ proposed.description }}
+                (brutto {{ entry_gross_total(proposed) }} {{ suggestion.currency_code }})
+              </p>
+            {% endif %}
+            <form method="post" action="{{ url_for('main.receipt_matching_approve', suggestion_id=suggestion.id) }}" class="stacked">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+              <label for="journal_entry_id_{{ suggestion.id }}">Buchung (änderbar)</label>
+              <select id="journal_entry_id_{{ suggestion.id }}" name="journal_entry_id" required>
+                {% for entry in entry_options %}
+                  <option value="{{ entry.id }}" {% if entry.id == suggestion.journal_entry_id %}selected{% endif %}>
+                    {{ entry.posting_number }} · {{ entry.entry_date.isoformat() }} · {{ entry.description }} · {{ entry_gross_total(entry) }}
+                  </option>
+                {% endfor %}
+              </select>
+              <button type="submit">Freigeben und verknüpfen</button>
+            </form>
+          {% elif expense_accounts and creditor_accounts %}
+            <p class="muted">Keine passende Buchung gefunden – Vorschlag für eine neue
+              Eingangsrechnungsbuchung (Beträge und Konten änderbar).</p>
+            <form method="post" action="{{ url_for('main.receipt_matching_book', suggestion_id=suggestion.id) }}" class="stacked">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+              <label for="entry_date_{{ suggestion.id }}">Buchungsdatum</label>
+              <input id="entry_date_{{ suggestion.id }}" name="entry_date" type="date"
+                     value="{{ suggestion.invoice_date.isoformat() if suggestion.invoice_date else today }}" required />
+
+              <label for="description_{{ suggestion.id }}">Buchungstext</label>
+              <input id="description_{{ suggestion.id }}" name="description"
+                     value="{{ (suggestion.supplier ~ ' ' ~ (suggestion.invoice_number or '')).strip() if suggestion.supplier else '' }}" />
+
+              <label for="expense_account_id_{{ suggestion.id }}">Aufwandskonto (Netto, Soll)</label>
+              <select id="expense_account_id_{{ suggestion.id }}" name="expense_account_id" required>
+                <option value="">Bitte wählen</option>
+                {% for account in expense_accounts %}
+                  <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                {% endfor %}
+              </select>
+
+              <label for="net_amount_{{ suggestion.id }}">Nettobetrag</label>
+              <input id="net_amount_{{ suggestion.id }}" name="net_amount" type="text" inputmode="decimal"
+                     value="{{ suggestion.net_amount if suggestion.net_amount is not none else '0.00' }}" required />
+
+              <label for="tax_code_id_{{ suggestion.id }}">Steuercode (für Vorsteuer)</label>
+              <select id="tax_code_id_{{ suggestion.id }}" name="tax_code_id">
+                <option value="">Ohne Steuer</option>
+                {% for tax_code in tax_codes %}
+                  <option value="{{ tax_code.id }}"
+                    {% if suggestion.tax_rate is not none and tax_code.rate == suggestion.tax_rate and 'VSt' in tax_code.code %}selected{% endif %}>
+                    {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                {% endfor %}
+              </select>
+
+              <label for="tax_amount_{{ suggestion.id }}">Steuerbetrag</label>
+              <input id="tax_amount_{{ suggestion.id }}" name="tax_amount" type="text" inputmode="decimal"
+                     value="{{ suggestion.tax_amount if suggestion.tax_amount is not none else '0.00' }}" required />
+
+              <label for="creditor_account_id_{{ suggestion.id }}">Kreditoren-/Verbindlichkeitskonto (Brutto, Haben)</label>
+              <select id="creditor_account_id_{{ suggestion.id }}" name="creditor_account_id" required>
+                <option value="">Bitte wählen</option>
+                {% for account in creditor_accounts %}
+                  <option value="{{ account.id }}" {% if account.code == '1600' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                {% endfor %}
+              </select>
+
+              <label for="cost_center_id_{{ suggestion.id }}">Kostenstelle (Aufwandszeile)</label>
+              <select id="cost_center_id_{{ suggestion.id }}" name="cost_center_id">
+                <option value="">Ohne Kostenstelle</option>
+                {% for unit in cost_centers %}
+                  <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+                {% endfor %}
+              </select>
+
+              <label for="profit_center_id_{{ suggestion.id }}">Profitcenter (Aufwandszeile)</label>
+              <select id="profit_center_id_{{ suggestion.id }}" name="profit_center_id">
+                <option value="">Ohne Profitcenter</option>
+                {% for unit in profit_centers %}
+                  <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+                {% endfor %}
+              </select>
+
+              <button type="submit">Buchung anlegen und freigeben</button>
+            </form>
+          {% else %}
+            <p class="muted">Für die neue Buchung werden ein Aufwands- und ein
+              Kreditoren-/Verbindlichkeitskonto benötigt — zuerst unter
+              <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a>
+              anlegen oder einen SKR importieren.</p>
+          {% endif %}
+
+          <form method="post" action="{{ url_for('main.receipt_matching_reject', suggestion_id=suggestion.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <button type="submit" class="secondary">Ablehnen</button>
+          </form>
+        </section>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if decided_suggestions %}
+    <section class="card">
+      <h2>Zuletzt entschiedene Vorschläge</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Beleg</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchung</th>
+              <th>Entschieden von</th>
+              <th>Entschieden am</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for suggestion in decided_suggestions %}
+              {% set document = documents_by_id.get(suggestion.document_id) %}
+              {% set entry = entries_by_id.get(suggestion.journal_entry_id) %}
+              <tr>
+                <td>{{ document.file_name if document else '#' ~ suggestion.document_id }}</td>
+                <td>{{ 'Match' if suggestion.suggestion_type == 'match' else 'Neue Buchung' }}</td>
+                <td><span class="badge">{{ suggestion.status }}</span></td>
+                <td>{{ entry.posting_number if entry else '–' }}</td>
+                <td>{{ suggestion.decided_by or '–' }}</td>
+                <td>{{ suggestion.decided_at.strftime('%Y-%m-%d %H:%M') if suggestion.decided_at else '–' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

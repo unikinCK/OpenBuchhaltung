@@ -73,6 +73,11 @@ Jeder Testfall sollte dokumentieren:
 | T-DOC-008 | Belegmanipulation im Dateisystem | Integritaetspruefung meldet Hashabweichung | manuell/automatisiert | hoch |
 | T-DOC-009 | Belegdatum erfassen | Belegdatum und technischer Uploadzeitpunkt werden getrennt gespeichert und exportiert | automatisiert | hoch |
 | T-DOC-010 | OCR-/E-Rechnungsdatum übernehmen | Erkanntes oder eingebettetes Rechnungsdatum wird als Belegdatum gespeichert | automatisiert | hoch |
+| T-DOC-011 | Belegabgleich: Match-Vorschlag | Unverknuepfter Beleg wird per Betrag/LLM einer vorhandenen Buchung zugeordnet; Vorschlag bleibt bis zur Freigabe offen | automatisiert | hoch |
+| T-DOC-012 | Belegabgleich: Freigabe mit Aenderung | Nutzer kann vor der Freigabe eine andere Buchung waehlen; Original- und Endauswahl stehen im Audit-Log | automatisiert | hoch |
+| T-DOC-013 | Belegabgleich: Neue Buchung | Ohne passende Buchung entsteht ein editierbarer Buchungsvorschlag; Freigabe erzeugt Buchung und verknuepft den Beleg | automatisiert | hoch |
+| T-DOC-014 | Belegabgleich: Ablehnung | Abgelehnter Vorschlag laesst den Beleg unverknuepft; erneuter Abgleich ist moeglich | automatisiert | mittel |
+| T-DOC-015 | Belegabgleich: LLM-Ausfall | Bei LLM-Fehler oder halluzinierter Buchungs-ID greift der regelbasierte Fallback mit Begruendung | automatisiert | hoch |
 
 ## 6. Audit-Log
 
