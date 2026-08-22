@@ -37,8 +37,10 @@ a {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  padding: 0 1.5rem;
-  height: 56px;
+  padding: 0.4rem 1.5rem;
+  min-height: 56px;
+  /* Bei schmalen Fenstern umbrechen statt über den Rand zu laufen. */
+  flex-wrap: wrap;
 }
 
 .topbar .brand {
@@ -53,6 +55,7 @@ a {
   display: flex;
   gap: 0.25rem;
   flex: 1;
+  flex-wrap: wrap;
 }
 
 .topbar nav a {
@@ -61,6 +64,7 @@ a {
   padding: 0.4rem 0.75rem;
   border-radius: 6px;
   font-size: 0.95rem;
+  white-space: nowrap;
 }
 
 .topbar nav a:hover {
@@ -139,6 +143,8 @@ section.card {
   border-radius: 10px;
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
+  /* Breite Tabellen scrollen innerhalb der Karte statt über den Rand zu laufen. */
+  overflow-x: auto;
 }
 
 section.card h2,
@@ -233,6 +239,9 @@ button.secondary {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  /* Lange Filterzeilen umbrechen statt seitlich hinauszulaufen. */
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .inline-form button {
@@ -243,11 +252,21 @@ button.secondary {
 
 .journal-line {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 2fr;
+  grid-template-columns: 2fr 1fr 1fr 1.5fr;
   gap: 0.75rem;
   align-items: end;
   padding: 0.6rem 0;
   border-bottom: 1px dashed var(--border);
+}
+
+/* Felder füllen ihre Grid-Zelle und dürfen schrumpfen, statt das Grid zu sprengen. */
+.journal-line > div {
+  min-width: 0;
+}
+
+.journal-line select,
+.journal-line input {
+  width: 100%;
 }
 
 .journal-line label {
@@ -258,10 +277,40 @@ button.secondary {
 }
 
 /* Tables */
+.table-scroll {
+  overflow-x: auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.92rem;
+}
+
+table select {
+  max-width: 160px;
+}
+
+.doc-table td:first-child {
+  min-width: 200px;
+}
+
+td.doc-actions {
+  min-width: 175px;
+}
+
+td.doc-actions .inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+  gap: 0.4rem;
+}
+
+td.doc-actions input[type="file"] {
+  width: 100%;
+  max-width: 165px;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.4rem;
 }
 
 th {
@@ -279,6 +328,36 @@ td {
   border-bottom: 1px solid var(--border);
   padding: 0.5rem 0.6rem;
   vertical-align: top;
+  /* Lange Token (Dateinamen, Hashes) dürfen umbrechen, statt die Tabelle aufzublähen. */
+  overflow-wrap: anywhere;
+}
+
+td.num,
+td.date {
+  white-space: nowrap;
+}
+
+/* Datum + Uhrzeit: nur am Leerzeichen umbrechen, nicht mitten im Token. */
+td.datetime {
+  overflow-wrap: normal;
+}
+
+/* Code in Tabellen (z. B. JSON-Payloads) umbrechen statt die Spalte aufzublähen. */
+td code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Kurze Hashes bleiben einzeilig. */
+td.hash,
+td.hash code {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* Buttons in Tabellen nie mitten im Wort umbrechen. */
+td button {
+  white-space: nowrap;
 }
 
 td.num,
@@ -329,6 +408,8 @@ tr.entry-lines td {
   border-radius: 999px;
   padding: 0.05rem 0.6rem;
   font-size: 0.78rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .submission-history {

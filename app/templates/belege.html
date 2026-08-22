@@ -36,7 +36,8 @@
   <section class="card">
     <h2>Hochgeladene Belege</h2>
     {% if documents %}
-      <table>
+      <div class="table-scroll">
+      <table class="doc-table">
         <thead>
           <tr>
             <th>Datei</th>
@@ -58,7 +59,7 @@
                 {% endif %}
               </td>
               <td>v{{ document.version_number }}</td>
-              <td><code>{{ document.file_sha256[:12] }}</code></td>
+              <td class="hash"><code>{{ document.file_sha256[:12] }}</code></td>
               <td>
                 <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -72,9 +73,9 @@
                   <noscript><button type="submit">Speichern</button></noscript>
                 </form>
               </td>
-              <td>{{ document.document_date.isoformat() if document.document_date else 'nicht erfasst' }}</td>
-              <td>{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
-              <td>
+              <td class="date">{{ document.document_date.isoformat() if document.document_date else 'nicht erfasst' }}</td>
+              <td class="datetime">{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td class="doc-actions">
                 <a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a>
                 {% if document.is_current %}
                   <form method="post" action="{{ url_for('main.replace_document', document_id=document.id) }}" enctype="multipart/form-data" class="inline-form">
@@ -88,6 +89,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="muted">Noch keine Belege vorhanden.</p>
     {% endif %}
