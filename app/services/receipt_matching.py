@@ -45,6 +45,7 @@ from app.services.receipt_ocr import (
     _collect_response_text,
     _parse_llm_json,
     analyze_document,
+    sanitize_text,
 )
 from domain.models import (
     Account,
@@ -68,6 +69,18 @@ TYPE_NEW_BOOKING = "new_booking"
 
 class ReceiptMatchError(ValueError):
     """Raised when a receipt-match suggestion cannot be created or decided."""
+
+
+def _clean_db_text(value: str | None) -> str | None:
+    """Bereinigt Textfelder vor dem Persistieren (defensiv, zusätzlich zur OCR-Stufe).
+
+    PostgreSQL lehnt NUL-Bytes in Text- und JSON-Spalten mit einem DataError ab;
+    hier wird das unabhängig davon abgefangen, woher der Wert stammt.
+    """
+    if value is None:
+        return None
+    cleaned = sanitize_text(value).strip()
+    return cleaned or None
 
 
 @dataclass(slots=True)
@@ -375,17 +388,17 @@ def create_match_suggestion(
         suggestion_type=suggestion_type,
         journal_entry_id=decision.journal_entry_id,
         confidence=decision.confidence,
-        reason=decision.reason,
+        reason=sanitize_text(decision.reason).strip(),
         llm_used=decision.llm_used,
         status=STATUS_OPEN,
-        supplier=extraction.supplier,
-        invoice_number=extraction.invoice_number,
+        supplier=_clean_db_text(extraction.supplier),
+        invoice_number=_clean_db_text(extraction.invoice_number),
         invoice_date=extraction.invoice_date,
         net_amount=extraction.net_amount,
         tax_amount=extraction.tax_amount,
         gross_amount=extraction.gross_amount,
         tax_rate=extraction.tax_rate,
-        currency_code=extraction.currency_code,
+        currency_code=_clean_db_text(extraction.currency_code) or "EUR",
     )
     session.add(suggestion)
     session.flush()

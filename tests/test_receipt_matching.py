@@ -753,6 +753,60 @@ def test_roles_and_tenant_scoping(tmp_path):
     assert cross_reject.status_code == 404
 
 
+def test_suggestion_fields_are_sanitized_before_persisting(tmp_path, monkeypatch):
+    """NUL-Bytes/Steuerzeichen aus der Extraktion dürfen nie in die DB gelangen.
+
+    PostgreSQL wirft bei NUL-Bytes in Textspalten einen DataError; die
+    Persistierung muss unabhängig von der OCR-Stufe bereinigen.
+    """
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+
+    def fake_analyze(**kwargs):
+        return receipt_ocr.ReceiptExtraction(
+            raw_text="egal",
+            supplier="\x00A\x00m\x00a\x00z\x00o\x00n",
+            invoice_number="R-\x0047\x0011",
+            gross_amount=Decimal("238.00"),
+        )
+
+    monkeypatch.setattr(receipt_matching, "analyze_document", fake_analyze)
+
+    with app.extensions["db_session_factory"]() as session:
+        suggestion = create_match_suggestion(
+            session=session,
+            company_id=company_id,
+            document_id=document_id,
+            changed_by="test",
+        )
+        assert suggestion.supplier == "Amazon"
+        assert suggestion.invoice_number == "R-4711"
+        assert "\x00" not in suggestion.reason
+        assert suggestion.currency_code == "EUR"
+
+
+def test_garbled_pdf_yields_clear_error_instead_of_500(tmp_path, monkeypatch):
+    """Zeichensalat aus der PDF-Extraktion muss als ReceiptMatchError ankommen."""
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    # Bordmittel- und pypdf-Extraktion liefern nur NUL-durchsetzten Müll.
+    monkeypatch.setattr(
+        receipt_ocr,
+        "_extract_pdf_text",
+        lambda pdf_bytes: "\x005\x00H\x00F\x00K\x00Q\x00X\x00Q\x00J" * 5,
+    )
+    client = _logged_in_client(app)
+
+    response = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    )
+    assert response.status_code == 422
+    assert "Textebene" in response.get_json()["error"]
+
+
 def test_missing_file_yields_clear_error(tmp_path):
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)

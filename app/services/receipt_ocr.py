@@ -33,6 +33,15 @@ from urllib.request import Request, urlopen
 
 _CENT = Decimal("0.01")
 
+# Steuerzeichen (inkl. NUL), die weder in Analyse-Text noch in DB-Feldern landen
+# dürfen – PostgreSQL lehnt NUL-Bytes in Text-/JSON-Spalten mit einem DataError ab.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def sanitize_text(value: str) -> str:
+    """Entfernt NUL-Bytes und sonstige Steuerzeichen (außer ``\\n``/``\\r``/``\\t``)."""
+    return _CONTROL_CHARS_RE.sub("", value)
+
 
 class ReceiptOCRError(ValueError):
     """Raised when a receipt cannot be turned into extractable text."""
@@ -97,7 +106,60 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _pdf_text_is_usable(text: str) -> bool:
+    """Ob extrahierter PDF-Text als echte Textebene taugt.
+
+    Neben der Mindestlänge wird der Anteil an Steuer-/Ersatzzeichen geprüft:
+    PDFs mit Font-Subsetting und eigenen Encodings (z. B. Amazon-Rechnungen)
+    liefern über die Bordmittel-Extraktion Zeichensalat voller NUL-Bytes, der
+    sonst als "Text" durchginge und die Analyse (und die DB) vergiften würde.
+    """
+    stripped = text.strip()
+    if len(stripped) < 20:
+        return False
+    garbled = sum(
+        1
+        for char in stripped
+        if (ord(char) < 32 and char not in "\n\r\t") or char == "�"
+    )
+    return garbled / len(stripped) <= 0.1
+
+
+def _extract_pdf_text_pypdf(pdf_bytes: bytes) -> str:
+    """Extrahiert die Textebene mit ``pypdf`` (kennt Font-Encodings/ToUnicode-CMaps).
+
+    Liefert bei fehlender Bibliothek oder nicht lesbarem PDF einen leeren String,
+    damit die Bordmittel-Extraktion als Fallback greifen kann.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    from io import BytesIO
+
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except Exception:  # pypdf wirft je nach Defekt sehr unterschiedliche Fehler.
+        return ""
+    return "\n".join(page for page in pages if page.strip())
+
+
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
+    """Extrahiert die Textebene eines PDFs: erst ``pypdf``, dann Bordmittel.
+
+    ``pypdf`` dekodiert auch PDFs mit Font-Subsetting/eigenen Encodings korrekt.
+    Nur wenn es keinen brauchbaren Text liefert, greift die Bordmittel-Extraktion
+    (:func:`_extract_pdf_text_builtin`); echte Scans ohne Textebene liefern in
+    beiden Wegen leeren Text und werden an den OCR-Endpoint delegiert.
+    """
+    text = _extract_pdf_text_pypdf(pdf_bytes)
+    if _pdf_text_is_usable(text):
+        return text
+    return _extract_pdf_text_builtin(pdf_bytes)
+
+
+def _extract_pdf_text_builtin(pdf_bytes: bytes) -> str:
     """Best-effort-Extraktion der Textebene aus einem PDF ohne Fremdbibliotheken.
 
     Liest die (ggf. Flate-komprimierten) Content-Streams aus und sammelt die in
@@ -300,20 +362,24 @@ def extract_document_text(
     kind = _classify(mime_type, file_name)
 
     if kind == "text":
-        return _decode_text(file_bytes), "text"
+        return sanitize_text(_decode_text(file_bytes)), "text"
 
     if kind == "pdf":
         pdf_text = _extract_pdf_text(file_bytes)
-        if len(pdf_text.strip()) >= 20:
-            return pdf_text, "pdf"
+        # Zeichensalat (z. B. aus Fonts mit eigenem Encoding) zählt wie eine
+        # fehlende Textebene – lieber OCR/Fehler als Müll analysieren.
+        if _pdf_text_is_usable(pdf_text):
+            return sanitize_text(pdf_text), "pdf"
         if ocr_endpoint:
             return (
-                _ocr_via_endpoint(
-                    endpoint_url=ocr_endpoint,
-                    model=ocr_model,
-                    file_bytes=file_bytes,
-                    mime_type=mime_type or "application/pdf",
-                    file_name=file_name,
+                sanitize_text(
+                    _ocr_via_endpoint(
+                        endpoint_url=ocr_endpoint,
+                        model=ocr_model,
+                        file_bytes=file_bytes,
+                        mime_type=mime_type or "application/pdf",
+                        file_name=file_name,
+                    )
                 ),
                 "ocr-endpoint",
             )
@@ -325,12 +391,14 @@ def extract_document_text(
     if kind == "image":
         if ocr_endpoint:
             return (
-                _ocr_via_endpoint(
-                    endpoint_url=ocr_endpoint,
-                    model=ocr_model,
-                    file_bytes=file_bytes,
-                    mime_type=mime_type or "image/png",
-                    file_name=file_name,
+                sanitize_text(
+                    _ocr_via_endpoint(
+                        endpoint_url=ocr_endpoint,
+                        model=ocr_model,
+                        file_bytes=file_bytes,
+                        mime_type=mime_type or "image/png",
+                        file_name=file_name,
+                    )
                 ),
                 "ocr-endpoint",
             )
@@ -705,9 +773,9 @@ def apply_llm_control(extraction: ReceiptExtraction, llm: LlmReceiptFields) -> N
 
     # Unterstützung: fehlende Textfelder ergänzen.
     if not extraction.supplier and llm.supplier:
-        extraction.supplier = llm.supplier.strip()[:120]
+        extraction.supplier = sanitize_text(llm.supplier).strip()[:120]
     if not extraction.invoice_number and llm.invoice_number:
-        extraction.invoice_number = llm.invoice_number.strip()
+        extraction.invoice_number = sanitize_text(llm.invoice_number).strip()
     if extraction.invoice_date is None and llm.invoice_date is not None:
         extraction.invoice_date = llm.invoice_date
     if llm.currency_code and llm.currency_code.strip():

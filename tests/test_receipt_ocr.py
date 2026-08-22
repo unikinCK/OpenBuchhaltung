@@ -20,6 +20,7 @@ from app.services.receipt_ocr import (
     apply_llm_control,
     extract_document_text,
     extract_receipt_fields_llm,
+    sanitize_text,
 )
 from domain.models import (
     Account,
@@ -135,6 +136,92 @@ def _pdf_with_text(lines: list[str]) -> bytes:
     )
     padding = max(0, MIN_DOCUMENT_BYTES - len(pdf) - len(b"%\n%%EOF"))
     return pdf + b"%" + b"0" * padding + b"\n%%EOF"
+
+
+def _garbled_pdf() -> bytes:
+    """PDF, dessen Textebene ohne Font-Encoding nur Zeichensalat ergibt.
+
+    Simuliert Rechnungen mit Font-Subsetting und eigenem Encoding (z. B. Amazon):
+    Die Hex-Strings dekodieren ohne ToUnicode-CMap zu NUL-durchsetztem Müll wie
+    ``\\x00R\\x00e\\x00c...``.
+    """
+    words = ["Rechnung", "Amazon", "Gesamtbetrag", "Rechnungsnummer"] * 3
+    shows = " ".join(
+        "<" + "".join(f"00{ord(char):02X}" for char in word) + "> Tj 0 -14 Td"
+        for word in words
+    )
+    content = f"BT /F1 12 Tf 50 800 Td {shows} ET".encode("latin-1")
+    pdf = (
+        b"%PDF-1.4\n"
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/Parent 2 0 R/Contents 4 0 R>>endobj\n"
+        b"4 0 obj<</Length " + str(len(content)).encode("ascii") + b">>\nstream\n"
+        + content
+        + b"\nendstream endobj\n"
+    )
+    padding = max(0, MIN_DOCUMENT_BYTES - len(pdf) - len(b"%\n%%EOF"))
+    return pdf + b"%" + b"0" * padding + b"\n%%EOF"
+
+
+def test_sanitize_text_removes_nul_and_control_chars():
+    assert sanitize_text("\x00R\x00echnung\x01\x7f Nr. 1\n\tOK") == "Rechnung Nr. 1\n\tOK"
+
+
+def test_extract_plain_text_is_sanitized():
+    text, source = extract_document_text(
+        file_bytes="Gesamtbetrag 10,00 EUR\x00\x01\x02".encode("utf-8"),
+        mime_type="text/plain",
+        file_name="beleg.txt",
+    )
+    assert source == "text"
+    assert "\x00" not in text
+    assert "Gesamtbetrag 10,00 EUR" in text
+
+
+def test_garbled_pdf_without_endpoint_raises_like_missing_text_layer():
+    # Der Zeichensalat ist länger als 20 Zeichen, darf aber nicht als Text
+    # durchgehen – erwartet wird dieselbe Reaktion wie ohne Textebene.
+    with pytest.raises(ReceiptOCRError, match="Textebene"):
+        extract_document_text(
+            file_bytes=_garbled_pdf(),
+            mime_type="application/pdf",
+            file_name="amazon.pdf",
+        )
+
+
+def test_garbled_pdf_delegates_to_ocr_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "urlopen",
+        lambda request, timeout=0: _FakeResponse(
+            {"output_text": "Amazon EU S.a r.l.\nGesamtbetrag 119,00 EUR"}
+        ),
+    )
+    text, source = extract_document_text(
+        file_bytes=_garbled_pdf(),
+        mime_type="application/pdf",
+        file_name="amazon.pdf",
+        ocr_endpoint="https://ocr.example/responses",
+    )
+    assert source == "ocr-endpoint"
+    assert "Gesamtbetrag 119,00" in text
+
+
+def test_pypdf_extraction_is_preferred_when_usable(monkeypatch):
+    monkeypatch.setattr(
+        receipt_ocr,
+        "_extract_pdf_text_pypdf",
+        lambda pdf_bytes: "Amazon EU S.a r.l.\nRechnungsnummer DE-4711\nGesamtbetrag 119,00 EUR",
+    )
+    text, source = extract_document_text(
+        file_bytes=_garbled_pdf(),
+        mime_type="application/pdf",
+        file_name="amazon.pdf",
+    )
+    assert source == "pdf"
+    assert "Gesamtbetrag 119,00" in text
+    assert "\x00" not in text
 
 
 def test_extract_text_from_plain_text():
