@@ -632,7 +632,7 @@ class FixedAsset(Base):
             name="ck_fixed_asset_method_known",
         ),
         CheckConstraint(
-            "status IN ('active', 'disposed', 'fully_depreciated')",
+            "status IN ('active', 'disposed', 'fully_depreciated', 'cancelled')",
             name="ck_fixed_asset_status_known",
         ),
     )

@@ -20,6 +20,7 @@ from app.auth import current_api_user
 from app.services.fixed_assets import (
     FixedAssetError,
     FixedAssetInput,
+    cancel_fixed_asset,
     create_fixed_asset,
     current_book_value,
     depreciation_schedule,
@@ -27,6 +28,7 @@ from app.services.fixed_assets import (
     list_fixed_assets,
     post_depreciation,
     record_impairment,
+    update_fixed_asset,
 )
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from domain.models import FixedAsset
@@ -303,6 +305,63 @@ def dispose_fixed_asset_via_api(asset_id: int):
                 disposal_date=disposal_date,
                 proceeds=proceeds,
                 fiscal_year=fiscal_year,
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except FixedAssetError as exc:
+            return validation_error(str(exc))
+        return jsonify(_fixed_asset_dict(session, asset)), 200
+
+
+@api_bp.patch("/fixed-assets/<int:asset_id>")
+def update_fixed_asset_via_api(asset_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        acquisition_cost = (
+            parse_decimal(str(payload["acquisition_cost"]))
+            if payload.get("acquisition_cost") is not None
+            else None
+        )
+    except (TypeError, ValueError, JournalEntryCreationError):
+        return jsonify({"error": "acquisition_cost must be a valid amount."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None or api_scoped_company(session, asset.company_id) is None:
+            return jsonify({"error": "Fixed asset not found."}), 404
+        try:
+            asset = update_fixed_asset(
+                session=session,
+                fixed_asset_id=asset_id,
+                name=payload.get("name"),
+                acquisition_cost=acquisition_cost,
+                notes=payload.get("notes"),
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except FixedAssetError as exc:
+            return validation_error(str(exc))
+        return jsonify(_fixed_asset_dict(session, asset)), 200
+
+
+@api_bp.post("/fixed-assets/<int:asset_id>/cancel")
+def cancel_fixed_asset_via_api(asset_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None or api_scoped_company(session, asset.company_id) is None:
+            return jsonify({"error": "Fixed asset not found."}), 404
+        try:
+            asset = cancel_fixed_asset(
+                session=session,
+                fixed_asset_id=asset_id,
+                reason=payload.get("reason"),
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )
         except FixedAssetError as exc:

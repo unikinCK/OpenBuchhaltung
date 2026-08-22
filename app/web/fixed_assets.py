@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.services.fixed_assets import (
     FixedAssetError,
     FixedAssetInput,
+    cancel_fixed_asset,
     create_fixed_asset,
     current_book_value,
     depreciation_schedule,
@@ -18,6 +19,7 @@ from app.services.fixed_assets import (
     list_fixed_assets,
     post_depreciation,
     record_impairment,
+    update_fixed_asset,
 )
 from app.services.journal_entries import parse_decimal
 from app.services.scoping import scoped_select
@@ -72,7 +74,7 @@ def fixed_assets_page():
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             for asset in assets:
                 book_value = current_book_value(session=session, asset=asset)
-                if asset.status != "disposed":
+                if asset.status not in ("disposed", "cancelled"):
                     total_book_value += book_value
                 asset_views.append({"asset": asset, "book_value": book_value})
 
@@ -284,4 +286,61 @@ def dispose_fixed_asset_action(asset_id: int):
             )
 
     flash("Anlagenabgang wurde gebucht.", "success")
+    return redirect(url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id))
+
+
+@main_bp.post("/anlagen/<int:asset_id>/bearbeiten")
+def update_fixed_asset_action(asset_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None:
+            abort(404)
+        require_company_access(session, asset.company_id)
+        company_id = asset.company_id
+        acquisition_cost = safe_optional_decimal(request.form.get("acquisition_cost", ""))
+        name = request.form.get("name")
+        notes = request.form.get("notes")
+        try:
+            update_fixed_asset(
+                session=session,
+                fixed_asset_id=asset_id,
+                name=name,
+                acquisition_cost=acquisition_cost,
+                notes=notes,
+                changed_by=changed_by(),
+            )
+        except FixedAssetError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
+            )
+
+    flash("Anlagegut wurde aktualisiert.", "success")
+    return redirect(url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id))
+
+
+@main_bp.post("/anlagen/<int:asset_id>/stornieren")
+def cancel_fixed_asset_action(asset_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        asset = session.get(FixedAsset, asset_id)
+        if asset is None:
+            abort(404)
+        require_company_access(session, asset.company_id)
+        company_id = asset.company_id
+        try:
+            cancel_fixed_asset(
+                session=session,
+                fixed_asset_id=asset_id,
+                reason=request.form.get("reason"),
+                changed_by=changed_by(),
+            )
+        except FixedAssetError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
+            )
+
+    flash("Anlagegut wurde storniert (ohne Abgangsbuchung).", "success")
     return redirect(url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id))
