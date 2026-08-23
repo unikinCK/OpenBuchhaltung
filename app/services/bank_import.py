@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -222,6 +223,175 @@ def match_transaction(
     session.commit()
     session.refresh(transaction)
     return transaction
+
+
+def reassign_bank_transactions(
+    *,
+    session: Session,
+    transaction_ids: Sequence[int],
+    bank_account_id: int,
+    changed_by: str,
+) -> list[BankTransaction]:
+    """Hängt einzelne Bankumsätze auf ein anderes Bankkonto um."""
+    ids = list(dict.fromkeys(transaction_ids))
+    if not ids:
+        raise BankImportError("Kein Bankumsatz ausgewählt.")
+
+    transactions = (
+        session.execute(select(BankTransaction).where(BankTransaction.id.in_(ids)))
+        .scalars()
+        .all()
+    )
+    found = {transaction.id for transaction in transactions}
+    missing = [str(transaction_id) for transaction_id in ids if transaction_id not in found]
+    if missing:
+        raise BankImportError(f"Bankumsatz nicht gefunden: {', '.join(missing)}")
+
+    company_ids = {transaction.company_id for transaction in transactions}
+    if len(company_ids) > 1:
+        raise BankImportError(
+            "Bankumsätze mehrerer Gesellschaften können nicht gemeinsam umgehängt werden."
+        )
+
+    return _reassign(
+        session=session,
+        company_id=company_ids.pop(),
+        transactions=transactions,
+        bank_account_id=bank_account_id,
+        changed_by=changed_by,
+    )
+
+
+def move_bank_transactions(
+    *,
+    session: Session,
+    company_id: int,
+    source_bank_account_id: int,
+    target_bank_account_id: int,
+    changed_by: str,
+    statuses: Sequence[str] | None = None,
+) -> list[BankTransaction]:
+    """Hängt alle Umsätze eines Bankkontos auf ein anderes Bankkonto um.
+
+    Mit ``statuses`` lässt sich die Auswahl auf einzelne Status einschränken
+    (z. B. nur ``open``); ohne Angabe werden alle Umsätze des Quellkontos bewegt.
+    """
+    if source_bank_account_id == target_bank_account_id:
+        raise BankImportError("Quell- und Zielkonto sind identisch.")
+
+    _resolve_bank_account(
+        session=session, company_id=company_id, bank_account_id=source_bank_account_id
+    )
+
+    stmt = select(BankTransaction).where(
+        BankTransaction.company_id == company_id,
+        BankTransaction.bank_account_id == source_bank_account_id,
+    )
+    if statuses:
+        stmt = stmt.where(BankTransaction.status.in_(list(statuses)))
+    transactions = (
+        session.execute(stmt.order_by(BankTransaction.booking_date, BankTransaction.id))
+        .scalars()
+        .all()
+    )
+    if not transactions:
+        return []
+
+    return _reassign(
+        session=session,
+        company_id=company_id,
+        transactions=transactions,
+        bank_account_id=target_bank_account_id,
+        changed_by=changed_by,
+    )
+
+
+def _reassign(
+    *,
+    session: Session,
+    company_id: int,
+    transactions: Sequence[BankTransaction],
+    bank_account_id: int,
+    changed_by: str,
+) -> list[BankTransaction]:
+    """Setzt das Bankkonto der Umsätze um und schreibt den Dedup-Hash fort.
+
+    Verschoben wird ausschließlich die Zuordnung der Kontoauszugszeile. Bereits
+    erzeugte Buchungen bleiben nach dem GoBD-Grundsatz der Unveränderbarkeit auf
+    dem bisherigen Konto stehen — den Saldo verschiebt man über eine
+    Umgliederungsbuchung, nicht über diese Funktion.
+    """
+    target = _resolve_bank_account(
+        session=session, company_id=company_id, bank_account_id=bank_account_id
+    )
+
+    pending = [
+        transaction for transaction in transactions if transaction.bank_account_id != target.id
+    ]
+    if not pending:
+        return []
+
+    moved_ids = {transaction.id for transaction in pending}
+    taken_hashes = set(
+        session.execute(
+            select(BankTransaction.dedup_hash).where(
+                BankTransaction.company_id == company_id,
+                BankTransaction.id.not_in(moved_ids),
+            )
+        ).scalars()
+    )
+
+    for transaction in pending:
+        new_hash = _dedup_hash(
+            bank_account_id=target.id,
+            booking_date=transaction.booking_date,
+            amount=transaction.amount,
+            purpose=transaction.purpose,
+            counterparty=transaction.counterparty,
+        )
+        if new_hash in taken_hashes:
+            raise BankImportError(
+                f"Bankumsatz {transaction.id} ({transaction.booking_date.isoformat()}, "
+                f"{transaction.amount}) ist auf Konto {target.code} bereits vorhanden."
+            )
+        taken_hashes.add(new_hash)
+
+        previous_bank_account_id = transaction.bank_account_id
+        transaction.bank_account_id = target.id
+        transaction.dedup_hash = new_hash
+
+        log_audit_event(
+            session=session,
+            tenant_id=transaction.tenant_id,
+            company_id=transaction.company_id,
+            entity_type="bank_transaction",
+            entity_id=str(transaction.id),
+            action="reassigned",
+            changed_by=changed_by,
+            payload={
+                "from_bank_account_id": previous_bank_account_id,
+                "to_bank_account_id": target.id,
+                "status": transaction.status,
+                # Die verknüpfte Buchung bleibt unverändert auf dem alten Konto.
+                "journal_entry_id": transaction.journal_entry_id,
+            },
+        )
+
+    session.commit()
+    for transaction in pending:
+        session.refresh(transaction)
+    return list(pending)
+
+
+def _resolve_bank_account(
+    *, session: Session, company_id: int, bank_account_id: int
+) -> Account:
+    account = session.get(Account, bank_account_id)
+    if account is None or account.company_id != company_id:
+        raise BankImportError("Bankkonto nicht gefunden.")
+    if account.account_type != "asset":
+        raise BankImportError("Als Bankkonto sind nur Sachkonten der Kontoart asset zulässig.")
+    return account
 
 
 def net_from_gross(gross: Decimal, rate: Decimal) -> tuple[Decimal, Decimal]:

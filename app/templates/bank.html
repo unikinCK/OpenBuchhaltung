@@ -33,6 +33,34 @@
     {% endif %}
   </section>
 
+  {% if bank_accounts | length > 1 %}
+    <section class="card">
+      <h2>Umsätze auf anderes Bankkonto umhängen</h2>
+      <form method="post" action="{{ url_for('main.bank_move_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="source_bank_account_id">Von Bankkonto</label>
+        <select id="source_bank_account_id" name="source_bank_account_id" required>
+          {% for account in bank_accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="target_bank_account_id">Auf Bankkonto</label>
+        <select id="target_bank_account_id" name="target_bank_account_id" required>
+          {% for account in bank_accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <p class="muted">Verschoben wird nur die Zuordnung der Kontoauszugszeilen. Bereits erzeugte Buchungen bleiben unverändert auf dem alten Konto stehen — den Saldo bei Bedarf über eine Umgliederungsbuchung verschieben.</p>
+
+        <button type="submit">Umhängen</button>
+      </form>
+    </section>
+  {% endif %}
+
   <section class="card">
     <h2>Umsätze</h2>
     {% if transactions %}
@@ -40,6 +68,7 @@
         <thead>
           <tr>
             <th>Datum</th>
+            <th>Bankkonto</th>
             <th>Verwendungszweck</th>
             <th>Gegenseite</th>
             <th class="num">Betrag</th>
@@ -51,6 +80,10 @@
           {% for tx in transactions %}
             <tr>
               <td>{{ tx.booking_date.isoformat() }}</td>
+              <td>
+                {% set bank_account = bank_accounts_by_id.get(tx.bank_account_id) %}
+                {{ bank_account.code if bank_account else tx.bank_account_id }}
+              </td>
               <td>{{ tx.purpose }}</td>
               <td>{{ tx.counterparty or "–" }}</td>
               <td class="num">{{ tx.amount }}</td>
@@ -109,6 +142,18 @@
                   </form>
                 {% elif tx.journal_entry_id %}
                   <span class="muted">→ Buchung #{{ tx.journal_entry_id }}</span>
+                {% endif %}
+                {% if bank_accounts | length > 1 %}
+                  <form method="post" action="{{ url_for('main.bank_reassign_action', transaction_id=tx.id) }}" style="margin-top:0.4rem;">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <select name="bank_account_id" required>
+                      {% for account in bank_accounts %}
+                        <option value="{{ account.id }}" {% if account.id == tx.bank_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="secondary" style="margin:0;">Umhängen</button>
+                  </form>
                 {% endif %}
               </td>
             </tr>

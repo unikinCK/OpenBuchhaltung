@@ -21,6 +21,8 @@ from app.services.bank_import import (
     book_transaction,
     import_bank_csv,
     match_transaction,
+    move_bank_transactions,
+    reassign_bank_transactions,
     suggest_matches,
 )
 from app.services.journal_entries import JournalEntryCreationError
@@ -50,6 +52,26 @@ def _transaction_dict(transaction: BankTransaction) -> dict[str, object]:
         "journal_entry_id": transaction.journal_entry_id,
         "imported_at": transaction.imported_at.isoformat(),
     }
+
+
+def _scoped_transaction_ids(
+    session, *, company_id: int, transaction_ids: list[int]
+) -> list[int]:
+    """Stellt sicher, dass alle Umsatz-IDs zur adressierten Gesellschaft gehören."""
+    known = set(
+        session.execute(
+            scoped_select(BankTransaction, company_id=company_id).where(
+                BankTransaction.id.in_(transaction_ids)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    known_ids = {transaction.id for transaction in known}
+    foreign = [str(value) for value in transaction_ids if value not in known_ids]
+    if foreign:
+        raise BankImportError(f"Bankumsatz nicht gefunden: {', '.join(foreign)}")
+    return transaction_ids
 
 
 def _journal_entry_suggestion_dict(entry: JournalEntry) -> dict[str, object]:
@@ -294,6 +316,115 @@ def import_bank_transactions_via_api():
             ),
             201,
         )
+
+
+@api_bp.post("/bank-transactions/reassign")
+def reassign_bank_transactions_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        target_bank_account_id = int(payload.get("target_bank_account_id"))
+    except (TypeError, ValueError):
+        return (
+            jsonify({"error": "company_id and target_bank_account_id are required."}),
+            400,
+        )
+
+    source_bank_account_id = payload.get("source_bank_account_id")
+    transaction_ids = payload.get("transaction_ids")
+    if (source_bank_account_id is None) == (transaction_ids is None):
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Exactly one of source_bank_account_id or transaction_ids is required."
+                    )
+                }
+            ),
+            400,
+        )
+
+    statuses = payload.get("statuses") or None
+    try:
+        if source_bank_account_id is not None:
+            source_bank_account_id = int(source_bank_account_id)
+        else:
+            transaction_ids = [int(value) for value in transaction_ids]
+    except (TypeError, ValueError):
+        return jsonify({"error": "Transaction and account ids must be integers."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        try:
+            if source_bank_account_id is not None:
+                transactions = move_bank_transactions(
+                    session=session,
+                    company_id=company.id,
+                    source_bank_account_id=source_bank_account_id,
+                    target_bank_account_id=target_bank_account_id,
+                    statuses=statuses,
+                    changed_by=_api_changed_by(),
+                )
+            else:
+                transactions = reassign_bank_transactions(
+                    session=session,
+                    transaction_ids=_scoped_transaction_ids(
+                        session, company_id=company.id, transaction_ids=transaction_ids
+                    ),
+                    bank_account_id=target_bank_account_id,
+                    changed_by=_api_changed_by(),
+                )
+        except BankImportError as exc:
+            return jsonify({"error": str(exc)}), 422
+
+        return (
+            jsonify(
+                {
+                    "company_id": company.id,
+                    "target_bank_account_id": target_bank_account_id,
+                    "reassigned_count": len(transactions),
+                    "transactions": [
+                        _transaction_dict(transaction) for transaction in transactions
+                    ],
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.post("/bank-transactions/<int:transaction_id>/bank-account")
+def set_bank_transaction_account_via_api(transaction_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        bank_account_id = int(payload.get("bank_account_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "bank_account_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        transaction = session.get(BankTransaction, transaction_id)
+        if transaction is None or api_scoped_company(session, transaction.company_id) is None:
+            return jsonify({"error": "Bank transaction not found."}), 404
+        try:
+            reassigned = reassign_bank_transactions(
+                session=session,
+                transaction_ids=[transaction.id],
+                bank_account_id=bank_account_id,
+                changed_by=_api_changed_by(),
+            )
+        except BankImportError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_transaction_dict(reassigned[0] if reassigned else transaction)), 200
 
 
 @api_bp.post("/bank-transactions/<int:transaction_id>/match")

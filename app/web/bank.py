@@ -11,6 +11,8 @@ from app.services.bank_import import (
     book_transaction,
     import_bank_csv,
     match_transaction,
+    move_bank_transactions,
+    reassign_bank_transactions,
     suggest_matches,
 )
 from app.services.journal_entries import JournalEntryCreationError
@@ -89,6 +91,7 @@ def bank_page():
         companies=companies,
         selected_company_id=selected_company_id,
         bank_accounts=bank_accounts,
+        bank_accounts_by_id={account.id: account for account in bank_accounts},
         contra_accounts=contra_accounts,
         tax_codes=tax_codes,
         transactions=transactions,
@@ -158,6 +161,70 @@ def bank_match_action(transaction_id: int):
             return redirect(url_for("main.bank_page", company_id=company_id))
 
     flash("Bankumsatz wurde der Buchung zugeordnet.", "success")
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.post("/bank/<int:transaction_id>/bankkonto")
+def bank_reassign_action(transaction_id: int):
+    company_id = request.form.get("company_id", type=int)
+    bank_account_id = request.form.get("bank_account_id", type=int)
+    if not bank_account_id:
+        flash("Bitte ein Bankkonto auswählen.", "error")
+        return redirect(url_for("main.bank_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        transaction = session.get(BankTransaction, transaction_id)
+        if transaction is None:
+            abort(404)
+        require_company_access(session, transaction.company_id)
+        try:
+            reassigned = reassign_bank_transactions(
+                session=session,
+                transaction_ids=[transaction_id],
+                bank_account_id=bank_account_id,
+                changed_by=changed_by(),
+            )
+        except BankImportError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+
+    if reassigned:
+        flash("Bankumsatz wurde auf das gewählte Bankkonto umgehängt.", "success")
+    else:
+        flash("Bankumsatz liegt bereits auf diesem Bankkonto.", "error")
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.post("/bank/umhaengen")
+def bank_move_action():
+    company_id = request.form.get("company_id", type=int)
+    source_bank_account_id = request.form.get("source_bank_account_id", type=int)
+    target_bank_account_id = request.form.get("target_bank_account_id", type=int)
+    if not company_id or not source_bank_account_id or not target_bank_account_id:
+        flash("Gesellschaft, Quell- und Zielkonto sind Pflichtfelder.", "error")
+        return redirect(url_for("main.bank_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        require_company_access(session, company_id)
+        try:
+            moved = move_bank_transactions(
+                session=session,
+                company_id=company_id,
+                source_bank_account_id=source_bank_account_id,
+                target_bank_account_id=target_bank_account_id,
+                changed_by=changed_by(),
+            )
+        except BankImportError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+
+    flash(
+        f"{len(moved)} Bankumsätze umgehängt. Bereits erzeugte Buchungen bleiben "
+        "auf dem alten Konto — Saldo bei Bedarf umgliedern.",
+        "success" if moved else "error",
+    )
     return redirect(url_for("main.bank_page", company_id=company_id))
 
 
