@@ -302,6 +302,46 @@ def test_account_update_and_history_tools_forward_arguments() -> None:
     )
 
 
+def test_update_fixed_asset_forwards_plan_parameters() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+
+    # Das Schema muss die Plan-Parameter zulassen, sonst verwerfen MCP-Clients
+    # sie wegen additionalProperties=False (Umstellung auf degressiv schlug fehl).
+    tools = server.handle({"jsonrpc": "2.0", "id": 40, "method": "tools/list"})["result"]["tools"]
+    schema = next(t for t in tools if t["name"] == "update_fixed_asset")["inputSchema"]
+    assert {"degressive_rate", "total_units", "in_service_date"} <= set(schema["properties"])
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "update_fixed_asset",
+                "arguments": {
+                    "asset_id": 5,
+                    "method": "degressive",
+                    "degressive_rate": "23.08",
+                    "total_units": "100000",
+                    "in_service_date": "2026-02-01",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "PATCH",
+        "/fixed-assets/5",
+        None,
+        {
+            "method": "degressive",
+            "degressive_rate": "23.08",
+            "total_units": "100000",
+            "in_service_date": "2026-02-01",
+        },
+    )
+
+
 def test_path_placeholder_filled_from_arguments() -> None:
     http = RecordingHttp()
     server = MCPServer(http=http)

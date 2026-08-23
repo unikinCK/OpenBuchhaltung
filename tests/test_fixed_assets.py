@@ -724,6 +724,112 @@ def test_update_method_to_digital_before_depreciation(session: Session) -> None:
     assert audit.payload["changes"]["method"] == {"old": "linear", "new": "digital"}
 
 
+def test_update_method_to_degressive_with_rate(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)  # linear, 60 Monate
+
+    updated = update_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        method="degressive",
+        degressive_rate=Decimal("20"),
+        changed_by="pytest",
+    )
+    assert updated.method == "degressive"
+    assert updated.degressive_rate == Decimal("20")
+    rows = depreciation_schedule(updated)
+    assert rows[0].depreciation == Decimal("2400.00")
+
+    audit = session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "fixed_asset", AuditLog.action == "updated"
+        )
+    ).scalar_one()
+    assert audit.payload["changes"]["degressive_rate"] == {"old": None, "new": "20"}
+
+
+def test_update_to_degressive_without_rate_rejected(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    with pytest.raises(FixedAssetError, match="Prozentsatz erforderlich"):
+        update_fixed_asset(
+            session=session, fixed_asset_id=asset.id, method="degressive", changed_by="pytest"
+        )
+    with pytest.raises(FixedAssetError, match="Prozentsatz muss größer 0"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            method="degressive",
+            degressive_rate=Decimal("-5"),
+            changed_by="pytest",
+        )
+
+
+def test_update_total_units_and_in_service_date(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+
+    updated = update_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        method="leistung",
+        total_units=Decimal("100000"),
+        in_service_date=date(2026, 4, 1),
+        changed_by="pytest",
+    )
+    assert updated.method == "leistung"
+    assert updated.total_units == Decimal("100000")
+    assert updated.in_service_date == date(2026, 4, 1)
+
+    audit = session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "fixed_asset", AuditLog.action == "updated"
+        )
+    ).scalar_one()
+    assert audit.payload["changes"]["total_units"] == {"old": None, "new": "100000"}
+    assert audit.payload["changes"]["in_service_date"] == {
+        "old": "2026-01-01",
+        "new": "2026-04-01",
+    }
+
+    with pytest.raises(FixedAssetError, match="Gesamtleistung muss größer 0"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            total_units=Decimal("0"),
+            changed_by="pytest",
+        )
+
+
+def test_update_plan_params_blocked_after_depreciation(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    with pytest.raises(FixedAssetError, match="Prozentsatz"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            degressive_rate=Decimal("20"),
+            changed_by="pytest",
+        )
+    with pytest.raises(FixedAssetError, match="Gesamtleistung"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            total_units=Decimal("100000"),
+            changed_by="pytest",
+        )
+    with pytest.raises(FixedAssetError, match="Inbetriebnahmedatum"):
+        update_fixed_asset(
+            session=session,
+            fixed_asset_id=asset.id,
+            in_service_date=date(2026, 6, 1),
+            changed_by="pytest",
+        )
+
+
 def test_update_method_blocked_after_depreciation(session: Session) -> None:
     company, _, _ = _seed(session)
     asset = _linear_asset(session, company)
@@ -806,6 +912,78 @@ def test_fixed_assets_api_patch_method(tmp_path: Path) -> None:
     rows = schedule.get_json()["schedule"]
     assert len(rows) == 1
     assert rows[0]["depreciation"] == "952.88"
+
+
+def test_fixed_assets_api_patch_to_degressive(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Anlagen API 4", "company_name": "Anlagen API 4 GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "0400", "name": "BGA", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    created = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": 1,
+            "asset_number": "A-2026-005",
+            "name": "Schreibtisch",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost": "1300.00",
+            "method": "linear",
+            "useful_life_months": 156,
+            "asset_account_id": 1,
+            "depreciation_account_id": 2,
+        },
+    )
+    assert created.status_code == 201
+    asset_id = created.get_json()["id"]
+
+    # Ohne Prozentsatz bleibt die Umstellung wie bisher abgelehnt.
+    rejected = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}", json={"method": "degressive"}
+    )
+    assert rejected.status_code == 422
+    assert "Prozentsatz" in rejected.get_json()["error"]
+
+    patched = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}",
+        json={
+            "method": "degressive",
+            # Spaltenpräzision ist Numeric(5,2), daher auf 2 Nachkommastellen.
+            "degressive_rate": "23.08",
+            "in_service_date": "2026-02-01",
+        },
+    )
+    assert patched.status_code == 200
+    body = patched.get_json()
+    assert body["method"] == "degressive"
+    assert body["degressive_rate"] == "23.08"
+    assert body["in_service_date"] == "2026-02-01"
+
+    total_units = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}",
+        json={"method": "leistung", "total_units": "100000"},
+    )
+    assert total_units.status_code == 200
+    assert total_units.get_json()["total_units"] == "100000.00"
+
+    invalid = client.patch(
+        f"/api/v1/fixed-assets/{asset_id}", json={"degressive_rate": "abc"}
+    )
+    assert invalid.status_code == 400
 
 
 def test_notes_length_is_validated(session: Session) -> None:

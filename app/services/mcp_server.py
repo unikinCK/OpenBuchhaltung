@@ -2417,8 +2417,10 @@ TOOLS: list[ToolSpec] = [
         name="update_fixed_asset",
         description=(
             "Korrigiert Stammdaten eines Anlageguts (Bezeichnung, Anschaffungskosten, "
-            "Notizen). Anschaffungskosten sind nur änderbar, solange keine AfA gebucht "
-            "wurde; die Hauptbuch-Korrektur erfolgt separat als reguläre Buchung."
+            "AfA-Verfahren inkl. degressivem Prozentsatz, Nutzungsdauer, Gesamtleistung, "
+            "Inbetriebnahmedatum, Notizen). Plan-Parameter sind nur änderbar, solange "
+            "keine AfA gebucht wurde; die Hauptbuch-Korrektur erfolgt separat als "
+            "reguläre Buchung."
         ),
         input_schema={
             "type": "object",
@@ -2446,6 +2448,27 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": (
                         "Neue Nutzungsdauer in Monaten (nur solange keine AfA gebucht)."
+                    ),
+                },
+                "degressive_rate": {
+                    "type": "string",
+                    "description": (
+                        "Degressiver Prozentsatz p. a., z. B. '20' (nur degressive; "
+                        "nur solange keine AfA gebucht)."
+                    ),
+                },
+                "total_units": {
+                    "type": "string",
+                    "description": (
+                        "Gesamtleistung (nur leistung), z. B. '100000' "
+                        "(nur solange keine AfA gebucht)."
+                    ),
+                },
+                "in_service_date": {
+                    "type": "string",
+                    "description": (
+                        "Neues Inbetriebnahmedatum = AfA-Beginn (JJJJ-MM-TT; "
+                        "nur solange keine AfA gebucht)."
                     ),
                 },
                 "notes": {"type": "string", "description": "Neue Notizen."},

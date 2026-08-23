@@ -220,6 +220,9 @@
               {% endfor %}
             </select>
             <input name="useful_life_months" inputmode="numeric" value="{{ selected_asset.useful_life_months or '' }}" placeholder="ND (Monate)" style="width:7rem;" title="Nutzungsdauer in Monaten (nur ohne gebuchte AfA änderbar)" />
+            <input name="degressive_rate" inputmode="decimal" value="{{ selected_asset.degressive_rate or '' }}" placeholder="Degr. %" style="width:6rem;" title="Degressiver Prozentsatz p. a. (nur degressive; nur ohne gebuchte AfA änderbar)" />
+            <input name="total_units" inputmode="decimal" value="{{ selected_asset.total_units or '' }}" placeholder="Gesamtleistung" style="width:8rem;" title="Gesamtleistung für Leistungs-AfA (nur ohne gebuchte AfA änderbar)" />
+            <input name="in_service_date" type="date" value="{{ selected_asset.in_service_date.isoformat() }}" title="Inbetriebnahme = AfA-Beginn (nur ohne gebuchte AfA änderbar)" />
             <button type="submit" class="secondary">Speichern</button>
           </form>
 
