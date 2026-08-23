@@ -653,7 +653,9 @@ class FixedAsset(Base):
     acquisition_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     useful_life_months: Mapped[int | None] = mapped_column(Integer)
-    degressive_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    # 4 Nachkommastellen: praxisübliche Sätze wie 23,0769 % (3/13 × 100) dürfen
+    # nicht auf 2 Stellen gerundet werden, sonst weicht der AfA-Plan ab.
+    degressive_rate: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
     total_units: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     residual_value: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0.00")
