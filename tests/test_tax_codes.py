@@ -189,3 +189,154 @@ def test_zero_rate_tax_code_adds_no_line(session: Session) -> None:
         select(JournalEntryLine).where(JournalEntryLine.journal_entry_id == entry.id)
     ).scalars().all()
     assert len(lines) == 2
+
+
+def _seed_company_skr04(session: Session) -> Company:
+    tenant = Tenant(name="SKR04 Tenant")
+    company = Company(tenant=tenant, name="SKR04 GmbH", currency_code="EUR")
+    session.add_all([tenant, company])
+    session.flush()
+    for code, name, account_type in (
+        ("3806", "Umsatzsteuer 19 %", "liability"),
+        ("3801", "Umsatzsteuer 7 %", "liability"),
+        ("1406", "Abziehbare Vorsteuer 19 %", "asset"),
+        ("1401", "Abziehbare Vorsteuer 7 %", "asset"),
+    ):
+        session.add(
+            Account(
+                tenant_id=tenant.id,
+                company_id=company.id,
+                code=code,
+                name=name,
+                account_type=account_type,
+            )
+        )
+    session.commit()
+    return company
+
+
+def test_ensure_default_tax_codes_resolves_skr04_accounts(session: Session) -> None:
+    company = _seed_company_skr04(session)
+    created = ensure_default_tax_codes(session=session, company=company)
+    assert created == 5
+
+    ust19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+    vst19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
+    ).scalar_one()
+    assert ust19.vat_account_id == _account_id(session, company, "3806")
+    assert vst19.vat_account_id == _account_id(session, company, "1406")
+
+
+def test_ensure_default_tax_codes_repairs_missing_vat_account(session: Session) -> None:
+    company = _seed_company_skr04(session)
+    # Historischer Zustand: Code existiert, aber ohne Steuerkonto (z. B. weil er
+    # gegen den falschen Kontenrahmen aufgelöst wurde).
+    session.add(
+        TaxCode(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            code="USt19",
+            rate=Decimal("19.00"),
+            vat_account_id=None,
+        )
+    )
+    session.commit()
+
+    changed = ensure_default_tax_codes(session=session, company=company)
+    # 4 neue Codes + 1 Reparatur.
+    assert changed == 5
+
+    ust19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+    assert ust19.vat_account_id == _account_id(session, company, "3806")
+
+    # Idempotent: zweiter Lauf ändert nichts mehr.
+    assert ensure_default_tax_codes(session=session, company=company) == 0
+
+
+def test_tax_codes_api_list_create_and_defaults(tmp_path) -> None:
+    from app import create_app
+    from app.auth import hash_password
+    from domain.models import User
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'tax_codes_api.db'}",
+        }
+    )
+    with app.extensions["db_session_factory"]() as db_session:
+        db_session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        db_session.commit()
+    client = app.test_client()
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Steuer API", "company_name": "Steuer API GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "3806",
+            "name": "Umsatzsteuer 19 %",
+            "account_type": "liability",
+        },
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "1406",
+            "name": "Abziehbare Vorsteuer 19 %",
+            "account_type": "asset",
+        },
+    )
+
+    defaults = client.post("/api/v1/tax-codes/defaults", json={"company_id": 1})
+    assert defaults.status_code == 200
+    body = defaults.get_json()
+    assert body["changed"] == 5
+    by_code = {tc["code"]: tc for tc in body["tax_codes"]}
+    assert by_code["USt19"]["vat_account_id"] is not None
+    assert by_code["VSt19"]["vat_account_id"] is not None
+
+    listed = client.get("/api/v1/tax-codes?company_id=1")
+    assert listed.status_code == 200
+    assert len(listed.get_json()["tax_codes"]) == 5
+
+    created = client.post(
+        "/api/v1/tax-codes",
+        json={
+            "company_id": 1,
+            "code": "USt19-Sonder",
+            "rate": "19.00",
+            "vat_account_code": "3806",
+            "description": "Sonderfall",
+        },
+    )
+    assert created.status_code == 201
+    assert created.get_json()["rate"] == "19.00"
+
+    duplicate = client.post(
+        "/api/v1/tax-codes",
+        json={"company_id": 1, "code": "USt19-Sonder", "rate": "19.00"},
+    )
+    assert duplicate.status_code == 409
+
+    bad_account = client.post(
+        "/api/v1/tax-codes",
+        json={"company_id": 1, "code": "X", "rate": "19.00", "vat_account_code": "9999"},
+    )
+    assert bad_account.status_code == 422

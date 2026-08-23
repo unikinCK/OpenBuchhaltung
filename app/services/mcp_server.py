@@ -2299,6 +2299,66 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_tax_codes",
+        description=(
+            "Listet die Steuercodes einer Gesellschaft (Code, Satz, Steuerkonto). "
+            "Steuercodes ordnen Buchungszeilen der UStVA zu."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/tax-codes",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_tax_code",
+        description=(
+            "Legt einen Steuercode an. Das Steuerkonto per interner ID "
+            "(vat_account_id) oder Kontonummer (vat_account_code, z. B. '3806')."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "code": {"type": "string", "description": "Kürzel, z. B. 'USt19'."},
+                "rate": {"type": "string", "description": "Steuersatz, z. B. '19.00'."},
+                "description": {"type": "string"},
+                "vat_account_id": {"type": "integer"},
+                "vat_account_code": {"type": "string"},
+            },
+            "required": ["company_id", "code", "rate"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/tax-codes",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="ensure_default_tax_codes",
+        description=(
+            "Legt fehlende Standard-Steuercodes (USt19/USt7/VSt19/VSt7/frei) für "
+            "eine Gesellschaft an und verknüpft bestehende Codes ohne Steuerkonto "
+            "mit dem passenden Konto des Kontenrahmens (SKR03/SKR04). Idempotent."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/tax-codes/defaults",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="update_fixed_asset",
         description=(
             "Korrigiert Stammdaten eines Anlageguts (Bezeichnung, Anschaffungskosten, "

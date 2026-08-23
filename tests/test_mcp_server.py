@@ -106,6 +106,9 @@ EXPECTED_TOOL_NAMES = {
     "post_depreciation",
     "record_fixed_asset_impairment",
     "dispose_fixed_asset",
+    "list_tax_codes",
+    "create_tax_code",
+    "ensure_default_tax_codes",
     "update_fixed_asset",
     "cancel_fixed_asset",
 }
