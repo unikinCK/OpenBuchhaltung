@@ -1220,7 +1220,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="import_bank_transactions",
-        description="Importiert Bankumsätze aus einer CSV-Datei. content_base64 enthält die CSV.",
+        description=(
+            "Importiert Bankumsätze aus einer Kontoauszugsdatei (CSV, CAMT.053-XML "
+            "oder MT940/.sta). content_base64 enthält die Datei."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1232,9 +1235,15 @@ TOOLS: list[ToolSpec] = [
                         "create_bank_account)."
                     ),
                 },
-                "file_name": {"type": "string", "description": "Originaler CSV-Dateiname."},
-                "mime_type": {"type": "string", "description": "MIME-Type, z. B. text/csv."},
-                "content_base64": {"type": "string", "description": "CSV-Inhalt als Base64."},
+                "file_name": {
+                    "type": "string",
+                    "description": "Originaler Dateiname (.csv, .xml, .sta, .mt940, .940).",
+                },
+                "mime_type": {
+                    "type": "string",
+                    "description": "MIME-Type, z. B. text/csv oder application/xml.",
+                },
+                "content_base64": {"type": "string", "description": "Dateiinhalt als Base64."},
             },
             "required": ["company_id", "bank_account_id", "file_name", "content_base64"],
             "additionalProperties": False,

@@ -6,7 +6,7 @@
   <h1 class="page-title">Bankumsätze</h1>
 
   <section class="card">
-    <h2>Kontoumsätze importieren (CSV)</h2>
+    <h2>Kontoumsätze importieren (CSV, CAMT.053, MT940)</h2>
     {% if not selected_company_id %}
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
     {% elif not bank_accounts %}
@@ -24,9 +24,9 @@
           {% endfor %}
         </select>
 
-        <label for="bank_csv">CSV-Datei</label>
-        <input id="bank_csv" name="bank_csv" type="file" accept=".csv,text/csv" required />
-        <p class="muted">Erkannte Spalten (Aliasse): Buchungstag/Datum, Betrag (auch 1.234,56), Verwendungszweck, Auftraggeber/Empfänger. Trennzeichen , oder ; — Re-Importe werden dedupliziert.</p>
+        <label for="bank_file">Kontoauszugsdatei</label>
+        <input id="bank_file" name="bank_file" type="file" accept=".csv,.xml,.sta,.mt940,.940,text/csv,application/xml" required />
+        <p class="muted">Formate: CSV (Spalten-Aliasse Buchungstag/Datum, Betrag, Verwendungszweck, Auftraggeber/Empfänger), CAMT.053-XML und MT940 (.sta) — Re-Importe werden dedupliziert.</p>
 
         <button type="submit">Importieren</button>
       </form>

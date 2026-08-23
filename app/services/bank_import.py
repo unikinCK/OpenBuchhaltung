@@ -7,12 +7,23 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import TextIO
+from io import StringIO
+from typing import Iterable, TextIO
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.bank_statement import (
+    BankStatementParseError,
+    BankStatementRow,
+    BankStatementRowError,
+    StatementItem,
+    decode_statement_text,
+    detect_statement_format,
+    parse_camt053,
+    parse_mt940,
+)
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -74,6 +85,60 @@ def import_bank_csv(
     changed_by: str,
 ) -> BankImportReport:
     """Importiert Bankumsätze aus einem CSV-Stream (idempotent über Dedup-Hash)."""
+    return import_bank_items(
+        session=session,
+        company_id=company_id,
+        bank_account_id=bank_account_id,
+        items=_csv_items(csv_stream),
+        changed_by=changed_by,
+        source="csv",
+    )
+
+
+def import_bank_statement(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    file_name: str,
+    content: bytes,
+    changed_by: str,
+) -> BankImportReport:
+    """Importiert eine Kontoauszugsdatei (CSV, CAMT.053-XML oder MT940)."""
+    statement_format = detect_statement_format(file_name, content)
+    try:
+        if statement_format == "camt":
+            items: Iterable[StatementItem] = parse_camt053(content)
+        elif statement_format == "mt940":
+            items = parse_mt940(content)
+        else:
+            items = _csv_items(StringIO(decode_statement_text(content)))
+    except BankStatementParseError as exc:
+        raise BankImportError(str(exc)) from exc
+
+    return import_bank_items(
+        session=session,
+        company_id=company_id,
+        bank_account_id=bank_account_id,
+        items=items,
+        changed_by=changed_by,
+        source=statement_format,
+    )
+
+
+def import_bank_items(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    items: Iterable[StatementItem],
+    changed_by: str,
+    source: str,
+) -> BankImportReport:
+    """Gemeinsame Import-Pipeline: Dedup, Persistenz und Audit-Log.
+
+    Wird vom Datei-Import (CSV/CAMT/MT940) und vom FinTS-Abruf genutzt.
+    """
     company = session.get(Company, company_id)
     if company is None:
         raise BankImportError("Gesellschaft nicht gefunden.")
@@ -82,48 +147,30 @@ def import_bank_csv(
     if bank_account is None or bank_account.company_id != company.id:
         raise BankImportError("Bankkonto nicht gefunden.")
 
-    reader = csv.DictReader(csv_stream, delimiter=_sniff_delimiter(csv_stream))
-    if not reader.fieldnames:
-        raise BankImportError("CSV-Kopfzeile fehlt.")
-
-    header_mapping = _resolve_header_mapping(reader.fieldnames)
     report = BankImportReport()
-
     existing_hashes = set(
         session.execute(
             select(BankTransaction.dedup_hash).where(BankTransaction.company_id == company.id)
         ).scalars()
     )
 
-    for line_number, raw_row in enumerate(reader, start=2):
+    for item in items:
         report.total_rows += 1
-        row = {
-            canonical: (raw_row.get(source) or "").strip()
-            for canonical, source in header_mapping.items()
-        }
-
-        missing = [name for name in REQUIRED_FIELDS if not row.get(name)]
-        if missing:
-            _record_error(report, line_number, f"Pflichtfelder fehlen: {', '.join(missing)}")
+        if isinstance(item, BankStatementRowError):
+            _record_error(report, item.position, item.message)
             continue
 
-        try:
-            booking_date = _parse_date(row["booking_date"])
-            amount = _parse_amount(row["amount"])
-        except BankImportError as exc:
-            _record_error(report, line_number, str(exc))
+        if item.amount == Decimal("0.00"):
+            _record_error(report, item.position, "Betrag darf nicht 0 sein.")
             continue
 
-        if amount == Decimal("0.00"):
-            _record_error(report, line_number, "Betrag darf nicht 0 sein.")
-            continue
-
-        counterparty = row.get("counterparty") or None
+        purpose = item.purpose[:255]
+        counterparty = item.counterparty[:255] if item.counterparty else None
         dedup_hash = _dedup_hash(
             bank_account_id=bank_account.id,
-            booking_date=booking_date,
-            amount=amount,
-            purpose=row["purpose"],
+            booking_date=item.booking_date,
+            amount=item.amount,
+            purpose=purpose,
             counterparty=counterparty,
         )
         if dedup_hash in existing_hashes:
@@ -135,10 +182,10 @@ def import_bank_csv(
                 tenant_id=company.tenant_id,
                 company_id=company.id,
                 bank_account_id=bank_account.id,
-                booking_date=booking_date,
-                amount=amount,
-                currency_code=company.currency_code,
-                purpose=row["purpose"],
+                booking_date=item.booking_date,
+                amount=item.amount,
+                currency_code=item.currency_code or company.currency_code,
+                purpose=purpose,
                 counterparty=counterparty,
                 dedup_hash=dedup_hash,
             )
@@ -155,6 +202,7 @@ def import_bank_csv(
         action="imported",
         changed_by=changed_by,
         payload={
+            "source": source,
             "imported": report.imported_rows,
             "duplicates": report.duplicate_rows,
             "errors": report.error_rows,
@@ -162,6 +210,41 @@ def import_bank_csv(
     )
     session.commit()
     return report
+
+
+def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
+    reader = csv.DictReader(csv_stream, delimiter=_sniff_delimiter(csv_stream))
+    if not reader.fieldnames:
+        raise BankImportError("CSV-Kopfzeile fehlt.")
+    header_mapping = _resolve_header_mapping(reader.fieldnames)
+
+    for line_number, raw_row in enumerate(reader, start=2):
+        row = {
+            canonical: (raw_row.get(source) or "").strip()
+            for canonical, source in header_mapping.items()
+        }
+
+        missing = [name for name in REQUIRED_FIELDS if not row.get(name)]
+        if missing:
+            yield BankStatementRowError(
+                line_number, f"Pflichtfelder fehlen: {', '.join(missing)}"
+            )
+            continue
+
+        try:
+            booking_date = _parse_date(row["booking_date"])
+            amount = _parse_amount(row["amount"])
+        except BankImportError as exc:
+            yield BankStatementRowError(line_number, str(exc))
+            continue
+
+        yield BankStatementRow(
+            position=line_number,
+            booking_date=booking_date,
+            amount=amount,
+            purpose=row["purpose"],
+            counterparty=row.get("counterparty") or None,
+        )
 
 
 def suggest_matches(

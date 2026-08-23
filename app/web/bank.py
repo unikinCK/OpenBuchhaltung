@@ -1,15 +1,13 @@
-"""Bankumsätze: CSV-Import, Matching und Verbuchung."""
+"""Bankumsätze: Kontoauszugs-Import (CSV/CAMT/MT940), Matching und Verbuchung."""
 
 from __future__ import annotations
-
-from io import StringIO
 
 from flask import abort, flash, redirect, render_template, request, url_for
 
 from app.services.bank_import import (
     BankImportError,
     book_transaction,
-    import_bank_csv,
+    import_bank_statement,
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
@@ -105,25 +103,25 @@ def bank_page():
 def bank_import_action():
     company_id = request.form.get("company_id", type=int)
     bank_account_id = request.form.get("bank_account_id", type=int)
-    uploaded_file = request.files.get("bank_csv")
+    uploaded_file = request.files.get("bank_file") or request.files.get("bank_csv")
 
     if not company_id or not bank_account_id or uploaded_file is None or not uploaded_file.filename:
-        flash("Gesellschaft, Bankkonto und CSV-Datei sind Pflichtfelder.", "error")
+        flash("Gesellschaft, Bankkonto und Kontoauszugsdatei sind Pflichtfelder.", "error")
         return redirect(url_for("main.bank_page", company_id=company_id))
 
     session_factory = get_session_factory()
     with session_factory() as session:
         require_company_access(session, company_id)
         try:
-            text_stream = StringIO(uploaded_file.read().decode("utf-8-sig"))
-            report = import_bank_csv(
+            report = import_bank_statement(
                 session=session,
                 company_id=company_id,
                 bank_account_id=bank_account_id,
-                csv_stream=text_stream,
+                file_name=uploaded_file.filename,
+                content=uploaded_file.read(),
                 changed_by=changed_by(),
             )
-        except (BankImportError, UnicodeDecodeError) as exc:
+        except BankImportError as exc:
             flash(f"Import fehlgeschlagen: {exc}", "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
 
