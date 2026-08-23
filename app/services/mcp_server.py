@@ -2215,7 +2215,10 @@ TOOLS: list[ToolSpec] = [
                 },
                 "degressive_rate": {
                     "type": "string",
-                    "description": "Degressiver Prozentsatz p. a., z. B. '20' (nur degressive).",
+                    "description": (
+                        "Degressiver Prozentsatz p. a. mit bis zu 4 Nachkommastellen, "
+                        "z. B. '20' oder '23.0769' (nur degressive)."
+                    ),
                 },
                 "total_units": {
                     "type": "string",

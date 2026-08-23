@@ -1024,3 +1024,74 @@ def test_notes_length_is_validated(session: Session) -> None:
         changed_by="pytest",
     )
     assert cancelled.notes is not None and len(cancelled.notes) <= 255
+
+
+def test_degressive_rate_keeps_four_decimal_places(session: Session) -> None:
+    company, _, _ = _seed(session)
+    # 3/13 × 100 = 23,0769 %: mit Numeric(5,2) würde die DB auf 23,08 runden.
+    asset = create_fixed_asset(
+        session=session,
+        payload=FixedAssetInput(
+            company_id=company.id,
+            asset_number="A-degressiv",
+            name="Produktionsanlage",
+            acquisition_date=date(2026, 1, 1),
+            acquisition_cost=Decimal("130000.00"),
+            method="degressive",
+            useful_life_months=156,
+            degressive_rate=Decimal("23.0769"),
+            asset_account_code="0400",
+            depreciation_account_code="4830",
+            changed_by="pytest",
+        ),
+    )
+
+    session.expire(asset)
+    reloaded = session.get(FixedAsset, asset.id)
+    assert reloaded is not None
+    assert reloaded.degressive_rate == Decimal("23.0769")
+
+    rows = depreciation_schedule(reloaded)
+    assert rows[0].depreciation == Decimal("29999.97")  # 130000 × 23,0769 %
+
+
+def test_fixed_assets_api_degressive_rate_roundtrip(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Anlagen API 4", "company_name": "Anlagen API 4 GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "0400", "name": "Maschinen", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "4830",
+            "name": "Abschreibungen",
+            "account_type": "expense",
+        },
+    )
+    created = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": 1,
+            "asset_number": "A-API-4",
+            "name": "Produktionsanlage",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost": "130000.00",
+            "method": "degressive",
+            "useful_life_months": 156,
+            "degressive_rate": "23.0769",
+            "asset_account_id": 1,
+            "depreciation_account_id": 2,
+        },
+    )
+    assert created.status_code == 201
+    assert created.get_json()["degressive_rate"] == "23.0769"
+
+    listed = client.get("/api/v1/fixed-assets?company_id=1")
+    assert listed.get_json()["assets"][0]["degressive_rate"] == "23.0769"
