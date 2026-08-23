@@ -1144,6 +1144,55 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_bank_accounts",
+        description=(
+            "Listet die als Bankkonto nutzbaren Sachkonten (Kontoart asset) einer "
+            "Gesellschaft. Die id dient als bank_account_id beim Import von "
+            "Bankumsätzen. Standardmäßig nur aktive Konten; include_inactive=true "
+            "zeigt alle."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch inaktive Konten einschließen (Standard: false).",
+                    "default": False,
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-accounts",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_bank_account",
+        description=(
+            "Legt ein Bankkonto als Sachkonto mit Kontoart asset an (z. B. Kontonummer "
+            "1210 für ein weiteres Girokonto). Die zurückgegebene id wird als "
+            "bank_account_id beim Import von Bankumsätzen verwendet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "code": {"type": "string", "description": "Kontonummer (z. B. 1210)."},
+                "name": {
+                    "type": "string",
+                    "description": "Kontobezeichnung, z. B. Bankname und Kontoart.",
+                },
+            },
+            "required": ["company_id", "code", "name"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-accounts",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_bank_transactions",
         description=(
             "Listet Bankumsätze einer Gesellschaft, optional nach Status und mit "
@@ -1176,7 +1225,13 @@ TOOLS: list[ToolSpec] = [
             "type": "object",
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
-                "bank_account_id": {"type": "integer", "description": "Bankkonto."},
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": (
+                        "ID des Bank-Sachkontos (siehe list_bank_accounts bzw. "
+                        "create_bank_account)."
+                    ),
+                },
                 "file_name": {"type": "string", "description": "Originaler CSV-Dateiname."},
                 "mime_type": {"type": "string", "description": "MIME-Type, z. B. text/csv."},
                 "content_base64": {"type": "string", "description": "CSV-Inhalt als Base64."},

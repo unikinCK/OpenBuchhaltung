@@ -84,6 +84,8 @@ EXPECTED_TOOL_NAMES = {
     "reject_receipt_match_suggestion",
     "import_einvoice",
     "export_einvoice",
+    "list_bank_accounts",
+    "create_bank_account",
     "list_bank_transactions",
     "import_bank_transactions",
     "match_bank_transaction",
@@ -1209,6 +1211,42 @@ def test_bank_tools_forward_arguments() -> None:
     server.handle(
         {
             "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {
+                "name": "list_bank_accounts",
+                "arguments": {"company_id": 7, "include_inactive": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/bank-accounts",
+        {"company_id": 7, "include_inactive": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "tools/call",
+            "params": {
+                "name": "create_bank_account",
+                "arguments": {"company_id": 7, "code": "1210", "name": "ING Girokonto"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-accounts",
+        None,
+        {"company_id": 7, "code": "1210", "name": "ING Girokonto"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
             "id": 55,
             "method": "tools/call",
             "params": {
@@ -1634,6 +1672,20 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         "updated",
         "created",
     ]
+
+    # Bankkonto anlegen und auflisten: nur Sachkonten der Kontoart asset.
+    created_bank_account = call_tool(
+        "create_bank_account",
+        {"company_id": company_id, "code": "1210", "name": "ING Girokonto"},
+    )
+    assert created_bank_account["isError"] is False
+    ing_account = json.loads(created_bank_account["content"][0]["text"])
+    assert ing_account["account_type"] == "asset"
+
+    bank_accounts = json.loads(
+        call_tool("list_bank_accounts", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [account["code"] for account in bank_accounts["bank_accounts"]] == ["1200", "1210"]
 
     entry = call_tool(
         "create_journal_entry",

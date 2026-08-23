@@ -7,8 +7,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.audit_log import log_audit_event, serialize_audit_log_entry
-from domain.models import Account, AuditLog
+from domain.models import Account, AuditLog, Company
 
 
 class AccountUpdateError(ValueError):
@@ -31,6 +32,31 @@ def serialize_account(account: Account) -> dict[str, Any]:
         "parent_account_id": account.parent_account_id,
         "is_active": account.is_active,
     }
+
+
+def create_account_with_audit(
+    *,
+    session: Session,
+    company: Company,
+    code: str,
+    name: str,
+    account_type: str,
+    changed_by: str,
+) -> Account:
+    account = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code=code,
+        name=name,
+        account_type=account_type,
+        parent_account_id=resolve_parent_account_id(
+            session=session, company_id=company.id, code=code
+        ),
+    )
+    session.add(account)
+    session.flush()
+    log_account_created(session=session, account=account, changed_by=changed_by)
+    return account
 
 
 def log_account_created(

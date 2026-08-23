@@ -341,6 +341,53 @@ def test_bank_page_upload_and_book_flow(tmp_path):
     assert b"verbucht</span>" in book_response.data
 
 
+def test_bank_account_api_create_list_and_import(tmp_path):
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "B Mandant", "company_name": "B GmbH"})
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "4200", "name": "Miete", "account_type": "expense"},
+    )
+
+    missing_fields = client.post("/api/v1/bank-accounts", json={"company_id": 1, "code": "1210"})
+    assert missing_fields.status_code == 400
+
+    created = client.post(
+        "/api/v1/bank-accounts",
+        json={"company_id": 1, "code": "1210", "name": "ING Girokonto"},
+    )
+    assert created.status_code == 201
+    bank_account = created.get_json()
+    assert bank_account["account_type"] == "asset"
+    assert bank_account["code"] == "1210"
+
+    duplicate = client.post(
+        "/api/v1/bank-accounts",
+        json={"company_id": 1, "code": "1210", "name": "Doppelt"},
+    )
+    assert duplicate.status_code == 409
+
+    # Nur Sachkonten der Kontoart asset erscheinen als Bankkonten.
+    list_response = client.get("/api/v1/bank-accounts", query_string={"company_id": 1})
+    assert list_response.status_code == 200
+    assert [account["code"] for account in list_response.get_json()["bank_accounts"]] == ["1210"]
+
+    import_response = client.post(
+        "/api/v1/bank-transactions/import",
+        json={
+            "company_id": 1,
+            "bank_account_id": bank_account["id"],
+            "file_name": "umsaetze.csv",
+            "mime_type": "text/csv",
+            "content_base64": base64.b64encode(GERMAN_CSV.encode("utf-8")).decode("ascii"),
+        },
+    )
+    assert import_response.status_code == 201
+    assert import_response.get_json()["report"]["imported_rows"] == 3
+
+
 def test_bank_api_import_list_match_and_book_flow(tmp_path):
     app = _create_ui_app(tmp_path)
     client = app.test_client()

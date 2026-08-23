@@ -8,11 +8,13 @@ from io import StringIO
 from pathlib import Path
 
 from flask import jsonify, request
+from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
+from app.services.accounts import create_account_with_audit, serialize_account
 from app.services.bank_import import (
     BankImportError,
     BankImportReport,
@@ -118,6 +120,74 @@ def _validate_csv_upload(*, file_name: str, mime_type: str) -> str | None:
     if mime_type not in ALLOWED_BANK_CSV_MIME_TYPES:
         return "Bank CSV MIME type is not allowed."
     return None
+
+
+@api_bp.get("/bank-accounts")
+def list_bank_accounts_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    include_inactive = request.args.get("include_inactive", "").lower() in {"1", "true", "yes"}
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        stmt = scoped_select(Account, company_id=company.id).where(
+            Account.account_type == "asset"
+        )
+        if not include_inactive:
+            stmt = stmt.where(Account.is_active.is_(True))
+        accounts = session.execute(stmt.order_by(Account.code)).scalars().all()
+
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "bank_accounts": [serialize_account(account) for account in accounts],
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.post("/bank-accounts")
+def create_bank_account_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    company_id = payload.get("company_id")
+    code = (payload.get("code") or "").strip()
+    name = (payload.get("name") or "").strip()
+
+    if not company_id or not code or not name:
+        return jsonify({"error": "company_id, code and name are required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        try:
+            account = create_account_with_audit(
+                session=session,
+                company=company,
+                code=code,
+                name=name,
+                account_type="asset",
+                changed_by=_api_changed_by(),
+            )
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return jsonify({"error": "Account code already exists for this company."}), 409
+
+        return jsonify(serialize_account(account)), 201
 
 
 @api_bp.get("/bank-transactions")
