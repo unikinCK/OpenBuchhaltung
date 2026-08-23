@@ -1363,6 +1363,138 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_fints_connections",
+        description=(
+            "Listet die FinTS-Bankzugänge einer Gesellschaft (nur Stammdaten, keine PIN)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Zugänge einschließen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/fints-connections",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_fints_connection",
+        description=(
+            "Legt einen FinTS/HBCI-Bankzugang an (BLZ, Login, FinTS-URL). PIN und TAN "
+            "werden nie gespeichert; sie werden erst beim Abruf übergeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": "ID des Bank-Sachkontos für die importierten Umsätze.",
+                },
+                "name": {"type": "string", "description": "Anzeigename des Zugangs."},
+                "blz": {"type": "string", "description": "Bankleitzahl (8 Ziffern)."},
+                "login": {"type": "string", "description": "FinTS-Benutzerkennung."},
+                "fints_url": {
+                    "type": "string",
+                    "description": "FinTS-Endpunkt der Bank (https://…).",
+                },
+                "sepa_iban": {
+                    "type": "string",
+                    "description": "Optional: IBAN, falls der Zugang mehrere Konten umfasst.",
+                },
+            },
+            "required": [
+                "company_id",
+                "bank_account_id",
+                "name",
+                "blz",
+                "login",
+                "fints_url",
+            ],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-connections",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_fints_connection_active",
+        description="Aktiviert oder deaktiviert einen FinTS-Bankzugang.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des Bankzugangs."},
+                "is_active": {"type": "boolean", "description": "Neuer Aktiv-Status."},
+            },
+            "required": ["connection_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-connections/{connection_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="sync_fints_transactions",
+        description=(
+            "Ruft Bankumsätze per FinTS direkt bei der Bank ab und importiert sie "
+            "(Dedup wie beim Dateiimport). Antwort ist entweder ein Import-Report oder "
+            "status=tan_required mit dialog_id — dann submit_fints_tan verwenden. "
+            "Die PIN wird nur für diesen Abruf verwendet und nicht gespeichert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des Bankzugangs."},
+                "pin": {"type": "string", "description": "Online-Banking-PIN."},
+                "from_date": {
+                    "type": "string",
+                    "description": "Optional: Beginn (YYYY-MM-DD), Standard 30 Tage zurück.",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "Optional: Ende (YYYY-MM-DD), Standard heute.",
+                },
+            },
+            "required": ["connection_id", "pin"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-connections/{connection_id}/sync",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="submit_fints_tan",
+        description=(
+            "Setzt einen FinTS-Abruf fort, der eine TAN verlangt hat. Bei entkoppelten "
+            "Verfahren (pushTAN-App) tan weglassen und nach der Freigabe erneut aufrufen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dialog_id": {
+                    "type": "string",
+                    "description": "dialog_id aus der tan_required-Antwort.",
+                },
+                "pin": {"type": "string", "description": "Online-Banking-PIN (erneut)."},
+                "tan": {
+                    "type": "string",
+                    "description": "TAN-Code; bei entkoppelten Verfahren weglassen.",
+                },
+            },
+            "required": ["dialog_id", "pin"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-dialogs/{dialog_id}/tan",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."

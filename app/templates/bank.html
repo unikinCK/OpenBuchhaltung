@@ -62,6 +62,123 @@
   {% endif %}
 
   <section class="card">
+    <h2>FinTS-Direktabruf</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% else %}
+      {% if not fints_configured %}
+        <p class="muted">Hinweis: Die Umgebungsvariable <code>FINTS_PRODUCT_ID</code> ist nicht gesetzt
+          (Produktregistrierung der Deutschen Kreditwirtschaft) — der Abruf ist erst danach möglich.</p>
+      {% endif %}
+
+      {% if fints_challenge %}
+        <div class="card" style="border:1px solid #c60;">
+          <h3>TAN-Bestätigung erforderlich</h3>
+          <p>{{ fints_challenge.challenge }}</p>
+          <form method="post" action="{{ url_for('main.fints_tan_action') }}" class="stacked">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="dialog_id" value="{{ fints_challenge.dialog_id }}" />
+            <label for="fints_tan_pin">PIN (erneut eingeben, wird nicht gespeichert)</label>
+            <input id="fints_tan_pin" name="pin" type="password" autocomplete="off" required />
+            {% if not fints_challenge.decoupled %}
+              <label for="fints_tan">TAN</label>
+              <input id="fints_tan" name="tan" type="text" autocomplete="one-time-code" required />
+            {% else %}
+              <p class="muted">Entkoppeltes Verfahren: Abruf in der Banking-App freigeben, dann fortsetzen.</p>
+            {% endif %}
+            <button type="submit">{% if fints_challenge.decoupled %}Freigabe prüfen{% else %}TAN senden{% endif %}</button>
+          </form>
+          <form method="post" action="{{ url_for('main.fints_tan_cancel_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <button type="submit" class="secondary">Abbrechen</button>
+          </form>
+        </div>
+      {% endif %}
+
+      {% if fints_connections %}
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>BLZ</th>
+              <th>Login</th>
+              <th>IBAN</th>
+              <th>Abruf</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for conn in fints_connections %}
+              <tr>
+                <td>{{ conn.name }}</td>
+                <td>{{ conn.blz }}</td>
+                <td>{{ conn.login }}</td>
+                <td>{{ conn.sepa_iban or "–" }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('main.fints_sync_action', connection_id=conn.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <input name="pin" type="password" placeholder="PIN" autocomplete="off" required style="width:7rem;" />
+                    <input name="from_date" type="date" title="Von (Standard: 30 Tage)" />
+                    <input name="to_date" type="date" title="Bis (Standard: heute)" />
+                    <button type="submit" class="secondary" style="margin:0;">Umsätze abrufen</button>
+                  </form>
+                </td>
+                <td>
+                  <form method="post" action="{{ url_for('main.fints_connection_deactivate_action', connection_id=conn.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <button type="submit" class="secondary" style="margin:0;">Deaktivieren</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch kein FinTS-Bankzugang hinterlegt.</p>
+      {% endif %}
+
+      {% if bank_accounts %}
+        <details style="margin-top:1rem;">
+          <summary>Neuen Bankzugang anlegen</summary>
+          <form method="post" action="{{ url_for('main.fints_connection_create_action') }}" class="stacked">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+            <label for="fints_name">Name</label>
+            <input id="fints_name" name="name" type="text" placeholder="z. B. Geschäftskonto Sparkasse" required />
+
+            <label for="fints_blz">BLZ</label>
+            <input id="fints_blz" name="blz" type="text" pattern="[0-9]{8}" required />
+
+            <label for="fints_login">FinTS-Login (Benutzerkennung)</label>
+            <input id="fints_login" name="login" type="text" required />
+
+            <label for="fints_url">FinTS-URL der Bank</label>
+            <input id="fints_url" name="fints_url" type="url" placeholder="https://banking-xy.s-fints-pt-xy.de/fints30" required />
+
+            <label for="fints_iban">IBAN (nur nötig, wenn der Zugang mehrere Konten umfasst)</label>
+            <input id="fints_iban" name="sepa_iban" type="text" />
+
+            <label for="fints_bank_account">Bank-Sachkonto</label>
+            <select id="fints_bank_account" name="bank_account_id" required>
+              {% for account in bank_accounts %}
+                <option value="{{ account.id }}" {% if account.code == '1200' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="muted">PIN und TAN werden nie gespeichert — die PIN wird bei jedem Abruf eingegeben.</p>
+
+            <button type="submit">Bankzugang anlegen</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="card">
     <h2>Umsätze</h2>
     {% if transactions %}
       <table>

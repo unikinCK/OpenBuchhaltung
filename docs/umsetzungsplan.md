@@ -290,6 +290,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       deutschem Zahlen-/Datumsformat und Dedup-Hash; Betrags-Matching schlägt passende
       Buchungen vor; offene Umsätze direkt verbuchbar inkl. Netto-aus-Brutto-Split
       bei Steuercode; Audit-Events für Import/Zuordnung/Verbuchung)*
+- [x] Kontoauszugs-Standards + FinTS-Direktabruf *(Sprint 2026-08-23: CAMT.053-XML
+      und MT940/.sta zusätzlich zu CSV über eine gemeinsame Import-Pipeline
+      [Dedup, Audit, Latin-1-Fallback]; FinTS/HBCI-Abruf via python-fints mit
+      Bankzugängen je Gesellschaft [BLZ/Login/URL, PIN nie gespeichert],
+      TAN-Flow inkl. entkoppelter Verfahren über eingefrorene Dialoge
+      [fints_pending_dialog, 15-Min-Ablauf]; FINTS_PRODUCT_ID als Voraussetzung;
+      UI/API/MCP-Parität und Tests mit Fake-FinTS-Client)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*

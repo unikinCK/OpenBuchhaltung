@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -1134,3 +1135,74 @@ class AuditLog(Base):
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class FinTSConnection(Base):
+    """FinTS/HBCI-Bankzugang einer Gesellschaft.
+
+    Es werden nur Zugangs-Stammdaten gespeichert (BLZ, Login, Endpunkt) —
+    niemals PIN oder TAN. Die PIN wird bei jedem Abruf neu eingegeben.
+    """
+
+    __tablename__ = "fints_connection"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_fints_connection_company_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    blz: Mapped[str] = mapped_column(String(8), nullable=False)
+    login: Mapped[str] = mapped_column(String(120), nullable=False)
+    fints_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional: IBAN, falls der Zugang mehrere SEPA-Konten umfasst.
+    sepa_iban: Mapped[str | None] = mapped_column(String(34))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+
+
+class FinTSPendingDialog(Base):
+    """Eingefrorener FinTS-Dialog, der auf eine TAN-Bestätigung wartet.
+
+    Enthält den von python-fints serialisierten Client-/Dialogzustand
+    (ohne PIN — die wird bei der TAN-Eingabe erneut abgefragt) und wird
+    nach Abschluss oder Ablauf gelöscht.
+    """
+
+    __tablename__ = "fints_pending_dialog"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("fints_connection.id", ondelete="CASCADE"), nullable=False
+    )
+    # Schritt, an dem die TAN nötig wurde: "init" (Dialog-Initialisierung)
+    # oder "transactions" (Umsatzabruf).
+    step: Mapped[str] = mapped_column(String(20), nullable=False)
+    client_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    dialog_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    tan_request_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    from_date: Mapped[date | None] = mapped_column(Date)
+    to_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    connection: Mapped[FinTSConnection] = relationship()
