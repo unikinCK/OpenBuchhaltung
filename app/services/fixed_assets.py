@@ -27,6 +27,7 @@ from domain.models import Account, Company, DepreciationEntry, FixedAsset
 from domain.services import depreciation as afa
 
 CENT = Decimal("0.01")
+NOTES_MAX_LENGTH = 255  # Spaltenlänge fixed_asset.notes (String(255))
 
 
 class FixedAssetError(ValueError):
@@ -108,6 +109,10 @@ def create_fixed_asset(*, session: Session, payload: FixedAssetInput) -> FixedAs
     name = payload.name.strip()
     if not asset_number or not name:
         raise FixedAssetError("Inventarnummer und Bezeichnung sind Pflichtfelder.")
+    if payload.notes and len(payload.notes.strip()) > NOTES_MAX_LENGTH:
+        raise FixedAssetError(
+            f"Notizen dürfen höchstens {NOTES_MAX_LENGTH} Zeichen lang sein."
+        )
     if payload.acquisition_cost <= Decimal("0.00"):
         raise FixedAssetError("Anschaffungskosten müssen größer 0 sein.")
 
@@ -310,6 +315,10 @@ def update_fixed_asset(
 
     if notes is not None:
         new_notes = notes.strip() or None
+        if new_notes and len(new_notes) > NOTES_MAX_LENGTH:
+            raise FixedAssetError(
+                f"Notizen dürfen höchstens {NOTES_MAX_LENGTH} Zeichen lang sein."
+            )
         if new_notes != asset.notes:
             changes["notes"] = {"old": asset.notes, "new": new_notes}
             asset.notes = new_notes
@@ -360,7 +369,8 @@ def cancel_fixed_asset(
     asset.status = "cancelled"
     if reason and reason.strip():
         suffix = f"Storniert: {reason.strip()}"
-        asset.notes = f"{asset.notes}\n{suffix}" if asset.notes else suffix
+        combined = f"{asset.notes}\n{suffix}" if asset.notes else suffix
+        asset.notes = combined[:NOTES_MAX_LENGTH]
 
     log_audit_event(
         session=session,
