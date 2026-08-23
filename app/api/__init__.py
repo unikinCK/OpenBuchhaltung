@@ -26,6 +26,7 @@ from app.api import (  # noqa: F401
     receipt_ocr,
     reports,
     system,
+    tax_codes,
     tenants,
     users,
     vat_returns,

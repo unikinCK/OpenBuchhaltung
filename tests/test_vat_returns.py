@@ -1155,3 +1155,138 @@ def test_elster_readiness_api(tmp_path: Path) -> None:
         "Production ELSTER requires ERiC library, certificate and command."
         in payload["warnings"]
     )
+
+
+def test_compute_vat_return_without_tax_codes_on_lines(session: Session) -> None:
+    """Importierte/manuelle Buchungen ohne Steuercode an den Zeilen müssen in der
+    UStVA landen: Steuerzeilen über die Steuerkonten der Steuercodes, der
+    Steuersatz aus dem Verhältnis USt/Bemessungsgrundlage."""
+    company = _seed(session)
+
+    # Ausgangsrechnung 19 % – alle Zeilen ohne tax_code_id, USt direkt auf 1776.
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 6, 1),
+        description="Ausgangsrechnung ohne Steuercode",
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, "1400"),
+                debit_amount=Decimal("1190.60"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "8400"),
+                credit_amount=Decimal("1000.50"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "1776"),
+                credit_amount=Decimal("190.10"),
+            ),
+        ],
+    )
+    # Steuerfreier Erlös ohne Steuercode und ohne USt-Zeile.
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 6, 10),
+        description="Steuerfreier Erlös ohne Steuercode",
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, "1400"),
+                debit_amount=Decimal("100.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "8100"),
+                credit_amount=Decimal("100.00"),
+            ),
+        ],
+    )
+    # Eingangsrechnung mit Vorsteuer direkt auf 1576, ohne Steuercode.
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 6, 15),
+        description="Eingangsrechnung ohne Steuercode",
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, "4200"),
+                debit_amount=Decimal("500.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "1576"),
+                debit_amount=Decimal("95.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "1600"),
+                credit_amount=Decimal("595.00"),
+            ),
+        ],
+    )
+
+    amounts = _amounts_by_kz(
+        compute_vat_return(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 6, 1),
+            date_to=date(2026, 6, 30),
+        )
+    )
+    assert amounts["81"] == Decimal("1000")
+    assert amounts["48"] == Decimal("100")
+    assert amounts["USt"] == Decimal("190.10")
+    assert amounts["66"] == Decimal("95.00")
+    assert amounts["83"] == Decimal("95.10")
+
+
+def test_compute_vat_return_mixes_tagged_and_untagged_lines(session: Session) -> None:
+    company = _seed(session)
+    # Getaggte Buchung (Steuerzeile wird vom Service erzeugt) ...
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 6, 3),
+        description="Ausgangsrechnung mit Steuercode",
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, "1400"),
+                debit_amount=Decimal("119.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "8400"),
+                credit_amount=Decimal("100.00"),
+                tax_code_id=_tax_code_id(session, company, "USt19"),
+            ),
+        ],
+    )
+    # ... plus ungetaggte Buchung im selben Zeitraum.
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 6, 5),
+        description="Ausgangsrechnung ohne Steuercode",
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, "1400"),
+                debit_amount=Decimal("238.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "8400"),
+                credit_amount=Decimal("200.00"),
+            ),
+            JournalLineInput(
+                account_id=_account_id(session, company, "1776"),
+                credit_amount=Decimal("38.00"),
+            ),
+        ],
+    )
+
+    amounts = _amounts_by_kz(
+        compute_vat_return(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 6, 1),
+            date_to=date(2026, 6, 30),
+        )
+    )
+    assert amounts["81"] == Decimal("300")
+    assert amounts["USt"] == Decimal("57.00")
