@@ -806,3 +806,43 @@ def test_fixed_assets_api_patch_method(tmp_path: Path) -> None:
     rows = schedule.get_json()["schedule"]
     assert len(rows) == 1
     assert rows[0]["depreciation"] == "952.88"
+
+
+def test_notes_length_is_validated(session: Session) -> None:
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+    too_long = "x" * 300
+
+    # Update und Neuanlage: klare Fehlermeldung statt DB-Fehler (Postgres: String(255)).
+    with pytest.raises(FixedAssetError, match="255 Zeichen"):
+        update_fixed_asset(
+            session=session, fixed_asset_id=asset.id, notes=too_long, changed_by="pytest"
+        )
+    with pytest.raises(FixedAssetError, match="255 Zeichen"):
+        create_fixed_asset(
+            session=session,
+            payload=FixedAssetInput(
+                company_id=company.id,
+                asset_number="A-notes",
+                name="Notiztest",
+                acquisition_date=date(2026, 1, 1),
+                acquisition_cost=Decimal("100.00"),
+                method="gwg",
+                asset_account_code="0400",
+                depreciation_account_code="4830",
+                notes=too_long,
+                changed_by="pytest",
+            ),
+        )
+
+    # Storno: angehängter Grund wird auf die Spaltenlänge gekappt statt zu scheitern.
+    update_fixed_asset(
+        session=session, fixed_asset_id=asset.id, notes="x" * 250, changed_by="pytest"
+    )
+    cancelled = cancel_fixed_asset(
+        session=session,
+        fixed_asset_id=asset.id,
+        reason="sehr langer Stornogrund " * 5,
+        changed_by="pytest",
+    )
+    assert cancelled.notes is not None and len(cancelled.notes) <= 255
