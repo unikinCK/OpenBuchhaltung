@@ -47,6 +47,7 @@ def _fixed_asset_dict(session, asset) -> dict[str, object]:
         "residual_value": str(asset.residual_value),
         "useful_life_months": asset.useful_life_months,
         "degressive_rate": str(asset.degressive_rate) if asset.degressive_rate else None,
+        "total_units": str(asset.total_units) if asset.total_units else None,
         "status": asset.status,
         "book_value": str(current_book_value(session=session, asset=asset)),
         "asset_account_id": asset.asset_account_id,
@@ -329,9 +330,28 @@ def update_fixed_asset_via_api(asset_id: int):
             if payload.get("useful_life_months") is not None
             else None
         )
+        degressive_rate = (
+            parse_decimal(str(payload["degressive_rate"]))
+            if payload.get("degressive_rate") is not None
+            else None
+        )
+        total_units = (
+            parse_decimal(str(payload["total_units"]))
+            if payload.get("total_units") is not None
+            else None
+        )
+        in_service_raw = payload.get("in_service_date")
+        in_service_date = date.fromisoformat(in_service_raw) if in_service_raw else None
     except (TypeError, ValueError, JournalEntryCreationError):
         return (
-            jsonify({"error": "acquisition_cost and useful_life_months must be valid."}),
+            jsonify(
+                {
+                    "error": (
+                        "acquisition_cost, useful_life_months, degressive_rate, "
+                        "total_units and in_service_date must be valid."
+                    )
+                }
+            ),
             400,
         )
 
@@ -348,6 +368,9 @@ def update_fixed_asset_via_api(asset_id: int):
                 acquisition_cost=acquisition_cost,
                 method=payload.get("method"),
                 useful_life_months=useful_life_months,
+                degressive_rate=degressive_rate,
+                total_units=total_units,
+                in_service_date=in_service_date,
                 notes=payload.get("notes"),
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )

@@ -240,13 +240,17 @@ def update_fixed_asset(
     acquisition_cost: Decimal | None = None,
     method: str | None = None,
     useful_life_months: int | None = None,
+    degressive_rate: Decimal | None = None,
+    total_units: Decimal | None = None,
+    in_service_date: date | None = None,
     notes: str | None = None,
 ) -> FixedAsset:
     """Korrigiert Stammdaten eines Anlageguts (z. B. falsche Bezeichnung oder AK).
 
-    Anschaffungskosten, AfA-Verfahren und Nutzungsdauer sind nur änderbar,
-    solange noch keine Abschreibungen gebucht wurden (z. B. nachträgliche
-    AK-Minderung durch Rechnungskorrektur oder Umstellung auf die digitale
+    Anschaffungskosten, AfA-Verfahren, Nutzungsdauer, degressiver Prozentsatz,
+    Gesamtleistung und Inbetriebnahmedatum sind nur änderbar, solange noch
+    keine Abschreibungen gebucht wurden (z. B. nachträgliche AK-Minderung
+    durch Rechnungskorrektur oder Umstellung auf die degressive bzw. digitale
     Sofort-AfA); die zugehörige Hauptbuch-Korrektur erfolgt separat als
     reguläre Buchung.
     """
@@ -305,7 +309,44 @@ def update_fixed_asset(
             }
             asset.useful_life_months = useful_life_months
 
-    if changes.keys() & {"acquisition_cost", "method", "useful_life_months"}:
+    if degressive_rate is not None:
+        if degressive_rate <= Decimal("0.00"):
+            raise FixedAssetError("Der degressive Prozentsatz muss größer 0 sein.")
+        if degressive_rate != asset.degressive_rate:
+            _guard_plan_change("Der degressive Prozentsatz ist")
+            changes["degressive_rate"] = {
+                "old": str(asset.degressive_rate) if asset.degressive_rate else None,
+                "new": str(degressive_rate),
+            }
+            asset.degressive_rate = degressive_rate
+
+    if total_units is not None:
+        if total_units <= Decimal("0.00"):
+            raise FixedAssetError("Die Gesamtleistung muss größer 0 sein.")
+        if total_units != asset.total_units:
+            _guard_plan_change("Die Gesamtleistung ist")
+            changes["total_units"] = {
+                "old": str(asset.total_units) if asset.total_units else None,
+                "new": str(total_units),
+            }
+            asset.total_units = total_units
+
+    if in_service_date is not None and in_service_date != asset.in_service_date:
+        _guard_plan_change("Das Inbetriebnahmedatum ist")
+        changes["in_service_date"] = {
+            "old": asset.in_service_date.isoformat(),
+            "new": in_service_date.isoformat(),
+        }
+        asset.in_service_date = in_service_date
+
+    if changes.keys() & {
+        "acquisition_cost",
+        "method",
+        "useful_life_months",
+        "degressive_rate",
+        "total_units",
+        "in_service_date",
+    }:
         # Geänderte Plan-Parameter früh validieren (z. B. fehlende Nutzungsdauer).
         if asset.method not in {afa.LEISTUNG, afa.MANUELL}:
             try:

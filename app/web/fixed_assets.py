@@ -303,6 +303,7 @@ def update_fixed_asset_action(asset_id: int):
         notes = request.form.get("notes")
         method = (request.form.get("method") or "").strip() or None
         useful_life_raw = (request.form.get("useful_life_months") or "").strip()
+        in_service_raw = (request.form.get("in_service_date") or "").strip()
         try:
             useful_life_months = int(useful_life_raw) if useful_life_raw else None
         except ValueError:
@@ -311,6 +312,15 @@ def update_fixed_asset_action(asset_id: int):
                 url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
             )
         try:
+            in_service_date = date.fromisoformat(in_service_raw) if in_service_raw else None
+        except ValueError:
+            flash("Inbetriebnahmedatum ist ungültig.", "error")
+            return redirect(
+                url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
+            )
+        degressive_rate = safe_optional_decimal(request.form.get("degressive_rate", ""))
+        total_units = safe_optional_decimal(request.form.get("total_units", ""))
+        try:
             update_fixed_asset(
                 session=session,
                 fixed_asset_id=asset_id,
@@ -318,6 +328,9 @@ def update_fixed_asset_action(asset_id: int):
                 acquisition_cost=acquisition_cost,
                 method=method,
                 useful_life_months=useful_life_months,
+                degressive_rate=degressive_rate,
+                total_units=total_units,
+                in_service_date=in_service_date,
                 notes=notes,
                 changed_by=changed_by(),
             )
