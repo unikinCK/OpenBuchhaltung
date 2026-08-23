@@ -13,11 +13,10 @@ from app.api.helpers import (
     get_session_factory,
 )
 from app.auth import current_api_user
-from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.accounts import (
     AccountUpdateError,
     account_history,
-    log_account_created,
+    create_account_with_audit,
     serialize_account,
     update_account_master_data,
 )
@@ -49,23 +48,13 @@ def create_account():
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
-        account = Account(
-            tenant_id=company.tenant_id,
-            company_id=company.id,
-            code=code,
-            name=name,
-            account_type=account_type,
-            parent_account_id=resolve_parent_account_id(
-                session=session, company_id=company.id, code=code
-            ),
-        )
-        session.add(account)
-
         try:
-            session.flush()
-            log_account_created(
+            account = create_account_with_audit(
                 session=session,
-                account=account,
+                company=company,
+                code=code,
+                name=name,
+                account_type=account_type,
                 changed_by=_api_changed_by(),
             )
             session.commit()
