@@ -962,7 +962,6 @@ def test_fixed_assets_api_patch_to_degressive(tmp_path: Path) -> None:
         f"/api/v1/fixed-assets/{asset_id}",
         json={
             "method": "degressive",
-            # Spaltenpräzision ist Numeric(5,2), daher auf 2 Nachkommastellen.
             "degressive_rate": "23.08",
             "in_service_date": "2026-02-01",
         },
@@ -970,7 +969,8 @@ def test_fixed_assets_api_patch_to_degressive(tmp_path: Path) -> None:
     assert patched.status_code == 200
     body = patched.get_json()
     assert body["method"] == "degressive"
-    assert body["degressive_rate"] == "23.08"
+    # Spaltenpräzision ist Numeric(7,4), daher vier Nachkommastellen.
+    assert body["degressive_rate"] == "23.0800"
     assert body["in_service_date"] == "2026-02-01"
 
     total_units = client.patch(

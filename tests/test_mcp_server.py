@@ -88,6 +88,8 @@ EXPECTED_TOOL_NAMES = {
     "create_bank_account",
     "list_bank_transactions",
     "import_bank_transactions",
+    "reassign_bank_transaction",
+    "move_bank_transactions",
     "match_bank_transaction",
     "book_bank_transaction",
     "list_open_items",
@@ -1368,6 +1370,52 @@ def test_bank_tools_forward_arguments() -> None:
         "/bank-transactions/8/book",
         None,
         {"contra_account_id": 10, "description": "Bankgebühr"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 59,
+            "method": "tools/call",
+            "params": {
+                "name": "reassign_bank_transaction",
+                "arguments": {"transaction_id": 8, "bank_account_id": 12},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/bank-account",
+        None,
+        {"bank_account_id": 12},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 60,
+            "method": "tools/call",
+            "params": {
+                "name": "move_bank_transactions",
+                "arguments": {
+                    "company_id": 7,
+                    "source_bank_account_id": 3,
+                    "target_bank_account_id": 12,
+                    "statuses": ["open"],
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/reassign",
+        None,
+        {
+            "company_id": 7,
+            "source_bank_account_id": 3,
+            "target_bank_account_id": 12,
+            "statuses": ["open"],
+        },
     )
 
 

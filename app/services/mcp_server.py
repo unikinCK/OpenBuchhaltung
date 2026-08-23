@@ -1244,6 +1244,74 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="reassign_bank_transaction",
+        description=(
+            "Hängt einen einzelnen Bankumsatz auf ein anderes Bankkonto um (z. B. wenn "
+            "beim Import das falsche Konto gewählt wurde). Verschoben wird nur die "
+            "Zuordnung des Kontoauszugs; eine bereits erzeugte Buchung bleibt "
+            "unverändert auf dem alten Konto stehen. Den Saldo verschiebt man mit einer "
+            "Umgliederungsbuchung über create_journal_entry."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "integer", "description": "ID des Bankumsatzes."},
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": "ID des Ziel-Bankkontos (siehe list_bank_accounts).",
+                },
+            },
+            "required": ["transaction_id", "bank_account_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/{transaction_id}/bank-account",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="move_bank_transactions",
+        description=(
+            "Hängt mehrere Bankumsätze auf ein anderes Bankkonto um: entweder alle "
+            "Umsätze eines Quellkontos (source_bank_account_id, optional auf einzelne "
+            "Status eingeschränkt) oder eine Liste einzelner Umsätze "
+            "(transaction_ids). Genau eines von beiden angeben. Bereits erzeugte "
+            "Buchungen bleiben unverändert auf dem alten Konto stehen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "target_bank_account_id": {
+                    "type": "integer",
+                    "description": "ID des Ziel-Bankkontos.",
+                },
+                "source_bank_account_id": {
+                    "type": "integer",
+                    "description": "ID des Quell-Bankkontos (alternativ zu transaction_ids).",
+                },
+                "transaction_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": (
+                        "IDs einzelner Bankumsätze (alternativ zu source_bank_account_id)."
+                    ),
+                },
+                "statuses": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: nur Umsätze dieser Status bewegen (open, matched, booked)."
+                    ),
+                },
+            },
+            "required": ["company_id", "target_bank_account_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/reassign",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="match_bank_transaction",
         description="Ordnet einen offenen Bankumsatz einer bestehenden Buchung zu.",
         input_schema={
