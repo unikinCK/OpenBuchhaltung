@@ -1,15 +1,15 @@
 """FinTS-Bankzugänge und eingefrorene TAN-Dialoge.
 
-Revision ID: 20260823_0028
-Revises: 20260822_0027
+Revision ID: 20260824_0029
+Revises: 20260823_0028
 Create Date: 2026-08-23 10:00:00
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260823_0028"
-down_revision = "20260822_0027"
+revision = "20260824_0029"
+down_revision = "20260823_0028"
 branch_labels = None
 depends_on = None
 
