@@ -61,6 +61,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
             ),
         ),
+        # FinTS-Produktkennung (Registrierung der Deutschen Kreditwirtschaft),
+        # Voraussetzung für den Direktabruf von Bankumsätzen.
+        FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
         # per API_REQUIRE_AUTH=0.

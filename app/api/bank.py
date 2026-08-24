@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-from io import StringIO
 from pathlib import Path
 
 from flask import jsonify, request
@@ -19,7 +18,7 @@ from app.services.bank_import import (
     BankImportError,
     BankImportReport,
     book_transaction,
-    import_bank_csv,
+    import_bank_statement,
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
@@ -30,7 +29,15 @@ from app.services.scoping import scoped_select
 from domain.models import Account, BankTransaction, JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
-ALLOWED_BANK_CSV_MIME_TYPES = {"text/csv", "application/vnd.ms-excel", "application/octet-stream"}
+ALLOWED_BANK_FILE_SUFFIXES = {".csv", ".xml", ".sta", ".mt940", ".940"}
+ALLOWED_BANK_FILE_MIME_TYPES = {
+    "text/csv",
+    "text/plain",
+    "text/xml",
+    "application/xml",
+    "application/vnd.ms-excel",
+    "application/octet-stream",
+}
 
 
 def _api_changed_by() -> str:
@@ -98,9 +105,9 @@ def _report_dict(report: BankImportReport) -> dict[str, object]:
 
 def _load_import_payload():
     if request.files:
-        uploaded_file = request.files.get("bank_csv")
+        uploaded_file = request.files.get("bank_file") or request.files.get("bank_csv")
         if uploaded_file is None or not uploaded_file.filename:
-            return None, jsonify({"error": "bank_csv is required."}), 400
+            return None, jsonify({"error": "bank_file is required."}), 400
         return (
             {
                 "company_id": request.form.get("company_id", type=int),
@@ -134,13 +141,13 @@ def _load_import_payload():
     )
 
 
-def _validate_csv_upload(*, file_name: str, mime_type: str) -> str | None:
+def _validate_statement_upload(*, file_name: str, mime_type: str) -> str | None:
     if not file_name:
         return "file_name is required."
-    if Path(file_name).suffix.lower() != ".csv":
-        return "Only CSV bank files may be imported."
-    if mime_type not in ALLOWED_BANK_CSV_MIME_TYPES:
-        return "Bank CSV MIME type is not allowed."
+    if Path(file_name).suffix.lower() not in ALLOWED_BANK_FILE_SUFFIXES:
+        return "Only CSV, CAMT.053 (XML) or MT940 bank files may be imported."
+    if mime_type not in ALLOWED_BANK_FILE_MIME_TYPES:
+        return "Bank file MIME type is not allowed."
     return None
 
 
@@ -265,7 +272,7 @@ def import_bank_transactions_via_api():
     except (TypeError, ValueError):
         return jsonify({"error": "company_id and bank_account_id are required."}), 400
 
-    validation_error = _validate_csv_upload(
+    validation_error = _validate_statement_upload(
         file_name=upload["file_name"], mime_type=upload["mime_type"]
     )
     if validation_error:
@@ -281,16 +288,14 @@ def import_bank_transactions_via_api():
             return jsonify({"error": "Bank account not found."}), 404
 
         try:
-            csv_text = upload["content"].decode("utf-8-sig")
-            report = import_bank_csv(
+            report = import_bank_statement(
                 session=session,
                 company_id=company.id,
                 bank_account_id=bank_account.id,
-                csv_stream=StringIO(csv_text),
+                file_name=upload["file_name"],
+                content=upload["content"],
                 changed_by=_api_changed_by(),
             )
-        except UnicodeDecodeError:
-            return jsonify({"error": "CSV must be UTF-8 encoded."}), 422
         except BankImportError as exc:
             return jsonify({"error": str(exc)}), 422
 

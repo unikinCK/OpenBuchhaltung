@@ -15,6 +15,7 @@ from app.api import (  # noqa: F401
     einvoice,
     elster,
     exports,
+    fints,
     fixed_assets,
     income_taxes,
     journal,
