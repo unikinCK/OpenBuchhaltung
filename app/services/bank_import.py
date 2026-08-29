@@ -555,6 +555,14 @@ def book_transaction(
     if contra_account is None or contra_account.company_id != transaction.company_id:
         raise BankImportError("Gegenkonto nicht gefunden.")
 
+    company = session.get(Company, transaction.company_id)
+    if transaction.currency_code and transaction.currency_code != company.currency_code:
+        raise BankImportError(
+            f"Bankumsatz in {transaction.currency_code} kann nicht direkt als "
+            f"{company.currency_code}-Buchung übernommen werden — bitte manuell "
+            "mit Umrechnungskurs buchen."
+        )
+
     gross = abs(transaction.amount)
     contra_net = gross
     if tax_code_id is not None:

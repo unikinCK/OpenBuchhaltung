@@ -348,6 +348,32 @@ def test_move_bank_transactions_updates_account_and_dedup_hash(session: Session)
     )
 
 
+def test_book_transaction_rejects_foreign_currency(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    outgoing.currency_code = "USD"
+    session.commit()
+
+    with pytest.raises(BankImportError, match="USD"):
+        book_transaction(
+            session=session,
+            transaction_id=outgoing.id,
+            contra_account_id=rent.id,
+            changed_by="tester",
+        )
+    session.refresh(outgoing)
+    assert outgoing.status == "open"
+
+
 def test_move_bank_transactions_keeps_existing_posting(session: Session) -> None:
     company, bank, rent = _seed_company(session)
     target = _second_bank_account(session, company)
