@@ -13,7 +13,13 @@ from flask import current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    api_can_write,
+    api_scoped_company,
+    forbidden,
+    get_session_factory,
+    incoming_invoice_error_response,
+)
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
 from app.services.documents import (
@@ -21,13 +27,8 @@ from app.services.documents import (
     document_content_error_code,
     document_file_metadata,
 )
-from app.services.journal_entries import (
-    JournalEntryCreationError,
-    JournalEntryInput,
-    JournalLineInput,
-    create_journal_entry,
-    parse_decimal,
-)
+from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
+from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.receipt_ocr import ReceiptExtraction, ReceiptOCRError, analyze_document
 from app.web.helpers import ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_DOCUMENT_MIME_TYPES
 from domain.models import Account, Document, TaxCode
@@ -294,56 +295,26 @@ def book_receipt_ocr_suggestion_via_api():
         if document is None or document.company_id != company.id:
             return jsonify({"error": "Document not found."}), 404
 
-        expense_account = session.get(Account, expense_account_id)
-        creditor_account = session.get(Account, creditor_account_id)
-        for account in (expense_account, creditor_account):
-            if account is None or account.company_id != company.id:
-                return jsonify({"error": "Account not found."}), 404
-
-        lines = [
-            JournalLineInput(
-                account_id=expense_account.id,
-                debit_amount=net_amount,
-                credit_amount=zero,
+        try:
+            entry = book_incoming_invoice(
+                session=session,
+                company=company,
+                entry_date=entry_date,
                 description=description,
+                expense_account_id=expense_account_id,
+                creditor_account_id=creditor_account_id,
+                net_amount=net_amount,
+                tax_amount=tax_amount,
+                gross_amount=gross_amount,
+                tax_code_id=tax_code_id,
+                expense_line_description=description,
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                changed_by=_api_changed_by(),
+                commit=False,
             )
-        ]
-        if tax_amount > zero:
-            tax_code = session.get(TaxCode, tax_code_id) if tax_code_id else None
-            if tax_code is None or tax_code.company_id != company.id:
-                return jsonify({"error": "Tax code not found."}), 404
-            if tax_code.vat_account_id is None:
-                return jsonify({"error": f"Tax code {tax_code.code} has no VAT account."}), 422
-            lines.append(
-                JournalLineInput(
-                    account_id=tax_code.vat_account_id,
-                    debit_amount=tax_amount,
-                    credit_amount=zero,
-                    description=f"Vorsteuer ({tax_code.code})",
-                )
-            )
-        lines.append(
-            JournalLineInput(
-                account_id=creditor_account.id,
-                debit_amount=zero,
-                credit_amount=gross_amount,
-            )
-        )
-
-        try:
-            entry = create_journal_entry(
-                session=session,
-                payload=JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=entry_date,
-                    description=description,
-                    status="posted",
-                    changed_by=_api_changed_by(),
-                    lines=lines,
-                ),
-            )
+        except IncomingInvoiceError as exc:
+            return incoming_invoice_error_response(exc)
         except (JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
 

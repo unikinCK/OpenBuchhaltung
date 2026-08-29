@@ -13,7 +13,13 @@ from flask import current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    api_can_write,
+    api_scoped_company,
+    forbidden,
+    get_session_factory,
+    incoming_invoice_error_response,
+)
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
 from app.services.documents import document_file_metadata
@@ -25,13 +31,8 @@ from app.services.einvoice_export import (
     build_einvoice,
 )
 from app.services.einvoice_import import EInvoiceParseError, ParsedInvoice, parse_einvoice
-from app.services.journal_entries import (
-    JournalEntryCreationError,
-    JournalEntryInput,
-    JournalLineInput,
-    create_journal_entry,
-    parse_decimal,
-)
+from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
+from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from domain.models import Account, Document, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
@@ -214,59 +215,31 @@ def import_einvoice_via_api():
         if company is None:
             return jsonify({"error": "Company not found."}), 404
 
-        expense_account = session.get(Account, expense_account_id)
-        creditor_account = session.get(Account, creditor_account_id)
-        for account in (expense_account, creditor_account):
-            if account is None or account.company_id != company.id:
-                return jsonify({"error": "Account not found."}), 404
-
-        zero = Decimal("0.00")
-        lines = [
-            JournalLineInput(
-                account_id=expense_account.id,
-                debit_amount=invoice.net_total,
-                credit_amount=zero,
-                description=f"{invoice.seller_name} {invoice.invoice_number}".strip(),
+        try:
+            entry = book_incoming_invoice(
+                session=session,
+                company=company,
+                entry_date=invoice.issue_date,
+                description=(
+                    f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})"
+                ).strip(),
+                expense_account_id=expense_account_id,
+                creditor_account_id=creditor_account_id,
+                net_amount=invoice.net_total,
+                tax_amount=invoice.tax_total,
+                gross_amount=invoice.grand_total,
+                tax_code_id=tax_code_id,
+                expense_line_description=(
+                    f"{invoice.seller_name} {invoice.invoice_number}".strip()
+                ),
+                tax_line_description=f"Steuer {invoice.primary_tax_rate}%",
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                changed_by=_api_changed_by(),
+                commit=False,
             )
-        ]
-        if invoice.tax_total > zero:
-            tax_code = session.get(TaxCode, tax_code_id) if tax_code_id else None
-            if tax_code is None or tax_code.company_id != company.id:
-                return jsonify({"error": "Tax code not found."}), 404
-            if tax_code.vat_account_id is None:
-                return jsonify({"error": f"Tax code {tax_code.code} has no VAT account."}), 422
-            lines.append(
-                JournalLineInput(
-                    account_id=tax_code.vat_account_id,
-                    debit_amount=invoice.tax_total,
-                    credit_amount=zero,
-                    description=f"Steuer {invoice.primary_tax_rate}%",
-                )
-            )
-        lines.append(
-            JournalLineInput(
-                account_id=creditor_account.id,
-                debit_amount=zero,
-                credit_amount=invoice.grand_total,
-            )
-        )
-
-        try:
-            entry = create_journal_entry(
-                session=session,
-                payload=JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=invoice.issue_date,
-                    description=(
-                        f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})"
-                    ).strip(),
-                    status="posted",
-                    changed_by=_api_changed_by(),
-                    lines=lines,
-                ),
-            )
+        except IncomingInvoiceError as exc:
+            return incoming_invoice_error_response(exc)
         except (JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
 

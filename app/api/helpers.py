@@ -22,6 +22,15 @@ def validation_error(message: str, *, details: list[dict[str, str]] | None = Non
     return jsonify(payload), 422
 
 
+def incoming_invoice_error_response(exc):
+    """Mappt IncomingInvoiceError-Codes auf die API-Fehlerkonvention."""
+    if exc.code == "account_not_found":
+        return jsonify({"error": "Account not found."}), 404
+    if exc.code == "tax_code_not_found":
+        return jsonify({"error": "Tax code not found."}), 404
+    return jsonify({"error": str(exc)}), 422
+
+
 def get_session_factory():
     session_factory = current_app.extensions.get("db_session_factory")
     if session_factory is None:
