@@ -122,9 +122,9 @@
                   <form method="post" action="{{ url_for('main.fints_sync_action', connection_id=conn.id) }}">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                    <input name="pin" type="password" placeholder="PIN" autocomplete="off" required style="width:7rem;" />
-                    <input name="from_date" type="date" title="Von (Standard: 30 Tage)" />
-                    <input name="to_date" type="date" title="Bis (Standard: heute)" />
+                    <input name="pin" type="password" placeholder="PIN" aria-label="PIN" autocomplete="off" required style="width:7rem;" />
+                    <input name="from_date" type="date" title="Von (Standard: 30 Tage)" aria-label="Von-Datum" />
+                    <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
                     <button type="submit" class="secondary" style="margin:0;">Umsätze abrufen</button>
                   </form>
                 </td>

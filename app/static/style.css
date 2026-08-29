@@ -82,6 +82,55 @@ a {
   font-weight: 600;
 }
 
+/* Gruppierte Navigation: CSS-Dropdowns (hover/focus, kein JS nötig) */
+.nav-group {
+  position: relative;
+}
+
+.nav-group-label {
+  background: transparent;
+  border: none;
+  color: #cfdce6;
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.nav-group:hover .nav-group-label,
+.nav-group:focus-within .nav-group-label {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-group.active .nav-group-label {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 600;
+}
+
+.nav-group-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--topbar);
+  border-radius: 0 0 8px 8px;
+  padding: 0.35rem;
+  min-width: 11rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  z-index: 100;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+.nav-group:hover .nav-group-menu,
+.nav-group:focus-within .nav-group-menu {
+  display: flex;
+}
+
 .topbar .user-area {
   display: flex;
   align-items: center;
@@ -503,5 +552,25 @@ tr.entry-lines td {
     flex-wrap: wrap;
     height: auto;
     padding: 0.5rem 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .journal-line {
+    grid-template-columns: 1fr;
+  }
+  .topbar {
+    gap: 0.5rem;
+  }
+  /* Dropdowns auf sehr schmalen Screens als aufgeklappte Gruppen zeigen. */
+  .nav-group-menu {
+    position: static;
+    box-shadow: none;
+    padding-left: 0.75rem;
+  }
+  .flash-list,
+  main {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
   }
 }

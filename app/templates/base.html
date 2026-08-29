@@ -11,43 +11,50 @@
     <header class="topbar">
       <a class="brand" href="{{ url_for('main.index') }}">OpenBuchhaltung</a>
       {% if session.get('user') %}
+        {% set nav_groups = [
+          ('Buchen', [
+            ('main.journal_page', 'Buchungen'),
+            ('main.accounts_page', 'Konten'),
+            ('main.controlling_page', 'Controlling'),
+            ('main.periods_page', 'Perioden'),
+          ]),
+          ('Belege', [
+            ('main.documents_page', 'Belege'),
+            ('main.receipt_ocr_page', 'Beleg-OCR'),
+            ('main.receipt_matching_page', 'Belegabgleich'),
+            ('main.einvoice_page', 'E-Rechnung'),
+          ]),
+          ('Bank & OPOS', [
+            ('main.bank_page', 'Bank'),
+            ('main.open_items_page', 'OPOS'),
+            ('main.fixed_assets_page', 'Anlagen'),
+            ('main.payroll_page', 'Lohn'),
+          ]),
+          ('Steuern & Berichte', [
+            ('main.reports_page', 'Berichte'),
+            ('main.vat_returns_page', 'UStVA'),
+            ('main.income_taxes_page', 'Ertragsteuern'),
+          ]),
+          ('Verwaltung', [
+            ('main.admin_page', 'Verwaltung'),
+            ('main.audit_log_page', 'Audit'),
+          ]),
+        ] %}
         <nav>
           <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
-          <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.journal_page' %}class="active"{% endif %}>Buchungen</a>
-          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.accounts_page' %}class="active"{% endif %}>Konten</a>
-          <a href="{{ url_for('main.controlling_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.controlling_page' %}class="active"{% endif %}>Controlling</a>
-          <a href="{{ url_for('main.documents_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.documents_page' %}class="active"{% endif %}>Belege</a>
-          <a href="{{ url_for('main.receipt_ocr_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.receipt_ocr_page' %}class="active"{% endif %}>Beleg-OCR</a>
-          <a href="{{ url_for('main.receipt_matching_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.receipt_matching_page' %}class="active"{% endif %}>Belegabgleich</a>
-          <a href="{{ url_for('main.reports_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.reports_page' %}class="active"{% endif %}>Berichte</a>
-          <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.open_items_page' %}class="active"{% endif %}>OPOS</a>
-          <a href="{{ url_for('main.fixed_assets_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.fixed_assets_page' %}class="active"{% endif %}>Anlagen</a>
-          <a href="{{ url_for('main.payroll_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.payroll_page' %}class="active"{% endif %}>Lohn</a>
-          <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.bank_page' %}class="active"{% endif %}>Bank</a>
-          <a href="{{ url_for('main.einvoice_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.einvoice_page' %}class="active"{% endif %}>E-Rechnung</a>
-          <a href="{{ url_for('main.vat_returns_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.vat_returns_page' %}class="active"{% endif %}>UStVA</a>
-          <a href="{{ url_for('main.income_taxes_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.income_taxes_page' %}class="active"{% endif %}>Ertragsteuern</a>
-          <a href="{{ url_for('main.periods_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.periods_page' %}class="active"{% endif %}>Perioden</a>
-          <a href="{{ url_for('main.audit_log_page') }}"
-             {% if request.endpoint == 'main.audit_log_page' %}class="active"{% endif %}>Audit</a>
-          <a href="{{ url_for('main.admin_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.admin_page' %}class="active"{% endif %}>Verwaltung</a>
+          {% for group_label, group_items in nav_groups %}
+            {% set group_active = request.endpoint in (group_items | map('first') | list) %}
+            <div class="nav-group{% if group_active %} active{% endif %}">
+              <button type="button" class="nav-group-label" aria-haspopup="true">{{ group_label }} ▾</button>
+              <div class="nav-group-menu">
+                {% for endpoint, label in group_items %}
+                  <a href="{{ url_for(endpoint) if endpoint == 'main.audit_log_page' else url_for(endpoint, company_id=selected_company_id) }}"
+                     {% if request.endpoint == endpoint %}class="active"{% endif %}>{{ label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
         </nav>
         <div class="user-area">
           <span>{{ session['user']['username'] }} <span class="badge">{{ session['user']['role'] }}</span></span>
