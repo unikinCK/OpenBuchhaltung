@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Numeric,
@@ -542,6 +543,10 @@ class BankTransaction(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "dedup_hash", name="uq_bank_tx_company_hash"),
         CheckConstraint("amount != 0", name="ck_bank_tx_amount_non_zero"),
+        CheckConstraint(
+            "status IN ('open', 'matched', 'booked')", name="ck_bank_tx_status_known"
+        ),
+        Index("ix_bank_tx_journal_entry", "journal_entry_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -560,6 +565,9 @@ class BankTransaction(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     purpose: Mapped[str] = mapped_column(String(255), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Bankseitige Referenz (CAMT AcctSvcrRef/EndToEndId, MT940-Bankreferenz);
+    # fließt in den Dedup-Hash ein, damit echte Doppelumsätze unterscheidbar bleiben.
+    bank_reference: Mapped[str | None] = mapped_column(String(64))
     dedup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     journal_entry_id: Mapped[int | None] = mapped_column(

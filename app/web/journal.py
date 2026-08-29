@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from flask import abort, flash, redirect, render_template, request, url_for
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -25,6 +25,7 @@ from app.web.helpers import (
     changed_by,
     company_context,
     get_session_factory,
+    pagination_args,
     require_company_access,
 )
 from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine, TaxCode
@@ -33,6 +34,7 @@ from domain.services.journal_entry_validation import JournalEntryValidationError
 
 @main_bp.get("/buchungen")
 def journal_page():
+    limit, offset = pagination_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -42,6 +44,7 @@ def journal_page():
         cost_centers = []
         profit_centers = []
         journal_entries = []
+        journal_entries_total = 0
         lines_by_entry: dict[int, list[dict]] = {}
         if selected_company_id:
             accounts = (
@@ -84,11 +87,17 @@ def journal_page():
                 .scalars()
                 .all()
             )
+            entries_stmt = scoped_select(JournalEntry, company_id=selected_company_id)
+            journal_entries_total = session.execute(
+                select(func.count()).select_from(entries_stmt.subquery())
+            ).scalar_one()
             journal_entries = (
                 session.execute(
-                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
+                    entries_stmt.order_by(
                         JournalEntry.entry_date.desc(), JournalEntry.id.desc()
                     )
+                    .limit(limit)
+                    .offset(offset)
                 )
                 .scalars()
                 .all()
@@ -111,7 +120,12 @@ def journal_page():
                 .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
                 .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
                 .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
-                .where(JournalEntry.company_id == selected_company_id)
+                .where(
+                    JournalEntry.company_id == selected_company_id,
+                    JournalEntryLine.journal_entry_id.in_(
+                        [entry.id for entry in journal_entries]
+                    ),
+                )
                 .order_by(JournalEntryLine.journal_entry_id, JournalEntryLine.line_number)
             ).all()
             for row in line_rows:
@@ -128,13 +142,30 @@ def journal_page():
                     }
                 )
 
-        # Storno-Verweise: Original-ID -> Belegnummer der Stornobuchung.
-        reversed_by_entry = {
-            entry.reversal_of_id: entry.posting_number
-            for entry in journal_entries
-            if entry.reversal_of_id is not None
-        }
+        # Storno-Verweise: Original-ID -> Belegnummer der Stornobuchung —
+        # auch wenn die Stornobuchung auf einer anderen Seite liegt.
+        shown_ids = [entry.id for entry in journal_entries]
+        reversed_by_entry = {}
+        if shown_ids:
+            reversed_by_entry = dict(
+                session.execute(
+                    select(JournalEntry.reversal_of_id, JournalEntry.posting_number).where(
+                        JournalEntry.reversal_of_id.in_(shown_ids)
+                    )
+                ).all()
+            )
         posting_number_by_id = {entry.id: entry.posting_number for entry in journal_entries}
+        referenced_ids = {
+            entry.reversal_of_id for entry in journal_entries if entry.reversal_of_id
+        } - set(posting_number_by_id)
+        if referenced_ids:
+            posting_number_by_id.update(
+                session.execute(
+                    select(JournalEntry.id, JournalEntry.posting_number).where(
+                        JournalEntry.id.in_(referenced_ids)
+                    )
+                ).all()
+            )
 
     return render_template(
         "buchungen.html",
@@ -145,6 +176,9 @@ def journal_page():
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         journal_entries=journal_entries,
+        journal_entries_total=journal_entries_total,
+        limit=limit,
+        offset=offset,
         lines_by_entry=lines_by_entry,
         reversed_by_entry=reversed_by_entry,
         posting_number_by_id=posting_number_by_id,

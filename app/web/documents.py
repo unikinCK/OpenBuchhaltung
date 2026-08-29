@@ -16,6 +16,7 @@ from flask import (
     send_file,
     url_for,
 )
+from sqlalchemy import func, select
 from werkzeug.utils import secure_filename
 
 from app.auth import current_tenant_id
@@ -29,45 +30,77 @@ from app.web.helpers import (
     company_context,
     document_upload_error,
     get_session_factory,
+    pagination_args,
     require_company_access,
 )
 from domain.models import Document, JournalEntry
 
+# Obergrenze für Verknüpfungs-Dropdowns (jüngste Buchungen).
+LINK_SELECT_LIMIT = 200
+
 
 @main_bp.get("/belege")
 def documents_page():
+    limit, offset = pagination_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
 
         documents = []
+        documents_total = 0
         journal_entries = []
+        journal_entry_labels = {}
         if selected_company_id:
+            documents_stmt = scoped_select(Document, company_id=selected_company_id)
+            documents_total = session.execute(
+                select(func.count()).select_from(documents_stmt.subquery())
+            ).scalar_one()
             documents = (
                 session.execute(
-                    scoped_select(Document, company_id=selected_company_id).order_by(
+                    documents_stmt.order_by(
                         Document.document_date.desc(), Document.uploaded_at.desc()
                     )
+                    .limit(limit)
+                    .offset(offset)
                 )
                 .scalars()
                 .all()
             )
+            # Auswahlliste für Verknüpfungen: die jüngsten Buchungen genügen —
+            # die Seitengröße wächst sonst quadratisch (Zeilen × Buchungen).
             journal_entries = (
                 session.execute(
-                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
-                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
-                    )
+                    scoped_select(JournalEntry, company_id=selected_company_id)
+                    .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+                    .limit(LINK_SELECT_LIMIT)
                 )
                 .scalars()
                 .all()
             )
-        journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
+            linked_ids = {
+                document.journal_entry_id
+                for document in documents
+                if document.journal_entry_id is not None
+            }
+            journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
+            missing_ids = linked_ids - set(journal_entry_labels)
+            if missing_ids:
+                journal_entry_labels.update(
+                    session.execute(
+                        select(JournalEntry.id, JournalEntry.posting_number).where(
+                            JournalEntry.id.in_(missing_ids)
+                        )
+                    ).all()
+                )
 
     return render_template(
         "belege.html",
         companies=companies,
         selected_company_id=selected_company_id,
         documents=documents,
+        documents_total=documents_total,
+        limit=limit,
+        offset=offset,
         journal_entries=journal_entries,
         journal_entry_labels=journal_entry_labels,
         today=date.today().isoformat(),

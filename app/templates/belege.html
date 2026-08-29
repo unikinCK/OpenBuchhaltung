@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}Belege – OpenBuchhaltung{% endblock %}
 
@@ -64,7 +65,7 @@
                 <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                   <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                  <select name="journal_entry_id" onchange="this.form.submit()">
+                  <select name="journal_entry_id" data-autosubmit>
                     <option value="">Keine Verknüpfung</option>
                     {% for entry in journal_entries %}
                       <option value="{{ entry.id }}" {% if entry.id == document.journal_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
@@ -90,6 +91,7 @@
         </tbody>
       </table>
       </div>
+      {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id) }}
     {% else %}
       <p class="muted">Noch keine Belege vorhanden.</p>
     {% endif %}

@@ -28,12 +28,8 @@ from app.services.einvoice_export import (
     build_einvoice,
 )
 from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
-from app.services.journal_entries import (
-    JournalEntryCreationError,
-    JournalEntryInput,
-    JournalLineInput,
-    create_journal_entry,
-)
+from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
+from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -134,64 +130,32 @@ def einvoice_book_action():
     with session_factory() as session:
         company = require_company_access(session, company_id)
 
-        expense_account = session.get(Account, expense_account_id)
-        creditor_account = session.get(Account, creditor_account_id)
-        for account in (expense_account, creditor_account):
-            if account is None or account.company_id != company.id:
-                flash("Ausgewähltes Konto gehört nicht zur Gesellschaft.", "error")
-                return redirect(url_for("main.einvoice_page", company_id=company_id))
-
-        zero = Decimal("0.00")
-        lines = [
-            JournalLineInput(
-                account_id=expense_account.id,
-                debit_amount=invoice.net_total,
-                credit_amount=zero,
-                description=f"{invoice.seller_name} {invoice.invoice_number}".strip(),
+        try:
+            entry = book_incoming_invoice(
+                session=session,
+                company=company,
+                entry_date=invoice.issue_date,
+                description=(
+                    f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})"
+                ).strip(),
+                expense_account_id=expense_account_id,
+                creditor_account_id=creditor_account_id,
+                net_amount=invoice.net_total,
+                tax_amount=invoice.tax_total,
+                gross_amount=invoice.grand_total,
+                tax_code_id=tax_code_id,
+                expense_line_description=(
+                    f"{invoice.seller_name} {invoice.invoice_number}".strip()
+                ),
+                tax_line_description=f"Steuer {invoice.primary_tax_rate}%",
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                changed_by=changed_by(),
+                commit=False,
             )
-        ]
-        if invoice.tax_total > zero:
-            tax_code = session.get(TaxCode, tax_code_id) if tax_code_id else None
-            if tax_code is None or tax_code.company_id != company.id:
-                flash("Für die Steuer bitte einen gültigen Steuercode wählen.", "error")
-                return redirect(url_for("main.einvoice_page", company_id=company_id))
-            if tax_code.vat_account_id is None:
-                flash(f"Steuercode {tax_code.code} hat kein Steuerkonto.", "error")
-                return redirect(url_for("main.einvoice_page", company_id=company_id))
-            # Steuer wird exakt aus der Rechnung übernommen; keine Auto-Expansion
-            # über tax_code_id, damit der Bruttobetrag exakt aufgeht.
-            lines.append(
-                JournalLineInput(
-                    account_id=tax_code.vat_account_id,
-                    debit_amount=invoice.tax_total,
-                    credit_amount=zero,
-                    description=f"Steuer {invoice.primary_tax_rate}%",
-                )
-            )
-        lines.append(
-            JournalLineInput(
-                account_id=creditor_account.id,
-                debit_amount=zero,
-                credit_amount=invoice.grand_total,
-            )
-        )
-
-        try:
-            entry = create_journal_entry(
-                session=session,
-                payload=JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=invoice.issue_date,
-                    description=(
-                        f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})"
-                    ).strip(),
-                    status="posted",
-                    changed_by=changed_by(),
-                    lines=lines,
-                ),
-            )
+        except IncomingInvoiceError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.einvoice_page", company_id=company_id))
         except (JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(f"Buchung fehlgeschlagen: {exc}", "error")
             return redirect(url_for("main.einvoice_page", company_id=company_id))

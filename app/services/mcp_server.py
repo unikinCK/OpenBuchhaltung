@@ -1210,6 +1210,14 @@ TOOLS: list[ToolSpec] = [
                     "type": "boolean",
                     "description": "Optional: passende Buchungen für offene Umsätze liefern.",
                 },
+                "limit": {
+                    "type": "integer",
+                    "description": "Optional: Seitengröße (Standard 200, max. 1000).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Optional: Startposition für die Seitenblätterung.",
+                },
             },
             "required": ["company_id"],
             "additionalProperties": False,

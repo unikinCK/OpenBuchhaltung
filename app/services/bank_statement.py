@@ -20,6 +20,10 @@ from xml.etree import ElementTree as ET
 import mt940
 
 MAX_TEXT_LENGTH = 255
+MAX_REFERENCE_LENGTH = 64
+
+# Übliche Platzhalter der Banken für "keine Referenz vorhanden".
+_REFERENCE_PLACEHOLDERS = {"NONREF", "NOTPROVIDED"}
 
 
 class BankStatementParseError(ValueError):
@@ -36,6 +40,7 @@ class BankStatementRow:
     purpose: str
     counterparty: str | None = None
     currency_code: str | None = None
+    bank_reference: str | None = None
 
 
 @dataclass(slots=True)
@@ -78,6 +83,15 @@ def _clip(value: str | None) -> str | None:
         return None
     value = " ".join(value.split())
     return value[:MAX_TEXT_LENGTH] or None
+
+
+def _clean_reference(value: object) -> str | None:
+    if not value:
+        return None
+    text = " ".join(str(value).split())
+    if not text or text.upper() in _REFERENCE_PLACEHOLDERS:
+        return None
+    return text[:MAX_REFERENCE_LENGTH]
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +152,19 @@ def _camt_purpose(entry: ET.Element) -> str | None:
     return _text(entry, "AddtlNtryInf")
 
 
+def _camt_reference(entry: ET.Element) -> str | None:
+    """Bankseitige Referenz eines Ntry: AcctSvcrRef, sonst EndToEndId/TxId aus Refs."""
+    reference = _clean_reference(_text(entry, "AcctSvcrRef"))
+    if reference:
+        return reference
+    for refs in _iter_descendants(entry, "Refs"):
+        for tag in ("EndToEndId", "TxId", "AcctSvcrRef"):
+            reference = _clean_reference(_text(refs, tag))
+            if reference:
+                return reference
+    return None
+
+
 def _camt_counterparty(entry: ET.Element, incoming: bool) -> str | None:
     party_tag = "Dbtr" if incoming else "Cdtr"
     for parties in _iter_descendants(entry, "RltdPties"):
@@ -149,7 +176,12 @@ def _camt_counterparty(entry: ET.Element, incoming: bool) -> str | None:
 
 
 def parse_camt053(content: bytes) -> list[StatementItem]:
-    """Liest alle Ntry-Elemente eines CAMT.053/052-Dokuments."""
+    """Liest alle Ntry-Elemente eines CAMT.053/052-Dokuments.
+
+    Sammelbuchungen (ein Ntry mit mehreren TxDtls) werden bewusst als eine
+    Zeile mit dem Summenbetrag des Ntry importiert; die Verwendungszwecke
+    aller Einzeltransaktionen werden aneinandergereiht.
+    """
     try:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
@@ -203,6 +235,7 @@ def parse_camt053(content: bytes) -> list[StatementItem]:
                 purpose=purpose,
                 counterparty=counterparty,
                 currency_code=currency,
+                bank_reference=_camt_reference(entry),
             )
         )
     return items
@@ -237,6 +270,11 @@ def row_from_mt940_data(position: int, data: dict) -> StatementItem:
 
     counterparty = _clip(data.get("applicant_name"))
     currency = data.get("currency") or getattr(amount_obj, "currency", None)
+    bank_reference = (
+        _clean_reference(data.get("bank_reference"))
+        or _clean_reference(data.get("end_to_end_reference"))
+        or _clean_reference(data.get("customer_reference"))
+    )
 
     return BankStatementRow(
         position=position,
@@ -245,6 +283,7 @@ def row_from_mt940_data(position: int, data: dict) -> StatementItem:
         purpose=purpose,
         counterparty=counterparty,
         currency_code=currency,
+        bank_reference=bank_reference,
     )
 
 

@@ -119,7 +119,7 @@
                       <form method="post" action="{{ url_for('main.lock_period_action', period_id=period.id) }}" style="margin:0;">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                        <input name="reason" placeholder="Grund (optional)" style="max-width:180px;" />
+                        <input name="reason" placeholder="Grund (optional)" aria-label="Grund" style="max-width:180px;" />
                         <button type="submit" class="secondary" style="margin:0;">Sperren</button>
                       </form>
                     {% endif %}
@@ -134,7 +134,7 @@
           {% if not fiscal_year.is_closed %}
             {% if is_admin %}
               <form method="post" action="{{ url_for('main.close_fiscal_year_action', fiscal_year_id=fiscal_year.id) }}"
-                    onsubmit="return confirm('Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.');">
+                    data-confirm="Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                 <button type="submit">Geschäftsjahr {{ fiscal_year.label }} abschließen</button>

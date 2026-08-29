@@ -129,7 +129,7 @@
             </div>
           {% endfor %}
         </div>
-        <button type="button" class="secondary" id="add-invoice-line">+ Weitere Position</button>
+        <button type="button" class="secondary" data-add-row="#invoice-lines" data-template="#invoice-line-template">+ Weitere Position</button>
         <br />
 
         <label for="syntax">Format</label>
@@ -161,17 +161,6 @@
           </div>
         </div>
       </template>
-      <script>
-        (function() {
-          const button = document.getElementById("add-invoice-line");
-          const container = document.getElementById("invoice-lines");
-          const template = document.getElementById("invoice-line-template");
-          if (!button || !container || !template) return;
-          button.addEventListener("click", function() {
-            container.appendChild(template.content.cloneNode(true));
-          });
-        })();
-      </script>
     {% endif %}
   </section>
 

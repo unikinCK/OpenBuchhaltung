@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}Buchungen – OpenBuchhaltung{% endblock %}
 
@@ -83,7 +84,7 @@
           {% endfor %}
         </div>
 
-        <button type="button" class="secondary" id="add-line-button">+ Weitere Zeile</button>
+        <button type="button" class="secondary" data-add-row="#journal-lines" data-template="#journal-line-template">+ Weitere Zeile</button>
         <br />
         <button type="submit">Buchung speichern</button>
       </form>
@@ -139,17 +140,6 @@
           </div>
         </div>
       </template>
-      <script>
-        (function() {
-          const addLineButton = document.getElementById("add-line-button");
-          const container = document.getElementById("journal-lines");
-          const template = document.getElementById("journal-line-template");
-          if (!addLineButton || !container || !template) return;
-          addLineButton.addEventListener("click", function() {
-            container.appendChild(template.content.cloneNode(true));
-          });
-        })();
-      </script>
     {% endif %}
   </section>
 
@@ -162,7 +152,7 @@
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
         <label for="up_to_date">Festschreibelauf bis einschließlich</label>
         <input id="up_to_date" name="up_to_date" type="date" value="{{ today }}" required style="width:auto;" />
-        <button type="submit" onclick="return confirm('Alle Buchungen bis zu diesem Datum unwiderruflich festschreiben?');">Festschreiben</button>
+        <button type="submit" data-confirm="Alle Buchungen bis zu diesem Datum unwiderruflich festschreiben?">Festschreiben</button>
       </form>
     {% endif %}
 
@@ -205,7 +195,7 @@
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                     <input type="hidden" name="reversal_date" value="{{ today }}" />
-                    <button type="submit" class="secondary" onclick="return confirm('Buchung {{ entry.posting_number }} per Gegenbuchung stornieren?');">Stornieren</button>
+                    <button type="submit" class="secondary" data-confirm="Buchung {{ entry.posting_number }} per Gegenbuchung stornieren?">Stornieren</button>
                   </form>
                 {% endif %}
               </td>
@@ -228,6 +218,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id) }}
     {% else %}
       <p class="muted">Noch keine Buchungen vorhanden.</p>
     {% endif %}

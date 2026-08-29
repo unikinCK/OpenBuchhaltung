@@ -12,13 +12,8 @@ from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
 from app.services.documents import document_file_metadata
-from app.services.journal_entries import (
-    JournalEntryCreationError,
-    JournalEntryInput,
-    JournalLineInput,
-    create_journal_entry,
-    parse_decimal,
-)
+from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
+from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.receipt_ocr import (
     ReceiptExtraction,
     ReceiptOCRError,
@@ -288,59 +283,27 @@ def receipt_ocr_book():
             flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
             return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
-        expense_account = session.get(Account, expense_account_id)
-        creditor_account = session.get(Account, creditor_account_id)
-        for account in (expense_account, creditor_account):
-            if account is None or account.company_id != company.id:
-                flash("Ausgewähltes Konto gehört nicht zur Gesellschaft.", "error")
-                return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
-
-        lines = [
-            JournalLineInput(
-                account_id=expense_account.id,
-                debit_amount=net_amount,
-                credit_amount=zero,
-                description=description or None,
+        try:
+            entry = book_incoming_invoice(
+                session=session,
+                company=company,
+                entry_date=entry_date,
+                description=description or "Belegbuchung (OCR)",
+                expense_account_id=expense_account_id,
+                creditor_account_id=creditor_account_id,
+                net_amount=net_amount,
+                tax_amount=tax_amount,
+                gross_amount=gross_amount,
+                tax_code_id=tax_code_id,
+                expense_line_description=description or None,
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                changed_by=changed_by(),
+                commit=False,
             )
-        ]
-        if tax_amount > zero:
-            tax_code = session.get(TaxCode, tax_code_id) if tax_code_id else None
-            if tax_code is None or tax_code.company_id != company.id:
-                flash("Für die Steuer bitte einen gültigen Steuercode wählen.", "error")
-                return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
-            if tax_code.vat_account_id is None:
-                flash(f"Steuercode {tax_code.code} hat kein Steuerkonto.", "error")
-                return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
-            lines.append(
-                JournalLineInput(
-                    account_id=tax_code.vat_account_id,
-                    debit_amount=tax_amount,
-                    credit_amount=zero,
-                    description=f"Vorsteuer ({tax_code.code})",
-                )
-            )
-        lines.append(
-            JournalLineInput(
-                account_id=creditor_account.id,
-                debit_amount=zero,
-                credit_amount=gross_amount,
-            )
-        )
-
-        try:
-            entry = create_journal_entry(
-                session=session,
-                payload=JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=entry_date,
-                    description=description or "Belegbuchung (OCR)",
-                    status="posted",
-                    changed_by=changed_by(),
-                    lines=lines,
-                ),
-            )
+        except IncomingInvoiceError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
         except (JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(f"Buchung fehlgeschlagen: {exc}", "error")
             return redirect(url_for("main.receipt_ocr_page", company_id=company_id))

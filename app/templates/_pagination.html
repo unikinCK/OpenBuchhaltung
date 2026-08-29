@@ -1,0 +1,13 @@
+{% macro pagination(endpoint, total, limit, offset, company_id, extra={}) %}
+  {% if total > limit %}
+    <div class="pagination">
+      <span class="muted">{{ offset + 1 }}–{{ [offset + limit, total] | min }} von {{ total }}</span>
+      {% if offset > 0 %}
+        <a href="{{ url_for(endpoint, company_id=company_id, limit=limit, offset=[offset - limit, 0] | max, **extra) }}">‹ Neuere</a>
+      {% endif %}
+      {% if offset + limit < total %}
+        <a href="{{ url_for(endpoint, company_id=company_id, limit=limit, offset=offset + limit, **extra) }}">Ältere ›</a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}

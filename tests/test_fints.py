@@ -383,6 +383,88 @@ def test_sync_with_tan_at_dialog_init(session: Session, monkeypatch):
     assert tan_result.report.imported_rows == 2
 
 
+def test_failed_fetch_after_tan_cleans_up_pending_dialog(session: Session, monkeypatch):
+    """Fachfehler nach erfolgreicher TAN: der verbrauchte Dialog wird gelöscht."""
+    company, bank = _seed_company(session)
+    connection = _create_connection(session, company, bank)
+    client = FakeFinTSClient("tan_init")
+    client.accounts = []
+    _patch_client(monkeypatch, client)
+
+    result = start_fints_sync(
+        session=session,
+        connection_id=connection.id,
+        pin="1234",
+        product_id=PRODUCT_ID,
+        changed_by="tester",
+    )
+    dialog_id = result.challenge.dialog_id
+
+    with pytest.raises(FinTSSyncError, match="SEPA"):
+        submit_fints_tan(
+            session=session,
+            dialog_id=dialog_id,
+            pin="1234",
+            tan="987654",
+            product_id=PRODUCT_ID,
+            changed_by="tester",
+        )
+    assert session.get(FinTSPendingDialog, dialog_id) is None
+
+
+def test_wrong_tan_cleans_up_pending_dialog(session: Session, monkeypatch):
+    company, bank = _seed_company(session)
+    connection = _create_connection(session, company, bank)
+
+    class WrongTanClient(FakeFinTSClient):
+        def send_tan(self, challenge, tan):
+            raise RuntimeError("9942: TAN ungültig")
+
+    client = WrongTanClient("tan_transactions")
+    _patch_client(monkeypatch, client)
+
+    result = start_fints_sync(
+        session=session,
+        connection_id=connection.id,
+        pin="1234",
+        product_id=PRODUCT_ID,
+        changed_by="tester",
+    )
+    dialog_id = result.challenge.dialog_id
+
+    with pytest.raises(FinTSSyncError, match="TAN-Bestätigung fehlgeschlagen"):
+        submit_fints_tan(
+            session=session,
+            dialog_id=dialog_id,
+            pin="1234",
+            tan="000000",
+            product_id=PRODUCT_ID,
+            changed_by="tester",
+        )
+    assert session.get(FinTSPendingDialog, dialog_id) is None
+
+
+def test_cancel_pending_dialog_removes_state(session: Session, monkeypatch):
+    company, bank = _seed_company(session)
+    connection = _create_connection(session, company, bank)
+    _patch_client(monkeypatch, FakeFinTSClient("tan_transactions"))
+
+    result = start_fints_sync(
+        session=session,
+        connection_id=connection.id,
+        pin="1234",
+        product_id=PRODUCT_ID,
+        changed_by="tester",
+    )
+    dialog_id = result.challenge.dialog_id
+
+    from app.services.fints_sync import cancel_pending_dialog
+
+    assert cancel_pending_dialog(session=session, dialog_id=dialog_id, changed_by="tester")
+    assert session.get(FinTSPendingDialog, dialog_id) is None
+    assert not cancel_pending_dialog(session=session, dialog_id=dialog_id, changed_by="tester")
+
+
 def test_decoupled_tan_returns_new_challenge(session: Session, monkeypatch):
     company, bank = _seed_company(session)
     connection = _create_connection(session, company, bank)

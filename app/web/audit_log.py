@@ -18,6 +18,7 @@ def audit_log_page():
     entity_type = (request.args.get("entity_type") or "").strip() or None
     action = (request.args.get("action") or "").strip() or None
     limit = request.args.get("limit", default=100, type=int) or 100
+    limit = max(1, min(limit, 500))
     verify_integrity = request.args.get("verify_integrity") == "1"
 
     session_factory = get_session_factory()
@@ -53,6 +54,6 @@ def audit_log_page():
         company_filter_id=company_filter_id,
         entity_type=entity_type or "",
         action=action or "",
-        limit=max(1, min(limit, 500)),
+        limit=limit,
         integrity_result=integrity_result,
     )

@@ -6,6 +6,7 @@ from datetime import date
 
 from flask import abort, current_app, flash, redirect, render_template, request, url_for
 from flask import session as flask_session
+from sqlalchemy import func, select
 
 from app.services.bank_import import (
     BankImportError,
@@ -14,11 +15,12 @@ from app.services.bank_import import (
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
-    suggest_matches,
+    suggest_matches_for,
 )
 from app.services.fints_sync import (
     FinTSSyncError,
     FinTSSyncResult,
+    cancel_pending_dialog,
     create_fints_connection,
     list_fints_connections,
     set_fints_connection_active,
@@ -32,14 +34,25 @@ from app.web.helpers import (
     changed_by,
     company_context,
     get_session_factory,
+    pagination_args,
     require_company_access,
 )
-from domain.models import Account, BankTransaction, ControllingUnit, JournalEntry, TaxCode
+from domain.models import (
+    Account,
+    BankTransaction,
+    ControllingUnit,
+    FinTSConnection,
+    FinTSPendingDialog,
+    JournalEntry,
+    TaxCode,
+)
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
 @main_bp.get("/bank")
 def bank_page():
+    limit, offset = pagination_args()
+    status_filter = (request.args.get("status") or "").strip() or None
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -48,6 +61,7 @@ def bank_page():
         contra_accounts = []
         tax_codes = []
         transactions = []
+        transactions_total = 0
         cost_centers = []
         profit_centers = []
         fints_connections = []
@@ -74,11 +88,21 @@ def bank_page():
                 .scalars()
                 .all()
             )
+            transactions_stmt = scoped_select(BankTransaction, company_id=selected_company_id)
+            if status_filter:
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.status == status_filter
+                )
+            transactions_total = session.execute(
+                select(func.count()).select_from(transactions_stmt.subquery())
+            ).scalar_one()
             transactions = (
                 session.execute(
-                    scoped_select(BankTransaction, company_id=selected_company_id).order_by(
+                    transactions_stmt.order_by(
                         BankTransaction.booking_date.desc(), BankTransaction.id.desc()
                     )
+                    .limit(limit)
+                    .offset(offset)
                 )
                 .scalars()
                 .all()
@@ -94,11 +118,11 @@ def bank_page():
             )
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
-            for transaction in transactions:
-                if transaction.status == "open":
-                    suggestions_by_tx[transaction.id] = suggest_matches(
-                        session=session, transaction=transaction
-                    )
+            suggestions_by_tx = suggest_matches_for(session=session, transactions=transactions)
+
+    fints_challenge = flask_session.get("fints_challenge")
+    if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
+        fints_challenge = None
 
     return render_template(
         "bank.html",
@@ -109,11 +133,15 @@ def bank_page():
         contra_accounts=contra_accounts,
         tax_codes=tax_codes,
         transactions=transactions,
+        transactions_total=transactions_total,
+        limit=limit,
+        offset=offset,
+        status_filter=status_filter,
         suggestions_by_tx=suggestions_by_tx,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,
-        fints_challenge=flask_session.get("fints_challenge"),
+        fints_challenge=fints_challenge,
         fints_configured=bool(current_app.config.get("FINTS_PRODUCT_ID")),
     )
 
@@ -209,7 +237,7 @@ def bank_reassign_action(transaction_id: int):
     if reassigned:
         flash("Bankumsatz wurde auf das gewählte Bankkonto umgehängt.", "success")
     else:
-        flash("Bankumsatz liegt bereits auf diesem Bankkonto.", "error")
+        flash("Bankumsatz liegt bereits auf diesem Bankkonto.", "warning")
     return redirect(url_for("main.bank_page", company_id=company_id))
 
 
@@ -240,7 +268,7 @@ def bank_move_action():
     flash(
         f"{len(moved)} Bankumsätze umgehängt. Bereits erzeugte Buchungen bleiben "
         "auf dem alten Konto — Saldo bei Bedarf umgliedern.",
-        "success" if moved else "error",
+        "success" if moved else "warning",
     )
     return redirect(url_for("main.bank_page", company_id=company_id))
 
@@ -280,12 +308,15 @@ def bank_book_action(transaction_id: int):
 
 def _handle_fints_result(result: FinTSSyncResult, company_id: int | None):
     if result.challenge is not None:
+        # company_id bindet die TAN-Karte an die richtige Gesellschaft —
+        # bei einem Wechsel der Gesellschaft wird sie nicht angezeigt.
         flask_session["fints_challenge"] = {
             "dialog_id": result.challenge.dialog_id,
             "challenge": result.challenge.challenge,
             "decoupled": result.challenge.decoupled,
+            "company_id": company_id,
         }
-        flash("Die Bank verlangt eine TAN-Bestätigung.", "error")
+        flash("Die Bank verlangt eine TAN-Bestätigung.", "info")
         return redirect(url_for("main.bank_page", company_id=company_id))
 
     flask_session.pop("fints_challenge", None)
@@ -341,10 +372,13 @@ def fints_connection_create_action():
 
 @main_bp.post("/bank/fints/<int:connection_id>/deaktivieren")
 def fints_connection_deactivate_action(connection_id: int):
-    company_id = request.form.get("company_id", type=int)
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        connection = session.get(FinTSConnection, connection_id)
+        if connection is None:
+            abort(404)
+        require_company_access(session, connection.company_id)
+        company_id = connection.company_id
         try:
             set_fints_connection_active(
                 session=session,
@@ -362,10 +396,13 @@ def fints_connection_deactivate_action(connection_id: int):
 
 @main_bp.post("/bank/fints/<int:connection_id>/abrufen")
 def fints_sync_action(connection_id: int):
-    company_id = request.form.get("company_id", type=int)
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        connection = session.get(FinTSConnection, connection_id)
+        if connection is None:
+            abort(404)
+        require_company_access(session, connection.company_id)
+        company_id = connection.company_id
         try:
             result = start_fints_sync(
                 session=session,
@@ -393,7 +430,13 @@ def fints_tan_action():
 
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        pending = session.get(FinTSPendingDialog, dialog_id)
+        if pending is None:
+            flask_session.pop("fints_challenge", None)
+            flash("TAN-Dialog nicht gefunden oder bereits abgeschlossen.", "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+        require_company_access(session, pending.company_id)
+        company_id = pending.company_id
         try:
             result = submit_fints_tan(
                 session=session,
@@ -414,6 +457,19 @@ def fints_tan_action():
 @main_bp.post("/bank/fints/tan/abbrechen")
 def fints_tan_cancel_action():
     company_id = request.form.get("company_id", type=int)
-    flask_session.pop("fints_challenge", None)
+    challenge = flask_session.pop("fints_challenge", None) or {}
+    dialog_id = (request.form.get("dialog_id") or "").strip() or challenge.get("dialog_id")
+
+    if dialog_id:
+        session_factory = get_session_factory()
+        with session_factory() as session:
+            pending = session.get(FinTSPendingDialog, dialog_id)
+            if pending is not None:
+                require_company_access(session, pending.company_id)
+                company_id = pending.company_id
+                cancel_pending_dialog(
+                    session=session, dialog_id=dialog_id, changed_by=changed_by()
+                )
+
     flash("TAN-Dialog wurde verworfen.", "success")
     return redirect(url_for("main.bank_page", company_id=company_id))

@@ -10,7 +10,8 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TextIO
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
@@ -134,6 +135,7 @@ def import_bank_items(
     items: Iterable[StatementItem],
     changed_by: str,
     source: str,
+    _retry_on_conflict: bool = True,
 ) -> BankImportReport:
     """Gemeinsame Import-Pipeline: Dedup, Persistenz und Audit-Log.
 
@@ -147,12 +149,15 @@ def import_bank_items(
     if bank_account is None or bank_account.company_id != company.id:
         raise BankImportError("Bankkonto nicht gefunden.")
 
+    items = list(items)
     report = BankImportReport()
-    existing_hashes = set(
-        session.execute(
-            select(BankTransaction.dedup_hash).where(BankTransaction.company_id == company.id)
-        ).scalars()
+    existing_hashes = _existing_hashes_for(
+        session=session, company_id=company.id, bank_account_id=bank_account.id, items=items
     )
+    # Bestände aus Importen vor der Referenz-Auswertung tragen referenzlose
+    # Hashes; jede solche Zeile darf höchstens eine Referenz-Zeile "schlucken".
+    legacy_matchable = set(existing_hashes)
+    occurrence_in_batch: dict[str, int] = {}
 
     for item in items:
         report.total_rows += 1
@@ -166,16 +171,30 @@ def import_bank_items(
 
         purpose = item.purpose[:255]
         counterparty = item.counterparty[:255] if item.counterparty else None
-        dedup_hash = _dedup_hash(
+        hash_fields = dict(
             bank_account_id=bank_account.id,
             booking_date=item.booking_date,
             amount=item.amount,
             purpose=purpose,
             counterparty=counterparty,
         )
-        if dedup_hash in existing_hashes:
-            report.duplicate_rows += 1
-            continue
+        legacy_hash = _dedup_hash(**hash_fields)
+        if item.bank_reference:
+            dedup_hash = _dedup_hash(**hash_fields, bank_reference=item.bank_reference)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
+            if legacy_hash in legacy_matchable:
+                legacy_matchable.discard(legacy_hash)
+                report.duplicate_rows += 1
+                continue
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            dedup_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
 
         session.add(
             BankTransaction(
@@ -187,29 +206,89 @@ def import_bank_items(
                 currency_code=item.currency_code or company.currency_code,
                 purpose=purpose,
                 counterparty=counterparty,
+                bank_reference=item.bank_reference,
                 dedup_hash=dedup_hash,
             )
         )
         existing_hashes.add(dedup_hash)
         report.imported_rows += 1
 
-    log_audit_event(
-        session=session,
-        tenant_id=company.tenant_id,
-        company_id=company.id,
-        entity_type="bank_import",
-        entity_id=str(bank_account.id),
-        action="imported",
-        changed_by=changed_by,
-        payload={
-            "source": source,
-            "imported": report.imported_rows,
-            "duplicates": report.duplicate_rows,
-            "errors": report.error_rows,
-        },
-    )
-    session.commit()
+    try:
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="bank_import",
+            entity_id=str(bank_account.id),
+            action="imported",
+            changed_by=changed_by,
+            payload={
+                "source": source,
+                "imported": report.imported_rows,
+                "duplicates": report.duplicate_rows,
+                "errors": report.error_rows,
+            },
+        )
+        session.commit()
+    except IntegrityError as exc:
+        # Paralleler Import derselben Datei: der Unique-Constraint auf
+        # (company_id, dedup_hash) hat gewonnen — einmal neu gegen den
+        # aktuellen Bestand rechnen, dann sind die Zeilen Duplikate.
+        session.rollback()
+        if not _retry_on_conflict:
+            raise BankImportError(
+                "Paralleler Bank-Import erkannt — bitte erneut versuchen."
+            ) from exc
+        return import_bank_items(
+            session=session,
+            company_id=company_id,
+            bank_account_id=bank_account_id,
+            items=items,
+            changed_by=changed_by,
+            source=source,
+            _retry_on_conflict=False,
+        )
     return report
+
+
+def _existing_hashes_for(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    items: Sequence[StatementItem],
+) -> set[str]:
+    """Lädt nur die Dedup-Hashes, die für diesen Import relevant sein können."""
+    candidates: set[str] = set()
+    occurrence_in_batch: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, BankStatementRowError):
+            continue
+        hash_fields = dict(
+            bank_account_id=bank_account_id,
+            booking_date=item.booking_date,
+            amount=item.amount,
+            purpose=item.purpose[:255],
+            counterparty=item.counterparty[:255] if item.counterparty else None,
+        )
+        legacy_hash = _dedup_hash(**hash_fields)
+        candidates.add(legacy_hash)
+        if item.bank_reference:
+            candidates.add(_dedup_hash(**hash_fields, bank_reference=item.bank_reference))
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            candidates.add(_dedup_hash(**hash_fields, occurrence=occurrence))
+    if not candidates:
+        return set()
+    return set(
+        session.execute(
+            select(BankTransaction.dedup_hash).where(
+                BankTransaction.company_id == company_id,
+                BankTransaction.dedup_hash.in_(candidates),
+            )
+        ).scalars()
+    )
 
 
 def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
@@ -251,30 +330,64 @@ def suggest_matches(
     *, session: Session, transaction: BankTransaction, limit: int = 5
 ) -> list[JournalEntry]:
     """Buchungen mit passender Zeile auf dem Bankkonto (Betrag + Seite), noch unverknüpft."""
-    line_filter = (
-        JournalEntryLine.debit_amount == transaction.amount
-        if transaction.amount > 0
-        else JournalEntryLine.credit_amount == -transaction.amount
+    return suggest_matches_for(session=session, transactions=[transaction], limit=limit).get(
+        transaction.id, []
     )
+
+
+def suggest_matches_for(
+    *, session: Session, transactions: Sequence[BankTransaction], limit: int = 5
+) -> dict[int, list[JournalEntry]]:
+    """Wie ``suggest_matches``, aber mit einer Query für viele Umsätze (kein N+1)."""
+    open_transactions = [t for t in transactions if t.status == "open"]
+    if not open_transactions:
+        return {}
+
+    debit_amounts = {t.amount for t in open_transactions if t.amount > 0}
+    credit_amounts = {-t.amount for t in open_transactions if t.amount < 0}
+    amount_filters = []
+    if debit_amounts:
+        amount_filters.append(JournalEntryLine.debit_amount.in_(debit_amounts))
+    if credit_amounts:
+        amount_filters.append(JournalEntryLine.credit_amount.in_(credit_amounts))
+
     already_linked = select(BankTransaction.journal_entry_id).where(
         BankTransaction.journal_entry_id.is_not(None)
     )
-    return (
-        session.execute(
-            select(JournalEntry)
-            .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
-            .where(
-                JournalEntry.company_id == transaction.company_id,
-                JournalEntryLine.account_id == transaction.bank_account_id,
-                line_filter,
-                JournalEntry.id.not_in(already_linked),
-            )
-            .order_by(JournalEntry.entry_date.desc())
-            .limit(limit)
+    rows = session.execute(
+        select(JournalEntry, JournalEntryLine)
+        .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
+        .where(
+            JournalEntry.company_id.in_({t.company_id for t in open_transactions}),
+            JournalEntryLine.account_id.in_({t.bank_account_id for t in open_transactions}),
+            or_(*amount_filters),
+            JournalEntry.id.not_in(already_linked),
         )
-        .scalars()
-        .all()
-    )
+        .order_by(JournalEntry.entry_date.desc())
+    ).all()
+
+    suggestions: dict[int, list[JournalEntry]] = {}
+    for transaction in open_transactions:
+        matches: list[JournalEntry] = []
+        seen: set[int] = set()
+        for entry, line in rows:
+            if (
+                entry.company_id != transaction.company_id
+                or line.account_id != transaction.bank_account_id
+                or entry.id in seen
+            ):
+                continue
+            if transaction.amount > 0:
+                fits = line.debit_amount == transaction.amount
+            else:
+                fits = line.credit_amount == -transaction.amount
+            if fits:
+                seen.add(entry.id)
+                matches.append(entry)
+                if len(matches) >= limit:
+                    break
+        suggestions[transaction.id] = matches
+    return suggestions
 
 
 def match_transaction(
@@ -289,6 +402,15 @@ def match_transaction(
     entry = session.get(JournalEntry, journal_entry_id)
     if entry is None or entry.company_id != transaction.company_id:
         raise BankImportError("Buchung nicht gefunden.")
+
+    already_linked = session.execute(
+        select(BankTransaction.id).where(
+            BankTransaction.journal_entry_id == entry.id,
+            BankTransaction.id != transaction.id,
+        )
+    ).first()
+    if already_linked is not None:
+        raise BankImportError("Die Buchung ist bereits einem anderen Bankumsatz zugeordnet.")
 
     transaction.journal_entry_id = entry.id
     transaction.status = "matched"
@@ -424,14 +546,22 @@ def _reassign(
         ).scalars()
     )
 
+    occurrence_in_batch: dict[str, int] = {}
     for transaction in pending:
-        new_hash = _dedup_hash(
+        hash_fields = dict(
             bank_account_id=target.id,
             booking_date=transaction.booking_date,
             amount=transaction.amount,
             purpose=transaction.purpose,
             counterparty=transaction.counterparty,
         )
+        if transaction.bank_reference:
+            new_hash = _dedup_hash(**hash_fields, bank_reference=transaction.bank_reference)
+        else:
+            legacy_hash = _dedup_hash(**hash_fields)
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            new_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
         if new_hash in taken_hashes:
             raise BankImportError(
                 f"Bankumsatz {transaction.id} ({transaction.booking_date.isoformat()}, "
@@ -519,6 +649,14 @@ def book_transaction(
     if contra_account is None or contra_account.company_id != transaction.company_id:
         raise BankImportError("Gegenkonto nicht gefunden.")
 
+    company = session.get(Company, transaction.company_id)
+    if transaction.currency_code and transaction.currency_code != company.currency_code:
+        raise BankImportError(
+            f"Bankumsatz in {transaction.currency_code} kann nicht direkt als "
+            f"{company.currency_code}-Buchung übernommen werden — bitte manuell "
+            "mit Umrechnungskurs buchen."
+        )
+
     gross = abs(transaction.amount)
     contra_net = gross
     if tax_code_id is not None:
@@ -543,6 +681,8 @@ def book_transaction(
         profit_center_id=profit_center_id,
     )
 
+    # commit=False: Buchung und Statuswechsel des Bankumsatzes müssen atomar
+    # persistiert werden, sonst kann derselbe Umsatz doppelt verbucht werden.
     entry = create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -553,6 +693,7 @@ def book_transaction(
             changed_by=changed_by,
             lines=[bank_line, contra_line],
         ),
+        commit=False,
     )
 
     transaction.journal_entry_id = entry.id
@@ -611,10 +752,35 @@ def _parse_date(value: str) -> date:
 
 
 def _parse_amount(value: str) -> Decimal:
+    """Parst deutsche (1.234,56) und englische (1,234.56) Beträge.
+
+    Kommen beide Trennzeichen vor, ist das letzte der Dezimaltrenner. Ein
+    einzelnes Trennzeichen mit genau drei Nachfolgeziffern (z. B. "1,234")
+    ist nicht entscheidbar und wird abgelehnt statt umgedeutet.
+    """
     normalized = value.replace(" ", "").replace(" ", "").replace("€", "")
-    if "," in normalized:
-        # Deutsches Format: 1.234,56
-        normalized = normalized.replace(".", "").replace(",", ".")
+    last_dot = normalized.rfind(".")
+    last_comma = normalized.rfind(",")
+    if last_dot >= 0 and last_comma >= 0:
+        thousands, decimal_sep = (",", ".") if last_dot > last_comma else (".", ",")
+        normalized = normalized.replace(thousands, "").replace(decimal_sep, ".")
+    elif last_dot >= 0 or last_comma >= 0:
+        separator = "." if last_dot >= 0 else ","
+        integer_part, _, fraction_part = normalized.rpartition(separator)
+        if separator in integer_part:
+            # Mehrfach vorkommend: reine Tausendertrenner (1.234.567).
+            normalized = normalized.replace(separator, "")
+        elif (
+            len(fraction_part) == 3
+            and fraction_part.isdigit()
+            and integer_part.lstrip("+-").isdigit()
+        ):
+            raise BankImportError(
+                f"Mehrdeutiger Betrag: {value} — Tausender- oder Dezimaltrennzeichen "
+                "nicht erkennbar."
+            )
+        else:
+            normalized = normalized.replace(separator, ".")
     try:
         return Decimal(normalized).quantize(Decimal("0.01"))
     except InvalidOperation as exc:
@@ -628,8 +794,21 @@ def _dedup_hash(
     amount: Decimal,
     purpose: str,
     counterparty: str | None,
+    bank_reference: str | None = None,
+    occurrence: int = 1,
 ) -> str:
+    """Duplikat-Hash einer Umsatzzeile.
+
+    Liegt eine bankseitige Referenz vor, ist sie Teil der Identität. Ohne
+    Referenz unterscheidet ``occurrence`` gleich aussehende echte Zahlungen
+    innerhalb einer Datei (das erste Vorkommen bleibt hash-kompatibel zu
+    Beständen aus der Zeit vor der Referenz-Auswertung).
+    """
     raw = f"{bank_account_id}|{booking_date.isoformat()}|{amount}|{purpose}|{counterparty or ''}"
+    if bank_reference:
+        raw += f"|ref:{bank_reference}"
+    elif occurrence > 1:
+        raw += f"|n:{occurrence}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

@@ -62,6 +62,20 @@ def require_period_access(session, period_id: int) -> Period:
     return period
 
 
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 500
+
+
+def pagination_args(
+    default: int = DEFAULT_PAGE_SIZE, maximum: int = MAX_PAGE_SIZE
+) -> tuple[int, int]:
+    """Liest limit/offset aus der Query, geclampt auf sinnvolle Grenzen."""
+    limit = request.args.get("limit", type=int)
+    limit = default if limit is None else max(1, min(limit, maximum))
+    offset = max(0, request.args.get("offset", type=int) or 0)
+    return limit, offset
+
+
 def changed_by() -> str:
     user = current_user()
     return user["username"] if user else "web-form"

@@ -10,6 +10,15 @@ Bestätigung in der Banking-App) ab.
 
 Die abgerufenen Umsätze laufen durch dieselbe Import-Pipeline wie der
 Dateiimport (Dedup über Hash, Audit-Log, Status "open").
+
+Risikoabwägung ``fints_pending_dialog``: Der eingefrorene Client-/Dialog-
+zustand (``client_data``/``dialog_data``/``tan_request_data``) liegt
+unverschlüsselt in der DB. Er enthält keine PIN und keine TAN, aber
+Zugangs-Stammdaten und Sitzungsdetails; ohne PIN ist er für einen
+Angreifer nicht als Bankzugang nutzbar. Die Datensätze leben höchstens
+``DIALOG_MAX_AGE`` (15 Minuten) und werden bei Abschluss, Fehler,
+Abbruch oder Ablauf gelöscht. Wer die DB-Datei als schutzwürdig genug
+einstuft, verschlüsselt sie auf Volume-/DB-Ebene.
 """
 
 from __future__ import annotations
@@ -312,11 +321,13 @@ def submit_fints_tan(
                 transactions = response
             if next_step is not None:
                 dialog_data = client.pause_dialog()
-    except FinTSSyncError:
-        raise
     except Exception as exc:
+        # Der Bankdialog ist durch den Context-Manager-Exit beendet — der
+        # eingefrorene Zustand ist nicht wiederverwendbar, also aufräumen.
         session.delete(pending)
         session.commit()
+        if isinstance(exc, FinTSSyncError):
+            raise
         raise FinTSSyncError(f"TAN-Bestätigung fehlgeschlagen: {exc}") from exc
 
     if next_step is not None:
@@ -338,6 +349,26 @@ def submit_fints_tan(
         session=session, connection=connection, transactions=transactions, changed_by=changed_by
     )
     return FinTSSyncResult(report=report)
+
+
+def cancel_pending_dialog(*, session: Session, dialog_id: str, changed_by: str) -> bool:
+    """Verwirft einen eingefrorenen TAN-Dialog samt gespeichertem Client-Zustand."""
+    pending = session.get(FinTSPendingDialog, dialog_id)
+    if pending is None:
+        return False
+    log_audit_event(
+        session=session,
+        tenant_id=pending.tenant_id,
+        company_id=pending.company_id,
+        entity_type="fints_pending_dialog",
+        entity_id=pending.id,
+        action="cancelled",
+        changed_by=changed_by,
+        payload={"connection_id": pending.connection_id, "step": pending.step},
+    )
+    session.delete(pending)
+    session.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------
