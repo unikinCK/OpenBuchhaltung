@@ -182,6 +182,44 @@ def test_import_keeps_identical_rows_within_one_file(session: Session) -> None:
     assert second.duplicate_rows == 2
 
 
+def test_parallel_import_conflict_is_reported_as_duplicates(
+    session: Session, monkeypatch
+) -> None:
+    """Verliert der Import das Rennen um den Unique-Constraint, zählt die Zeile als Duplikat."""
+    from app.services import bank_import as bank_import_module
+
+    company, bank, _ = _seed_company(session)
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+
+    real_prefetch = bank_import_module._existing_hashes_for
+    calls = {"count": 0}
+
+    def stale_then_real(**kwargs):
+        calls["count"] += 1
+        # Erster Aufruf simuliert einen veralteten Lesestand (paralleler Import).
+        return set() if calls["count"] == 1 else real_prefetch(**kwargs)
+
+    monkeypatch.setattr(bank_import_module, "_existing_hashes_for", stale_then_real)
+
+    report = import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    assert report.imported_rows == 0
+    assert report.duplicate_rows == 3
+    assert calls["count"] == 2
+    assert len(session.execute(select(BankTransaction)).scalars().all()) == 3
+
+
 def test_import_reports_row_errors(session: Session) -> None:
     company, bank, _ = _seed_company(session)
     broken_csv = "Buchungstag;Verwendungszweck;Betrag\nkein-datum;Test;10,00\n05.07.2026;;5,00\n"

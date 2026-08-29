@@ -276,6 +276,31 @@ def test_reference_rows_dedup_against_legacy_rows_without_reference(session: Ses
     assert len(session.execute(select(BankTransaction)).scalars().all()) == 2
 
 
+def test_parse_camt053_collapses_batch_entry_to_single_row():
+    """Sammelbuchung: ein Ntry mit mehreren TxDtls wird eine Summenzeile."""
+    batch_camt = """<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt>
+    <Ntry>
+      <Amt Ccy="EUR">100.00</Amt>
+      <CdtDbtInd>CRDT</CdtDbtInd>
+      <BookgDt><Dt>2026-08-12</Dt></BookgDt>
+      <AcctSvcrRef>BATCH-1</AcctSvcrRef>
+      <NtryDtls>
+        <TxDtls><RmtInf><Ustrd>Teil A</Ustrd></RmtInf></TxDtls>
+        <TxDtls><RmtInf><Ustrd>Teil B</Ustrd></RmtInf></TxDtls>
+      </NtryDtls>
+    </Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>
+"""
+    rows = parse_camt053(batch_camt.encode("utf-8"))
+    assert len(rows) == 1
+    assert rows[0].amount == Decimal("100.00")
+    assert rows[0].purpose == "Teil A Teil B"
+    assert rows[0].bank_reference == "BATCH-1"
+
+
 def test_parse_mt940_extracts_references():
     rows = parse_mt940(MT940_SAMPLE.encode("utf-8"))
     assert [row.bank_reference for row in rows] == ["STRIPE-REF-1", "KD-1001"]

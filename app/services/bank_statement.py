@@ -176,7 +176,12 @@ def _camt_counterparty(entry: ET.Element, incoming: bool) -> str | None:
 
 
 def parse_camt053(content: bytes) -> list[StatementItem]:
-    """Liest alle Ntry-Elemente eines CAMT.053/052-Dokuments."""
+    """Liest alle Ntry-Elemente eines CAMT.053/052-Dokuments.
+
+    Sammelbuchungen (ein Ntry mit mehreren TxDtls) werden bewusst als eine
+    Zeile mit dem Summenbetrag des Ntry importiert; die Verwendungszwecke
+    aller Einzeltransaktionen werden aneinandergereiht.
+    """
     try:
         root = ET.fromstring(content)
     except ET.ParseError as exc:

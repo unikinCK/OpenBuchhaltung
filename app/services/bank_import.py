@@ -213,22 +213,22 @@ def import_bank_items(
         existing_hashes.add(dedup_hash)
         report.imported_rows += 1
 
-    log_audit_event(
-        session=session,
-        tenant_id=company.tenant_id,
-        company_id=company.id,
-        entity_type="bank_import",
-        entity_id=str(bank_account.id),
-        action="imported",
-        changed_by=changed_by,
-        payload={
-            "source": source,
-            "imported": report.imported_rows,
-            "duplicates": report.duplicate_rows,
-            "errors": report.error_rows,
-        },
-    )
     try:
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="bank_import",
+            entity_id=str(bank_account.id),
+            action="imported",
+            changed_by=changed_by,
+            payload={
+                "source": source,
+                "imported": report.imported_rows,
+                "duplicates": report.duplicate_rows,
+                "errors": report.error_rows,
+            },
+        )
         session.commit()
     except IntegrityError as exc:
         # Paralleler Import derselben Datei: der Unique-Constraint auf
