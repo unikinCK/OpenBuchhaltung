@@ -546,9 +546,7 @@ class BankTransaction(Base):
         CheckConstraint(
             "status IN ('open', 'matched', 'booked')", name="ck_bank_tx_status_known"
         ),
-        # Eine Buchung darf höchstens mit einem Bankumsatz verknüpft sein
-        # (NULL-Werte kollidieren in SQLite/PostgreSQL/MariaDB nicht).
-        Index("uq_bank_tx_journal_entry", "journal_entry_id", unique=True),
+        Index("ix_bank_tx_journal_entry", "journal_entry_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

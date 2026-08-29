@@ -10,6 +10,15 @@ Bestätigung in der Banking-App) ab.
 
 Die abgerufenen Umsätze laufen durch dieselbe Import-Pipeline wie der
 Dateiimport (Dedup über Hash, Audit-Log, Status "open").
+
+Risikoabwägung ``fints_pending_dialog``: Der eingefrorene Client-/Dialog-
+zustand (``client_data``/``dialog_data``/``tan_request_data``) liegt
+unverschlüsselt in der DB. Er enthält keine PIN und keine TAN, aber
+Zugangs-Stammdaten und Sitzungsdetails; ohne PIN ist er für einen
+Angreifer nicht als Bankzugang nutzbar. Die Datensätze leben höchstens
+``DIALOG_MAX_AGE`` (15 Minuten) und werden bei Abschluss, Fehler,
+Abbruch oder Ablauf gelöscht. Wer die DB-Datei als schutzwürdig genug
+einstuft, verschlüsselt sie auf Volume-/DB-Ebene.
 """
 
 from __future__ import annotations

@@ -7,6 +7,7 @@ import binascii
 from pathlib import Path
 
 from flask import jsonify, request
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
@@ -22,12 +23,14 @@ from app.services.bank_import import (
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
-    suggest_matches,
+    suggest_matches_for,
 )
 from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
 from domain.models import Account, BankTransaction, JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
+
+DEFAULT_TRANSACTION_PAGE_SIZE = 200
 
 ALLOWED_BANK_FILE_SUFFIXES = {".csv", ".xml", ".sta", ".mt940", ".940"}
 ALLOWED_BANK_FILE_MIME_TYPES = {
@@ -232,30 +235,58 @@ def list_bank_transactions_via_api():
         "true",
         "yes",
     }
+    limit = request.args.get("limit", type=int)
+    limit = DEFAULT_TRANSACTION_PAGE_SIZE if limit is None else max(1, min(limit, 1000))
+    offset = max(0, request.args.get("offset", type=int) or 0)
 
     session_factory = get_session_factory()
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
 
-        stmt = scoped_select(BankTransaction, company_id=company_id).order_by(
-            BankTransaction.booking_date.desc(), BankTransaction.id.desc()
-        )
+        stmt = scoped_select(BankTransaction, company_id=company_id)
         if status is not None:
             stmt = stmt.where(BankTransaction.status == status)
-        transactions = session.execute(stmt).scalars().all()
+        total = session.execute(
+            select(func.count()).select_from(stmt.subquery())
+        ).scalar_one()
+        transactions = (
+            session.execute(
+                stmt.order_by(BankTransaction.booking_date.desc(), BankTransaction.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
 
+        suggestions_by_tx = (
+            suggest_matches_for(session=session, transactions=transactions)
+            if include_suggestions
+            else {}
+        )
         payload = []
         for transaction in transactions:
             transaction_payload = _transaction_dict(transaction)
             if include_suggestions and transaction.status == "open":
                 transaction_payload["suggestions"] = [
                     _journal_entry_suggestion_dict(entry)
-                    for entry in suggest_matches(session=session, transaction=transaction)
+                    for entry in suggestions_by_tx.get(transaction.id, [])
                 ]
             payload.append(transaction_payload)
 
-        return jsonify({"company_id": company_id, "transactions": payload}), 200
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "transactions": payload,
+                }
+            ),
+            200,
+        )
 
 
 @api_bp.post("/bank-transactions/import")
@@ -305,6 +336,7 @@ def import_bank_transactions_via_api():
                 scoped_select(BankTransaction, company_id=company.id)
                 .where(BankTransaction.bank_account_id == bank_account.id)
                 .order_by(BankTransaction.booking_date.desc(), BankTransaction.id.desc())
+                .limit(DEFAULT_TRANSACTION_PAGE_SIZE)
             )
             .scalars()
             .all()

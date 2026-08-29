@@ -10,7 +10,8 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TextIO
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
@@ -134,6 +135,7 @@ def import_bank_items(
     items: Iterable[StatementItem],
     changed_by: str,
     source: str,
+    _retry_on_conflict: bool = True,
 ) -> BankImportReport:
     """Gemeinsame Import-Pipeline: Dedup, Persistenz und Audit-Log.
 
@@ -147,11 +149,10 @@ def import_bank_items(
     if bank_account is None or bank_account.company_id != company.id:
         raise BankImportError("Bankkonto nicht gefunden.")
 
+    items = list(items)
     report = BankImportReport()
-    existing_hashes = set(
-        session.execute(
-            select(BankTransaction.dedup_hash).where(BankTransaction.company_id == company.id)
-        ).scalars()
+    existing_hashes = _existing_hashes_for(
+        session=session, company_id=company.id, bank_account_id=bank_account.id, items=items
     )
     # Bestände aus Importen vor der Referenz-Auswertung tragen referenzlose
     # Hashes; jede solche Zeile darf höchstens eine Referenz-Zeile "schlucken".
@@ -227,8 +228,67 @@ def import_bank_items(
             "errors": report.error_rows,
         },
     )
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        # Paralleler Import derselben Datei: der Unique-Constraint auf
+        # (company_id, dedup_hash) hat gewonnen — einmal neu gegen den
+        # aktuellen Bestand rechnen, dann sind die Zeilen Duplikate.
+        session.rollback()
+        if not _retry_on_conflict:
+            raise BankImportError(
+                "Paralleler Bank-Import erkannt — bitte erneut versuchen."
+            ) from exc
+        return import_bank_items(
+            session=session,
+            company_id=company_id,
+            bank_account_id=bank_account_id,
+            items=items,
+            changed_by=changed_by,
+            source=source,
+            _retry_on_conflict=False,
+        )
     return report
+
+
+def _existing_hashes_for(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    items: Sequence[StatementItem],
+) -> set[str]:
+    """Lädt nur die Dedup-Hashes, die für diesen Import relevant sein können."""
+    candidates: set[str] = set()
+    occurrence_in_batch: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, BankStatementRowError):
+            continue
+        hash_fields = dict(
+            bank_account_id=bank_account_id,
+            booking_date=item.booking_date,
+            amount=item.amount,
+            purpose=item.purpose[:255],
+            counterparty=item.counterparty[:255] if item.counterparty else None,
+        )
+        legacy_hash = _dedup_hash(**hash_fields)
+        candidates.add(legacy_hash)
+        if item.bank_reference:
+            candidates.add(_dedup_hash(**hash_fields, bank_reference=item.bank_reference))
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            candidates.add(_dedup_hash(**hash_fields, occurrence=occurrence))
+    if not candidates:
+        return set()
+    return set(
+        session.execute(
+            select(BankTransaction.dedup_hash).where(
+                BankTransaction.company_id == company_id,
+                BankTransaction.dedup_hash.in_(candidates),
+            )
+        ).scalars()
+    )
 
 
 def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
@@ -270,30 +330,64 @@ def suggest_matches(
     *, session: Session, transaction: BankTransaction, limit: int = 5
 ) -> list[JournalEntry]:
     """Buchungen mit passender Zeile auf dem Bankkonto (Betrag + Seite), noch unverknüpft."""
-    line_filter = (
-        JournalEntryLine.debit_amount == transaction.amount
-        if transaction.amount > 0
-        else JournalEntryLine.credit_amount == -transaction.amount
+    return suggest_matches_for(session=session, transactions=[transaction], limit=limit).get(
+        transaction.id, []
     )
+
+
+def suggest_matches_for(
+    *, session: Session, transactions: Sequence[BankTransaction], limit: int = 5
+) -> dict[int, list[JournalEntry]]:
+    """Wie ``suggest_matches``, aber mit einer Query für viele Umsätze (kein N+1)."""
+    open_transactions = [t for t in transactions if t.status == "open"]
+    if not open_transactions:
+        return {}
+
+    debit_amounts = {t.amount for t in open_transactions if t.amount > 0}
+    credit_amounts = {-t.amount for t in open_transactions if t.amount < 0}
+    amount_filters = []
+    if debit_amounts:
+        amount_filters.append(JournalEntryLine.debit_amount.in_(debit_amounts))
+    if credit_amounts:
+        amount_filters.append(JournalEntryLine.credit_amount.in_(credit_amounts))
+
     already_linked = select(BankTransaction.journal_entry_id).where(
         BankTransaction.journal_entry_id.is_not(None)
     )
-    return (
-        session.execute(
-            select(JournalEntry)
-            .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
-            .where(
-                JournalEntry.company_id == transaction.company_id,
-                JournalEntryLine.account_id == transaction.bank_account_id,
-                line_filter,
-                JournalEntry.id.not_in(already_linked),
-            )
-            .order_by(JournalEntry.entry_date.desc())
-            .limit(limit)
+    rows = session.execute(
+        select(JournalEntry, JournalEntryLine)
+        .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
+        .where(
+            JournalEntry.company_id.in_({t.company_id for t in open_transactions}),
+            JournalEntryLine.account_id.in_({t.bank_account_id for t in open_transactions}),
+            or_(*amount_filters),
+            JournalEntry.id.not_in(already_linked),
         )
-        .scalars()
-        .all()
-    )
+        .order_by(JournalEntry.entry_date.desc())
+    ).all()
+
+    suggestions: dict[int, list[JournalEntry]] = {}
+    for transaction in open_transactions:
+        matches: list[JournalEntry] = []
+        seen: set[int] = set()
+        for entry, line in rows:
+            if (
+                entry.company_id != transaction.company_id
+                or line.account_id != transaction.bank_account_id
+                or entry.id in seen
+            ):
+                continue
+            if transaction.amount > 0:
+                fits = line.debit_amount == transaction.amount
+            else:
+                fits = line.credit_amount == -transaction.amount
+            if fits:
+                seen.add(entry.id)
+                matches.append(entry)
+                if len(matches) >= limit:
+                    break
+        suggestions[transaction.id] = matches
+    return suggestions
 
 
 def match_transaction(

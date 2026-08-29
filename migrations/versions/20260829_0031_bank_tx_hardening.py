@@ -1,4 +1,7 @@
-"""Bankumsatz-Härtung: Status-CHECK und eindeutige Buchungsverknüpfung.
+"""Bankumsatz-Härtung: Status-CHECK und Index auf die Buchungsverknüpfung.
+
+Kein Unique-Index auf journal_entry_id: Teilzahlungen verknüpfen über
+settle_open_item legitim mehrere Bankumsätze mit derselben Buchung.
 
 Revision ID: 20260829_0031
 Revises: 20260829_0030
@@ -18,12 +21,10 @@ def upgrade() -> None:
         batch.create_check_constraint(
             "ck_bank_tx_status_known", "status IN ('open', 'matched', 'booked')"
         )
-    op.create_index(
-        "uq_bank_tx_journal_entry", "bank_transaction", ["journal_entry_id"], unique=True
-    )
+    op.create_index("ix_bank_tx_journal_entry", "bank_transaction", ["journal_entry_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("uq_bank_tx_journal_entry", table_name="bank_transaction")
+    op.drop_index("ix_bank_tx_journal_entry", table_name="bank_transaction")
     with op.batch_alter_table("bank_transaction") as batch:
         batch.drop_constraint("ck_bank_tx_status_known", type_="check")
