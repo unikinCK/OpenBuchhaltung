@@ -638,10 +638,35 @@ def _parse_date(value: str) -> date:
 
 
 def _parse_amount(value: str) -> Decimal:
+    """Parst deutsche (1.234,56) und englische (1,234.56) Beträge.
+
+    Kommen beide Trennzeichen vor, ist das letzte der Dezimaltrenner. Ein
+    einzelnes Trennzeichen mit genau drei Nachfolgeziffern (z. B. "1,234")
+    ist nicht entscheidbar und wird abgelehnt statt umgedeutet.
+    """
     normalized = value.replace(" ", "").replace(" ", "").replace("€", "")
-    if "," in normalized:
-        # Deutsches Format: 1.234,56
-        normalized = normalized.replace(".", "").replace(",", ".")
+    last_dot = normalized.rfind(".")
+    last_comma = normalized.rfind(",")
+    if last_dot >= 0 and last_comma >= 0:
+        thousands, decimal_sep = (",", ".") if last_dot > last_comma else (".", ",")
+        normalized = normalized.replace(thousands, "").replace(decimal_sep, ".")
+    elif last_dot >= 0 or last_comma >= 0:
+        separator = "." if last_dot >= 0 else ","
+        integer_part, _, fraction_part = normalized.rpartition(separator)
+        if separator in integer_part:
+            # Mehrfach vorkommend: reine Tausendertrenner (1.234.567).
+            normalized = normalized.replace(separator, "")
+        elif (
+            len(fraction_part) == 3
+            and fraction_part.isdigit()
+            and integer_part.lstrip("+-").isdigit()
+        ):
+            raise BankImportError(
+                f"Mehrdeutiger Betrag: {value} — Tausender- oder Dezimaltrennzeichen "
+                "nicht erkennbar."
+            )
+        else:
+            normalized = normalized.replace(separator, ".")
     try:
         return Decimal(normalized).quantize(Decimal("0.01"))
     except InvalidOperation as exc:

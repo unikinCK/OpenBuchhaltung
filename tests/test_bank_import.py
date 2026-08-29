@@ -134,6 +134,24 @@ def test_import_bank_csv_german_format_and_dedup(session: Session) -> None:
     assert len(audit) == 2
 
 
+def test_parse_amount_handles_german_and_english_formats() -> None:
+    from app.services.bank_import import _parse_amount
+
+    assert _parse_amount("1.234,56") == Decimal("1234.56")
+    assert _parse_amount("1,234.56") == Decimal("1234.56")
+    assert _parse_amount("-1,000.00") == Decimal("-1000.00")
+    assert _parse_amount("1.234.567,89") == Decimal("1234567.89")
+    assert _parse_amount("1.234.567") == Decimal("1234567.00")
+    assert _parse_amount("-9,90") == Decimal("-9.90")
+    assert _parse_amount("1234.56") == Decimal("1234.56")
+
+    for ambiguous in ("1,234", "1.234"):
+        with pytest.raises(BankImportError):
+            _parse_amount(ambiguous)
+    with pytest.raises(BankImportError):
+        _parse_amount("abc")
+
+
 def test_import_keeps_identical_rows_within_one_file(session: Session) -> None:
     """Zwei echte, identisch aussehende Zahlungen ohne Referenz bleiben erhalten."""
     company, bank, _ = _seed_company(session)
