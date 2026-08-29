@@ -7,7 +7,16 @@ from sqlalchemy import select
 from app import create_app
 from app.auth import hash_api_token, hash_password
 from app.services.audit_log import log_audit_event
-from domain.models import Account, Company, JournalEntry, TaxCode, Tenant, User
+from domain.models import (
+    Account,
+    Company,
+    FinTSConnection,
+    FinTSPendingDialog,
+    JournalEntry,
+    TaxCode,
+    Tenant,
+    User,
+)
 
 
 def _create_test_app(tmp_path: Path, **extra_config):
@@ -93,6 +102,79 @@ def test_tenant_bound_user_cannot_write_to_foreign_company(tmp_path):
         data={"name": "Manipuliert", "is_active": "false"},
     )
     assert update_response.status_code == 404
+
+
+def test_tenant_bound_user_cannot_touch_foreign_fints_resources(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_a_id, company_b_id = _seed_two_tenants_with_user(app)
+    foreign_dialog_id = "11111111-1111-1111-1111-111111111111"
+    with app.extensions["db_session_factory"]() as session:
+        company_b = session.get(Company, company_b_id)
+        foreign_account = Account(
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            code="1800",
+            name="Fremde Bank",
+            account_type="asset",
+        )
+        session.add(foreign_account)
+        session.flush()
+        foreign_connection = FinTSConnection(
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            bank_account_id=foreign_account.id,
+            name="Fremder Zugang",
+            blz="10010010",
+            login="fremd",
+            fints_url="https://fints.example.test/",
+        )
+        session.add(foreign_connection)
+        session.flush()
+        session.add(
+            FinTSPendingDialog(
+                id=foreign_dialog_id,
+                tenant_id=company_b.tenant_id,
+                company_id=company_b.id,
+                connection_id=foreign_connection.id,
+                step="init",
+                client_data=b"client",
+                dialog_data=b"dialog",
+                tan_request_data=b"tan",
+            )
+        )
+        session.commit()
+        foreign_connection_id = foreign_connection.id
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "nutzer-a", "password": "passwort-a"})
+
+    deactivate = client.post(
+        f"/bank/fints/{foreign_connection_id}/deaktivieren",
+        data={"company_id": str(company_a_id)},
+    )
+    assert deactivate.status_code == 404
+
+    sync = client.post(
+        f"/bank/fints/{foreign_connection_id}/abrufen",
+        data={"company_id": str(company_a_id), "pin": "1234"},
+    )
+    assert sync.status_code == 404
+
+    tan = client.post(
+        "/bank/fints/tan",
+        data={
+            "company_id": str(company_a_id),
+            "dialog_id": foreign_dialog_id,
+            "pin": "1234",
+            "tan": "000000",
+        },
+    )
+    assert tan.status_code == 404
+
+    with app.extensions["db_session_factory"]() as session:
+        connection = session.get(FinTSConnection, foreign_connection_id)
+        assert connection.is_active is True
+        assert session.get(FinTSPendingDialog, foreign_dialog_id) is not None
 
 
 def test_tenant_bound_user_cannot_create_new_tenant(tmp_path):

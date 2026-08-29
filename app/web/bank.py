@@ -34,7 +34,15 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, BankTransaction, ControllingUnit, JournalEntry, TaxCode
+from domain.models import (
+    Account,
+    BankTransaction,
+    ControllingUnit,
+    FinTSConnection,
+    FinTSPendingDialog,
+    JournalEntry,
+    TaxCode,
+)
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -341,10 +349,13 @@ def fints_connection_create_action():
 
 @main_bp.post("/bank/fints/<int:connection_id>/deaktivieren")
 def fints_connection_deactivate_action(connection_id: int):
-    company_id = request.form.get("company_id", type=int)
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        connection = session.get(FinTSConnection, connection_id)
+        if connection is None:
+            abort(404)
+        require_company_access(session, connection.company_id)
+        company_id = connection.company_id
         try:
             set_fints_connection_active(
                 session=session,
@@ -362,10 +373,13 @@ def fints_connection_deactivate_action(connection_id: int):
 
 @main_bp.post("/bank/fints/<int:connection_id>/abrufen")
 def fints_sync_action(connection_id: int):
-    company_id = request.form.get("company_id", type=int)
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        connection = session.get(FinTSConnection, connection_id)
+        if connection is None:
+            abort(404)
+        require_company_access(session, connection.company_id)
+        company_id = connection.company_id
         try:
             result = start_fints_sync(
                 session=session,
@@ -393,7 +407,13 @@ def fints_tan_action():
 
     session_factory = get_session_factory()
     with session_factory() as session:
-        require_company_access(session, company_id)
+        pending = session.get(FinTSPendingDialog, dialog_id)
+        if pending is None:
+            flask_session.pop("fints_challenge", None)
+            flash("TAN-Dialog nicht gefunden oder bereits abgeschlossen.", "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+        require_company_access(session, pending.company_id)
+        company_id = pending.company_id
         try:
             result = submit_fints_tan(
                 session=session,
