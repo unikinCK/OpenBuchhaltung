@@ -10,6 +10,10 @@
   --success-text: #1e6b3a;
   --error-bg: #fdeaea;
   --error-text: #a12622;
+  --info-bg: #e7f0f8;
+  --info-text: #1f5f8b;
+  --warning-bg: #fdf3e1;
+  --warning-text: #8a5a10;
   --topbar: #16344a;
 }
 
@@ -395,6 +399,16 @@ tr.entry-lines td {
 .flash-list li.error {
   background: var(--error-bg);
   color: var(--error-text);
+}
+
+.flash-list li.info {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.flash-list li.warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .muted {

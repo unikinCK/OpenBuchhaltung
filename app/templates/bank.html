@@ -77,7 +77,7 @@
           <p>{{ fints_challenge.challenge }}</p>
           <form method="post" action="{{ url_for('main.fints_tan_action') }}" class="stacked">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="company_id" value="{{ fints_challenge.company_id }}" />
             <input type="hidden" name="dialog_id" value="{{ fints_challenge.dialog_id }}" />
             <label for="fints_tan_pin">PIN (erneut eingeben, wird nicht gespeichert)</label>
             <input id="fints_tan_pin" name="pin" type="password" autocomplete="off" required />
@@ -91,7 +91,8 @@
           </form>
           <form method="post" action="{{ url_for('main.fints_tan_cancel_action') }}">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="company_id" value="{{ fints_challenge.company_id }}" />
+            <input type="hidden" name="dialog_id" value="{{ fints_challenge.dialog_id }}" />
             <button type="submit" class="secondary">Abbrechen</button>
           </form>
         </div>
