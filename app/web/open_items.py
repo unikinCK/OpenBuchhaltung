@@ -20,13 +20,18 @@ from app.web.helpers import (
     changed_by,
     company_context,
     get_session_factory,
+    pagination_args,
     require_company_access,
 )
 from domain.models import Account, BankTransaction, JournalEntry, OpenItem
 
+# Obergrenze für Verknüpfungs-Dropdowns (jüngste Einträge).
+LINK_SELECT_LIMIT = 200
+
 
 @main_bp.get("/offene-posten")
 def open_items_page():
+    limit, offset = pagination_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -47,20 +52,22 @@ def open_items_page():
                 .scalars()
                 .all()
             )
+            # Auswahllisten für Verknüpfung/Ausgleich: die jüngsten Einträge
+            # genügen — sonst wächst die Seite quadratisch (Zeilen × Optionen).
             journal_entries = (
                 session.execute(
-                    scoped_select(JournalEntry, company_id=selected_company_id).order_by(
-                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
-                    )
+                    scoped_select(JournalEntry, company_id=selected_company_id)
+                    .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+                    .limit(LINK_SELECT_LIMIT)
                 )
                 .scalars()
                 .all()
             )
             bank_transactions = (
                 session.execute(
-                    scoped_select(BankTransaction, company_id=selected_company_id).order_by(
-                        BankTransaction.booking_date.desc(), BankTransaction.id.desc()
-                    )
+                    scoped_select(BankTransaction, company_id=selected_company_id)
+                    .order_by(BankTransaction.booking_date.desc(), BankTransaction.id.desc())
+                    .limit(LINK_SELECT_LIMIT)
                 )
                 .scalars()
                 .all()
@@ -74,6 +81,9 @@ def open_items_page():
                 if item.status == "open":
                     totals[item.item_type] += item.open_amount
 
+    open_items_total = len(open_items)
+    open_items = open_items[offset : offset + limit]
+
     return render_template(
         "offene_posten.html",
         companies=companies,
@@ -82,6 +92,9 @@ def open_items_page():
         journal_entries=journal_entries,
         bank_transactions=bank_transactions,
         open_items=open_items,
+        open_items_total=open_items_total,
+        limit=limit,
+        offset=offset,
         include_settled=include_settled,
         totals=totals,
         today=date.today().isoformat(),

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}Bank – OpenBuchhaltung{% endblock %}
 
@@ -181,6 +182,15 @@
 
   <section class="card">
     <h2>Umsätze</h2>
+    {% if selected_company_id %}
+      <p>
+        {% if status_filter == 'open' %}
+          <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}">Alle anzeigen</a>
+        {% else %}
+          <a href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">Nur offene anzeigen</a>
+        {% endif %}
+      </p>
+    {% endif %}
     {% if transactions %}
       <table>
         <thead>
@@ -278,6 +288,8 @@
           {% endfor %}
         </tbody>
       </table>
+      {{ pagination('main.bank_page', transactions_total, limit, offset, selected_company_id,
+                    extra={'status': status_filter} if status_filter else {}) }}
     {% else %}
       <p class="muted">Noch keine Bankumsätze importiert.</p>
     {% endif %}

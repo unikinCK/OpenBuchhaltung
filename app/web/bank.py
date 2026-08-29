@@ -6,6 +6,7 @@ from datetime import date
 
 from flask import abort, current_app, flash, redirect, render_template, request, url_for
 from flask import session as flask_session
+from sqlalchemy import func, select
 
 from app.services.bank_import import (
     BankImportError,
@@ -14,7 +15,7 @@ from app.services.bank_import import (
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
-    suggest_matches,
+    suggest_matches_for,
 )
 from app.services.fints_sync import (
     FinTSSyncError,
@@ -33,6 +34,7 @@ from app.web.helpers import (
     changed_by,
     company_context,
     get_session_factory,
+    pagination_args,
     require_company_access,
 )
 from domain.models import (
@@ -49,6 +51,8 @@ from domain.services.journal_entry_validation import JournalEntryValidationError
 
 @main_bp.get("/bank")
 def bank_page():
+    limit, offset = pagination_args()
+    status_filter = (request.args.get("status") or "").strip() or None
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -57,6 +61,7 @@ def bank_page():
         contra_accounts = []
         tax_codes = []
         transactions = []
+        transactions_total = 0
         cost_centers = []
         profit_centers = []
         fints_connections = []
@@ -83,11 +88,21 @@ def bank_page():
                 .scalars()
                 .all()
             )
+            transactions_stmt = scoped_select(BankTransaction, company_id=selected_company_id)
+            if status_filter:
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.status == status_filter
+                )
+            transactions_total = session.execute(
+                select(func.count()).select_from(transactions_stmt.subquery())
+            ).scalar_one()
             transactions = (
                 session.execute(
-                    scoped_select(BankTransaction, company_id=selected_company_id).order_by(
+                    transactions_stmt.order_by(
                         BankTransaction.booking_date.desc(), BankTransaction.id.desc()
                     )
+                    .limit(limit)
+                    .offset(offset)
                 )
                 .scalars()
                 .all()
@@ -103,11 +118,7 @@ def bank_page():
             )
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
-            for transaction in transactions:
-                if transaction.status == "open":
-                    suggestions_by_tx[transaction.id] = suggest_matches(
-                        session=session, transaction=transaction
-                    )
+            suggestions_by_tx = suggest_matches_for(session=session, transactions=transactions)
 
     fints_challenge = flask_session.get("fints_challenge")
     if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
@@ -122,6 +133,10 @@ def bank_page():
         contra_accounts=contra_accounts,
         tax_codes=tax_codes,
         transactions=transactions,
+        transactions_total=transactions_total,
+        limit=limit,
+        offset=offset,
+        status_filter=status_filter,
         suggestions_by_tx=suggestions_by_tx,
         cost_centers=cost_centers,
         profit_centers=profit_centers,

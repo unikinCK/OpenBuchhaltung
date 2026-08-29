@@ -411,6 +411,13 @@ tr.entry-lines td {
   color: var(--warning-text);
 }
 
+.pagination {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
 .muted {
   color: var(--text-muted);
 }

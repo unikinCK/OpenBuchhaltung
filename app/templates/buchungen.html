@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
 
 {% block title %}Buchungen – OpenBuchhaltung{% endblock %}
 
@@ -228,6 +229,7 @@
           {% endfor %}
         </tbody>
       </table>
+      {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id) }}
     {% else %}
       <p class="muted">Noch keine Buchungen vorhanden.</p>
     {% endif %}
