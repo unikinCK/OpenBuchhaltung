@@ -134,7 +134,7 @@
           {% if not fiscal_year.is_closed %}
             {% if is_admin %}
               <form method="post" action="{{ url_for('main.close_fiscal_year_action', fiscal_year_id=fiscal_year.id) }}"
-                    onsubmit="return confirm('Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.');">
+                    data-confirm="Geschäftsjahr {{ fiscal_year.label }} wirklich abschließen? Alle Perioden werden gesperrt.">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                 <button type="submit">Geschäftsjahr {{ fiscal_year.label }} abschließen</button>

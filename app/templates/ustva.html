@@ -130,7 +130,7 @@
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
           <input type="hidden" name="period" value="{{ period_label }}" />
-          <button type="submit" onclick="return confirm('{{ declaration_display_name }} {{ period_label }} als Snapshot festhalten?');">{{ declaration_display_name }} festhalten</button>
+          <button type="submit" data-confirm="{{ declaration_display_name }} {{ period_label }} als Snapshot festhalten?">{{ declaration_display_name }} festhalten</button>
         </form>
       {% endif %}
     {% endif %}

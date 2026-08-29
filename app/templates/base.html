@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}OpenBuchhaltung{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -62,7 +63,7 @@
       <div class="company-bar">
         <form method="get" action="{{ request.path }}">
           <label for="company-select">Gesellschaft:</label>
-          <select id="company-select" name="company_id" onchange="this.form.submit()">
+          <select id="company-select" name="company_id" data-autosubmit>
             {% for company in companies %}
               <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
             {% endfor %}
