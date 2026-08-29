@@ -33,7 +33,9 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Belege & E-Rechnung:** getrenntes Beleg-/Erfassungsdatum, Uploads mit SHA-256-Hash und Versionierung,
   optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
   E-Rechnungs-Export.
-- **Bank & OPOS:** CSV-Bankimport, Deduplizierung, Matching,
+- **Bank & OPOS:** Kontoauszugs-Import (CSV, CAMT.053, MT940) und
+  FinTS/HBCI-Direktabruf mit TAN-Flow, mehrere Bankkonten je Gesellschaft,
+  Deduplizierung über Bankreferenzen, Matching,
   offene Posten und Zahlungsausgleich.
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
@@ -238,6 +240,7 @@ Alle UI-Seiten erfordern eine Anmeldung. `seed-demo` legt folgende Benutzer an:
 | `admin`      | `admin123`       | Admin      | alle Mandanten |
 | `buchhalter` | `buchhalter123`  | Buchhalter | nur Demo Mandant |
 | `pruefer`    | `pruefer123`     | Prüfer     | nur lesen |
+| `support`    | `support123`     | Support    | alle Mandanten, nur lesen |
 
 Weitere Benutzer per CLI:
 ```bash
@@ -267,18 +270,49 @@ export DOCUMENT_MAX_UPLOAD_BYTES=10485760
 export DOCUMENT_MIN_UPLOAD_BYTES=1024
 ```
 
-## Bank-CSV-Import
+## Bankimport & FinTS
 
-Unter **Bank** lassen sich Kontoumsätze als CSV importieren (Spalten-Aliasse:
-Buchungstag/Datum, Betrag — auch deutsches Format `1.234,56` —, Verwendungszweck,
-Auftraggeber/Empfänger; Trennzeichen `,` oder `;`). Re-Importe werden dedupliziert.
+Unter **Bank** lassen sich Kontoauszüge in drei Formaten hochladen — das Format
+wird automatisch erkannt (Dateiendung plus Inhalt, Latin-1-Fallback beim Decoding):
+
+- **CSV** (Spalten-Aliasse: Buchungstag/Datum, Betrag, Verwendungszweck,
+  Auftraggeber/Empfänger; Trennzeichen `,` oder `;`). Beträge werden im deutschen
+  (`1.234,56`) und englischen Format (`1,234.56`) akzeptiert; mehrdeutige Werte
+  wie `1,234` werden abgelehnt statt still umgedeutet.
+- **CAMT.053** (ISO 20022, namespace-agnostisch für camt.053.001.02–.08)
+- **MT940** (`.sta`, auch als FinTS-Rückgabeformat)
+
+Re-Importe werden dedupliziert; der Duplikat-Hash berücksichtigt die bankseitige
+Referenz (CAMT `AcctSvcrRef`/`EndToEndId`, MT940-Bank-/EREF-Referenz), sodass
+echte Doppelumsätze (z. B. zwei identische Kartenzahlungen am selben Tag)
+erhalten bleiben. Beispiel-CSV: `data/demo/bank_demo.csv`.
+
+**FinTS/HBCI-Direktabruf:** Je Gesellschaft lassen sich Bankzugänge (BLZ, Login,
+FinTS-URL, optional IBAN bei Mehrkonten-Zugängen) hinterlegen und Umsätze direkt
+abrufen. PIN und TAN werden **nie gespeichert** — die PIN wird bei jedem Abruf
+eingegeben. Verlangt die Bank eine TAN (PSD2), wird der Dialog eingefroren und
+nach TAN-Eingabe fortgesetzt; auch entkoppelte Verfahren (pushTAN-Freigabe in
+der Banking-App) werden unterstützt. Eingefrorene Dialoge verfallen nach
+15 Minuten. Voraussetzung ist eine registrierte Produktkennung der Deutschen
+Kreditwirtschaft (<https://www.fints.org>):
+
+```bash
+export FINTS_PRODUCT_ID=IHRE-PRODUKT-ID
+```
+
+**Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
+(Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein
+anderes Bankkonto umhängen; bereits erzeugte Buchungen bleiben dabei nach dem
+GoBD-Grundsatz unverändert (Saldo bei Bedarf per Umgliederungsbuchung).
 
 Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
-(Vorschläge per Betrags-Matching auf dem Bankkonto) oder **direkt verbucht** werden:
-Gegenkonto wählen, optional Steuercode, Kostenstelle und Profitcenter — der
-Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt. Die Dimensionen
-liegen auf Gegenkonto und automatisch erzeugter Steuerzeile, nicht auf dem
-Bankkonto. Beispiel-CSV: `data/demo/bank_demo.csv`.
+(Vorschläge per Betrags-Matching auf dem Bankkonto; eine Buchung ist höchstens
+mit einem Umsatz verknüpfbar — Teilzahlungen laufen über OPOS) oder **direkt
+verbucht** werden: Gegenkonto wählen, optional Steuercode, Kostenstelle und
+Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt.
+Die Dimensionen liegen auf Gegenkonto und automatisch erzeugter Steuerzeile,
+nicht auf dem Bankkonto. Umsätze in Fremdwährung werden nicht automatisch
+verbucht. Die Umsatzliste ist paginiert und nach Status filterbar.
 
 ## Offene Posten (OPOS)
 
@@ -417,6 +451,19 @@ Basis-Endpunkte:
 - `GET /api/v1/trial-balance` — optional `date_from`/`date_to` (JJJJ-MM-TT)
 - `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
 - `GET /api/v1/balance-sheet` — optional `date_to` (Stichtag; Alias `as_of`)
+
+Bank & FinTS:
+
+- `GET/POST /api/v1/bank-accounts` — Bankkonten (Kontoart `asset`) auflisten/anlegen
+- `GET /api/v1/bank-transactions` — paginiert (`limit` Standard 200, max. 1000;
+  `offset`; Antwortfeld `total`), optional `status` und `include_suggestions`
+- `POST /api/v1/bank-transactions/import` — Kontoauszug (CSV/CAMT.053/MT940) hochladen
+- `POST /api/v1/bank-transactions/<id>/match` bzw. `/book` — zuordnen/verbuchen
+- `POST /api/v1/bank-transactions/reassign`, `POST /api/v1/bank-transactions/<id>/bank-account`
+  — Umsätze auf ein anderes Bankkonto umhängen
+- `GET/POST /api/v1/fints-connections`, `POST /api/v1/fints-connections/<id>/active`
+- `POST /api/v1/fints-connections/<id>/sync` — Abruf; bei TAN-Pflicht `202` mit `dialog_id`
+- `POST /api/v1/fints-dialogs/<id>/tan` — TAN bestätigen bzw. pushTAN-Freigabe prüfen
 
 Die Report-Endpunkte akzeptieren einen **Zeitraum**: GuV und Summen-/Saldenliste
 werten Buchungen mit `entry_date` in `[date_from, date_to]` aus, die Bilanz als
@@ -624,11 +671,10 @@ curl -X POST http://localhost:8000/api/v1/mcp/call \
 ## MCP-Server (API als Tools)
 
 Zusätzlich zum Bridge-Endpunkt gibt es einen eigenständigen **MCP-Server**, der jeden
-REST-Endpunkt aus `/api/v1` als MCP-Tool bereitstellt (`health`, `list_companies`,
-`create_tenant_with_company`, `create_account`, `list_accounts`, `create_journal_entry`,
-`create_fixed_asset`, `list_fixed_assets`, `get_depreciation_schedule`, `post_depreciation`,
-`get_trial_balance`, `get_income_statement`, `get_balance_sheet` sowie die drei
-CSV-Exporte). So können MCP-fähige Clients (z. B. Claude Desktop) direkt buchen und
+REST-Endpunkt aus `/api/v1` als MCP-Tool bereitstellt — inzwischen über 100 Tools
+für alle Fachbereiche (Buchungen, Berichte, Bank/FinTS inkl. TAN-Flow, Belege,
+OCR/Belegabgleich, Anlagen, Lohn, UStVA/ELSTER, Controlling, Exporte, Verwaltung).
+So können MCP-fähige Clients (z. B. Claude Desktop) direkt buchen und
 auswerten. Der Server spricht JSON-RPC 2.0 über stdio und benötigt keine zusätzlichen
 Abhängigkeiten.
 

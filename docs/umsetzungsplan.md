@@ -7,8 +7,10 @@ OpenBuchhaltung wird eine webbasierte Open-Source-Buchhaltungssoftware für deut
 **Technologie-Stack (Start):**
 - Backend: Python + Flask
 - Datenbank: SQLite (Entwicklung/Einzelmandant), optional PostgreSQL oder MariaDB (Produktion)
-- Frontend: Flask-Templates + HTMX/Alpine.js (später optional SPA)
-- Hintergrundjobs: Celery/RQ (für Export, OCR, E-Mail, Prüfungen)
+- Frontend: Flask-Templates + eigenes CSS und Vanilla-JS (`app/static/app.js`,
+  CSP ohne Inline-Skripte); HTMX/Alpine.js wurde nicht eingesetzt (später optional SPA)
+- Hintergrundjobs: Celery/RQ (für Export, OCR, E-Mail, Prüfungen) — **noch nicht
+  umgesetzt**, der `worker`-Service im Compose ist ein Platzhalter
 
 ## 2. Einordnung von GnuCash (Desktop) als Referenz
 GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HGB-Fokus sind folgende Punkte relevant:
@@ -42,16 +44,16 @@ GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HG
    - Vollständiger Audit-Log
 
 ### V1.5
-- Offene-Posten-Logik Debitor/Kreditor
-- Zahlungsabgleich (CSV-Import Bankumsätze)
-- Mahnstufen (Basis)
+- [x] Offene-Posten-Logik Debitor/Kreditor
+- [x] Zahlungsabgleich (Kontoauszugs-Import CSV/CAMT.053/MT940 + FinTS-Direktabruf)
+- [ ] Mahnstufen (Basis)
 - [x] Anlagenverzeichnis + Anlagenbuchhaltung (siehe Sprint N)
 
 ### V2
-- E-Rechnung (XRechnung/ZUGFeRD Import/Export)
-- Automatisierte Belegerkennung (OCR + Buchungsvorschläge)
-- Konsolidierung/mehrere Gesellschaften
-- API für Steuerberater-Tools
+- [x] E-Rechnung (XRechnung/ZUGFeRD Import/Export)
+- [x] Automatisierte Belegerkennung (OCR + Buchungsvorschläge, LLM-Belegabgleich)
+- [ ] Konsolidierung/mehrere Gesellschaften
+- [x] API für Steuerberater-Tools (REST + MCP-Server, UI/API/MCP-Parität)
 
 ## 4. Zielarchitektur
 
@@ -297,6 +299,20 @@ UI, REST-API und MCP angeboten und gepflegt.
       TAN-Flow inkl. entkoppelter Verfahren über eingefrorene Dialoge
       [fints_pending_dialog, 15-Min-Ablauf]; FINTS_PRODUCT_ID als Voraussetzung;
       UI/API/MCP-Parität und Tests mit Fake-FinTS-Client)*
+- [x] Bank-Härtung & Mehrkonten *(Sprint 2026-08-29, Umsetzung des Code-Reviews:
+      FinTS-Web-Routen scopen gegen die geladene Ressource [IDOR-Fix];
+      Dedup-Hash mit Bankreferenz [CAMT/MT940] und Vorkommens-Zähler,
+      neue Spalte bank_transaction.bank_reference [Migration 0030];
+      Betragsparser für deutsches + englisches Format, mehrdeutige Werte abgelehnt;
+      atomare Bankverbuchung [create_journal_entry(commit=False)], Buchung nur
+      einmal per Match verknüpfbar, Währungsprüfung; TAN-Dialog-Lebenszyklus
+      vereinheitlicht inkl. cancel_pending_dialog; Status-CHECK + Index
+      [Migration 0031]; Bank-API paginiert, Buchungsvorschläge in einer Query,
+      Import-Konflikte [IntegrityError] als Duplikate; UI: company-gebundene
+      TAN-Challenge, Pagination für Bank/Buchungen/Belege/OPOS, gemeinsamer
+      Eingangsrechnungs-Service [incoming_invoice] für OCR/E-Rechnung in Web+API,
+      Inline-JS in app.js überführt und CSP ohne script-src 'unsafe-inline',
+      Doppel-Submit-Schutz, gruppierte Navigation, Flash-Kategorien info/warning)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*

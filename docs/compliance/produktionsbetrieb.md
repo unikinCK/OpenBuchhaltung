@@ -154,7 +154,26 @@ Bei Exporten an Steuerberater, Wirtschaftspruefer oder Betriebspruefer:
 - sichere Uebertragung verwenden
 - Zugriffe und Downloads protokollieren
 
-## 11. Mindestabnahme vor Produktivstart
+## 11. Bankanbindung (FinTS)
+
+Fuer den FinTS/HBCI-Direktabruf gelten folgende Betriebsregeln:
+
+- `FINTS_PRODUCT_ID` muss auf eine bei der Deutschen Kreditwirtschaft
+  registrierte Produktkennung gesetzt sein (<https://www.fints.org>);
+  ohne Kennung verweigert die Anwendung den Abruf.
+- PIN und TAN werden zu keinem Zeitpunkt persistiert oder protokolliert;
+  die PIN wird bei jedem Abruf (und bei der TAN-Bestaetigung erneut)
+  eingegeben.
+- Wartet ein Abruf auf eine TAN, wird der Dialogzustand serialisiert in
+  `fints_pending_dialog` zwischengespeichert (ohne PIN). Diese Datensaetze
+  verfallen nach 15 Minuten und werden bei Abschluss, Fehler oder Abbruch
+  geloescht. Sie liegen unverschluesselt in der Datenbank — wer die
+  DB-Datei als entsprechend schutzwuerdig einstuft, verschluesselt sie
+  auf Volume- oder Datenbankebene.
+- Bankzugaenge (BLZ, Login, FinTS-URL) sind Stammdaten je Gesellschaft;
+  das Anlegen und Deaktivieren wird im Audit-Log protokolliert.
+
+## 12. Mindestabnahme vor Produktivstart
 
 Vor Produktivstart sollten folgende Punkte bestaetigt sein:
 
