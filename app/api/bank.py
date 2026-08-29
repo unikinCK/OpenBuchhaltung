@@ -55,6 +55,7 @@ def _transaction_dict(transaction: BankTransaction) -> dict[str, object]:
         "currency_code": transaction.currency_code,
         "purpose": transaction.purpose,
         "counterparty": transaction.counterparty,
+        "bank_reference": transaction.bank_reference,
         "status": transaction.status,
         "journal_entry_id": transaction.journal_entry_id,
         "imported_at": transaction.imported_at.isoformat(),

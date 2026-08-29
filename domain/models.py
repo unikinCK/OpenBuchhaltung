@@ -560,6 +560,9 @@ class BankTransaction(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     purpose: Mapped[str] = mapped_column(String(255), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Bankseitige Referenz (CAMT AcctSvcrRef/EndToEndId, MT940-Bankreferenz);
+    # fließt in den Dedup-Hash ein, damit echte Doppelumsätze unterscheidbar bleiben.
+    bank_reference: Mapped[str | None] = mapped_column(String(64))
     dedup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     journal_entry_id: Mapped[int | None] = mapped_column(

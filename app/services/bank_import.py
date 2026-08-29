@@ -153,6 +153,10 @@ def import_bank_items(
             select(BankTransaction.dedup_hash).where(BankTransaction.company_id == company.id)
         ).scalars()
     )
+    # Bestände aus Importen vor der Referenz-Auswertung tragen referenzlose
+    # Hashes; jede solche Zeile darf höchstens eine Referenz-Zeile "schlucken".
+    legacy_matchable = set(existing_hashes)
+    occurrence_in_batch: dict[str, int] = {}
 
     for item in items:
         report.total_rows += 1
@@ -166,16 +170,30 @@ def import_bank_items(
 
         purpose = item.purpose[:255]
         counterparty = item.counterparty[:255] if item.counterparty else None
-        dedup_hash = _dedup_hash(
+        hash_fields = dict(
             bank_account_id=bank_account.id,
             booking_date=item.booking_date,
             amount=item.amount,
             purpose=purpose,
             counterparty=counterparty,
         )
-        if dedup_hash in existing_hashes:
-            report.duplicate_rows += 1
-            continue
+        legacy_hash = _dedup_hash(**hash_fields)
+        if item.bank_reference:
+            dedup_hash = _dedup_hash(**hash_fields, bank_reference=item.bank_reference)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
+            if legacy_hash in legacy_matchable:
+                legacy_matchable.discard(legacy_hash)
+                report.duplicate_rows += 1
+                continue
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            dedup_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
 
         session.add(
             BankTransaction(
@@ -187,6 +205,7 @@ def import_bank_items(
                 currency_code=item.currency_code or company.currency_code,
                 purpose=purpose,
                 counterparty=counterparty,
+                bank_reference=item.bank_reference,
                 dedup_hash=dedup_hash,
             )
         )
@@ -424,14 +443,22 @@ def _reassign(
         ).scalars()
     )
 
+    occurrence_in_batch: dict[str, int] = {}
     for transaction in pending:
-        new_hash = _dedup_hash(
+        hash_fields = dict(
             bank_account_id=target.id,
             booking_date=transaction.booking_date,
             amount=transaction.amount,
             purpose=transaction.purpose,
             counterparty=transaction.counterparty,
         )
+        if transaction.bank_reference:
+            new_hash = _dedup_hash(**hash_fields, bank_reference=transaction.bank_reference)
+        else:
+            legacy_hash = _dedup_hash(**hash_fields)
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            new_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
         if new_hash in taken_hashes:
             raise BankImportError(
                 f"Bankumsatz {transaction.id} ({transaction.booking_date.isoformat()}, "
@@ -628,8 +655,21 @@ def _dedup_hash(
     amount: Decimal,
     purpose: str,
     counterparty: str | None,
+    bank_reference: str | None = None,
+    occurrence: int = 1,
 ) -> str:
+    """Duplikat-Hash einer Umsatzzeile.
+
+    Liegt eine bankseitige Referenz vor, ist sie Teil der Identität. Ohne
+    Referenz unterscheidet ``occurrence`` gleich aussehende echte Zahlungen
+    innerhalb einer Datei (das erste Vorkommen bleibt hash-kompatibel zu
+    Beständen aus der Zeit vor der Referenz-Auswertung).
+    """
     raw = f"{bank_account_id}|{booking_date.isoformat()}|{amount}|{purpose}|{counterparty or ''}"
+    if bank_reference:
+        raw += f"|ref:{bank_reference}"
+    elif occurrence > 1:
+        raw += f"|n:{occurrence}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

@@ -134,6 +134,36 @@ def test_import_bank_csv_german_format_and_dedup(session: Session) -> None:
     assert len(audit) == 2
 
 
+def test_import_keeps_identical_rows_within_one_file(session: Session) -> None:
+    """Zwei echte, identisch aussehende Zahlungen ohne Referenz bleiben erhalten."""
+    company, bank, _ = _seed_company(session)
+    twin_csv = (
+        "Buchungstag;Verwendungszweck;Auftraggeber/Empfänger;Betrag\n"
+        "05.07.2026;Kartenzahlung;Baecker;-3,50\n"
+        "05.07.2026;Kartenzahlung;Baecker;-3,50\n"
+    )
+
+    report = import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(twin_csv),
+        changed_by="tester",
+    )
+    assert report.imported_rows == 2
+    assert report.duplicate_rows == 0
+
+    second = import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(twin_csv),
+        changed_by="tester",
+    )
+    assert second.imported_rows == 0
+    assert second.duplicate_rows == 2
+
+
 def test_import_reports_row_errors(session: Session) -> None:
     company, bank, _ = _seed_company(session)
     broken_csv = "Buchungstag;Verwendungszweck;Betrag\nkein-datum;Test;10,00\n05.07.2026;;5,00\n"

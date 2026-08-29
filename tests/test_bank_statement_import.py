@@ -195,6 +195,92 @@ def test_import_bank_statement_camt_and_dedup(session: Session):
     assert {tx.status for tx in transactions} == {"open"}
 
 
+CAMT_TWIN_PAYMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <Stmt>
+      <Ntry>
+        <Amt Ccy="EUR">3.50</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <BookgDt><Dt>2026-08-10</Dt></BookgDt>
+        <AcctSvcrRef>REF-A-1</AcctSvcrRef>
+        <AddtlNtryInf>Kartenzahlung Baecker</AddtlNtryInf>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">3.50</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <BookgDt><Dt>2026-08-10</Dt></BookgDt>
+        <AcctSvcrRef>REF-A-2</AcctSvcrRef>
+        <AddtlNtryInf>Kartenzahlung Baecker</AddtlNtryInf>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>
+"""
+
+
+def test_camt_identical_payments_with_distinct_references_both_import(session: Session):
+    company, bank = _seed_company(session)
+
+    report = import_bank_statement(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        file_name="auszug.xml",
+        content=CAMT_TWIN_PAYMENTS.encode("utf-8"),
+        changed_by="tester",
+    )
+    assert report.imported_rows == 2
+    references = set(session.execute(select(BankTransaction.bank_reference)).scalars())
+    assert references == {"REF-A-1", "REF-A-2"}
+
+    # Re-Import bleibt idempotent.
+    report = import_bank_statement(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        file_name="auszug.xml",
+        content=CAMT_TWIN_PAYMENTS.encode("utf-8"),
+        changed_by="tester",
+    )
+    assert report.imported_rows == 0
+    assert report.duplicate_rows == 2
+
+
+def test_reference_rows_dedup_against_legacy_rows_without_reference(session: Session):
+    """Altbestand ohne Referenz zählt beim Re-Import mit Referenz als Duplikat."""
+    company, bank = _seed_company(session)
+
+    legacy_csv = "Buchungstag;Verwendungszweck;Auftraggeber/Empfänger;Betrag\n10.08.2026;Kartenzahlung Baecker;;-3,50\n"
+    report = import_bank_statement(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        file_name="umsatz.csv",
+        content=legacy_csv.encode("utf-8"),
+        changed_by="tester",
+    )
+    assert report.imported_rows == 1
+
+    report = import_bank_statement(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        file_name="auszug.xml",
+        content=CAMT_TWIN_PAYMENTS.encode("utf-8"),
+        changed_by="tester",
+    )
+    # Eine Referenz-Zeile "verbraucht" den Altbestand, die zweite ist neu.
+    assert report.duplicate_rows == 1
+    assert report.imported_rows == 1
+    assert len(session.execute(select(BankTransaction)).scalars().all()) == 2
+
+
+def test_parse_mt940_extracts_references():
+    rows = parse_mt940(MT940_SAMPLE.encode("utf-8"))
+    assert [row.bank_reference for row in rows] == ["STRIPE-REF-1", "KD-1001"]
+
+
 def test_import_bank_statement_mt940_latin1(session: Session):
     company, bank = _seed_company(session)
     content = MT940_SAMPLE.replace("ABO AUGUST", "GEBÜHR AUGUST").encode("latin-1")
