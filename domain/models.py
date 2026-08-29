@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Numeric,
@@ -542,6 +543,12 @@ class BankTransaction(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "dedup_hash", name="uq_bank_tx_company_hash"),
         CheckConstraint("amount != 0", name="ck_bank_tx_amount_non_zero"),
+        CheckConstraint(
+            "status IN ('open', 'matched', 'booked')", name="ck_bank_tx_status_known"
+        ),
+        # Eine Buchung darf höchstens mit einem Bankumsatz verknüpft sein
+        # (NULL-Werte kollidieren in SQLite/PostgreSQL/MariaDB nicht).
+        Index("uq_bank_tx_journal_entry", "journal_entry_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

@@ -309,6 +309,15 @@ def match_transaction(
     if entry is None or entry.company_id != transaction.company_id:
         raise BankImportError("Buchung nicht gefunden.")
 
+    already_linked = session.execute(
+        select(BankTransaction.id).where(
+            BankTransaction.journal_entry_id == entry.id,
+            BankTransaction.id != transaction.id,
+        )
+    ).first()
+    if already_linked is not None:
+        raise BankImportError("Die Buchung ist bereits einem anderen Bankumsatz zugeordnet.")
+
     transaction.journal_entry_id = entry.id
     transaction.status = "matched"
 
@@ -570,6 +579,8 @@ def book_transaction(
         profit_center_id=profit_center_id,
     )
 
+    # commit=False: Buchung und Statuswechsel des Bankumsatzes müssen atomar
+    # persistiert werden, sonst kann derselbe Umsatz doppelt verbucht werden.
     entry = create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -580,6 +591,7 @@ def book_transaction(
             changed_by=changed_by,
             lines=[bank_line, contra_line],
         ),
+        commit=False,
     )
 
     transaction.journal_entry_id = entry.id

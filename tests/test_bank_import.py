@@ -251,6 +251,18 @@ def test_suggest_and_match_transaction(session: Session) -> None:
             changed_by="tester",
         )
 
+    # Dieselbe Buchung darf keinem zweiten Bankumsatz zugeordnet werden.
+    other = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    with pytest.raises(BankImportError, match="anderen Bankumsatz"):
+        match_transaction(
+            session=session,
+            transaction_id=other.id,
+            journal_entry_id=entry.id,
+            changed_by="tester",
+        )
+
 
 def _second_bank_account(session: Session, company: Company) -> Account:
     account = Account(

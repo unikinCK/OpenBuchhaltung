@@ -142,7 +142,15 @@ def build_periods_for_fiscal_year(fiscal_year: FiscalYear) -> list[Period]:
     return periods
 
 
-def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> JournalEntry:
+def create_journal_entry(
+    *, session: Session, payload: JournalEntryInput, commit: bool = True
+) -> JournalEntry:
+    """Legt eine Buchung an.
+
+    Mit ``commit=False`` wird nur geflusht — der Aufrufer committet selbst und
+    kann so weitere Änderungen (z. B. den Statuswechsel eines Bankumsatzes)
+    atomar mit der Buchung zusammenfassen.
+    """
     company = session.get(Company, payload.company_id)
     if company is None:
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
@@ -275,8 +283,11 @@ def create_journal_entry(*, session: Session, payload: JournalEntryInput) -> Jou
         },
     )
 
-    session.commit()
-    session.refresh(entry)
+    if commit:
+        session.commit()
+        session.refresh(entry)
+    else:
+        session.flush()
     return entry
 
 
