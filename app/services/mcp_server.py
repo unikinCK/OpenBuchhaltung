@@ -1263,6 +1263,97 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_bank_booking_rules",
+        description=(
+            "Listet Auto-Kontierungsregeln für Bankumsätze (Teilstring-Muster auf "
+            "Verwendungszweck/Gegenseite -> Gegenkonto, optional Steuercode und "
+            "Controlling-Dimensionen)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Regeln einschließen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-booking-rules",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_bank_booking_rule",
+        description=(
+            "Legt eine Auto-Kontierungsregel an: Trifft das Muster (Teilstring, "
+            "ohne Groß-/Kleinschreibung, min. 3 Zeichen) auf Verwendungszweck oder "
+            "Gegenseite zu, wird das Gegenkonto vorgeschlagen bzw. beim Regel-Lauf "
+            "direkt verbucht. Das längste Muster gewinnt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "pattern": {"type": "string", "description": "Teilstring-Muster."},
+                "contra_account_id": {"type": "integer", "description": "Gegenkonto-ID."},
+                "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
+                "cost_center_id": {"type": "integer", "description": "Optionale Kostenstelle."},
+                "profit_center_id": {
+                    "type": "integer",
+                    "description": "Optionales Profitcenter.",
+                },
+            },
+            "required": ["company_id", "pattern", "contra_account_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-booking-rules",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_bank_booking_rule_active",
+        description="Aktiviert oder deaktiviert eine Auto-Kontierungsregel.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "rule_id": {"type": "integer", "description": "ID der Regel."},
+                "is_active": {"type": "boolean", "description": "Neuer Status."},
+            },
+            "required": ["rule_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-booking-rules/{rule_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="apply_bank_booking_rules",
+        description=(
+            "Regel-Lauf: verbucht alle offenen Bankumsätze mit Regel-Treffer "
+            "(optional auf transaction_ids eingeschränkt). Fehler einzelner "
+            "Buchungen brechen den Lauf nicht ab, sondern stehen im Report."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "transaction_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Optional: nur diese Umsätze verbuchen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-booking-rules/apply",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_bank_reconciliation",
         description=(
             "Saldenabgleich je Bankkonto: Buchsaldo (Soll − Haben aller "

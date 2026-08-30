@@ -581,6 +581,50 @@ class BankTransaction(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship()
 
 
+class BankBookingRule(Base):
+    """Auto-Kontierungsregel für Bankumsätze.
+
+    Trifft ``pattern`` (Teilstring, ohne Groß-/Kleinschreibung) auf
+    Verwendungszweck oder Gegenseite eines offenen Umsatzes zu, wird das
+    hinterlegte Gegenkonto (plus optional Steuercode und Controlling-
+    Dimensionen) vorgeschlagen bzw. beim Regel-Lauf direkt verbucht.
+    Bei mehreren Treffern gewinnt das längste (spezifischste) Muster.
+    """
+
+    __tablename__ = "bank_booking_rule"
+    __table_args__ = (
+        UniqueConstraint("company_id", "pattern", name="uq_bank_rule_company_pattern"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    pattern: Mapped[str] = mapped_column(String(120), nullable=False)
+    contra_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    tax_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tax_code.id", ondelete="RESTRICT")
+    )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    contra_account: Mapped[Account] = relationship(foreign_keys=[contra_account_id])
+    tax_code: Mapped[TaxCode | None] = relationship(foreign_keys=[tax_code_id])
+
+
 class OpenItem(Base):
     __tablename__ = "open_item"
     __table_args__ = (

@@ -35,9 +35,17 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
+from app.services.bank_rules import (
+    BankRuleError,
+    apply_rules,
+    create_rule,
+    list_rules,
+    serialize_rule,
+    set_rule_active,
+)
 from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
-from domain.models import Account, BankTransaction, JournalEntry
+from domain.models import Account, BankBookingRule, BankTransaction, JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 DEFAULT_TRANSACTION_PAGE_SIZE = 200
@@ -328,6 +336,123 @@ def list_bank_transactions_via_api():
                 geldtransit_account.id if geldtransit_account else None
             )
         return jsonify(response_body), 200
+
+
+@api_bp.get("/bank-booking-rules")
+def list_bank_booking_rules_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    include_inactive = (request.args.get("include_inactive") or "").lower() in {"1", "true"}
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        rules = list_rules(
+            session=session, company_id=company_id, include_inactive=include_inactive
+        )
+        return (
+            jsonify({"company_id": company_id, "rules": [serialize_rule(r) for r in rules]}),
+            200,
+        )
+
+
+@api_bp.post("/bank-booking-rules")
+def create_bank_booking_rule_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        contra_account_id = int(payload.get("contra_account_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id and contra_account_id are required."}), 400
+
+    def optional_int(name: str) -> int | None:
+        value = payload.get(name)
+        return int(value) if value not in (None, "") else None
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            rule = create_rule(
+                session=session,
+                company_id=company_id,
+                pattern=str(payload.get("pattern") or ""),
+                contra_account_id=contra_account_id,
+                tax_code_id=optional_int("tax_code_id"),
+                cost_center_id=optional_int("cost_center_id"),
+                profit_center_id=optional_int("profit_center_id"),
+                changed_by=_api_changed_by(),
+            )
+        except BankRuleError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(serialize_rule(rule)), 201
+
+
+@api_bp.post("/bank-booking-rules/<int:rule_id>/active")
+def set_bank_booking_rule_active_via_api(rule_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    is_active = payload.get("is_active")
+    if not isinstance(is_active, bool):
+        return jsonify({"error": "is_active (boolean) is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        rule = session.get(BankBookingRule, rule_id)
+        if rule is None or api_scoped_company(session, rule.company_id) is None:
+            return jsonify({"error": "Rule not found."}), 404
+        rule = set_rule_active(
+            session=session, rule_id=rule_id, is_active=is_active, changed_by=_api_changed_by()
+        )
+        return jsonify(serialize_rule(rule)), 200
+
+
+@api_bp.post("/bank-booking-rules/apply")
+def apply_bank_booking_rules_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id is required."}), 400
+    transaction_ids = payload.get("transaction_ids")
+    if transaction_ids is not None:
+        try:
+            transaction_ids = [int(value) for value in transaction_ids]
+        except (TypeError, ValueError):
+            return jsonify({"error": "transaction_ids must be integers."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        report = apply_rules(
+            session=session,
+            company_id=company_id,
+            changed_by=_api_changed_by(),
+            transaction_ids=transaction_ids,
+        )
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "matched": report.matched,
+                    "booked": report.booked,
+                    "errors": report.errors,
+                }
+            ),
+            200,
+        )
 
 
 @api_bp.get("/bank-reconciliation")

@@ -20,6 +20,14 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
+from app.services.bank_rules import (
+    BankRuleError,
+    apply_rules,
+    create_rule,
+    list_rules,
+    match_rules_for,
+    set_rule_active,
+)
 from app.services.fints_sync import (
     FinTSSyncError,
     FinTSSyncResult,
@@ -44,6 +52,7 @@ from app.web.helpers import (
 )
 from domain.models import (
     Account,
+    BankBookingRule,
     BankTransaction,
     ControllingUnit,
     FinTSConnection,
@@ -75,6 +84,8 @@ def bank_page():
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
         reconciliation = []
+        booking_rules = []
+        rule_by_tx = {}
         if selected_company_id:
             fints_connections = list_fints_connections(
                 session=session, company_id=selected_company_id
@@ -152,6 +163,8 @@ def bank_page():
             reconciliation = bank_reconciliation(
                 session=session, company_id=selected_company_id
             )
+            booking_rules = list_rules(session=session, company_id=selected_company_id)
+            rule_by_tx = match_rules_for(session=session, transactions=transactions)
 
     fints_challenge = flask_session.get("fints_challenge")
     if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
@@ -178,6 +191,8 @@ def bank_page():
         transfer_by_tx=transfer_by_tx,
         geldtransit_account=geldtransit_account,
         reconciliation=reconciliation,
+        booking_rules=booking_rules,
+        rule_by_tx=rule_by_tx,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,
@@ -510,6 +525,71 @@ def fints_tan_action():
             return redirect(url_for("main.bank_page", company_id=company_id))
 
     return _handle_fints_result(result, company_id)
+
+
+@main_bp.post("/bank/regeln")
+def bank_rule_create_action():
+    company_id = request.form.get("company_id", type=int)
+    if not company_id:
+        abort(404)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        require_company_access(session, company_id)
+        try:
+            rule = create_rule(
+                session=session,
+                company_id=company_id,
+                pattern=request.form.get("pattern") or "",
+                contra_account_id=request.form.get("contra_account_id", type=int) or 0,
+                tax_code_id=request.form.get("tax_code_id", type=int),
+                cost_center_id=request.form.get("cost_center_id", type=int),
+                profit_center_id=request.form.get("profit_center_id", type=int),
+                changed_by=changed_by(),
+            )
+        except BankRuleError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+
+    flash(f"Kontierungsregel „{rule.pattern}“ wurde angelegt.", "success")
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.post("/bank/regeln/<int:rule_id>/deaktivieren")
+def bank_rule_deactivate_action(rule_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        rule = session.get(BankBookingRule, rule_id)
+        if rule is None:
+            abort(404)
+        require_company_access(session, rule.company_id)
+        company_id = rule.company_id
+        set_rule_active(session=session, rule_id=rule_id, is_active=False, changed_by=changed_by())
+
+    flash("Kontierungsregel wurde deaktiviert.", "success")
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.post("/bank/regeln/anwenden")
+def bank_rules_apply_action():
+    company_id = request.form.get("company_id", type=int)
+    if not company_id:
+        abort(404)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        require_company_access(session, company_id)
+        report = apply_rules(session=session, company_id=company_id, changed_by=changed_by())
+
+    if report.matched == 0:
+        flash("Keine offenen Umsätze mit Regel-Treffer gefunden.", "info")
+    else:
+        category = "success" if not report.errors else "warning"
+        message = f"Regel-Lauf: {report.booked} von {report.matched} Treffern verbucht."
+        if report.errors:
+            message += " Fehler: " + " | ".join(report.errors[:3])
+            if len(report.errors) > 3:
+                message += f" (+{len(report.errors) - 3} weitere)"
+        flash(message, category)
+    return redirect(url_for("main.bank_page", company_id=company_id))
 
 
 @main_bp.post("/bank/fints/tan/abbrechen")
