@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Mahnwesen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Mahnwesen</h1>
+
+  <section class="card">
+    <h2>Mahnvorschläge</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% elif proposals %}
+      <table>
+        <thead>
+          <tr>
+            <th>Referenz</th>
+            <th>Gegenpartei</th>
+            <th>Fällig seit</th>
+            <th class="num">Offen</th>
+            <th>Stufe</th>
+            <th>Vorschlag</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for proposal in proposals %}
+            {% set item = proposal.item %}
+            <tr>
+              <td>{{ item.reference }}</td>
+              <td>{{ item.counterparty or "–" }}</td>
+              <td>{{ item.due_date.isoformat() }} ({{ proposal.days_overdue }} Tage)</td>
+              <td class="num">{{ item.open_amount }} {{ item.currency_code }}</td>
+              <td>
+                {% if item.dunning_level %}
+                  <span class="badge">Stufe {{ item.dunning_level }}</span>
+                  {% if item.last_dunning_date %}<br /><span class="muted">{{ item.last_dunning_date.isoformat() }}</span>{% endif %}
+                {% else %}
+                  <span class="muted">ungemahnt</span>
+                {% endif %}
+              </td>
+              <td>{{ proposal.suggested_level_label }}</td>
+              <td>
+                <a href="{{ url_for('main.dunning_letter_page', open_item_id=item.id) }}" target="_blank">Mahnschreiben</a>
+                <form method="post" action="{{ url_for('main.dunning_record_action', open_item_id=item.id) }}" style="display:inline; margin-left:0.5rem;">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="secondary" style="margin:0;"
+                          data-confirm="Posten {{ item.reference }} auf Stufe {{ proposal.suggested_level }} ({{ proposal.suggested_level_label }}) setzen?">Mahnstufe setzen</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted">Vorgeschlagen werden offene Forderungen mit überschrittener Fälligkeit.
+        Nach einer Mahnung pausiert der Posten 7 Tage; Höchststufe ist 3
+        (2. Mahnung = letzte Mahnung). „Mahnstufe setzen“ protokolliert die Mahnung im Audit-Log.</p>
+    {% else %}
+      <p class="muted">Keine überfälligen Forderungen zu mahnen. 🎉</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -9,6 +9,12 @@ from flask import jsonify, request
 from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
+from app.services.dunning import (
+    DunningError,
+    dunning_proposals,
+    record_dunning,
+    serialize_proposal,
+)
 from app.services.journal_entries import parse_decimal
 from app.services.open_items import (
     OpenItemError,
@@ -43,6 +49,10 @@ def _open_item_dict(item: OpenItem) -> dict[str, object]:
         "open_amount": str(item.open_amount),
         "currency_code": item.currency_code,
         "status": item.status,
+        "dunning_level": item.dunning_level,
+        "last_dunning_date": (
+            item.last_dunning_date.isoformat() if item.last_dunning_date else None
+        ),
         "created_at": item.created_at.isoformat(),
         "settled_at": item.settled_at.isoformat() if item.settled_at else None,
         "settled_by": item.settled_by,
@@ -173,5 +183,64 @@ def settle_open_item_via_api(open_item_id: int):
                 changed_by=_api_changed_by(),
             )
         except OpenItemError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_open_item_dict(item)), 200
+
+
+@api_bp.get("/dunning-proposals")
+def list_dunning_proposals_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        proposals = dunning_proposals(session=session, company_id=company_id)
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "proposals": [serialize_proposal(p) for p in proposals],
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.post("/open-items/<int:open_item_id>/dunning")
+def record_dunning_via_api(open_item_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    level = payload.get("level")
+    if level is not None:
+        try:
+            level = int(level)
+        except (TypeError, ValueError):
+            return jsonify({"error": "level must be an integer."}), 400
+    dunning_date = None
+    if payload.get("dunning_date"):
+        try:
+            dunning_date = date.fromisoformat(str(payload["dunning_date"]))
+        except ValueError:
+            return jsonify({"error": "dunning_date must be an ISO date."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        item = session.get(OpenItem, open_item_id)
+        if item is None or api_scoped_company(session, item.company_id) is None:
+            return jsonify({"error": "Open item not found."}), 404
+        try:
+            item = record_dunning(
+                session=session,
+                open_item_id=open_item_id,
+                changed_by=_api_changed_by(),
+                level=level,
+                dunning_date=dunning_date,
+            )
+        except DunningError as exc:
             return jsonify({"error": str(exc)}), 422
         return jsonify(_open_item_dict(item)), 200

@@ -1689,6 +1689,52 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_dunning_proposals",
+        description=(
+            "Mahnvorschläge: überfällige offene Forderungen mit aktueller Mahnstufe "
+            "und vorgeschlagener nächster Stufe (1 = Zahlungserinnerung, 2 = 1. "
+            "Mahnung, 3 = letzte Mahnung). Posten mit Höchststufe oder Mahnung in "
+            "den letzten 7 Tagen werden nicht erneut vorgeschlagen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/dunning-proposals",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="record_dunning",
+        description=(
+            "Setzt die Mahnstufe eines überfälligen debitorischen Postens (Standard: "
+            "nächste Stufe, max. 3) und protokolliert die Mahnung im Audit-Log."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "open_item_id": {"type": "integer", "description": "ID des offenen Postens."},
+                "level": {
+                    "type": "integer",
+                    "description": "Optional: explizite Mahnstufe (1-3).",
+                },
+                "dunning_date": {
+                    "type": "string",
+                    "description": "Optional: Mahndatum (JJJJ-MM-TT, Standard heute).",
+                },
+            },
+            "required": ["open_item_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-items/{open_item_id}/dunning",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="create_open_item",
         description="Legt einen offenen Posten (Debitor/Kreditor) an.",
         input_schema={
