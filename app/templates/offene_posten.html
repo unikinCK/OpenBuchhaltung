@@ -56,6 +56,12 @@
         <label for="counterparty">Debitor/Kreditor</label>
         <input id="counterparty" name="counterparty" placeholder="Kunde oder Lieferant" />
 
+        <label for="counterparty_iban">IBAN der Gegenpartei (optional, für SEPA-Zahllauf)</label>
+        <input id="counterparty_iban" name="counterparty_iban" placeholder="DE.." />
+
+        <label for="counterparty_bic">BIC (optional)</label>
+        <input id="counterparty_bic" name="counterparty_bic" />
+
         <label for="entry_date">Belegdatum</label>
         <input id="entry_date" name="entry_date" type="date" value="{{ today }}" />
 

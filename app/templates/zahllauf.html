@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Zahllauf – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">SEPA-Zahllauf</h1>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <h2>Auftraggeber-Bankverbindung</h2>
+      <form method="post" action="{{ url_for('main.payment_run_bank_details_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="company_iban">IBAN der Gesellschaft</label>
+        <input id="company_iban" name="iban" value="{{ company_iban or '' }}" placeholder="DE.." />
+
+        <label for="company_bic">BIC (optional)</label>
+        <input id="company_bic" name="bic" value="{{ company_bic or '' }}" />
+
+        <button type="submit" class="secondary">Speichern</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Offene Kreditoren-Posten mit IBAN</h2>
+      {% if items %}
+        <form method="post" action="{{ url_for('main.payment_run_create_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Referenz</th>
+                <th>Empfänger</th>
+                <th>IBAN</th>
+                <th>Fällig</th>
+                <th class="num">Offen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in items %}
+                <tr>
+                  <td><input type="checkbox" name="open_item_ids" value="{{ item.id }}" checked
+                             aria-label="Posten {{ item.reference }} auswählen" /></td>
+                  <td>{{ item.reference }}</td>
+                  <td>{{ item.counterparty or "–" }}</td>
+                  <td>{{ item.counterparty_iban }}</td>
+                  <td>{{ item.due_date.isoformat() if item.due_date else "–" }}</td>
+                  <td class="num">{{ item.open_amount }} {{ item.currency_code }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          <label for="execution_date">Ausführungsdatum</label>
+          <input id="execution_date" name="execution_date" type="date" value="{{ today }}" />
+
+          <button type="submit" data-confirm="pain.001-Datei für die ausgewählten Posten erzeugen?">Überweisungsdatei erzeugen (pain.001)</button>
+        </form>
+        <p class="muted">Die Datei wird im Online-Banking hochgeladen und dort freigegeben —
+          die Posten bleiben offen und werden wie gewohnt über den Kontoauszug ausgeglichen.
+          Der Zahllauf wird im Audit-Log protokolliert.</p>
+      {% else %}
+        <p class="muted">Keine offenen Kreditoren-Posten mit hinterlegter IBAN.
+          Die Empfänger-IBAN wird beim Anlegen unter
+          <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">OPOS</a> erfasst.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

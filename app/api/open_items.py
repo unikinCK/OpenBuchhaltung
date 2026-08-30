@@ -43,6 +43,8 @@ def _open_item_dict(item: OpenItem) -> dict[str, object]:
         "item_type": item.item_type,
         "reference": item.reference,
         "counterparty": item.counterparty,
+        "counterparty_iban": item.counterparty_iban,
+        "counterparty_bic": item.counterparty_bic,
         "entry_date": item.entry_date.isoformat(),
         "due_date": item.due_date.isoformat() if item.due_date else None,
         "original_amount": str(item.original_amount),
@@ -134,6 +136,9 @@ def create_open_item_via_api():
                     item_type=(payload.get("item_type") or "").strip(),
                     reference=(payload.get("reference") or "").strip(),
                     counterparty=(payload.get("counterparty") or "").strip() or None,
+                    counterparty_iban=(payload.get("counterparty_iban") or "").strip()
+                    or None,
+                    counterparty_bic=(payload.get("counterparty_bic") or "").strip() or None,
                     entry_date=entry_date,
                     due_date=due_date,
                     amount=amount,

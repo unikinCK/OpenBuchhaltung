@@ -70,6 +70,9 @@ class Company(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     # Erster Monat des Wirtschaftsjahres (1 = Januar = Kalenderjahr, sonst abweichendes WJ).
     fiscal_year_start_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Auftraggeber-Bankverbindung für SEPA-Zahlläufe (pain.001).
+    iban: Mapped[str | None] = mapped_column(String(34))
+    bic: Mapped[str | None] = mapped_column(String(11))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -658,6 +661,9 @@ class OpenItem(Base):
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     reference: Mapped[str] = mapped_column(String(120), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Bankverbindung der Gegenpartei für SEPA-Zahlläufe (nur Kreditoren nötig).
+    counterparty_iban: Mapped[str | None] = mapped_column(String(34))
+    counterparty_bic: Mapped[str | None] = mapped_column(String(11))
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date)
     original_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)

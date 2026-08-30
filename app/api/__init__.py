@@ -21,6 +21,7 @@ from app.api import (  # noqa: F401
     journal,
     mcp,
     open_items,
+    payment_runs,
     payroll,
     periods,
     receipt_matching,

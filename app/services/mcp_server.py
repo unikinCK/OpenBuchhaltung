@@ -1689,6 +1689,73 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="set_company_bank_details",
+        description=(
+            "Hinterlegt die Auftraggeber-Bankverbindung (IBAN, optional BIC) einer "
+            "Gesellschaft für SEPA-Zahlläufe; leere Werte löschen die Angabe."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "iban": {"type": "string", "description": "IBAN der Gesellschaft."},
+                "bic": {"type": "string", "description": "Optional: BIC."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/bank-details",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_payment_run_proposals",
+        description=(
+            "Offene Kreditoren-Posten mit hinterlegter Empfänger-IBAN, die in einen "
+            "SEPA-Zahllauf aufgenommen werden können (fällige zuerst)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/payment-runs/proposals",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_sepa_payment_run",
+        description=(
+            "Erzeugt eine SEPA-Überweisungsdatei (pain.001.001.03) für die gewählten "
+            "offenen Kreditoren-Posten. Antwort enthält xml_base64 zum Speichern; die "
+            "Posten bleiben offen und werden über den Kontoauszug ausgeglichen. Der "
+            "Zahllauf wird im Audit-Log protokolliert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "open_item_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "IDs der zu zahlenden offenen Posten.",
+                },
+                "execution_date": {
+                    "type": "string",
+                    "description": "Ausführungsdatum (JJJJ-MM-TT, Standard heute).",
+                },
+            },
+            "required": ["company_id", "open_item_ids"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payment-runs",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_dunning_proposals",
         description=(
             "Mahnvorschläge: überfällige offene Forderungen mit aktueller Mahnstufe "
@@ -1753,6 +1820,14 @@ TOOLS: list[ToolSpec] = [
                 },
                 "reference": {"type": "string", "description": "Referenz/Rechnungsnummer."},
                 "counterparty": {"type": "string", "description": "Kunde/Lieferant."},
+                "counterparty_iban": {
+                    "type": "string",
+                    "description": "Optional: IBAN der Gegenpartei (für SEPA-Zahlläufe).",
+                },
+                "counterparty_bic": {
+                    "type": "string",
+                    "description": "Optional: BIC der Gegenpartei.",
+                },
                 "entry_date": {"type": "string", "description": "Datum JJJJ-MM-TT."},
                 "due_date": {"type": "string", "description": "Fälligkeitsdatum JJJJ-MM-TT."},
                 "amount": {"type": "string", "description": "Betrag, z. B. '1190.00'."},
