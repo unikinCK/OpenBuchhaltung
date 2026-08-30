@@ -61,6 +61,16 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
             ),
         ),
+        # KI-Chat: OpenAI-/responses-kompatibler Endpoint für den integrierten
+        # Chat mit Tool-Zugriff; Fallback auf den Beleg-LLM-Endpoint.
+        CHAT_LLM_ENDPOINT_URL=os.environ.get("CHAT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        CHAT_LLM_MODEL=os.environ.get(
+            "CHAT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
+        CHAT_LLM_API_KEY=os.environ.get("CHAT_LLM_API_KEY"),
+        CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),
+        CHAT_LLM_TIMEOUT_SECONDS=float(os.environ.get("CHAT_LLM_TIMEOUT_SECONDS", "120")),
         # FinTS-Produktkennung (Registrierung der Deutschen Kreditwirtschaft),
         # Voraussetzung für den Direktabruf von Bankumsätzen.
         FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),

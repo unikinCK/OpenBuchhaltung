@@ -699,6 +699,52 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), RES
 (`create_receipt_match_suggestion`, `list_receipt_match_suggestions`,
 `approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`).
 
+## KI-Chat (integrierter Assistent mit Tool-Zugriff)
+
+Unter **KI-Chat** steht ein LibreChat-angelehnter Chat direkt in der Oberfläche zur
+Verfügung: Sidebar mit Unterhaltungen, Verlauf mit Nachrichten-Bubbles, Anhänge und
+einsehbare Tool-Aufrufe. Der Assistent spricht den konfigurierten
+OpenAI-`/responses`-kompatiblen LLM-Endpoint und erhält dabei die komplette
+MCP-Tool-Registry als Funktionsdefinitionen — er kann also Konten, Buchungen,
+Berichte, offene Posten usw. direkt lesen und (auf ausdrücklichen Wunsch) auch
+buchen.
+
+```bash
+export CHAT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
+export CHAT_LLM_MODEL="gpt-4.1-mini"
+# Optional: Authorization-Header für gehostete Provider
+export CHAT_LLM_API_KEY="sk-..."
+# Optional: Limits (Default 15 Tool-Aufrufe je Nachricht, 120 s Timeout)
+export CHAT_LLM_MAX_TOOL_CALLS=15
+export CHAT_LLM_TIMEOUT_SECONDS=120
+```
+
+Ohne gesetzte `CHAT_LLM_*`-Variablen fällt der Chat auf
+`DOCUMENT_LLM_ENDPOINT_URL`/`DOCUMENT_LLM_MODEL` zurück.
+
+Funktionsweise und Sicherheit:
+
+- **Tool-Ausführung in-process:** Jeder vom Modell angeforderte Tool-Aufruf läuft
+  über die eigene REST-API (`/api/v1/...`) mit dem Auth-Kontext des angemeldeten
+  Benutzers — Tenant-Scope und Rollenrechte gelten also unverändert. Der
+  Auth-Kontext wird über einen WSGI-environ-Eintrag transportiert, den externe
+  Requests nicht fälschen können.
+- **Tool-Protokoll:** Ausgeführte Tool-Aufrufe (Name, Argumente, gekürztes
+  Ergebnis) werden an der Assistenten-Nachricht gespeichert und sind in der UI
+  aufklappbar.
+- **Anhänge:** PDF, PNG, JPG, TXT, CSV und MD. Text-/PDF-Inhalte werden extrahiert
+  (PDF über die Beleg-OCR-Pipeline inkl. optionalem OCR-Endpoint), Bilder gehen
+  als Bild an das Modell. Die Chat-eigenen MCP-Tools sind für das Modell gesperrt
+  (keine Rekursion).
+- **Unterhaltungen** sind je Benutzer und Gesellschaft getrennt und werden mit
+  Verlauf in der Datenbank gespeichert (`chat_conversation`, `chat_message`).
+
+Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
+(`POST /api/v1/chat/messages`, `GET /api/v1/chat/conversations[/<id>]`,
+`POST /api/v1/chat/conversations/<id>/delete`) und MCP-Tools
+(`send_chat_message`, `list_chat_conversations`, `get_chat_conversation`,
+`delete_chat_conversation`).
+
 ## End-to-End-Kernflows
 
 Ausführen der E2E-Suite lokal:

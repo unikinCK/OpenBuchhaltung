@@ -3130,6 +3130,87 @@ TOOLS: list[ToolSpec] = [
         path="/fixed-assets/{asset_id}/cancel",
         arg_location="json",
     ),
+    ToolSpec(
+        name="list_chat_conversations",
+        description="Listet die KI-Chat-Unterhaltungen einer Gesellschaft.",
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/chat/conversations",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_chat_conversation",
+        description="Liest eine KI-Chat-Unterhaltung inklusive aller Nachrichten.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "integer",
+                    "description": "ID der Unterhaltung.",
+                }
+            },
+            "required": ["conversation_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/chat/conversations/{conversation_id}",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="send_chat_message",
+        description=(
+            "Sendet eine Nachricht an den integrierten KI-Chat (LLM mit "
+            "OpenBuchhaltung-Tool-Zugriff) und liefert die Antwort. Ohne "
+            "conversation_id wird eine neue Unterhaltung angelegt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "conversation_id": {
+                    "type": "integer",
+                    "description": "ID einer bestehenden Unterhaltung (optional).",
+                },
+                "message": {"type": "string", "description": "Die Nachricht an den Assistenten."},
+                "attachments": {
+                    "type": "array",
+                    "description": "Optionale Anhänge (PDF/PNG/JPG/TXT/CSV/MD).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file_name": {"type": "string"},
+                            "content_base64": {"type": "string"},
+                        },
+                        "required": ["file_name", "content_base64"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["company_id", "message"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/chat/messages",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="delete_chat_conversation",
+        description="Löscht eine KI-Chat-Unterhaltung samt Nachrichten.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "integer",
+                    "description": "ID der Unterhaltung.",
+                }
+            },
+            "required": ["conversation_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/chat/conversations/{conversation_id}/delete",
+        arg_location="json",
+    ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}

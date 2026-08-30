@@ -1306,3 +1306,57 @@ class FinTSPendingDialog(Base):
     )
 
     connection: Mapped[FinTSConnection] = relationship()
+
+
+class ChatConversation(Base):
+    """Eine KI-Chat-Unterhaltung eines Benutzers im Kontext einer Gesellschaft."""
+
+    __tablename__ = "chat_conversation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    # Bei API-Aufrufen mit globalem Token gibt es keinen Benutzer.
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="Neue Unterhaltung")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    messages: Mapped[list[ChatMessage]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id",
+    )
+
+
+class ChatMessage(Base):
+    """Eine Nachricht innerhalb einer KI-Chat-Unterhaltung.
+
+    ``tool_calls`` protokolliert die vom Assistenten ausgeführten MCP-Tool-Aufrufe
+    (Name, Argumente, gekürztes Ergebnis); ``attachments`` die Metadaten und den
+    extrahierten Text hochgeladener Dateien.
+    """
+
+    __tablename__ = "chat_message"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tool_calls: Mapped[list[Any] | None] = mapped_column(JSON)
+    attachments: Mapped[list[Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    conversation: Mapped[ChatConversation] = relationship(back_populates="messages")
