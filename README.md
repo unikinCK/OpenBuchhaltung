@@ -357,6 +357,18 @@ optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ei
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
 werden; die Aktion wird im Audit-Log protokolliert.
 
+## Mahnwesen
+
+Unter **Mahnwesen** schlägt die App überfällige offene Forderungen zur Mahnung
+vor (Fälligkeit überschritten, sortiert nach Fälligkeit). Je Posten werden
+Mahnstufe (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = letzte Mahnung) und das
+letzte Mahndatum geführt; nach einer Mahnung pausiert der Posten 7 Tage.
+„Mahnstufe setzen“ protokolliert die Mahnung im Audit-Log, das
+**Mahnschreiben** öffnet sich als druckbare Seite (über den Browser als PDF
+speichern). API: `GET /api/v1/dunning-proposals`,
+`POST /api/v1/open-items/<id>/dunning` (optional `level`, `dunning_date`);
+MCP: `list_dunning_proposals`, `record_dunning`.
+
 ## Anlagenbuchhaltung (Anlagenverzeichnis & AfA)
 
 Unter **Anlagen** werden Anlagegüter mit den in HGB und Steuerrecht üblichen

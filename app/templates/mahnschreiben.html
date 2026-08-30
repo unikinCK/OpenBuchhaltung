@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ level_label }} – {{ item.reference }}</title>
+    <style>
+      body {
+        font-family: Georgia, "Times New Roman", serif;
+        max-width: 44rem;
+        margin: 3rem auto;
+        line-height: 1.6;
+        color: #1a1a1a;
+        padding: 0 1.5rem;
+      }
+      header { margin-bottom: 3rem; }
+      .sender { font-size: 0.8rem; border-bottom: 1px solid #999; padding-bottom: 0.2rem; }
+      .recipient { margin: 1.5rem 0 3rem; white-space: pre-line; }
+      .meta { text-align: right; margin-bottom: 2rem; }
+      h1 { font-size: 1.2rem; margin-bottom: 1.5rem; }
+      table { border-collapse: collapse; margin: 1.5rem 0; width: 100%; }
+      th, td { border: 1px solid #bbb; padding: 0.4rem 0.7rem; text-align: left; }
+      td.num, th.num { text-align: right; }
+      footer { margin-top: 3rem; }
+      .print-hint { background: #fdf3e1; padding: 0.6rem 1rem; border-radius: 6px; }
+      @media print {
+        .print-hint { display: none; }
+        body { margin: 1cm auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <p class="print-hint">Über die Druckfunktion des Browsers als PDF speichern oder drucken.
+      Anschrift der Gegenpartei bitte vor dem Druck ergänzen.</p>
+
+    <header>
+      <div class="sender">{{ company_name }}</div>
+      <div class="recipient">{{ item.counterparty or "(Empfänger eintragen)" }}
+&nbsp;
+&nbsp;</div>
+      <div class="meta">{{ today.strftime("%d.%m.%Y") }}</div>
+    </header>
+
+    <h1>{{ level_label }} — Rechnung {{ item.reference }}</h1>
+
+    {% if level == 1 %}
+      <p>sicher ist es Ihrer Aufmerksamkeit entgangen, dass die folgende Forderung
+        noch offen ist. Wir bitten um Ausgleich bis zum
+        <strong>{{ payment_deadline.strftime("%d.%m.%Y") }}</strong>.</p>
+    {% elif level == 2 %}
+      <p>trotz unserer Zahlungserinnerung ist die folgende Forderung weiterhin offen.
+        Wir bitten nachdrücklich um Ausgleich bis zum
+        <strong>{{ payment_deadline.strftime("%d.%m.%Y") }}</strong>.</p>
+    {% else %}
+      <p>trotz wiederholter Mahnung ist die folgende Forderung weiterhin offen.
+        Wir fordern Sie letztmalig auf, den Betrag bis zum
+        <strong>{{ payment_deadline.strftime("%d.%m.%Y") }}</strong> auszugleichen.
+        Nach fruchtlosem Ablauf behalten wir uns rechtliche Schritte vor.</p>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr>
+          <th>Referenz</th>
+          <th>Rechnungsdatum</th>
+          <th>Fällig am</th>
+          <th class="num">Offener Betrag</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ item.reference }}</td>
+          <td>{{ item.entry_date.strftime("%d.%m.%Y") }}</td>
+          <td>{{ item.due_date.strftime("%d.%m.%Y") if item.due_date else "–" }}</td>
+          <td class="num">{{ item.open_amount }} {{ item.currency_code }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben,
+      betrachten Sie es bitte als gegenstandslos.</p>
+
+    <footer>
+      <p>Mit freundlichen Grüßen<br /><br />{{ company_name }}</p>
+    </footer>
+  </body>
+</html>

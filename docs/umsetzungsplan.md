@@ -46,7 +46,10 @@ GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HG
 ### V1.5
 - [x] Offene-Posten-Logik Debitor/Kreditor
 - [x] Zahlungsabgleich (Kontoauszugs-Import CSV/CAMT.053/MT940 + FinTS-Direktabruf)
-- [ ] Mahnstufen (Basis)
+- [x] Mahnstufen (Basis) *(Sprint 2026-08-30: Mahnstufe 1-3 + letztes
+      Mahndatum am offenen Posten [Migration 0033], Mahnvorschlagsliste mit
+      7-Tage-Schonfrist, druckbares Mahnschreiben je Stufe, Audit-Event
+      "dunned"; UI-Seite Mahnwesen plus API/MCP-Parität)*
 - [x] Anlagenverzeichnis + Anlagenbuchhaltung (siehe Sprint N)
 
 ### V2

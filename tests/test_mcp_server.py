@@ -103,6 +103,8 @@ EXPECTED_TOOL_NAMES = {
     "sync_fints_transactions",
     "submit_fints_tan",
     "list_open_items",
+    "list_dunning_proposals",
+    "record_dunning",
     "create_open_item",
     "settle_open_item",
     "list_fiscal_years",

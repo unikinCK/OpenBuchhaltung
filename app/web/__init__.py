@@ -13,6 +13,7 @@ from app.web import (  # noqa: F401
     controlling,
     dashboard,
     documents,
+    dunning,
     einvoice,
     fixed_assets,
     income_taxes,

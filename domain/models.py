@@ -634,6 +634,9 @@ class OpenItem(Base):
             "item_type IN ('receivable', 'payable')", name="ck_open_item_type_known"
         ),
         CheckConstraint("status IN ('open', 'settled')", name="ck_open_item_status_known"),
+        CheckConstraint(
+            "dunning_level BETWEEN 0 AND 3", name="ck_open_item_dunning_level"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -661,6 +664,9 @@ class OpenItem(Base):
     open_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Mahnwesen (nur Forderungen): 0 = ungemahnt, 1-3 = Mahnstufe.
+    dunning_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_dunning_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
