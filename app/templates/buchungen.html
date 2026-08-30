@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
+{% from "_filters.html" import filter_form %}
 
 {% block title %}Buchungen – OpenBuchhaltung{% endblock %}
 
@@ -145,6 +146,10 @@
 
   <section class="card">
     <h2>Journal</h2>
+    {% if selected_company_id %}
+      {{ filter_form('main.journal_page', selected_company_id, q, date_from, date_to,
+                     placeholder="Beschreibung oder Belegnummer") }}
+    {% endif %}
 
     {% if selected_company_id and journal_entries %}
       <form method="post" action="{{ url_for('main.finalize_journal_entries_action') }}" class="inline-form" style="margin-bottom: 1rem;">
@@ -218,7 +223,8 @@
           {% endfor %}
         </tbody>
       </table>
-      {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id) }}
+      {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id,
+                    extra=filter_args) }}
     {% else %}
       <p class="muted">Noch keine Buchungen vorhanden.</p>
     {% endif %}

@@ -313,6 +313,12 @@ UI, REST-API und MCP angeboten und gepflegt.
       Eingangsrechnungs-Service [incoming_invoice] für OCR/E-Rechnung in Web+API,
       Inline-JS in app.js überführt und CSP ohne script-src 'unsafe-inline',
       Doppel-Submit-Schutz, gruppierte Navigation, Flash-Kategorien info/warning)*
+- [x] Komfort & Robustheit *(Sprint 2026-08-30: Dashboard-Kacheln „Offene
+      Aufgaben" [unverbuchte Bankumsätze, unverknüpfte Belege, überfällige
+      OPOS, offene Abgleich-Vorschläge]; Suche (q) + Datumsfilter auf Bank-,
+      Buchungs-, Beleg- und OPOS-Seite inkl. API/MCP-Parität; Saldenabgleich
+      je Bankkonto [Buchsaldo vs. Summe importierter Umsätze, UI/API/MCP];
+      OCR-Härtung: defekte Dateien lösen ReceiptOCRError statt 500 aus)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*

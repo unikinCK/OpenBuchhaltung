@@ -35,8 +35,11 @@ können, was gebucht, exportiert und protokolliert wird.
   E-Rechnungs-Export.
 - **Bank & OPOS:** Kontoauszugs-Import (CSV, CAMT.053, MT940) und
   FinTS/HBCI-Direktabruf mit TAN-Flow, mehrere Bankkonten je Gesellschaft,
-  Deduplizierung über Bankreferenzen, Matching,
+  Deduplizierung über Bankreferenzen, Matching, Saldenabgleich je Bankkonto,
   offene Posten und Zahlungsausgleich.
+- **Arbeitskomfort:** Dashboard mit offenen Aufgaben (unverbuchte Umsätze,
+  unverknüpfte Belege, überfällige OPOS, offene Abgleich-Vorschläge) sowie
+  Suche und Datumsfilter auf Bank-, Buchungs-, Beleg- und OPOS-Seite.
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
 - **Lohnbuchhaltung:** Mitarbeiterstamm, konfigurierbare Abzugsraten,
@@ -323,7 +326,16 @@ verbucht** werden: Gegenkonto wählen, optional Steuercode, Kostenstelle und
 Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt.
 Die Dimensionen liegen auf Gegenkonto und automatisch erzeugter Steuerzeile,
 nicht auf dem Bankkonto. Umsätze in Fremdwährung werden nicht automatisch
-verbucht. Die Umsatzliste ist paginiert und nach Status filterbar.
+verbucht. Die Umsatzliste ist paginiert und nach Status, Suchbegriff
+(Verwendungszweck, Gegenseite, Bankreferenz) und Buchungstag filterbar
+(`q`, `date_from`, `date_to` — auch in API und MCP; dieselben Filter gibt
+es auf den Buchungs-, Beleg- und OPOS-Seiten).
+
+**Saldenabgleich:** Die Bank-Seite zeigt je Bankkonto den Buchsaldo
+(Soll − Haben aller Buchungszeilen) neben der Summe der importierten
+Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so
+sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
+`get_bank_reconciliation`).
 
 ## Offene Posten (OPOS)
 

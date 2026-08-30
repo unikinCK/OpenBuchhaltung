@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
+{% from "_filters.html" import filter_form %}
 
 {% block title %}Offene Posten – OpenBuchhaltung{% endblock %}
 
@@ -72,8 +73,13 @@
   <section class="card">
     <h2>
       Posten
-      <span class="badge"><strong>Anzahl:</strong> {{ open_items|length }}</span>
+      <span class="badge"><strong>Anzahl:</strong> {{ open_items_total }}</span>
     </h2>
+    {% if selected_company_id %}
+      {{ filter_form('main.open_items_page', selected_company_id, q, date_from, date_to,
+                     extra={'include_settled': 1} if include_settled else {},
+                     placeholder="Referenz oder Gegenpartei") }}
+    {% endif %}
     <p>
       {% if include_settled %}
         <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">Nur offene anzeigen</a>
@@ -148,7 +154,7 @@
         </tbody>
       </table>
       {{ pagination('main.open_items_page', open_items_total, limit, offset, selected_company_id,
-                    extra={'include_settled': 1} if include_settled else {}) }}
+                    extra=filter_args) }}
     {% else %}
       <p class="muted">Keine offenen Posten vorhanden.</p>
     {% endif %}

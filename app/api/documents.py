@@ -12,7 +12,14 @@ from flask import current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    DateArgError,
+    api_can_write,
+    api_scoped_company,
+    date_arg,
+    forbidden,
+    get_session_factory,
+)
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
 from app.services.documents import (
@@ -124,6 +131,12 @@ def list_documents_via_api():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
     journal_entry_id = request.args.get("journal_entry_id", type=int)
+    query = (request.args.get("q") or "").strip() or None
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -134,6 +147,12 @@ def list_documents_via_api():
         )
         if journal_entry_id is not None:
             stmt = stmt.where(Document.journal_entry_id == journal_entry_id)
+        if query:
+            stmt = stmt.where(Document.file_name.ilike(f"%{query}%"))
+        if date_from is not None:
+            stmt = stmt.where(Document.document_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Document.document_date <= date_to)
         documents = session.execute(stmt).scalars().all()
         return (
             jsonify(

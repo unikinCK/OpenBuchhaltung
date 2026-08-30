@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
+{% from "_filters.html" import filter_form %}
 
 {% block title %}Belege – OpenBuchhaltung{% endblock %}
 
@@ -36,6 +37,10 @@
 
   <section class="card">
     <h2>Hochgeladene Belege</h2>
+    {% if selected_company_id %}
+      {{ filter_form('main.documents_page', selected_company_id, q, date_from, date_to,
+                     placeholder="Dateiname") }}
+    {% endif %}
     {% if documents %}
       <div class="table-scroll">
       <table class="doc-table">
@@ -91,7 +96,8 @@
         </tbody>
       </table>
       </div>
-      {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id) }}
+      {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id,
+                    extra=filter_args) }}
     {% else %}
       <p class="muted">Noch keine Belege vorhanden.</p>
     {% endif %}
