@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}KI-Chat – OpenBuchhaltung{% endblock %}
+{% block head_extra %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='chat.css') }}" />
+  <script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% macro render_message(message) %}
+  <div class="chat-message chat-message-{{ message.role }}">
+    <div class="chat-avatar">{{ 'Du' if message.role == 'user' else 'KI' }}</div>
+    <div class="chat-bubble">
+      {% if message.attachments %}
+        <div class="chat-attachments">
+          {% for attachment in message.attachments %}
+            <span class="chat-attachment-chip{% if attachment.kind == 'error' %} error{% endif %}"
+                  {% if attachment.error %}title="{{ attachment.error }}"{% endif %}>
+              📎 {{ attachment.file_name }}
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if message.tool_calls %}
+        <div class="chat-tool-calls">
+          {% for call in message.tool_calls %}
+            <details class="chat-tool-call{% if call.is_error %} error{% endif %}">
+              <summary>🔧 {{ call.name }}</summary>
+              <div class="chat-tool-call-body">
+                <div class="chat-tool-call-label">Argumente</div>
+                <pre>{{ call.arguments | tojson(indent=2) }}</pre>
+                <div class="chat-tool-call-label">Ergebnis</div>
+                <pre>{{ call.result_text }}</pre>
+              </div>
+            </details>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <div class="chat-content">{{ message.content }}</div>
+    </div>
+  </div>
+{% endmacro %}
+<div class="chat-layout"
+     id="chat-root"
+     data-company-id="{{ selected_company_id or '' }}"
+     data-conversation-id="{{ selected_conversation.id if selected_conversation else '' }}"
+     data-page-url="{{ url_for('main.chat_page', company_id=selected_company_id) }}">
+  <aside class="chat-sidebar">
+    <a class="chat-new-button" href="{{ url_for('main.chat_page', company_id=selected_company_id) }}">
+      <span>＋</span> Neue Unterhaltung
+    </a>
+    <div class="chat-conversation-list">
+      {% for conversation in conversations %}
+        <div class="chat-conversation-item{% if selected_conversation and conversation.id == selected_conversation.id %} active{% endif %}">
+          <a class="chat-conversation-link"
+             href="{{ url_for('main.chat_page', company_id=selected_company_id, conversation_id=conversation.id) }}"
+             title="{{ conversation.title }}">{{ conversation.title }}</a>
+          <form method="post"
+                action="{{ url_for('main.chat_delete', conversation_id=conversation.id) }}"
+                data-confirm="Unterhaltung „{{ conversation.title }}“ löschen?">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="chat-delete-button" title="Löschen" aria-label="Löschen">🗑</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="chat-sidebar-empty">Noch keine Unterhaltungen.</p>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <section class="chat-main">
+    {% if selected_company_id is none %}
+      <div class="chat-welcome">
+        <h2>KI-Chat</h2>
+        <p>Bitte zuerst eine Gesellschaft anlegen bzw. auswählen.</p>
+      </div>
+    {% else %}
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-welcome" id="chat-welcome" {% if messages %}hidden{% endif %}>
+          <h2>Wobei kann ich helfen?</h2>
+          <p>
+            Fragen zur Buchhaltung stellen, Auswertungen abrufen, Buchungen anlegen
+            oder Belege hochladen – der Assistent nutzt dafür direkt die
+            OpenBuchhaltung-Funktionen.
+          </p>
+        </div>
+        {% for message in messages %}{{ render_message(message) }}{% endfor %}
+        <div class="chat-message chat-message-assistant chat-pending" id="chat-pending" hidden>
+          <div class="chat-avatar">KI</div>
+          <div class="chat-bubble"><div class="chat-typing"><span></span><span></span><span></span></div></div>
+        </div>
+      </div>
+
+      <form class="chat-input-area" id="chat-form" method="post"
+            action="{{ url_for('main.chat_send') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="hidden" name="conversation_id" id="chat-conversation-id"
+               value="{{ selected_conversation.id if selected_conversation else '' }}" />
+        <div class="chat-error" id="chat-error" hidden></div>
+        <div class="chat-attachment-preview" id="chat-attachment-preview" hidden></div>
+        <div class="chat-input-row">
+          <label class="chat-attach-button" for="chat-file-input" title="Datei anhängen">📎
+            <input type="file" id="chat-file-input" name="attachments" multiple
+                   accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md" hidden />
+          </label>
+          <textarea id="chat-textarea" name="message" rows="1"
+                    placeholder="Nachricht an den Assistenten … (Enter zum Senden, Umschalt+Enter für neue Zeile)"></textarea>
+          <button type="submit" class="chat-send-button" id="chat-send-button" title="Senden">➤</button>
+        </div>
+        <p class="chat-hint">
+          Der Assistent kann Buchungen und Änderungen direkt ausführen. Anhänge:
+          PDF, PNG, JPG, TXT, CSV, MD.
+        </p>
+      </form>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -6,6 +6,7 @@
     <title>{% block title %}OpenBuchhaltung{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    {% block head_extra %}{% endblock %}
   </head>
   <body>
     <header class="topbar">
@@ -46,6 +47,8 @@
         <nav>
           <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
              {% if request.endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
+          <a href="{{ url_for('main.chat_page', company_id=selected_company_id) }}"
+             {% if request.endpoint == 'main.chat_page' %}class="active"{% endif %}>KI-Chat</a>
           {% for group_label, group_items in nav_groups %}
             {% set group_active = request.endpoint in (group_items | map('first') | list) %}
             <div class="nav-group{% if group_active %} active{% endif %}">

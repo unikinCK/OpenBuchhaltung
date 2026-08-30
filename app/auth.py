@@ -167,6 +167,17 @@ def require_api_token():
     if request.endpoint == "api.health":
         return None
 
+    # Interne In-Process-Aufrufe (KI-Chat-Tools) übergeben den Auth-Kontext über
+    # einen WSGI-environ-Eintrag. Externe Clients können nur HTTP_*-Schlüssel
+    # setzen, diesen Eintrag also nicht fälschen.
+    internal_context = request.environ.get("openbuchhaltung.internal_api")
+    if isinstance(internal_context, dict):
+        internal_user = internal_context.get("user")
+        if isinstance(internal_user, dict):
+            g.api_user = dict(internal_user)
+        g.api_global_access = bool(internal_context.get("global_access"))
+        return None
+
     configured_token = current_app.config.get("API_AUTH_TOKEN")
     require_auth = bool(configured_token) or current_app.config.get("API_REQUIRE_AUTH", True)
     auth_header = request.headers.get("Authorization", "")

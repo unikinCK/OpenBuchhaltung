@@ -135,6 +135,10 @@ EXPECTED_TOOL_NAMES = {
     "ensure_default_tax_codes",
     "update_fixed_asset",
     "cancel_fixed_asset",
+    "list_chat_conversations",
+    "get_chat_conversation",
+    "send_chat_message",
+    "delete_chat_conversation",
 }
 
 
