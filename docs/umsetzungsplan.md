@@ -327,6 +327,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       Verwendungszweck/Gegenseite mit Längster-gewinnt-Priorität, Vorauswahl
       im Buchen-Formular, Regel-Lauf mit Fehler-Report; CRUD + Anwenden in
       UI, API und MCP)*
+- [x] SEPA-Zahllauf *(Sprint 2026-08-30: pain.001.001.03-Erzeugung aus
+      offenen Kreditoren-Posten; IBAN/BIC an Gesellschaft und offenem Posten
+      [Migration 0034] mit Mod-97-Validierung; Zahllauf-Seite mit Auswahl und
+      Ausführungsdatum, Datei-Download; Audit-Event payment_run; API/MCP-
+      Parität inkl. xml_base64-Antwort)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*

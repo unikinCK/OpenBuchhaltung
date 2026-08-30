@@ -131,6 +131,8 @@ def create_open_item_action():
     item_type = request.form.get("item_type", "").strip()
     reference = request.form.get("reference", "").strip()
     counterparty = request.form.get("counterparty", "").strip() or None
+    counterparty_iban = request.form.get("counterparty_iban", "").strip() or None
+    counterparty_bic = request.form.get("counterparty_bic", "").strip() or None
     entry_date_raw = request.form.get("entry_date", "").strip()
     due_date_raw = request.form.get("due_date", "").strip()
     amount_raw = request.form.get("amount", "").strip()
@@ -160,6 +162,8 @@ def create_open_item_action():
                     item_type=item_type,
                     reference=reference,
                     counterparty=counterparty,
+                    counterparty_iban=counterparty_iban,
+                    counterparty_bic=counterparty_bic,
                     entry_date=entry_date,
                     due_date=due_date,
                     amount=amount,

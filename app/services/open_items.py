@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
+from app.services.sepa_export import SepaExportError, normalize_bic, normalize_iban
 from domain.models import Account, BankTransaction, Company, JournalEntry, OpenItem
 
 OPEN_ITEM_TYPES = {"receivable", "payable"}
@@ -29,6 +30,8 @@ class OpenItemInput:
     journal_entry_id: int | None = None
     counterparty: str | None = None
     due_date: date | None = None
+    counterparty_iban: str | None = None
+    counterparty_bic: str | None = None
 
 
 def list_open_items(
@@ -70,6 +73,12 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
         if linked_entry is None or linked_entry.company_id != company.id:
             raise OpenItemError("Verknüpfte Buchung nicht gefunden.")
 
+    try:
+        counterparty_iban = normalize_iban(payload.counterparty_iban)
+        counterparty_bic = normalize_bic(payload.counterparty_bic)
+    except SepaExportError as exc:
+        raise OpenItemError(str(exc)) from exc
+
     item = OpenItem(
         tenant_id=company.tenant_id,
         company_id=company.id,
@@ -78,6 +87,8 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
         item_type=item_type,
         reference=reference,
         counterparty=(payload.counterparty or "").strip() or None,
+        counterparty_iban=counterparty_iban,
+        counterparty_bic=counterparty_bic,
         entry_date=payload.entry_date,
         due_date=payload.due_date,
         original_amount=amount,

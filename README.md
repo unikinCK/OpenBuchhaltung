@@ -369,6 +369,21 @@ speichern). API: `GET /api/v1/dunning-proposals`,
 `POST /api/v1/open-items/<id>/dunning` (optional `level`, `dunning_date`);
 MCP: `list_dunning_proposals`, `record_dunning`.
 
+## SEPA-Zahllauf (pain.001)
+
+Unter **Zahllauf** wird aus offenen Kreditoren-Posten mit hinterlegter
+Empfänger-IBAN (erfasst beim OPOS-Anlegen) eine SEPA-Überweisungsdatei
+**pain.001.001.03** erzeugt — zum Upload ins Online-Banking; die Freigabe und
+Ausführung bleiben bei der Bank. Voraussetzung ist die
+Auftraggeber-Bankverbindung der Gesellschaft (IBAN, optional BIC), die direkt
+auf der Zahllauf-Seite gepflegt wird; IBANs werden mit Mod-97-Prüfsumme
+validiert. Die Posten bleiben offen und werden wie gewohnt über den
+Kontoauszug ausgeglichen; jeder Zahllauf wird im Audit-Log protokolliert.
+API: `POST /api/v1/companies/<id>/bank-details`,
+`GET /api/v1/payment-runs/proposals`, `POST /api/v1/payment-runs`
+(liefert `xml_base64`); MCP: `set_company_bank_details`,
+`list_payment_run_proposals`, `create_sepa_payment_run`.
+
 ## Anlagenbuchhaltung (Anlagenverzeichnis & AfA)
 
 Unter **Anlagen** werden Anlagegüter mit den in HGB und Steuerrecht üblichen

@@ -19,6 +19,7 @@ from app.web import (  # noqa: F401
     income_taxes,
     journal,
     open_items,
+    payment_run,
     payroll,
     periods,
     receipt_matching,
