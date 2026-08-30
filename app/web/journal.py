@@ -19,6 +19,14 @@ from app.services.journal_entries import (
     parse_decimal,
     reverse_journal_entry,
 )
+from app.services.journal_templates import (
+    JournalTemplateError,
+    book_template,
+    create_template,
+    due_templates,
+    list_templates,
+    set_template_active,
+)
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -48,6 +56,8 @@ def journal_page():
         profit_centers = []
         journal_entries = []
         journal_entries_total = 0
+        templates = []
+        due_template_ids: set[int] = set()
         lines_by_entry: dict[int, list[dict]] = {}
         if selected_company_id:
             accounts = (
@@ -90,6 +100,13 @@ def journal_page():
                 .scalars()
                 .all()
             )
+            templates = list_templates(session=session, company_id=selected_company_id)
+            due_template_ids = {
+                template.id
+                for template in due_templates(
+                    session=session, company_id=selected_company_id
+                )
+            }
             entries_stmt = scoped_select(JournalEntry, company_id=selected_company_id)
             if query:
                 pattern = f"%{query}%"
@@ -190,6 +207,8 @@ def journal_page():
         profit_centers=profit_centers,
         journal_entries=journal_entries,
         journal_entries_total=journal_entries_total,
+        templates=templates,
+        due_template_ids=due_template_ids,
         limit=limit,
         offset=offset,
         q=query,
@@ -201,6 +220,58 @@ def journal_page():
         posting_number_by_id=posting_number_by_id,
         today=date.today().isoformat(),
     )
+
+
+@main_bp.post("/buchungsvorlagen/<int:template_id>/buchen")
+def book_journal_template_action(template_id: int):
+    from domain.models import JournalTemplate
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        template = session.get(JournalTemplate, template_id)
+        if template is None:
+            abort(404)
+        require_company_access(session, template.company_id)
+        company_id = template.company_id
+        try:
+            entry, template = book_template(
+                session=session, template_id=template_id, changed_by=changed_by()
+            )
+        except (
+            JournalTemplateError,
+            JournalEntryCreationError,
+            JournalEntryValidationError,
+        ) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.journal_page", company_id=company_id))
+
+    next_note = (
+        f" Nächste Fälligkeit: {template.next_run.isoformat()}." if template.next_run else ""
+    )
+    flash(
+        f"Vorlage „{template.name}“ als Buchung {entry.posting_number} gebucht.{next_note}",
+        "success",
+    )
+    return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+@main_bp.post("/buchungsvorlagen/<int:template_id>/deaktivieren")
+def deactivate_journal_template_action(template_id: int):
+    from domain.models import JournalTemplate
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        template = session.get(JournalTemplate, template_id)
+        if template is None:
+            abort(404)
+        require_company_access(session, template.company_id)
+        company_id = template.company_id
+        set_template_active(
+            session=session, template_id=template_id, is_active=False, changed_by=changed_by()
+        )
+
+    flash("Vorlage wurde deaktiviert.", "success")
+    return redirect(url_for("main.journal_page", company_id=company_id))
 
 
 @main_bp.post("/journal-entries")
@@ -305,6 +376,33 @@ def create_journal_entry_from_form():
         with session_factory() as session:
             require_company_access(session, company_id)
             entry = create_journal_entry(session=session, payload=entry_payload)
+
+            template_name = (request.form.get("template_name") or "").strip()
+            if template_name:
+                try:
+                    create_template(
+                        session=session,
+                        company_id=company_id,
+                        name=template_name,
+                        description=description,
+                        interval=request.form.get("template_interval") or "on_demand",
+                        lines=[
+                            {
+                                "account_id": line.account_id,
+                                "debit": str(line.debit_amount),
+                                "credit": str(line.credit_amount),
+                                "tax_code_id": line.tax_code_id,
+                                "cost_center_id": line.cost_center_id,
+                                "profit_center_id": line.profit_center_id,
+                                "description": line.description,
+                            }
+                            for line in line_inputs
+                        ],
+                        changed_by=changed_by(),
+                    )
+                    flash(f"Vorlage „{template_name}“ wurde gespeichert.", "success")
+                except JournalTemplateError as exc:
+                    flash(f"Buchung gespeichert, Vorlage aber nicht: {exc}", "warning")
 
     except (JournalEntryCreationError, JournalEntryValidationError) as exc:
         flash(str(exc), "error")

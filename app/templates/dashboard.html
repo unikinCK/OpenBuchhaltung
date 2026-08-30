@@ -55,7 +55,8 @@
     <section class="card">
       <h2>Offene Aufgaben</h2>
       {% if tasks.open_bank_transactions or tasks.unlinked_documents
-            or tasks.overdue_open_items or tasks.pending_match_suggestions %}
+            or tasks.overdue_open_items or tasks.pending_match_suggestions
+            or tasks.due_templates %}
         <div class="stat-grid">
           <a class="stat-card task-card {% if tasks.open_bank_transactions %}task-open{% endif %}"
              href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">
@@ -76,6 +77,11 @@
              href="{{ url_for('main.receipt_matching_page', company_id=selected_company_id) }}">
             <div class="stat-label">Offene Belegabgleich-Vorschläge</div>
             <div class="stat-value">{{ tasks.pending_match_suggestions }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.due_templates %}task-open{% endif %}"
+             href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Fällige Buchungsvorlagen</div>
+            <div class="stat-value">{{ tasks.due_templates }}</div>
           </a>
         </div>
       {% else %}

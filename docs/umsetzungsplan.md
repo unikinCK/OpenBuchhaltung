@@ -332,6 +332,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       [Migration 0034] mit Mod-97-Validierung; Zahllauf-Seite mit Auswahl und
       Ausführungsdatum, Datei-Download; Audit-Event payment_run; API/MCP-
       Parität inkl. xml_base64-Antwort)*
+- [x] Buchungsvorlagen & Eröffnungsbilanz *(Sprint 2026-08-30:
+      journal_template-Tabelle [Migration 0035] mit Intervall/next_run und
+      JSON-Zeilen; „Als Vorlage speichern" im Buchungsformular, Vorlagen-Karte
+      mit Fällig-Badge und Dashboard-Kachel, Buchen schiebt die Fälligkeit
+      monatsend-sicher weiter; Eröffnungsbilanz-Seite mit Konto;Soll;Haben-
+      Eingabe, automatischem Saldenvortrags-Ausgleich [9000/Name] und
+      expand_tax_lines=False; UI/API/MCP-Parität, 5 neue MCP-Tools)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*

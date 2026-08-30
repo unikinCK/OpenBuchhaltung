@@ -357,6 +357,28 @@ optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ei
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
 werden; die Aktion wird im Audit-Log protokolliert.
 
+## Buchungsvorlagen (wiederkehrende Buchungen)
+
+Beim Speichern einer Buchung lässt sie sich **als Vorlage speichern** (Name +
+Intervall: bei Bedarf, monatlich, quartalsweise, jährlich). Die Buchungsseite
+listet die Vorlagen mit nächster Fälligkeit; fällige Vorlagen sind markiert
+und erscheinen als Dashboard-Kachel. „Buchen“ übernimmt die Zeilen als neue
+Journalbuchung und schiebt die Fälligkeit um das Intervall weiter
+(Monatsenden werden sauber behandelt, 31.01. + 1 Monat = 28./29.02.).
+API: `GET/POST /api/v1/journal-templates`, `POST /journal-templates/<id>/book`
+und `/active`; MCP: `list/create_journal_template`,
+`set_journal_template_active`, `book_journal_template`.
+
+## Eröffnungsbilanz / Saldenübernahme
+
+Unter **Eröffnungsbilanz** (Nav-Gruppe Buchen) werden Kontensalden aus einem
+Altsystem als eine Eröffnungsbuchung übernommen: Zeilen im Format
+`Konto;Soll;Haben` einfügen (deutsches oder englisches Zahlenformat),
+Buchungsdatum = Beginn des Wirtschaftsjahres. Eine Differenz wird automatisch
+auf das Saldenvortragskonto gebucht (Kontonummer 9000 oder Name
+„Saldenvortrag“; fehlt es, müssen die Salden exakt aufgehen). API:
+`POST /api/v1/opening-balance`; MCP: `book_opening_balance`.
+
 ## Mahnwesen
 
 Unter **Mahnwesen** schlägt die App überfällige offene Forderungen zur Mahnung

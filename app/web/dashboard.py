@@ -7,6 +7,7 @@ from datetime import date
 from flask import render_template
 from sqlalchemy import func, select
 
+from app.services.journal_templates import due_templates
 from app.services.reports import balance_sheet_for_company, income_statement_for_company
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
@@ -54,6 +55,7 @@ def open_task_counts(session, company_id: int) -> dict[str, int]:
                 ReceiptMatchSuggestion.status == "offen"
             ),
         ),
+        "due_templates": len(due_templates(session=session, company_id=company_id)),
     }
 
 

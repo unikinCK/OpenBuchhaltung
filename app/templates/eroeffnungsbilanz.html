@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Eröffnungsbilanz – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Eröffnungsbilanz / Saldenübernahme</h1>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <h2>Kontensalden aus dem Altsystem übernehmen</h2>
+      <p class="muted">Eine Zeile je Konto im Format <code>Kontonummer;Soll;Haben</code>
+        (deutsches oder englisches Dezimalformat). Die Salden werden als eine
+        Eröffnungsbuchung erfasst; eine Differenz wird automatisch auf das
+        Saldenvortragskonto gebucht
+        {% if carryforward_account %}
+          (gefunden: {{ carryforward_account.code }} – {{ carryforward_account.name }}).
+        {% else %}
+          — <strong>derzeit ist kein Saldenvortragskonto vorhanden</strong>
+          (Kontonummer 9000 oder Name „Saldenvortrag“ unter
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen),
+          dann müssen die Salden exakt aufgehen.
+        {% endif %}
+      </p>
+
+      <form method="post" action="{{ url_for('main.opening_balance_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="entry_date">Buchungsdatum (Beginn des Wirtschaftsjahres)</label>
+        <input id="entry_date" name="entry_date" type="date" value="{{ today }}" required />
+
+        <label for="balances">Kontensalden (Konto;Soll;Haben)</label>
+        <textarea id="balances" name="balances" rows="12" required
+                  placeholder="1200;25000,00;&#10;1400;1190,00;&#10;1600;;595,00"></textarea>
+
+        <button type="submit" data-confirm="Saldenübernahme als Eröffnungsbuchung erfassen?">Eröffnungsbuchung erfassen</button>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}
