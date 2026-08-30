@@ -1208,7 +1208,13 @@ TOOLS: list[ToolSpec] = [
                 },
                 "include_suggestions": {
                     "type": "boolean",
-                    "description": "Optional: passende Buchungen für offene Umsätze liefern.",
+                    "description": (
+                        "Optional: passende Buchungen für offene Umsätze liefern; "
+                        "erkennt außerdem Übertrage zwischen eigenen Bankkonten "
+                        "(transfer_counterpart_id) und liefert das Geldtransit-Konto "
+                        "(geldtransit_account_id) — solche Übertrage gegen Geldtransit "
+                        "buchen, nie direkt gegen das andere Bankkonto."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
@@ -1264,10 +1270,9 @@ TOOLS: list[ToolSpec] = [
         name="reassign_bank_transaction",
         description=(
             "Hängt einen einzelnen Bankumsatz auf ein anderes Bankkonto um (z. B. wenn "
-            "beim Import das falsche Konto gewählt wurde). Verschoben wird nur die "
-            "Zuordnung des Kontoauszugs; eine bereits erzeugte Buchung bleibt "
-            "unverändert auf dem alten Konto stehen. Den Saldo verschiebt man mit einer "
-            "Umgliederungsbuchung über create_journal_entry."
+            "beim Import das falsche Konto gewählt wurde). Eine bereits erzeugte "
+            "Buchung bleibt unverändert (GoBD); standardmäßig wird der Saldo per "
+            "automatischer Umgliederungsbuchung (altes an neues Konto) mitgezogen."
         ),
         input_schema={
             "type": "object",
@@ -1276,6 +1281,13 @@ TOOLS: list[ToolSpec] = [
                 "bank_account_id": {
                     "type": "integer",
                     "description": "ID des Ziel-Bankkontos (siehe list_bank_accounts).",
+                },
+                "reclassify": {
+                    "type": "boolean",
+                    "description": (
+                        "Standard true: Saldo verbuchter Umsätze per "
+                        "Umgliederungsbuchung mitziehen."
+                    ),
                 },
             },
             "required": ["transaction_id", "bank_account_id"],
@@ -1292,7 +1304,8 @@ TOOLS: list[ToolSpec] = [
             "Umsätze eines Quellkontos (source_bank_account_id, optional auf einzelne "
             "Status eingeschränkt) oder eine Liste einzelner Umsätze "
             "(transaction_ids). Genau eines von beiden angeben. Bereits erzeugte "
-            "Buchungen bleiben unverändert auf dem alten Konto stehen."
+            "Buchungen bleiben unverändert (GoBD); standardmäßig wird der Saldo der "
+            "verbuchten Umsätze per automatischer Umgliederungsbuchung mitgezogen."
         ),
         input_schema={
             "type": "object",
@@ -1318,6 +1331,13 @@ TOOLS: list[ToolSpec] = [
                     "items": {"type": "string"},
                     "description": (
                         "Optional: nur Umsätze dieser Status bewegen (open, matched, booked)."
+                    ),
+                },
+                "reclassify": {
+                    "type": "boolean",
+                    "description": (
+                        "Standard true: Saldo verbuchter Umsätze per "
+                        "Umgliederungsbuchung mitziehen."
                     ),
                 },
             },

@@ -19,6 +19,8 @@ from app.services.bank_import import (
     BankImportError,
     BankImportReport,
     book_transaction,
+    detect_transfer_counterparts,
+    find_geldtransit_account,
     import_bank_statement,
     match_transaction,
     move_bank_transactions,
@@ -265,6 +267,16 @@ def list_bank_transactions_via_api():
             if include_suggestions
             else {}
         )
+        transfer_by_tx = (
+            detect_transfer_counterparts(session=session, transactions=transactions)
+            if include_suggestions
+            else {}
+        )
+        geldtransit_account = (
+            find_geldtransit_account(session=session, company_id=company_id)
+            if include_suggestions
+            else None
+        )
         payload = []
         for transaction in transactions:
             transaction_payload = _transaction_dict(transaction)
@@ -273,20 +285,24 @@ def list_bank_transactions_via_api():
                     _journal_entry_suggestion_dict(entry)
                     for entry in suggestions_by_tx.get(transaction.id, [])
                 ]
+                counterpart = transfer_by_tx.get(transaction.id)
+                transaction_payload["transfer_counterpart_id"] = (
+                    counterpart.id if counterpart else None
+                )
             payload.append(transaction_payload)
 
-        return (
-            jsonify(
-                {
-                    "company_id": company_id,
-                    "total": total,
-                    "limit": limit,
-                    "offset": offset,
-                    "transactions": payload,
-                }
-            ),
-            200,
-        )
+        response_body: dict[str, object] = {
+            "company_id": company_id,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "transactions": payload,
+        }
+        if include_suggestions:
+            response_body["geldtransit_account_id"] = (
+                geldtransit_account.id if geldtransit_account else None
+            )
+        return jsonify(response_body), 200
 
 
 @api_bp.post("/bank-transactions/import")
@@ -386,6 +402,7 @@ def reassign_bank_transactions_via_api():
         )
 
     statuses = payload.get("statuses") or None
+    reclassify = bool(payload.get("reclassify", True))
     try:
         if source_bank_account_id is not None:
             source_bank_account_id = int(source_bank_account_id)
@@ -402,34 +419,42 @@ def reassign_bank_transactions_via_api():
 
         try:
             if source_bank_account_id is not None:
-                transactions = move_bank_transactions(
+                result = move_bank_transactions(
                     session=session,
                     company_id=company.id,
                     source_bank_account_id=source_bank_account_id,
                     target_bank_account_id=target_bank_account_id,
                     statuses=statuses,
                     changed_by=_api_changed_by(),
+                    reclassify=reclassify,
                 )
             else:
-                transactions = reassign_bank_transactions(
+                result = reassign_bank_transactions(
                     session=session,
                     transaction_ids=_scoped_transaction_ids(
                         session, company_id=company.id, transaction_ids=transaction_ids
                     ),
                     bank_account_id=target_bank_account_id,
                     changed_by=_api_changed_by(),
+                    reclassify=reclassify,
                 )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
 
+        entry = result.reclassification_entry
         return (
             jsonify(
                 {
                     "company_id": company.id,
                     "target_bank_account_id": target_bank_account_id,
-                    "reassigned_count": len(transactions),
+                    "reassigned_count": len(result.transactions),
+                    "reclassification_entry": (
+                        {"id": entry.id, "posting_number": entry.posting_number}
+                        if entry
+                        else None
+                    ),
                     "transactions": [
-                        _transaction_dict(transaction) for transaction in transactions
+                        _transaction_dict(transaction) for transaction in result.transactions
                     ],
                 }
             ),
@@ -454,15 +479,23 @@ def set_bank_transaction_account_via_api(transaction_id: int):
         if transaction is None or api_scoped_company(session, transaction.company_id) is None:
             return jsonify({"error": "Bank transaction not found."}), 404
         try:
-            reassigned = reassign_bank_transactions(
+            result = reassign_bank_transactions(
                 session=session,
                 transaction_ids=[transaction.id],
                 bank_account_id=bank_account_id,
                 changed_by=_api_changed_by(),
+                reclassify=bool(payload.get("reclassify", True)),
             )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
-        return jsonify(_transaction_dict(reassigned[0] if reassigned else transaction)), 200
+        entry = result.reclassification_entry
+        transaction_payload = _transaction_dict(
+            result.transactions[0] if result.transactions else transaction
+        )
+        transaction_payload["reclassification_entry"] = (
+            {"id": entry.id, "posting_number": entry.posting_number} if entry else None
+        )
+        return jsonify(transaction_payload), 200
 
 
 @api_bp.post("/bank-transactions/<int:transaction_id>/match")

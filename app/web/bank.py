@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from app.services.bank_import import (
     BankImportError,
     book_transaction,
+    detect_transfer_counterparts,
+    find_geldtransit_account,
     import_bank_statement,
     match_transaction,
     move_bank_transactions,
@@ -66,6 +68,8 @@ def bank_page():
         profit_centers = []
         fints_connections = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
+        transfer_by_tx: dict[int, BankTransaction] = {}
+        geldtransit_account = None
         if selected_company_id:
             fints_connections = list_fints_connections(
                 session=session, company_id=selected_company_id
@@ -119,6 +123,12 @@ def bank_page():
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             suggestions_by_tx = suggest_matches_for(session=session, transactions=transactions)
+            transfer_by_tx = detect_transfer_counterparts(
+                session=session, transactions=transactions
+            )
+            geldtransit_account = find_geldtransit_account(
+                session=session, company_id=selected_company_id
+            )
 
     fints_challenge = flask_session.get("fints_challenge")
     if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
@@ -138,6 +148,8 @@ def bank_page():
         offset=offset,
         status_filter=status_filter,
         suggestions_by_tx=suggestions_by_tx,
+        transfer_by_tx=transfer_by_tx,
+        geldtransit_account=geldtransit_account,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,
@@ -224,18 +236,23 @@ def bank_reassign_action(transaction_id: int):
             abort(404)
         require_company_access(session, transaction.company_id)
         try:
-            reassigned = reassign_bank_transactions(
+            result = reassign_bank_transactions(
                 session=session,
                 transaction_ids=[transaction_id],
                 bank_account_id=bank_account_id,
                 changed_by=changed_by(),
+                reclassify=request.form.get("reclassify", "1") == "1",
             )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        entry = result.reclassification_entry
+        reclass_note = (
+            f" Umgliederungsbuchung {entry.posting_number} erstellt." if entry else ""
+        )
 
-    if reassigned:
-        flash("Bankumsatz wurde auf das gewählte Bankkonto umgehängt.", "success")
+    if result:
+        flash(f"Bankumsatz wurde auf das gewählte Bankkonto umgehängt.{reclass_note}", "success")
     else:
         flash("Bankumsatz liegt bereits auf diesem Bankkonto.", "warning")
     return redirect(url_for("main.bank_page", company_id=company_id))
@@ -253,22 +270,35 @@ def bank_move_action():
     session_factory = get_session_factory()
     with session_factory() as session:
         require_company_access(session, company_id)
+        reclassify_requested = request.form.get("reclassify", "1") == "1"
         try:
-            moved = move_bank_transactions(
+            result = move_bank_transactions(
                 session=session,
                 company_id=company_id,
                 source_bank_account_id=source_bank_account_id,
                 target_bank_account_id=target_bank_account_id,
                 changed_by=changed_by(),
+                reclassify=reclassify_requested,
             )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        entry = result.reclassification_entry
 
+    if entry is not None:
+        reclass_note = f" Saldo per Umgliederungsbuchung {entry.posting_number} mitgezogen."
+    elif result and reclassify_requested:
+        reclass_note = " Keine Umgliederung nötig (keine verbuchten Umsätze bewegt)."
+    elif result:
+        reclass_note = (
+            " Bereits erzeugte Buchungen bleiben auf dem alten Konto — "
+            "Saldo bei Bedarf umgliedern."
+        )
+    else:
+        reclass_note = ""
     flash(
-        f"{len(moved)} Bankumsätze umgehängt. Bereits erzeugte Buchungen bleiben "
-        "auf dem alten Konto — Saldo bei Bedarf umgliedern.",
-        "success" if moved else "warning",
+        f"{len(result.transactions)} Bankumsätze umgehängt.{reclass_note}",
+        "success" if result else "warning",
     )
     return redirect(url_for("main.bank_page", company_id=company_id))
 
