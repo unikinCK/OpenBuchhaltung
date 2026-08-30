@@ -12,12 +12,20 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    DateArgError,
+    api_can_write,
+    api_scoped_company,
+    date_arg,
+    forbidden,
+    get_session_factory,
+)
 from app.auth import current_api_user
 from app.services.accounts import create_account_with_audit, serialize_account
 from app.services.bank_import import (
     BankImportError,
     BankImportReport,
+    bank_reconciliation,
     book_transaction,
     detect_transfer_counterparts,
     find_geldtransit_account,
@@ -240,6 +248,12 @@ def list_bank_transactions_via_api():
     limit = request.args.get("limit", type=int)
     limit = DEFAULT_TRANSACTION_PAGE_SIZE if limit is None else max(1, min(limit, 1000))
     offset = max(0, request.args.get("offset", type=int) or 0)
+    query = (request.args.get("q") or "").strip() or None
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -249,6 +263,17 @@ def list_bank_transactions_via_api():
         stmt = scoped_select(BankTransaction, company_id=company_id)
         if status is not None:
             stmt = stmt.where(BankTransaction.status == status)
+        if query:
+            pattern = f"%{query}%"
+            stmt = stmt.where(
+                BankTransaction.purpose.ilike(pattern)
+                | BankTransaction.counterparty.ilike(pattern)
+                | BankTransaction.bank_reference.ilike(pattern)
+            )
+        if date_from is not None:
+            stmt = stmt.where(BankTransaction.booking_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(BankTransaction.booking_date <= date_to)
         total = session.execute(
             select(func.count()).select_from(stmt.subquery())
         ).scalar_one()
@@ -303,6 +328,38 @@ def list_bank_transactions_via_api():
                 geldtransit_account.id if geldtransit_account else None
             )
         return jsonify(response_body), 200
+
+
+@api_bp.get("/bank-reconciliation")
+def bank_reconciliation_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        rows = bank_reconciliation(session=session, company_id=company_id)
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "accounts": [
+                        {
+                            "account_id": row.account_id,
+                            "account_code": row.account_code,
+                            "account_name": row.account_name,
+                            "book_balance": str(row.book_balance),
+                            "statement_total": str(row.statement_total),
+                            "difference": str(row.difference),
+                        }
+                        for row in rows
+                    ],
+                }
+            ),
+            200,
+        )
 
 
 @api_bp.post("/bank-transactions/import")

@@ -19,9 +19,11 @@ from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
     company_context,
+    filter_url_args,
     get_session_factory,
     pagination_args,
     require_company_access,
+    search_args,
 )
 from domain.models import Account, BankTransaction, JournalEntry, OpenItem
 
@@ -32,6 +34,7 @@ LINK_SELECT_LIMIT = 200
 @main_bp.get("/offene-posten")
 def open_items_page():
     limit, offset = pagination_args()
+    query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -81,6 +84,19 @@ def open_items_page():
                 if item.status == "open":
                     totals[item.item_type] += item.open_amount
 
+    if query:
+        needle = query.lower()
+        open_items = [
+            item
+            for item in open_items
+            if needle in (item.reference or "").lower()
+            or needle in (item.counterparty or "").lower()
+        ]
+    if date_from:
+        open_items = [item for item in open_items if item.entry_date >= date_from]
+    if date_to:
+        open_items = [item for item in open_items if item.entry_date <= date_to]
+
     open_items_total = len(open_items)
     open_items = open_items[offset : offset + limit]
 
@@ -95,6 +111,12 @@ def open_items_page():
         open_items_total=open_items_total,
         limit=limit,
         offset=offset,
+        q=query,
+        date_from=date_from,
+        date_to=date_to,
+        filter_args=filter_url_args(
+            query, date_from, date_to, include_settled=1 if include_settled else None
+        ),
         include_settled=include_settled,
         totals=totals,
         today=date.today().isoformat(),

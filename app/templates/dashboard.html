@@ -53,6 +53,37 @@
     </div>
 
     <section class="card">
+      <h2>Offene Aufgaben</h2>
+      {% if tasks.open_bank_transactions or tasks.unlinked_documents
+            or tasks.overdue_open_items or tasks.pending_match_suggestions %}
+        <div class="stat-grid">
+          <a class="stat-card task-card {% if tasks.open_bank_transactions %}task-open{% endif %}"
+             href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">
+            <div class="stat-label">Unverbuchte Bankumsätze</div>
+            <div class="stat-value">{{ tasks.open_bank_transactions }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.unlinked_documents %}task-open{% endif %}"
+             href="{{ url_for('main.documents_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Unverknüpfte Belege</div>
+            <div class="stat-value">{{ tasks.unlinked_documents }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.overdue_open_items %}task-open{% endif %}"
+             href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Überfällige offene Posten</div>
+            <div class="stat-value">{{ tasks.overdue_open_items }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.pending_match_suggestions %}task-open{% endif %}"
+             href="{{ url_for('main.receipt_matching_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Offene Belegabgleich-Vorschläge</div>
+            <div class="stat-value">{{ tasks.pending_match_suggestions }}</div>
+          </a>
+        </div>
+      {% else %}
+        <p class="muted">Alles erledigt — keine offenen Aufgaben.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
       <h2>Letzte Buchungen</h2>
       {% if recent_entries %}
         <table>

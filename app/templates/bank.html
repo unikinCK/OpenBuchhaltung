@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
+{% from "_filters.html" import filter_form %}
 
 {% block title %}Bank – OpenBuchhaltung{% endblock %}
 
@@ -184,9 +185,48 @@
     {% endif %}
   </section>
 
+  {% if reconciliation %}
+    <section class="card">
+      <h2>Saldenabgleich je Bankkonto</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Konto</th>
+            <th class="num">Buchsaldo</th>
+            <th class="num">Summe Umsätze</th>
+            <th class="num">Differenz</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in reconciliation %}
+            <tr>
+              <td>{{ row.account_code }} – {{ row.account_name }}</td>
+              <td class="num">{{ row.book_balance }}</td>
+              <td class="num">{{ row.statement_total }}</td>
+              <td class="num">
+                {% if row.difference == 0 %}
+                  <span class="badge">0.00</span>
+                {% else %}
+                  <strong>{{ row.difference }}</strong>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted">Buchsaldo = Soll − Haben aller Buchungszeilen auf dem Konto;
+        Summe Umsätze = alle importierten Kontoauszugszeilen. Eine Differenz ist nicht
+        zwingend ein Fehler (z. B. Eröffnungsbuchungen oder noch unverbuchte Umsätze),
+        zeigt aber sofort, wo ein Konto schief hängt.</p>
+    </section>
+  {% endif %}
+
   <section class="card">
     <h2>Umsätze</h2>
     {% if selected_company_id %}
+      {{ filter_form('main.bank_page', selected_company_id, q, date_from, date_to,
+                     extra={'status': status_filter} if status_filter else {},
+                     placeholder="Verwendungszweck, Gegenseite, Referenz") }}
       <p>
         {% if status_filter == 'open' %}
           <a href="{{ url_for('main.bank_page', company_id=selected_company_id) }}">Alle anzeigen</a>
@@ -308,7 +348,7 @@
         </tbody>
       </table>
       {{ pagination('main.bank_page', transactions_total, limit, offset, selected_company_id,
-                    extra={'status': status_filter} if status_filter else {}) }}
+                    extra=filter_args) }}
     {% else %}
       <p class="muted">Noch keine Bankumsätze importiert.</p>
     {% endif %}

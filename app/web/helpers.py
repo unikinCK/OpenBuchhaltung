@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -74,6 +75,37 @@ def pagination_args(
     limit = default if limit is None else max(1, min(limit, maximum))
     offset = max(0, request.args.get("offset", type=int) or 0)
     return limit, offset
+
+
+def search_args() -> tuple[str | None, date | None, date | None]:
+    """Suchbegriff und Datumsbereich aus der Query (ungültige Daten -> None)."""
+    query = (request.args.get("q") or "").strip() or None
+
+    def parse(name: str) -> date | None:
+        raw = (request.args.get(name) or "").strip()
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw)
+        except ValueError:
+            return None
+
+    return query, parse("date_from"), parse("date_to")
+
+
+def filter_url_args(
+    query: str | None, date_from, date_to, **extra: object
+) -> dict[str, object]:
+    """Nicht-leere Filterwerte als url_for-Parameter (für Paginierungslinks)."""
+    args: dict[str, object] = {}
+    if query:
+        args["q"] = query
+    if date_from:
+        args["date_from"] = date_from.isoformat()
+    if date_to:
+        args["date_to"] = date_to.isoformat()
+    args.update({key: value for key, value in extra.items() if value})
+    return args
 
 
 def changed_by() -> str:

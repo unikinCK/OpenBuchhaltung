@@ -749,6 +749,23 @@ def test_receipt_ocr_api_suggest_and_book(tmp_path):
         )
 
 
+def test_analyze_document_wraps_unexpected_extraction_errors(monkeypatch):
+    """Defekte Dateien lösen ReceiptOCRError aus, keinen unbehandelten Crash."""
+    from app.services import receipt_ocr as receipt_ocr_module
+    from app.services.receipt_ocr import ReceiptOCRError, analyze_document
+
+    def broken_extract(**kwargs):
+        raise RuntimeError("zlib error: invalid stored block lengths")
+
+    monkeypatch.setattr(receipt_ocr_module, "extract_document_text", broken_extract)
+    with pytest.raises(ReceiptOCRError, match="konnte nicht gelesen werden"):
+        analyze_document(
+            file_bytes=b"%PDF-1.4 kaputt",
+            mime_type="application/pdf",
+            file_name="kaputt.pdf",
+        )
+
+
 def test_ocr_suggest_rejects_disallowed_type(tmp_path):
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)

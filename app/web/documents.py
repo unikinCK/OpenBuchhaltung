@@ -29,9 +29,11 @@ from app.web.helpers import (
     changed_by,
     company_context,
     document_upload_error,
+    filter_url_args,
     get_session_factory,
     pagination_args,
     require_company_access,
+    search_args,
 )
 from domain.models import Document, JournalEntry
 
@@ -42,6 +44,7 @@ LINK_SELECT_LIMIT = 200
 @main_bp.get("/belege")
 def documents_page():
     limit, offset = pagination_args()
+    query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -52,6 +55,12 @@ def documents_page():
         journal_entry_labels = {}
         if selected_company_id:
             documents_stmt = scoped_select(Document, company_id=selected_company_id)
+            if query:
+                documents_stmt = documents_stmt.where(Document.file_name.ilike(f"%{query}%"))
+            if date_from:
+                documents_stmt = documents_stmt.where(Document.document_date >= date_from)
+            if date_to:
+                documents_stmt = documents_stmt.where(Document.document_date <= date_to)
             documents_total = session.execute(
                 select(func.count()).select_from(documents_stmt.subquery())
             ).scalar_one()
@@ -101,6 +110,10 @@ def documents_page():
         documents_total=documents_total,
         limit=limit,
         offset=offset,
+        q=query,
+        date_from=date_from,
+        date_to=date_to,
+        filter_args=filter_url_args(query, date_from, date_to),
         journal_entries=journal_entries,
         journal_entry_labels=journal_entry_labels,
         today=date.today().isoformat(),

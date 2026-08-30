@@ -668,6 +668,37 @@ def test_find_geldtransit_account_and_transfer_detection(session: Session) -> No
     assert matches[out_a.id].bank_account_id != out_a.bank_account_id
 
 
+def test_bank_reconciliation_reports_book_vs_statement_balance(session: Session) -> None:
+    from app.services.bank_import import bank_reconciliation
+
+    company, bank, rent = _seed_company(session)
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    book_transaction(
+        session=session,
+        transaction_id=outgoing.id,
+        contra_account_id=rent.id,
+        changed_by="tester",
+    )
+
+    rows = bank_reconciliation(session=session, company_id=company.id)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.account_code == "1200"
+    # Nur der eine verbuchte Umsatz steht im Buchsaldo; importiert sind alle drei.
+    assert row.book_balance == Decimal("-595.00")
+    assert row.statement_total == Decimal("585.10")
+    assert row.difference == Decimal("-1180.10")
+
+
 def test_move_bank_transactions_filters_by_status(session: Session) -> None:
     company, bank, rent = _seed_company(session)
     target = _second_bank_account(session, company)

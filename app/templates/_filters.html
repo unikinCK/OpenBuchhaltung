@@ -1,0 +1,15 @@
+{% macro filter_form(endpoint, company_id, q, date_from, date_to, extra={}, placeholder="Suchbegriff") %}
+  <form method="get" action="{{ url_for(endpoint) }}" class="filter-bar">
+    <input type="hidden" name="company_id" value="{{ company_id }}" />
+    {% for key, value in extra.items() %}
+      <input type="hidden" name="{{ key }}" value="{{ value }}" />
+    {% endfor %}
+    <input type="search" name="q" value="{{ q or '' }}" placeholder="{{ placeholder }}" aria-label="Suchbegriff" />
+    <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
+    <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+    <button type="submit" class="secondary">Filtern</button>
+    {% if q or date_from or date_to %}
+      <a href="{{ url_for(endpoint, company_id=company_id, **extra) }}">Zurücksetzen</a>
+    {% endif %}
+  </form>
+{% endmacro %}

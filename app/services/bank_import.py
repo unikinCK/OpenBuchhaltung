@@ -10,7 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TextIO
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -388,6 +388,75 @@ def suggest_matches_for(
                     break
         suggestions[transaction.id] = matches
     return suggestions
+
+
+@dataclass(slots=True)
+class BankReconciliationRow:
+    """Saldenabgleich eines Bankkontos: Buchsaldo vs. importierte Umsätze."""
+
+    account_id: int
+    account_code: str
+    account_name: str
+    book_balance: Decimal
+    statement_total: Decimal
+
+    @property
+    def difference(self) -> Decimal:
+        return self.book_balance - self.statement_total
+
+
+def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconciliationRow]:
+    """Je Bankkonto mit importierten Umsätzen: Buchsaldo (Soll − Haben aller
+    Buchungszeilen) gegen die Summe der Kontoauszugszeilen.
+
+    Eine Differenz ist nicht zwingend ein Fehler (z. B. Eröffnungsbuchungen vor
+    dem ersten Import), macht ein „schiefes“ Konto aber sofort sichtbar.
+    """
+    zero = Decimal("0.00")
+    statement_totals = dict(
+        session.execute(
+            select(BankTransaction.bank_account_id, func.sum(BankTransaction.amount))
+            .where(BankTransaction.company_id == company_id)
+            .group_by(BankTransaction.bank_account_id)
+        ).all()
+    )
+    if not statement_totals:
+        return []
+
+    book_rows = session.execute(
+        select(
+            JournalEntryLine.account_id,
+            func.coalesce(func.sum(JournalEntryLine.debit_amount), 0),
+            func.coalesce(func.sum(JournalEntryLine.credit_amount), 0),
+        )
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .where(
+            JournalEntry.company_id == company_id,
+            JournalEntryLine.account_id.in_(statement_totals),
+        )
+        .group_by(JournalEntryLine.account_id)
+    ).all()
+    book_balances = {row[0]: Decimal(row[1]) - Decimal(row[2]) for row in book_rows}
+
+    accounts = (
+        session.execute(
+            select(Account)
+            .where(Account.id.in_(statement_totals))
+            .order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        BankReconciliationRow(
+            account_id=account.id,
+            account_code=account.code,
+            account_name=account.name,
+            book_balance=book_balances.get(account.id, zero).quantize(zero),
+            statement_total=Decimal(statement_totals[account.id]).quantize(zero),
+        )
+        for account in accounts
+    ]
 
 
 # Übliche Geldtransit-Konten: SKR03 1360, SKR04 1460 (das mitgelieferte

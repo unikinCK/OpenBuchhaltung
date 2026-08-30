@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from app.services.bank_import import (
     BankImportError,
+    bank_reconciliation,
     book_transaction,
     detect_transfer_counterparts,
     find_geldtransit_account,
@@ -35,9 +36,11 @@ from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
     company_context,
+    filter_url_args,
     get_session_factory,
     pagination_args,
     require_company_access,
+    search_args,
 )
 from domain.models import (
     Account,
@@ -55,6 +58,7 @@ from domain.services.journal_entry_validation import JournalEntryValidationError
 def bank_page():
     limit, offset = pagination_args()
     status_filter = (request.args.get("status") or "").strip() or None
+    query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -70,6 +74,7 @@ def bank_page():
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
+        reconciliation = []
         if selected_company_id:
             fints_connections = list_fints_connections(
                 session=session, company_id=selected_company_id
@@ -96,6 +101,21 @@ def bank_page():
             if status_filter:
                 transactions_stmt = transactions_stmt.where(
                     BankTransaction.status == status_filter
+                )
+            if query:
+                pattern = f"%{query}%"
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.purpose.ilike(pattern)
+                    | BankTransaction.counterparty.ilike(pattern)
+                    | BankTransaction.bank_reference.ilike(pattern)
+                )
+            if date_from:
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.booking_date >= date_from
+                )
+            if date_to:
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.booking_date <= date_to
                 )
             transactions_total = session.execute(
                 select(func.count()).select_from(transactions_stmt.subquery())
@@ -129,6 +149,9 @@ def bank_page():
             geldtransit_account = find_geldtransit_account(
                 session=session, company_id=selected_company_id
             )
+            reconciliation = bank_reconciliation(
+                session=session, company_id=selected_company_id
+            )
 
     fints_challenge = flask_session.get("fints_challenge")
     if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
@@ -147,9 +170,14 @@ def bank_page():
         limit=limit,
         offset=offset,
         status_filter=status_filter,
+        q=query,
+        date_from=date_from,
+        date_to=date_to,
+        filter_args=filter_url_args(query, date_from, date_to, status=status_filter),
         suggestions_by_tx=suggestions_by_tx,
         transfer_by_tx=transfer_by_tx,
         geldtransit_account=geldtransit_account,
+        reconciliation=reconciliation,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,

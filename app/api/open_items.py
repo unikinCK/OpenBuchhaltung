@@ -55,6 +55,7 @@ def list_open_items_via_api():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
     include_settled = request.args.get("include_settled", "").lower() in {"1", "true"}
+    query = (request.args.get("q") or "").strip() or None
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -63,6 +64,14 @@ def list_open_items_via_api():
         items = list_open_items(
             session=session, company_id=company_id, include_settled=include_settled
         )
+        if query:
+            needle = query.lower()
+            items = [
+                item
+                for item in items
+                if needle in (item.reference or "").lower()
+                or needle in (item.counterparty or "").lower()
+            ]
         return (
             jsonify(
                 {

@@ -844,13 +844,22 @@ def analyze_document(
     LLM-Fehler blockieren die Pipeline nicht; sie werden als Warnung vermerkt, der
     regelbasierte Vorschlag bleibt erhalten.
     """
-    text, source = extract_document_text(
-        file_bytes=file_bytes,
-        mime_type=mime_type,
-        file_name=file_name,
-        ocr_endpoint=ocr_endpoint,
-        ocr_model=ocr_model,
-    )
+    try:
+        text, source = extract_document_text(
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            file_name=file_name,
+            ocr_endpoint=ocr_endpoint,
+            ocr_model=ocr_model,
+        )
+    except ReceiptOCRError:
+        raise
+    except Exception as exc:
+        # Defekte Dateien (z. B. beschädigte PDF-Streams) dürfen keinen
+        # 500er auslösen — die Aufrufer behandeln ReceiptOCRError sauber.
+        raise ReceiptOCRError(
+            f"Beleg konnte nicht gelesen werden ({exc.__class__.__name__}: {exc})."
+        ) from exc
     extraction = analyze_receipt_text(text)
     extraction.source = source
 

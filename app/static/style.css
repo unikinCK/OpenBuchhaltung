@@ -467,6 +467,32 @@ tr.entry-lines td {
   margin-top: 0.75rem;
 }
 
+a.task-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.task-card:hover {
+  border-color: var(--primary);
+}
+
+.task-card.task-open .stat-value {
+  color: var(--warning-text);
+}
+
+.filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.filter-bar input[type="search"] {
+  min-width: 14rem;
+}
+
 .muted {
   color: var(--text-muted);
 }

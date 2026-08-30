@@ -122,6 +122,13 @@ def list_journal_entries_via_api():
             stmt = stmt.where(JournalEntry.entry_date >= date_from)
         if date_to is not None:
             stmt = stmt.where(JournalEntry.entry_date <= date_to)
+        query = (request.args.get("q") or "").strip() or None
+        if query:
+            pattern = f"%{query}%"
+            stmt = stmt.where(
+                JournalEntry.description.ilike(pattern)
+                | JournalEntry.posting_number.ilike(pattern)
+            )
         if source:
             stmt = stmt.where(JournalEntry.source == source)
         if is_finalized is not None:

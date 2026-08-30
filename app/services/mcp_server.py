@@ -545,6 +545,10 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
                 },
+                "q": {
+                    "type": "string",
+                    "description": "Volltextsuche in Beschreibung und Belegnummer.",
+                },
                 "source": {
                     "type": "string",
                     "description": "Buchungsquelle, z. B. manual oder storno.",
@@ -736,7 +740,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="list_documents",
-        description="Listet Belege einer Gesellschaft, optional gefiltert nach Buchung.",
+        description=(
+            "Listet Belege einer Gesellschaft, optional gefiltert nach Buchung, "
+            "Dateiname (q) und Belegdatum."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -744,6 +751,15 @@ TOOLS: list[ToolSpec] = [
                 "journal_entry_id": {
                     "type": "integer",
                     "description": "Optional: nur Belege zu dieser Buchung.",
+                },
+                "q": {"type": "string", "description": "Volltextsuche im Dateinamen."},
+                "date_from": {
+                    "type": "string",
+                    "description": "Belegdatum ab (JJJJ-MM-TT, optional).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Belegdatum bis einschließlich (JJJJ-MM-TT, optional).",
                 },
             },
             "required": ["company_id"],
@@ -1224,12 +1240,45 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Optional: Startposition für die Seitenblätterung.",
                 },
+                "q": {
+                    "type": "string",
+                    "description": (
+                        "Volltextsuche in Verwendungszweck, Gegenseite und Bankreferenz."
+                    ),
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Buchungstag ab (JJJJ-MM-TT, optional).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Buchungstag bis einschließlich (JJJJ-MM-TT, optional).",
+                },
             },
             "required": ["company_id"],
             "additionalProperties": False,
         },
         http_method="GET",
         path="/bank-transactions",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_bank_reconciliation",
+        description=(
+            "Saldenabgleich je Bankkonto: Buchsaldo (Soll − Haben aller "
+            "Buchungszeilen) gegen die Summe der importierten Kontoauszugszeilen; "
+            "macht schief hängende Bankkonten sichtbar."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-reconciliation",
         arg_location="query",
     ),
     ToolSpec(
@@ -1535,6 +1584,10 @@ TOOLS: list[ToolSpec] = [
                     "type": "boolean",
                     "description": "Auch ausgeglichene Posten einschließen.",
                     "default": False,
+                },
+                "q": {
+                    "type": "string",
+                    "description": "Volltextsuche in Referenz und Gegenpartei.",
                 },
             },
             "required": ["company_id"],

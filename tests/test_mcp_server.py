@@ -87,6 +87,7 @@ EXPECTED_TOOL_NAMES = {
     "list_bank_accounts",
     "create_bank_account",
     "list_bank_transactions",
+    "get_bank_reconciliation",
     "import_bank_transactions",
     "reassign_bank_transaction",
     "move_bank_transactions",
