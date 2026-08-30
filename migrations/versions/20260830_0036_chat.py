@@ -1,15 +1,15 @@
 """KI-Chat: Unterhaltungen und Nachrichten.
 
-Revision ID: 20260830_0035
-Revises: 20260830_0034
+Revision ID: 20260830_0036
+Revises: 20260830_0035
 Create Date: 2026-08-30 16:00:00
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260830_0035"
-down_revision = "20260830_0034"
+revision = "20260830_0036"
+down_revision = "20260830_0035"
 branch_labels = None
 depends_on = None
 
