@@ -251,7 +251,10 @@ def test_reference_rows_dedup_against_legacy_rows_without_reference(session: Ses
     """Altbestand ohne Referenz zählt beim Re-Import mit Referenz als Duplikat."""
     company, bank = _seed_company(session)
 
-    legacy_csv = "Buchungstag;Verwendungszweck;Auftraggeber/Empfänger;Betrag\n10.08.2026;Kartenzahlung Baecker;;-3,50\n"
+    legacy_csv = (
+        "Buchungstag;Verwendungszweck;Auftraggeber/Empfänger;Betrag\n"
+        "10.08.2026;Kartenzahlung Baecker;;-3,50\n"
+    )
     report = import_bank_statement(
         session=session,
         company_id=company.id,

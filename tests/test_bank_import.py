@@ -327,15 +327,18 @@ def test_move_bank_transactions_updates_account_and_dedup_hash(session: Session)
     )
     hashes_before = set(session.execute(select(BankTransaction.dedup_hash)).scalars())
 
-    moved = move_bank_transactions(
+    result = move_bank_transactions(
         session=session,
         company_id=company.id,
         source_bank_account_id=bank.id,
         target_bank_account_id=target.id,
         changed_by="tester",
     )
+    moved = result.transactions
     assert len(moved) == 3
     assert {transaction.bank_account_id for transaction in moved} == {target.id}
+    # Keine verbuchten Umsätze bewegt -> keine Umgliederungsbuchung nötig.
+    assert result.reclassification_entry is None
 
     # Der Dedup-Hash enthält das Bankkonto und wird mitgeführt, damit ein
     # Re-Import auf dem Zielkonto weiterhin als Duplikat erkannt wird.
@@ -375,14 +378,11 @@ def test_move_bank_transactions_updates_account_and_dedup_hash(session: Session)
         )
 
     # Ein bereits auf dem Zielkonto liegender Umsatz ist ein No-op.
-    assert (
-        reassign_bank_transactions(
-            session=session,
-            transaction_ids=[moved[0].id],
-            bank_account_id=target.id,
-            changed_by="tester",
-        )
-        == []
+    assert not reassign_bank_transactions(
+        session=session,
+        transaction_ids=[moved[0].id],
+        bank_account_id=target.id,
+        changed_by="tester",
     )
 
 
@@ -433,7 +433,7 @@ def test_move_bank_transactions_keeps_existing_posting(session: Session) -> None
     )
     entry_id = booked.journal_entry_id
 
-    reassign_bank_transactions(
+    result = reassign_bank_transactions(
         session=session,
         transaction_ids=[outgoing.id],
         bank_account_id=target.id,
@@ -453,6 +453,34 @@ def test_move_bank_transactions_keeps_existing_posting(session: Session) -> None
     )
     assert bank.id in bank_line_accounts
     assert target.id not in bank_line_accounts
+
+    # Der Saldo wird automatisch per Umgliederungsbuchung mitgezogen:
+    # -595 auf dem Quellkonto -> Quellkonto Soll 595, Zielkonto Haben 595.
+    reclass = result.reclassification_entry
+    assert reclass is not None
+    assert "Umgliederung" in reclass.description
+    reclass_lines = {
+        row.account_id: (row.debit_amount, row.credit_amount)
+        for row in session.execute(
+            select(
+                JournalEntryLine.account_id,
+                JournalEntryLine.debit_amount,
+                JournalEntryLine.credit_amount,
+            ).where(JournalEntryLine.journal_entry_id == reclass.id)
+        )
+    }
+    assert reclass_lines[bank.id] == (Decimal("595.00"), Decimal("0.00"))
+    assert reclass_lines[target.id] == (Decimal("0.00"), Decimal("595.00"))
+
+    # Ohne reclassify entsteht keine Buchung (Rückweg zum Ursprungskonto).
+    back = reassign_bank_transactions(
+        session=session,
+        transaction_ids=[outgoing.id],
+        bank_account_id=bank.id,
+        changed_by="tester",
+        reclassify=False,
+    )
+    assert back.reclassification_entry is None
 
 
 def test_reassign_rejects_unknown_and_non_asset_accounts(session: Session) -> None:
@@ -529,6 +557,117 @@ def test_move_bank_transactions_detects_duplicate_on_target(session: Session) ->
     )
 
 
+def test_move_creates_aggregated_reclassification_entry(session: Session) -> None:
+    """Mehrere verbuchte Umsätze ergeben eine Umgliederungsbuchung über den Netto-Saldo."""
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    revenue_id = session.execute(
+        select(Account.id).where(Account.company_id == company.id, Account.code == "8400")
+    ).scalar_one()
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    incoming = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("1190.00"))
+    ).scalar_one()
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    book_transaction(
+        session=session,
+        transaction_id=incoming.id,
+        contra_account_id=revenue_id,
+        changed_by="tester",
+    )
+    book_transaction(
+        session=session,
+        transaction_id=outgoing.id,
+        contra_account_id=rent.id,
+        changed_by="tester",
+    )
+
+    result = move_bank_transactions(
+        session=session,
+        company_id=company.id,
+        source_bank_account_id=bank.id,
+        target_bank_account_id=target.id,
+        changed_by="tester",
+    )
+    assert len(result.transactions) == 3
+    reclass = result.reclassification_entry
+    assert reclass is not None
+
+    # Netto verbucht: +1190 - 595 = +595 -> Quellkonto Haben, Zielkonto Soll.
+    lines = {
+        row.account_id: (row.debit_amount, row.credit_amount)
+        for row in session.execute(
+            select(
+                JournalEntryLine.account_id,
+                JournalEntryLine.debit_amount,
+                JournalEntryLine.credit_amount,
+            ).where(JournalEntryLine.journal_entry_id == reclass.id)
+        )
+    }
+    assert lines[bank.id] == (Decimal("0.00"), Decimal("595.00"))
+    assert lines[target.id] == (Decimal("595.00"), Decimal("0.00"))
+
+
+def test_find_geldtransit_account_and_transfer_detection(session: Session) -> None:
+    from app.services.bank_import import (
+        detect_transfer_counterparts,
+        find_geldtransit_account,
+    )
+
+    company, bank, _ = _seed_company(session)
+    target = _second_bank_account(session, company)
+
+    assert find_geldtransit_account(session=session, company_id=company.id) is None
+    transit = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1360",
+        name="Geldtransit",
+        account_type="asset",
+    )
+    session.add(transit)
+    session.commit()
+    assert find_geldtransit_account(session=session, company_id=company.id).id == transit.id
+
+    def _tx(account_id: int, amount: str, day: int, purpose: str, suffix: str):
+        return BankTransaction(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            bank_account_id=account_id,
+            booking_date=date(2026, 7, day),
+            amount=Decimal(amount),
+            currency_code="EUR",
+            purpose=purpose,
+            dedup_hash=f"transfer-{suffix}",
+        )
+
+    out_a = _tx(bank.id, "-1000.00", 10, "Übertrag Sparkonto", "a")
+    in_b = _tx(target.id, "1000.00", 11, "Übertrag von Girokonto", "b")
+    far_away = _tx(target.id, "1000.00", 20, "Anderer Eingang", "c")
+    same_account = _tx(bank.id, "1000.00", 10, "Erstattung", "d")
+    session.add_all([out_a, in_b, far_away, same_account])
+    session.commit()
+
+    matches = detect_transfer_counterparts(
+        session=session, transactions=[out_a, in_b, far_away]
+    )
+    # out_a und in_b sind gegenläufig innerhalb der Toleranz und paaren sich;
+    # far_away (9 Tage Abstand) bekommt kein Gegenstück auf dem anderen Konto.
+    assert matches[out_a.id].id == in_b.id
+    assert matches[in_b.id].id == out_a.id
+    assert far_away.id not in matches
+    # same_account liegt auf demselben Konto wie out_a und ist kein Gegenstück.
+    assert matches[out_a.id].bank_account_id != out_a.bank_account_id
+
+
 def test_move_bank_transactions_filters_by_status(session: Session) -> None:
     company, bank, rent = _seed_company(session)
     target = _second_bank_account(session, company)
@@ -556,7 +695,7 @@ def test_move_bank_transactions_filters_by_status(session: Session) -> None:
         target_bank_account_id=target.id,
         statuses=["open"],
         changed_by="tester",
-    )
+    ).transactions
     assert len(moved) == 2
     session.refresh(outgoing)
     assert outgoing.bank_account_id == bank.id

@@ -31,7 +31,7 @@ from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_in
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.receipt_ocr import ReceiptExtraction, ReceiptOCRError, analyze_document
 from app.web.helpers import ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_DOCUMENT_MIME_TYPES
-from domain.models import Account, Document, TaxCode
+from domain.models import Document
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 

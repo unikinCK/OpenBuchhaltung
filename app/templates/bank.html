@@ -55,7 +55,11 @@
           {% endfor %}
         </select>
 
-        <p class="muted">Verschoben wird nur die Zuordnung der Kontoauszugszeilen. Bereits erzeugte Buchungen bleiben unverändert auf dem alten Konto stehen — den Saldo bei Bedarf über eine Umgliederungsbuchung verschieben.</p>
+        <label>
+          <input type="checkbox" name="reclassify" value="1" checked />
+          Saldo verbuchter Umsätze per Umgliederungsbuchung mitziehen
+        </label>
+        <p class="muted">Verschoben wird die Zuordnung der Kontoauszugszeilen; bereits erzeugte Buchungen bleiben unverändert (GoBD). Mit gesetztem Haken wird der Saldo der verbuchten Umsätze automatisch per Umgliederungsbuchung (altes an neues Konto) mitgezogen.</p>
 
         <button type="submit">Umhängen</button>
       </form>
@@ -226,6 +230,20 @@
               </td>
               <td>
                 {% if tx.status == 'open' %}
+                  {% set transfer = transfer_by_tx.get(tx.id) %}
+                  {% if transfer %}
+                    <p class="muted" style="margin:0 0 0.3rem 0;">
+                      <span class="badge">Eigenübertrag?</span>
+                      Gegenstück am {{ transfer.booking_date.isoformat() }} auf
+                      {% set transfer_account = bank_accounts_by_id.get(transfer.bank_account_id) %}
+                      {{ transfer_account.code if transfer_account else transfer.bank_account_id }}
+                      {% if geldtransit_account %}
+                        — Geldtransit ({{ geldtransit_account.code }}) vorausgewählt.
+                      {% else %}
+                        — kein Geldtransit-Konto (1360) vorhanden, bitte unter Konten anlegen.
+                      {% endif %}
+                    </p>
+                  {% endif %}
                   {% set suggestions = suggestions_by_tx.get(tx.id, []) %}
                   {% if suggestions %}
                     <form method="post" action="{{ url_for('main.bank_match_action', transaction_id=tx.id) }}" style="margin-bottom:0.4rem;">
@@ -245,7 +263,8 @@
                     <select name="contra_account_id" required>
                       <option value="">Gegenkonto wählen</option>
                       {% for account in contra_accounts %}
-                        <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                        <option value="{{ account.id }}"
+                          {% if transfer and geldtransit_account and account.id == geldtransit_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
                       {% endfor %}
                     </select>
                     <select name="tax_code_id">

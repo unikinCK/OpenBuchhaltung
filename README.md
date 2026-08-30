@@ -303,7 +303,18 @@ export FINTS_PRODUCT_ID=IHRE-PRODUKT-ID
 **Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
 (Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein
 anderes Bankkonto umhängen; bereits erzeugte Buchungen bleiben dabei nach dem
-GoBD-Grundsatz unverändert (Saldo bei Bedarf per Umgliederungsbuchung).
+GoBD-Grundsatz unverändert — der Saldo der verbuchten Umsätze wird
+standardmäßig automatisch per Umgliederungsbuchung (altes an neues Konto)
+mitgezogen, atomar mit dem Umzug (abwählbar per Checkbox bzw.
+`reclassify=false` in API/MCP).
+
+**Geldtransit:** Übertrage zwischen eigenen Bankkonten erkennt die Bank-Seite
+automatisch (gegenläufiger Betrag auf einem anderen Bankkonto, max. 2 Tage
+Abstand) und schlägt das Geldtransit-Konto (Kontonummer 1360/1460 oder Name
+„Geldtransit“) als Gegenkonto vor — beide Seiten gegen Geldtransit buchen,
+nie direkt gegen das andere Bankkonto, dann geht das Konto auf null. Die API
+liefert die Erkennung über `include_suggestions`
+(`transfer_counterpart_id`, `geldtransit_account_id`).
 
 Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
 (Vorschläge per Betrags-Matching auf dem Bankkonto; eine Buchung ist höchstens

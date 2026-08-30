@@ -5,7 +5,7 @@ import hashlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TextIO
@@ -390,6 +390,87 @@ def suggest_matches_for(
     return suggestions
 
 
+# Übliche Geldtransit-Konten: SKR03 1360, SKR04 1460 (das mitgelieferte
+# SKR04-Chart führt Geldtransit ebenfalls unter 1360).
+GELDTRANSIT_CODES = ("1360", "1460")
+TRANSFER_DATE_TOLERANCE_DAYS = 2
+
+
+def find_geldtransit_account(*, session: Session, company_id: int) -> Account | None:
+    """Findet das Geldtransit-Konto der Gesellschaft (per Kontonummer oder Name)."""
+    return (
+        session.execute(
+            select(Account)
+            .where(
+                Account.company_id == company_id,
+                Account.is_active.is_(True),
+                or_(
+                    Account.code.in_(GELDTRANSIT_CODES),
+                    Account.name.ilike("%geldtransit%"),
+                ),
+            )
+            .order_by(Account.code)
+        )
+        .scalars()
+        .first()
+    )
+
+
+def detect_transfer_counterparts(
+    *, session: Session, transactions: Sequence[BankTransaction]
+) -> dict[int, BankTransaction]:
+    """Erkennt Übertrage zwischen eigenen Bankkonten unter den offenen Umsätzen.
+
+    Ein Gegenstück ist ein Umsatz derselben Gesellschaft auf einem anderen
+    Bankkonto mit gegenläufigem Betrag und höchstens
+    ``TRANSFER_DATE_TOLERANCE_DAYS`` Tagen Abstand. Jedes Gegenstück wird nur
+    einmal vergeben. Solche Übertrage gehören gegen das Geldtransit-Konto
+    gebucht, nie direkt gegen das andere Bankkonto.
+    """
+    candidates = [t for t in transactions if t.status == "open"]
+    if not candidates:
+        return {}
+
+    tolerance = timedelta(days=TRANSFER_DATE_TOLERANCE_DAYS)
+    min_date = min(t.booking_date for t in candidates) - tolerance
+    max_date = max(t.booking_date for t in candidates) + tolerance
+    counterpart_rows = (
+        session.execute(
+            select(BankTransaction).where(
+                BankTransaction.company_id.in_({t.company_id for t in candidates}),
+                BankTransaction.amount.in_({-t.amount for t in candidates}),
+                BankTransaction.booking_date >= min_date,
+                BankTransaction.booking_date <= max_date,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    matches: dict[int, BankTransaction] = {}
+    used_counterparts: set[int] = set()
+    for transaction in sorted(candidates, key=lambda t: (t.booking_date, t.id)):
+        best = None
+        for row in counterpart_rows:
+            if (
+                row.id == transaction.id
+                or row.id in used_counterparts
+                or row.company_id != transaction.company_id
+                or row.bank_account_id == transaction.bank_account_id
+                or row.amount != -transaction.amount
+                or abs(row.booking_date - transaction.booking_date) > tolerance
+            ):
+                continue
+            if best is None or abs(row.booking_date - transaction.booking_date) < abs(
+                best.booking_date - transaction.booking_date
+            ):
+                best = row
+        if best is not None:
+            used_counterparts.add(best.id)
+            matches[transaction.id] = best
+    return matches
+
+
 def match_transaction(
     *, session: Session, transaction_id: int, journal_entry_id: int, changed_by: str
 ) -> BankTransaction:
@@ -430,13 +511,25 @@ def match_transaction(
     return transaction
 
 
+@dataclass
+class ReassignResult:
+    """Ergebnis eines Umzugs: bewegte Umsätze plus optionale Umgliederungsbuchung."""
+
+    transactions: list[BankTransaction] = field(default_factory=list)
+    reclassification_entry: JournalEntry | None = None
+
+    def __bool__(self) -> bool:
+        return bool(self.transactions)
+
+
 def reassign_bank_transactions(
     *,
     session: Session,
     transaction_ids: Sequence[int],
     bank_account_id: int,
     changed_by: str,
-) -> list[BankTransaction]:
+    reclassify: bool = True,
+) -> ReassignResult:
     """Hängt einzelne Bankumsätze auf ein anderes Bankkonto um."""
     ids = list(dict.fromkeys(transaction_ids))
     if not ids:
@@ -464,6 +557,7 @@ def reassign_bank_transactions(
         transactions=transactions,
         bank_account_id=bank_account_id,
         changed_by=changed_by,
+        reclassify=reclassify,
     )
 
 
@@ -475,7 +569,8 @@ def move_bank_transactions(
     target_bank_account_id: int,
     changed_by: str,
     statuses: Sequence[str] | None = None,
-) -> list[BankTransaction]:
+    reclassify: bool = True,
+) -> ReassignResult:
     """Hängt alle Umsätze eines Bankkontos auf ein anderes Bankkonto um.
 
     Mit ``statuses`` lässt sich die Auswahl auf einzelne Status einschränken
@@ -500,7 +595,7 @@ def move_bank_transactions(
         .all()
     )
     if not transactions:
-        return []
+        return ReassignResult()
 
     return _reassign(
         session=session,
@@ -508,6 +603,7 @@ def move_bank_transactions(
         transactions=transactions,
         bank_account_id=target_bank_account_id,
         changed_by=changed_by,
+        reclassify=reclassify,
     )
 
 
@@ -518,13 +614,15 @@ def _reassign(
     transactions: Sequence[BankTransaction],
     bank_account_id: int,
     changed_by: str,
-) -> list[BankTransaction]:
+    reclassify: bool = True,
+) -> ReassignResult:
     """Setzt das Bankkonto der Umsätze um und schreibt den Dedup-Hash fort.
 
-    Verschoben wird ausschließlich die Zuordnung der Kontoauszugszeile. Bereits
-    erzeugte Buchungen bleiben nach dem GoBD-Grundsatz der Unveränderbarkeit auf
-    dem bisherigen Konto stehen — den Saldo verschiebt man über eine
-    Umgliederungsbuchung, nicht über diese Funktion.
+    Bereits erzeugte Buchungen bleiben nach dem GoBD-Grundsatz der
+    Unveränderbarkeit unverändert; mit ``reclassify=True`` (Standard) wird der
+    Saldo der bereits verbuchten Umsätze stattdessen über eine automatische
+    Umgliederungsbuchung (altes Bankkonto an neues) mitgezogen — atomar mit
+    dem Umzug.
     """
     target = _resolve_bank_account(
         session=session, company_id=company_id, bank_account_id=bank_account_id
@@ -534,7 +632,7 @@ def _reassign(
         transaction for transaction in transactions if transaction.bank_account_id != target.id
     ]
     if not pending:
-        return []
+        return ReassignResult()
 
     moved_ids = {transaction.id for transaction in pending}
     taken_hashes = set(
@@ -547,6 +645,7 @@ def _reassign(
     )
 
     occurrence_in_batch: dict[str, int] = {}
+    booked_net_by_source: dict[int, Decimal] = {}
     for transaction in pending:
         hash_fields = dict(
             bank_account_id=target.id,
@@ -572,6 +671,13 @@ def _reassign(
         previous_bank_account_id = transaction.bank_account_id
         transaction.bank_account_id = target.id
         transaction.dedup_hash = new_hash
+        if transaction.journal_entry_id is not None:
+            # Nur bereits verbuchte/zugeordnete Umsätze haben den Buchsaldo
+            # des alten Kontos beeinflusst.
+            booked_net_by_source[previous_bank_account_id] = (
+                booked_net_by_source.get(previous_bank_account_id, Decimal("0.00"))
+                + transaction.amount
+            )
 
         log_audit_event(
             session=session,
@@ -585,15 +691,95 @@ def _reassign(
                 "from_bank_account_id": previous_bank_account_id,
                 "to_bank_account_id": target.id,
                 "status": transaction.status,
-                # Die verknüpfte Buchung bleibt unverändert auf dem alten Konto.
+                # Die verknüpfte Buchung selbst bleibt unverändert (GoBD);
+                # der Saldo wird ggf. per Umgliederungsbuchung mitgezogen.
                 "journal_entry_id": transaction.journal_entry_id,
             },
+        )
+
+    reclassification_entry = None
+    if reclassify:
+        reclassification_entry = _create_reclassification_entry(
+            session=session,
+            company_id=company_id,
+            target=target,
+            booked_net_by_source=booked_net_by_source,
+            changed_by=changed_by,
         )
 
     session.commit()
     for transaction in pending:
         session.refresh(transaction)
-    return list(pending)
+    return ReassignResult(
+        transactions=list(pending), reclassification_entry=reclassification_entry
+    )
+
+
+def _create_reclassification_entry(
+    *,
+    session: Session,
+    company_id: int,
+    target: Account,
+    booked_net_by_source: dict[int, Decimal],
+    changed_by: str,
+) -> JournalEntry | None:
+    """Umgliederungsbuchung für umgehängte, bereits verbuchte Umsätze.
+
+    Je Quellkonto eine Zeile über den Netto-Saldo der bewegten verbuchten
+    Umsätze, gegengebucht auf dem Zielkonto — damit zeigen altes wie neues
+    Bankkonto nach dem Umzug wieder den echten Banksaldo. Kein eigener
+    Commit: läuft atomar mit dem Umzug.
+    """
+    zero = Decimal("0.00")
+    sources = {
+        account_id: net for account_id, net in booked_net_by_source.items() if net != zero
+    }
+    if not sources:
+        return None
+
+    source_codes = sorted(
+        code
+        for (code,) in session.execute(
+            select(Account.code).where(Account.id.in_(sources))
+        ).all()
+    )
+    lines = []
+    for source_account_id, net in sorted(sources.items()):
+        # net > 0: der Zugang lag bisher auf dem Quellkonto -> Quellkonto
+        # entlasten (Haben), Zielkonto belasten (Soll); net < 0 umgekehrt.
+        lines.append(
+            JournalLineInput(
+                account_id=source_account_id,
+                debit_amount=-net if net < zero else zero,
+                credit_amount=net if net > zero else zero,
+            )
+        )
+    total = sum(sources.values(), zero)
+    if total != zero:
+        lines.append(
+            JournalLineInput(
+                account_id=target.id,
+                debit_amount=total if total > zero else zero,
+                credit_amount=-total if total < zero else zero,
+            )
+        )
+    if len(lines) < 2:
+        return None
+
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company_id,
+            entry_date=date.today(),
+            description=(
+                f"Umgliederung Bankumsätze {', '.join(source_codes)} → {target.code}"
+            ),
+            status="posted",
+            changed_by=changed_by,
+            lines=lines,
+        ),
+        commit=False,
+    )
 
 
 def _resolve_bank_account(
