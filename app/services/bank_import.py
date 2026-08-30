@@ -1042,6 +1042,11 @@ def _parse_amount(value: str) -> Decimal:
         raise BankImportError(f"Ungültiger Betrag: {value}") from exc
 
 
+def parse_amount(value: str) -> Decimal:
+    """Öffentliche Variante von ``_parse_amount`` für andere Importpfade."""
+    return _parse_amount(value)
+
+
 def _dedup_hash(
     *,
     bank_account_id: int,

@@ -87,6 +87,19 @@
 
         <button type="button" class="secondary" data-add-row="#journal-lines" data-template="#journal-line-template">+ Weitere Zeile</button>
         <br />
+        <details style="margin:0.5rem 0;">
+          <summary>Als Vorlage speichern (wiederkehrende Buchung)</summary>
+          <label for="template_name">Vorlagen-Name</label>
+          <input id="template_name" name="template_name" placeholder="z. B. Miete Büro" />
+          <label for="template_interval">Intervall</label>
+          <select id="template_interval" name="template_interval">
+            <option value="on_demand">Bei Bedarf</option>
+            <option value="monthly">Monatlich</option>
+            <option value="quarterly">Quartalsweise</option>
+            <option value="yearly">Jährlich</option>
+          </select>
+        </details>
+
         <button type="submit">Buchung speichern</button>
       </form>
 
@@ -145,6 +158,47 @@
   </section>
 
   <section class="card">
+    {% if templates %}
+      <h2>Buchungsvorlagen</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Beschreibung</th>
+            <th>Intervall</th>
+            <th>Nächste Fälligkeit</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for template in templates %}
+            <tr>
+              <td>{{ template.name }}
+                {% if template.id in due_template_ids %}<span class="badge">fällig</span>{% endif %}
+              </td>
+              <td>{{ template.description }}</td>
+              <td>{{ {'on_demand': 'bei Bedarf', 'monthly': 'monatlich',
+                      'quarterly': 'quartalsweise', 'yearly': 'jährlich'}[template.interval] }}</td>
+              <td>{{ template.next_run.isoformat() if template.next_run else "–" }}</td>
+              <td>
+                <form method="post" action="{{ url_for('main.book_journal_template_action', template_id=template.id) }}" style="display:inline;">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="secondary" style="margin:0;"
+                          data-confirm="Vorlage „{{ template.name }}“ jetzt buchen?">Buchen</button>
+                </form>
+                <form method="post" action="{{ url_for('main.deactivate_journal_template_action', template_id=template.id) }}" style="display:inline; margin-left:0.4rem;">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="secondary" style="margin:0;">Deaktivieren</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted">Vorlagen entstehen beim Speichern einer Buchung („Als Vorlage speichern“).
+        Buchen übernimmt die Zeilen als neue Buchung und schiebt die Fälligkeit um das Intervall weiter.</p>
+    {% endif %}
+
     <h2>Journal</h2>
     {% if selected_company_id %}
       {{ filter_form('main.journal_page', selected_company_id, q, date_from, date_to,

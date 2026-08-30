@@ -584,6 +584,42 @@ class BankTransaction(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship()
 
 
+class JournalTemplate(Base):
+    """Buchungsvorlage für wiederkehrende Buchungen (Miete, Abos, Versicherungen).
+
+    ``lines`` hält die Buchungszeilen als JSON-Liste (account_id, debit,
+    credit, optional tax_code_id/cost_center_id/profit_center_id/description);
+    ``interval`` steuert die Wiedervorlage (monthly/quarterly/yearly oder
+    ``on_demand`` ohne Fälligkeit), ``next_run`` das nächste Buchungsdatum.
+    """
+
+    __tablename__ = "journal_template"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_journal_template_company_name"),
+        CheckConstraint(
+            "interval IN ('on_demand', 'monthly', 'quarterly', 'yearly')",
+            name="ck_journal_template_interval",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    interval: Mapped[str] = mapped_column(String(20), nullable=False, default="on_demand")
+    next_run: Mapped[date | None] = mapped_column(Date)
+    lines: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class BankBookingRule(Base):
     """Auto-Kontierungsregel für Bankumsätze.
 

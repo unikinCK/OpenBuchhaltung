@@ -571,6 +571,131 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_journal_templates",
+        description=(
+            "Listet Buchungsvorlagen (wiederkehrende Buchungen) mit Intervall und "
+            "nächster Fälligkeit."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Vorlagen einschließen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/journal-templates",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_journal_template",
+        description=(
+            "Legt eine Buchungsvorlage an. lines ist eine Liste aus "
+            "{account_id, debit, credit, optional tax_code_id/cost_center_id/"
+            "profit_center_id/description}; interval on_demand, monthly, "
+            "quarterly oder yearly (mit next_run als erster Fälligkeit)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "name": {"type": "string", "description": "Eindeutiger Vorlagen-Name."},
+                "description": {"type": "string", "description": "Buchungstext."},
+                "lines": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Buchungszeilen (account_id, debit, credit, ...).",
+                },
+                "interval": {
+                    "type": "string",
+                    "description": "on_demand (Standard), monthly, quarterly oder yearly.",
+                },
+                "next_run": {
+                    "type": "string",
+                    "description": "Erste Fälligkeit (JJJJ-MM-TT, Standard heute).",
+                },
+            },
+            "required": ["company_id", "name", "lines"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-templates",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_journal_template_active",
+        description="Aktiviert oder deaktiviert eine Buchungsvorlage.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "integer", "description": "ID der Vorlage."},
+                "is_active": {"type": "boolean", "description": "Neuer Status."},
+            },
+            "required": ["template_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-templates/{template_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="book_journal_template",
+        description=(
+            "Bucht eine Buchungsvorlage als normale Journalbuchung (entry_date "
+            "Standard: Fälligkeit bzw. heute) und schiebt die Fälligkeit um das "
+            "Intervall weiter."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "integer", "description": "ID der Vorlage."},
+                "entry_date": {
+                    "type": "string",
+                    "description": "Optional: Buchungsdatum (JJJJ-MM-TT).",
+                },
+            },
+            "required": ["template_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/journal-templates/{template_id}/book",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="book_opening_balance",
+        description=(
+            "Eröffnungsbilanz/Saldenübernahme: bucht übergebene Kontensalden "
+            "({account_id oder account_code, debit, credit}) als eine "
+            "Eröffnungsbuchung; eine Differenz landet automatisch auf dem "
+            "Saldenvortragskonto (9000 oder Name 'Saldenvortrag')."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "entry_date": {
+                    "type": "string",
+                    "description": "Buchungsdatum (JJJJ-MM-TT, Beginn des Wirtschaftsjahres).",
+                },
+                "balances": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Kontensalden ({account_code, debit, credit}).",
+                },
+            },
+            "required": ["company_id", "entry_date", "balances"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/opening-balance",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="finalize_journal_entry",
         description=(
             "Schreibt eine Buchung fest (GoBD): danach ist sie unveränderbar; Korrekturen "

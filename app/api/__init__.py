@@ -19,6 +19,7 @@ from app.api import (  # noqa: F401
     fixed_assets,
     income_taxes,
     journal,
+    journal_templates,
     mcp,
     open_items,
     payment_runs,
