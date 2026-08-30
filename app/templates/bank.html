@@ -185,6 +185,94 @@
     {% endif %}
   </section>
 
+  {% if selected_company_id and contra_accounts %}
+    <section class="card">
+      <h2>Auto-Kontierung (Regeln)</h2>
+      {% if booking_rules %}
+        <table>
+          <thead>
+            <tr>
+              <th>Muster</th>
+              <th>Gegenkonto</th>
+              <th>Steuer</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rule in booking_rules %}
+              <tr>
+                <td>{{ rule.pattern }}</td>
+                <td>{{ rule.contra_account.code }} – {{ rule.contra_account.name }}</td>
+                <td>{{ rule.tax_code.code if rule.tax_code else "–" }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('main.bank_rule_deactivate_action', rule_id=rule.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit" class="secondary" style="margin:0;">Deaktivieren</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <form method="post" action="{{ url_for('main.bank_rules_apply_action') }}" style="margin-top:0.5rem;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <button type="submit" data-confirm="Alle offenen Umsätze mit Regel-Treffer jetzt verbuchen?">Regel-Treffer verbuchen</button>
+        </form>
+      {% else %}
+        <p class="muted">Noch keine Regeln — Treffer in Verwendungszweck oder Gegenseite
+          kontieren Umsätze automatisch auf das hinterlegte Gegenkonto.</p>
+      {% endif %}
+
+      <details style="margin-top:1rem;">
+        <summary>Neue Regel anlegen</summary>
+        <form method="post" action="{{ url_for('main.bank_rule_create_action') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+          <label for="rule_pattern">Muster (Teilstring in Verwendungszweck/Gegenseite)</label>
+          <input id="rule_pattern" name="pattern" type="text" placeholder="z. B. Telekom" required minlength="3" />
+
+          <label for="rule_contra">Gegenkonto</label>
+          <select id="rule_contra" name="contra_account_id" required>
+            {% for account in contra_accounts %}
+              <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="rule_tax">Steuercode (optional)</label>
+          <select id="rule_tax" name="tax_code_id">
+            <option value="">Ohne Steuer</option>
+            {% for tax_code in tax_codes %}
+              <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+            {% endfor %}
+          </select>
+
+          {% if cost_centers %}
+            <label for="rule_cost_center">Kostenstelle (optional)</label>
+            <select id="rule_cost_center" name="cost_center_id">
+              <option value="">Ohne Kostenstelle</option>
+              {% for unit in cost_centers %}
+                <option value="{{ unit.id }}">KSt {{ unit.code }} – {{ unit.name }}</option>
+              {% endfor %}
+            </select>
+          {% endif %}
+          {% if profit_centers %}
+            <label for="rule_profit_center">Profitcenter (optional)</label>
+            <select id="rule_profit_center" name="profit_center_id">
+              <option value="">Ohne Profitcenter</option>
+              {% for unit in profit_centers %}
+                <option value="{{ unit.id }}">PC {{ unit.code }} – {{ unit.name }}</option>
+              {% endfor %}
+            </select>
+          {% endif %}
+
+          <button type="submit">Regel anlegen</button>
+        </form>
+      </details>
+    </section>
+  {% endif %}
+
   {% if reconciliation %}
     <section class="card">
       <h2>Saldenabgleich je Bankkonto</h2>
@@ -271,6 +359,13 @@
               <td>
                 {% if tx.status == 'open' %}
                   {% set transfer = transfer_by_tx.get(tx.id) %}
+                  {% set rule = rule_by_tx.get(tx.id) %}
+                  {% if rule %}
+                    <p class="muted" style="margin:0 0 0.3rem 0;">
+                      <span class="badge">Regel</span>
+                      „{{ rule.pattern }}“ → {{ rule.contra_account.code }} vorausgewählt.
+                    </p>
+                  {% endif %}
                   {% if transfer %}
                     <p class="muted" style="margin:0 0 0.3rem 0;">
                       <span class="badge">Eigenübertrag?</span>
@@ -304,13 +399,15 @@
                       <option value="">Gegenkonto wählen</option>
                       {% for account in contra_accounts %}
                         <option value="{{ account.id }}"
-                          {% if transfer and geldtransit_account and account.id == geldtransit_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                          {% if rule and account.id == rule.contra_account_id %}selected
+                          {% elif not rule and transfer and geldtransit_account and account.id == geldtransit_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
                       {% endfor %}
                     </select>
                     <select name="tax_code_id">
                       <option value="">Ohne Steuer</option>
                       {% for tax_code in tax_codes %}
-                        <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                        <option value="{{ tax_code.id }}"
+                          {% if rule and tax_code.id == rule.tax_code_id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
                       {% endfor %}
                     </select>
                     <select name="cost_center_id">

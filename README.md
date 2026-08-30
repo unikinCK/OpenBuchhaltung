@@ -331,6 +331,19 @@ verbucht. Die Umsatzliste ist paginiert und nach Status, Suchbegriff
 (`q`, `date_from`, `date_to` — auch in API und MCP; dieselben Filter gibt
 es auf den Buchungs-, Beleg- und OPOS-Seiten).
 
+**Auto-Kontierung (Regeln):** Je Gesellschaft lassen sich Kontierungsregeln
+hinterlegen: Trifft ein Teilstring-Muster (ohne Groß-/Kleinschreibung, min.
+3 Zeichen) auf Verwendungszweck oder Gegenseite eines offenen Umsatzes zu,
+wird das hinterlegte Gegenkonto samt optionalem Steuercode und
+Controlling-Dimensionen vorgeschlagen und im Buchen-Formular vorausgewählt;
+bei mehreren Treffern gewinnt das längste (spezifischste) Muster. Der
+Regel-Lauf („Regel-Treffer verbuchen“) bucht alle offenen Treffer auf einmal
+— Fehler einzelner Buchungen (z. B. gesperrte Periode) brechen den Lauf
+nicht ab, sondern stehen im Ergebnisbericht. API:
+`GET/POST /api/v1/bank-booking-rules`, `POST /bank-booking-rules/<id>/active`,
+`POST /bank-booking-rules/apply`; MCP: `list/create_bank_booking_rule`,
+`set_bank_booking_rule_active`, `apply_bank_booking_rules`.
+
 **Saldenabgleich:** Die Bank-Seite zeigt je Bankkonto den Buchsaldo
 (Soll − Haben aller Buchungszeilen) neben der Summe der importierten
 Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so

@@ -319,6 +319,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       Buchungs-, Beleg- und OPOS-Seite inkl. API/MCP-Parität; Saldenabgleich
       je Bankkonto [Buchsaldo vs. Summe importierter Umsätze, UI/API/MCP];
       OCR-Härtung: defekte Dateien lösen ReceiptOCRError statt 500 aus)*
+- [x] Auto-Kontierungsregeln für Bankumsätze *(Sprint 2026-08-30:
+      bank_booking_rule-Tabelle [Migration 0032], Teilstring-Matching auf
+      Verwendungszweck/Gegenseite mit Längster-gewinnt-Priorität, Vorauswahl
+      im Buchen-Formular, Regel-Lauf mit Fehler-Report; CRUD + Anwenden in
+      UI, API und MCP)*
 - [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
       Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
       Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*
