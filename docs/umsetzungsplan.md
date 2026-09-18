@@ -509,6 +509,43 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
   7. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
      Soll-Ist-Auswertungen.
 
+## Phase 5 – Review-Umsetzung (Stand 2026-09-19)
+
+Grundlage: `docs/review/projektreview-2026-09-19.md` (Befund-Nummern F/S/A/T/U/O
+und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
+
+- [ ] **Sprint 1 – Fachliche Korrektheit**: Abschlussbuchungen in GuV/Bilanz/
+      UStVA/KSt ausklammern + Saldovortrag (F1, F7); Netto-aus-Brutto mit
+      Rundungszeile (F2); `commit=False` in AfA/Lohn/Belegabgleich/Storno
+      (A1, F11); `TaxCode.kind` input/output (F5); Buchungsnummer je WJ mit
+      Sequenz und Retry (F6); Storno-Hooks für Bank/AfA/OPOS/Lohn (F4);
+      Cent-Quantisierung, Storno-Datum, WJ-Überlappung (F12, F13).
+- [ ] **Sprint 2 – Sicherheit**: Chat-Tool-Allowlist + Human-in-the-Loop für
+      schreibende Tools (S1); Secret-Redaktion im Chat-Verlauf (S2);
+      `/mcp/call` entfernen oder in-process (S3); ProxyFix + Rate-Limit in DB
+      (S4); Open Redirect, Cookie/HSTS, Admin-Check, MCP-Body-Limit,
+      Einzeiler (S6–S10); Login-/Admin-Audit-Events; Passwort ändern.
+- [ ] **Sprint 3 – Betrieb**: `redeploy.sh` auf Prod-Compose (O1);
+      `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
+      + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,
+      Logging-Konfiguration, Health mit DB-Check (O3, O7); Tags, CHANGELOG,
+      `.env.example` (O9).
+- [ ] **Sprint 4 – Qualität**: Postgres-Matrix in CI (T1); FK-Pragma/WAL
+      (T2); Coverage-Gate (T4); `conftest.py` (T5); mypy, pip-audit,
+      Docker-Build, Downgrade-Rundlauf (T6); Paritätstest aus `url_map` (A2);
+      `DomainError` + Errorhandler (A4); Index-Drift (A5); Lockfile (A7);
+      DATEV je WJ mit BU-Schlüsseln + Golden-Files (F3, T7).
+- [ ] **Sprint 5 – Produkt-Basis**: Firmenstammdaten in DB (#3);
+      Kunden-/Lieferantenstamm (#1); Eingangsrechnung → OPOS (#5); Skonto
+      (#11); Zahllauf markiert Posten (F8); § 13b / ig. Erwerb / ZM (#4, F10);
+      BWA + Vorjahresvergleich (#8); Steuercode-UI, Gesellschaft bearbeiten.
+- [ ] **Sprint 6 – UX**: deutsches Betrags-/Datumsformat (U2);
+      Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
+      Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit
+      WJ-Bezug, Liquidität, Fälligkeiten (U6).
+- [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
+      Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)
 2. **Datenmodell v0** inkl. ER-Diagramm
