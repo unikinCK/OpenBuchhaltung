@@ -11,6 +11,30 @@
     </section>
   {% else %}
     <section class="card">
+      <h2>Auswertungszeitraum</h2>
+      <form method="get" action="{{ url_for('main.reports_page') }}" class="inline-form">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="date_from">Von</label>
+        <input id="date_from" name="date_from" type="date" value="{{ date_from.isoformat() if date_from else '' }}" style="width:auto;" />
+        <label for="date_to">Bis / Stichtag</label>
+        <input id="date_to" name="date_to" type="date" value="{{ date_to.isoformat() if date_to else '' }}" style="width:auto;" />
+        <label for="include_closing_entries">
+          <input id="include_closing_entries" name="include_closing_entries" type="checkbox" value="1" {% if include_closing_entries %}checked{% endif %} />
+          inkl. Abschlussbuchungen
+        </label>
+        <button type="submit">Anzeigen</button>
+      </form>
+      <p class="muted">
+        Ohne Häkchen zeigen SuSa, GuV und Bilanz den Stand vor den Abschlussbuchungen
+        (Periode 13, z. B. AfA). Der Ergebnisvortrag des Jahresabschlusses zählt in der GuV nie
+        mit; Saldovorträge (EB-Werte) erscheinen in der SuSa nur bei Auswertung ab einem Datum.
+        {% if balance_sheet.period and balance_sheet.period.fiscal_year %}
+          Bilanz-Geschäftsjahr: {{ balance_sheet.period.fiscal_year }}.
+        {% endif %}
+      </p>
+    </section>
+
+    <section class="card">
       <h2>Summen- und Saldenliste</h2>
       {% if trial_balance %}
         <table>
@@ -39,11 +63,11 @@
         <p class="muted">Noch keine Buchungen für diese Gesellschaft.</p>
       {% endif %}
       <p>
-        <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id) }}">Summen-/Saldenliste als CSV exportieren</a>
+        <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id, **report_args) }}">Summen-/Saldenliste als CSV exportieren</a>
         ·
         <a href="{{ url_for('api.export_journal_csv', company_id=selected_company_id) }}">Journal-Export (CSV)</a>
         ·
-        <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id) }}">SuSa-Export (CSV, API-Format)</a>
+        <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id, **report_args) }}">SuSa-Export (CSV, API-Format)</a>
         ·
         <a href="{{ url_for('api.export_datev_csv', company_id=selected_company_id) }}">DATEV-Buchungsstapel (EXTF)</a>
         ·

@@ -529,6 +529,7 @@ def _seed_company_with_accounts(app):
             tenant_id=tenant.id,
             company_id=company.id,
             code="VSt19",
+            kind="input",
             rate=Decimal("19.00"),
             vat_account_id=vat.id,
         )

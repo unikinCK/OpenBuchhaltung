@@ -104,6 +104,7 @@ def _setup_company(client):
                 tenant_id=company.tenant_id,
                 company_id=company.id,
                 code="VSt19",
+                kind="input",
                 rate=Decimal("19.00"),
                 description="Vorsteuer 19 %",
                 vat_account_id=vat_account.id,

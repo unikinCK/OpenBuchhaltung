@@ -1095,3 +1095,33 @@ def test_fixed_assets_api_degressive_rate_roundtrip(tmp_path: Path) -> None:
 
     listed = client.get("/api/v1/fixed-assets?company_id=1")
     assert listed.get_json()["assets"][0]["degressive_rate"] == "23.0769"
+
+
+def test_post_depreciation_is_atomic_with_journal_entry(session: Session, monkeypatch) -> None:
+    from app.services import fixed_assets as fixed_assets_module
+    from domain.models import JournalEntry
+
+    company, _, _ = _seed(session)
+    asset = _linear_asset(session, company)
+
+    def failing_audit(**kwargs):
+        raise RuntimeError("Audit-Log nicht erreichbar")
+
+    monkeypatch.setattr(fixed_assets_module, "log_audit_event", failing_audit)
+    with pytest.raises(RuntimeError):
+        post_depreciation(
+            session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+        )
+    session.rollback()
+
+    # Weder Journalbuchung noch AfA-Satz dürfen zurückbleiben …
+    assert session.execute(select(JournalEntry.id)).first() is None
+    assert session.execute(select(DepreciationEntry.id)).first() is None
+
+    # … sodass der erneute Versuch genau einmal bucht.
+    monkeypatch.undo()
+    entry = post_depreciation(
+        session=session, fixed_asset_id=asset.id, fiscal_year=2026, changed_by="pytest"
+    )
+    assert entry.amount == Decimal("2400.00")
+    assert len(session.execute(select(JournalEntry.id)).all()) == 1

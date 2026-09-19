@@ -895,6 +895,21 @@ def test_report_tools_expose_date_parameters() -> None:
     # Bilanz ist Stichtag: date_to, aber kein date_from.
     balance_props = by_name["get_balance_sheet"].input_schema["properties"]
     assert "date_to" in balance_props and "date_from" not in balance_props
+    # Schalter „inkl. Abschlussbuchungen“ überall, wo Salden ausgewertet werden.
+    for name in (
+        "get_trial_balance",
+        "get_income_statement",
+        "get_balance_sheet",
+        "export_trial_balance_csv",
+        "get_vat_return",
+        "create_vat_return",
+        "get_vat_annual_return",
+        "create_vat_annual_return",
+        "preview_income_tax_return",
+        "create_income_tax_return",
+    ):
+        properties = by_name[name].input_schema["properties"]
+        assert properties["include_closing_entries"]["type"] == "boolean", name
 
 
 def test_audit_log_tool_forwards_filters_as_query() -> None:

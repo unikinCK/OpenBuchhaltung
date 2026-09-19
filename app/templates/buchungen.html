@@ -59,7 +59,7 @@
                 <select name="line_tax_code_id">
                   <option value="">Ohne Steuer</option>
                   {% for tax_code in tax_codes %}
-                    <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %, {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
                   {% endfor %}
                 </select>
               </div>
@@ -130,7 +130,7 @@
             <select name="line_tax_code_id">
               <option value="">Ohne Steuer</option>
               {% for tax_code in tax_codes %}
-                <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %, {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
               {% endfor %}
             </select>
           </div>

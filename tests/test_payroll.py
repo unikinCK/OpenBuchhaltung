@@ -7,6 +7,7 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -391,3 +392,63 @@ def test_payroll_run_uses_configured_pap_command(tmp_path: Path) -> None:
         assert run.net_total == Decimal("2437.00")
         assert run.lines[0].calculation["tax"]["mode"] == "pap_command"
         assert run.lines[0].calculation["tax"]["version"] == "PAP-2026-test"
+
+
+def test_payroll_expense_is_posted_at_month_end_of_period() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        company, _ = _seed(session)
+        create_payroll_employee(session=session, payload=_employee_input(company))
+        run = create_payroll_run(
+            session=session,
+            payload=PayrollRunInput(
+                company_id=company.id,
+                period_label="2026-02",
+                payment_date=date(2026, 3, 10),
+                changed_by="pytest",
+            ),
+        )
+        posted = post_payroll_run(session=session, payroll_run_id=run.id, changed_by="pytest")
+        journal = session.get(JournalEntry, posted.journal_entry_id)
+        # Lohnaufwand periodengerecht im Lohnmonat, nicht am Zahlungsdatum.
+        assert journal.entry_date == date(2026, 2, 28)
+
+
+def test_post_payroll_run_is_atomic(monkeypatch) -> None:
+    from app.services import payroll as payroll_module
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        company, _ = _seed(session)
+        create_payroll_employee(session=session, payload=_employee_input(company))
+        run = create_payroll_run(
+            session=session,
+            payload=PayrollRunInput(
+                company_id=company.id,
+                period_label="2026-05",
+                payment_date=date(2026, 5, 31),
+                changed_by="pytest",
+            ),
+        )
+        original_audit = payroll_module.log_audit_event
+
+        def failing_audit(**kwargs):
+            if kwargs.get("action") == "posted":
+                raise RuntimeError("Audit-Log nicht erreichbar")
+            return original_audit(**kwargs)
+
+        monkeypatch.setattr(payroll_module, "log_audit_event", failing_audit)
+        with pytest.raises(RuntimeError):
+            post_payroll_run(session=session, payroll_run_id=run.id, changed_by="pytest")
+        session.rollback()
+
+        # Keine Waisenbuchung, Lauf weiterhin Entwurf.
+        assert session.execute(select(JournalEntry.id)).first() is None
+        assert session.get(PayrollRun, run.id).status == "draft"
+
+        monkeypatch.undo()
+        posted = post_payroll_run(session=session, payroll_run_id=run.id, changed_by="pytest")
+        assert posted.status == "posted"
+        assert len(session.execute(select(JournalEntry.id)).all()) == 1

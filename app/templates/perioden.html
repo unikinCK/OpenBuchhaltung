@@ -16,7 +16,10 @@
         Reguläre Geschäftsjahre werden automatisch mit der ersten Buchung anhand des
         Beginn-Monats angelegt. Rumpf- und abweichende Jahre können manuell mit freiem
         Zeitraum erfasst werden. Jedes Geschäftsjahr erhält eine Abschlussperiode (13)
-        für Jahresabschlussbuchungen.
+        für Jahresabschlussbuchungen. Der Jahresabschluss bucht den Ergebnisvortrag
+        (Erfolgskonten an Gewinnvortrag) in die Abschlussperiode und den Saldovortrag der
+        Bestandskonten als EB-Werte in das Folgejahr; Vorjahre müssen zuvor abgeschlossen
+        sein.
       </p>
 
       {% if is_admin %}

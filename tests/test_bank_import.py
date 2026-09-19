@@ -808,9 +808,63 @@ def test_net_from_gross_edge_cases() -> None:
         Decimal("50.00"),
         Decimal("0.00"),
     )
-    # 0,03 € hat keine exakte Netto+19%-Zerlegung — muss sauber fehlschlagen
-    with pytest.raises(BankImportError, match="zerlegen"):
-        net_from_gross(Decimal("0.03"), Decimal("19.00"))
+    # Beträge ohne exakte Netto+19%-Zerlegung gehen über den Rundungscent auf
+    # der Steuerzeile auf (1,03 × 19 % wäre 0,20).
+    assert net_from_gross(Decimal("1.22"), Decimal("19.00")) == (
+        Decimal("1.03"),
+        Decimal("0.19"),
+    )
+    assert net_from_gross(Decimal("0.03"), Decimal("19.00")) == (
+        Decimal("0.03"),
+        Decimal("0.00"),
+    )
+    # Jeder Centbetrag zwischen 0,01 und 20,00 € geht auf.
+    for cents in range(1, 2001):
+        gross = Decimal(cents) / Decimal("100")
+        net, tax = net_from_gross(gross, Decimal("19.00"))
+        assert net + tax == gross
+        assert net >= Decimal("0.00") and tax >= Decimal("0.00")
+
+
+def test_book_transaction_with_rounding_cent_on_tax_line(session: Session) -> None:
+
+    company, bank, rent = _seed_company(session)
+    ensure_default_tax_codes(session=session, company=company)
+    vst19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
+    ).scalar_one()
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        booking_date=date(2026, 3, 3),
+        amount=Decimal("-1.22"),
+        currency_code="EUR",
+        purpose="Kleinbetrag",
+        dedup_hash="rounding-1",
+    )
+    session.add(transaction)
+    session.commit()
+
+    booked = book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=rent.id,
+        tax_code_id=vst19.id,
+        changed_by="tester",
+    )
+    lines = session.execute(
+        select(JournalEntryLine)
+        .where(JournalEntryLine.journal_entry_id == booked.journal_entry_id)
+        .order_by(JournalEntryLine.line_number)
+    ).scalars().all()
+    assert [(line.debit_amount, line.credit_amount) for line in lines] == [
+        (Decimal("0.00"), Decimal("1.22")),
+        (Decimal("1.03"), Decimal("0.00")),
+        (Decimal("0.19"), Decimal("0.00")),
+    ]
+    assert lines[2].account_id == vst19.vat_account_id
+    assert lines[1].tax_code_id == vst19.id and lines[2].tax_code_id == vst19.id
 
 
 def _create_ui_app(tmp_path: Path):

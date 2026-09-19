@@ -36,7 +36,17 @@ from app.services.vat_returns import (
     period_bounds,
     save_vat_return,
 )
-from domain.models import Account, AuditLog, Base, Company, TaxCode, Tenant, User, VatReturn
+from domain.models import (
+    Account,
+    AuditLog,
+    Base,
+    Company,
+    FiscalYear,
+    TaxCode,
+    Tenant,
+    User,
+    VatReturn,
+)
 
 
 @pytest.fixture()
@@ -110,6 +120,7 @@ def _seed(session: Session) -> Company:
                 tenant_id=tenant.id,
                 company_id=company.id,
                 code="VSt19",
+                kind="input",
                 rate=Decimal("19.00"),
                 vat_account_id=account_id("1576"),
             ),
@@ -1290,3 +1301,65 @@ def test_compute_vat_return_mixes_tagged_and_untagged_lines(session: Session) ->
     )
     assert amounts["81"] == Decimal("300")
     assert amounts["USt"] == Decimal("57.00")
+
+
+def test_year_end_close_does_not_distort_vat_return(session: Session) -> None:
+    from app.services.periods import close_fiscal_year
+
+    company = _seed(session)
+    session.add(
+        Account(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            code="0860",
+            name="Gewinnvortrag vor Verwendung",
+            account_type="equity",
+        )
+    )
+    session.commit()
+    _seed_bookings(session, company)
+    # Abschlussbuchung in Periode 13 mit steuerfreiem Erlös (z. B. Abgrenzung).
+    create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 12, 31),
+            description="Abgrenzung",
+            status="posted",
+            changed_by="pytest",
+            post_to_closing_period=True,
+            lines=[
+                JournalLineInput(
+                    account_id=_account_id(session, company, "1200"),
+                    debit_amount=Decimal("40.00"),
+                ),
+                JournalLineInput(
+                    account_id=_account_id(session, company, "8100"),
+                    credit_amount=Decimal("40.00"),
+                    tax_code_id=_tax_code_id(session, company, "frei"),
+                ),
+            ],
+        ),
+    )
+
+    def kz(include: bool) -> dict[str, Decimal]:
+        rows = compute_vat_return(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 12, 31),
+            include_closing_entries=include,
+        )
+        return {row.kennziffer: row.amount for row in rows}
+
+    before = kz(False)
+    assert before["48"] == Decimal("100")
+    assert kz(True)["48"] == Decimal("140")
+
+    fiscal_year = session.execute(select(FiscalYear)).scalar_one()
+    close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="pytest")
+
+    # Der Ergebnisvortrag (Erlöskonten im Soll, ohne Steuercode) ist kein Umsatz:
+    # Kz 48 bleibt positiv, Kz 81 und Kz 83 unverändert.
+    assert kz(False) == before
+    assert kz(True)["48"] == Decimal("140")
