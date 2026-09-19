@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 
 class JournalEntryValidationError(ValueError):
     """Raised when a JournalEntry violates business validation rules."""
+
+
+CENT = Decimal("0.01")
+
+
+def is_cent_amount(value: Decimal) -> bool:
+    """True, wenn der Betrag höchstens zwei Nachkommastellen hat."""
+    try:
+        return value.is_finite() and value == value.quantize(CENT)
+    except InvalidOperation:
+        return False
 
 
 @dataclass(slots=True)
@@ -54,6 +65,10 @@ class JournalEntryValidator:
             if line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00"):
                 raise JournalEntryValidationError(
                     f"Zeile {idx}: Betrag muss größer 0 sein."
+                )
+            if not is_cent_amount(line.debit_amount) or not is_cent_amount(line.credit_amount):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Beträge dürfen höchstens zwei Nachkommastellen haben."
                 )
             debit_total += line.debit_amount
             credit_total += line.credit_amount

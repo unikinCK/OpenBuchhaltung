@@ -449,9 +449,12 @@ def calculate_payroll_line(
 
 
 def decimal_from_payload(value: object, default: str = "0.00") -> Decimal:
+    """Dezimalwert aus Formular/JSON — ohne Cent-Prüfung, da auch Sätze
+    (z. B. 0,195) und Kinderfreibeträge (0,5) darüber laufen; Geldbeträge
+    werden im Service über ``_money`` auf Cent gerundet."""
     if value is None or value == "":
         value = default
-    return parse_decimal(str(value))
+    return parse_decimal(str(value), places=None)
 
 
 def _payroll_employees_for_run(

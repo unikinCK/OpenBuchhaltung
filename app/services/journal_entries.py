@@ -407,11 +407,33 @@ def _expand_tax_lines(
     return expanded
 
 
-def parse_decimal(value: str) -> Decimal:
+def parse_decimal(value: str, *, places: int | None = 2) -> Decimal:
+    """Parst einen Dezimalstring.
+
+    Mit ``places`` (Standard 2 = Cent) werden Werte mit mehr Nachkommastellen
+    abgelehnt statt stillschweigend gerundet (0,015 + 0,015 wäre sonst als
+    0,03 buchbar); das Ergebnis ist auf ``places`` Stellen quantisiert
+    (``"5"`` → ``5.00``). ``places=None`` parst ohne Stellenprüfung, z. B. für
+    Prozentsätze, AfA-Sätze oder Mengen.
+    """
     try:
-        return Decimal(value)
-    except (InvalidOperation, TypeError):
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, AttributeError):
         raise JournalEntryCreationError("Betrag ist keine gültige Dezimalzahl.") from None
+    if not parsed.is_finite():
+        raise JournalEntryCreationError("Betrag ist keine gültige Dezimalzahl.")
+    if places is None:
+        return parsed
+    quantum = Decimal(1).scaleb(-places)
+    try:
+        quantized = parsed.quantize(quantum)
+    except InvalidOperation:
+        raise JournalEntryCreationError("Betrag ist zu groß.") from None
+    if quantized != parsed:
+        raise JournalEntryCreationError(
+            f"Betrag darf höchstens {places} Nachkommastellen haben ({parsed})."
+        )
+    return quantized
 
 
 def _get_or_create_fiscal_year(
@@ -423,17 +445,7 @@ def _get_or_create_fiscal_year(
 ) -> FiscalYear:
     # Zuerst ein bereits vorhandenes (auch manuell angelegtes Rumpf-/abweichendes)
     # Wirtschaftsjahr suchen, dessen Zeitraum das Buchungsdatum umfasst.
-    fiscal_year = (
-        session.execute(
-            select(FiscalYear).where(
-                FiscalYear.company_id == company_id,
-                FiscalYear.start_date <= dt,
-                FiscalYear.end_date >= dt,
-            )
-        )
-        .scalars()
-        .first()
-    )
+    fiscal_year = _find_fiscal_year_containing(session=session, company_id=company_id, dt=dt)
     if fiscal_year:
         return fiscal_year
 
@@ -441,6 +453,30 @@ def _get_or_create_fiscal_year(
     company = session.get(Company, company_id)
     start_month = company.fiscal_year_start_month if company else 1
     start_date, end_date, label = fiscal_year_bounds(start_month, dt)
+
+    # Das automatische Jahr darf sich nicht mit manuell angelegten (Rumpf-/
+    # abweichenden) Geschäftsjahren überschneiden — sonst entstünden zwei
+    # Jahre für dasselbe Datum und die Zuordnung wäre Zufall.
+    overlapping = (
+        session.execute(
+            select(FiscalYear.label)
+            .where(
+                FiscalYear.company_id == company_id,
+                FiscalYear.start_date <= end_date,
+                FiscalYear.end_date >= start_date,
+            )
+            .order_by(FiscalYear.start_date)
+        )
+        .scalars()
+        .all()
+    )
+    if overlapping:
+        raise JournalEntryCreationError(
+            f"Für das Buchungsdatum {dt.isoformat()} existiert kein Geschäftsjahr; das "
+            f"automatische Geschäftsjahr {label} ({start_date.isoformat()} – "
+            f"{end_date.isoformat()}) würde sich mit {', '.join(overlapping)} überschneiden. "
+            "Bitte das passende Geschäftsjahr in der Periodenverwaltung manuell anlegen."
+        )
 
     fiscal_year = FiscalYear(
         tenant_id=tenant_id,
@@ -450,12 +486,52 @@ def _get_or_create_fiscal_year(
         end_date=end_date,
         is_closed=False,
     )
-    session.add(fiscal_year)
-    session.flush()
-    for period in build_periods_for_fiscal_year(fiscal_year):
-        session.add(period)
+    try:
+        with session.begin_nested():
+            session.add(fiscal_year)
+            session.flush()
+            for period in build_periods_for_fiscal_year(fiscal_year):
+                session.add(period)
+    except IntegrityError:
+        # Wettlauf: Eine parallele Buchung hat das Geschäftsjahr inzwischen
+        # angelegt (UNIQUE auf Bezeichnung) — erneut nachschlagen.
+        fiscal_year = _find_fiscal_year_containing(
+            session=session, company_id=company_id, dt=dt
+        )
+        if fiscal_year is None:
+            raise JournalEntryCreationError(
+                f"Das Geschäftsjahr {label} konnte nicht angelegt werden (Bezeichnung "
+                "bereits vergeben). Bitte das Geschäftsjahr manuell anlegen."
+            ) from None
+        return fiscal_year
     session.flush()
     return fiscal_year
+
+
+def _find_fiscal_year_containing(
+    *, session: Session, company_id: int, dt: date
+) -> FiscalYear | None:
+    """Das Geschäftsjahr, dessen Zeitraum ``dt`` enthält (eindeutig oder Fehler)."""
+    matches = (
+        session.execute(
+            select(FiscalYear)
+            .where(
+                FiscalYear.company_id == company_id,
+                FiscalYear.start_date <= dt,
+                FiscalYear.end_date >= dt,
+            )
+            .order_by(FiscalYear.start_date, FiscalYear.id)
+        )
+        .scalars()
+        .all()
+    )
+    if len(matches) > 1:
+        labels = ", ".join(match.label for match in matches)
+        raise JournalEntryCreationError(
+            f"Mehrere Geschäftsjahre enthalten das Buchungsdatum {dt.isoformat()} "
+            f"({labels}). Bitte die Geschäftsjahre in der Periodenverwaltung korrigieren."
+        )
+    return matches[0] if matches else None
 
 
 def _get_or_create_period(
@@ -749,6 +825,12 @@ def reverse_journal_entry(
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
             "und kann nicht storniert werden."
+        )
+    if reversal_date < original.entry_date:
+        raise JournalEntryCreationError(
+            f"Das Stornodatum {reversal_date.isoformat()} darf nicht vor dem "
+            f"Buchungsdatum {original.entry_date.isoformat()} der Buchung "
+            f"{original.posting_number} liegen."
         )
     already_reversed = session.execute(
         select(JournalEntry.posting_number).where(

@@ -155,9 +155,11 @@ def _parse_export_lines(payload: dict[str, object]) -> list[InvoiceLine]:
             lines.append(
                 InvoiceLine(
                     name=name,
-                    quantity=parse_decimal(str(raw_line.get("quantity") or "0")),
-                    unit_price=parse_decimal(str(raw_line.get("unit_price") or "0")),
-                    tax_rate=parse_decimal(str(raw_line.get("tax_rate") or "0")),
+                    quantity=parse_decimal(str(raw_line.get("quantity") or "0"), places=None),
+                    unit_price=parse_decimal(
+                        str(raw_line.get("unit_price") or "0"), places=None
+                    ),
+                    tax_rate=parse_decimal(str(raw_line.get("tax_rate") or "0"), places=None),
                 )
             )
         except JournalEntryCreationError as exc:

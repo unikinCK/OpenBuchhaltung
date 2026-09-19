@@ -126,8 +126,8 @@ def create_fixed_asset_action():
         acquisition_cost = parse_decimal(request.form.get("acquisition_cost", "").strip())
         useful_life_raw = request.form.get("useful_life_months", "").strip()
         useful_life_months = int(useful_life_raw) if useful_life_raw else None
-        degressive_rate = optional_decimal(request.form.get("degressive_rate", ""))
-        total_units = optional_decimal(request.form.get("total_units", ""))
+        degressive_rate = optional_decimal(request.form.get("degressive_rate", ""), places=None)
+        total_units = optional_decimal(request.form.get("total_units", ""), places=None)
         residual_value = optional_decimal(request.form.get("residual_value", "")) or Decimal(
             "0.00"
         )
@@ -178,7 +178,7 @@ def create_fixed_asset_action():
 def depreciate_fixed_asset_action(asset_id: int):
     company_id = request.form.get("company_id", type=int)
     fiscal_year = request.form.get("fiscal_year", type=int)
-    units = safe_optional_decimal(request.form.get("units", ""))
+    units = safe_optional_decimal(request.form.get("units", ""), places=None)
 
     if not fiscal_year:
         flash("Bitte ein Wirtschaftsjahr angeben.", "error")
@@ -318,8 +318,10 @@ def update_fixed_asset_action(asset_id: int):
             return redirect(
                 url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id)
             )
-        degressive_rate = safe_optional_decimal(request.form.get("degressive_rate", ""))
-        total_units = safe_optional_decimal(request.form.get("total_units", ""))
+        degressive_rate = safe_optional_decimal(
+            request.form.get("degressive_rate", ""), places=None
+        )
+        total_units = safe_optional_decimal(request.form.get("total_units", ""), places=None)
         try:
             update_fixed_asset(
                 session=session,
