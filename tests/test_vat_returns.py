@@ -110,6 +110,7 @@ def _seed(session: Session) -> Company:
                 tenant_id=tenant.id,
                 company_id=company.id,
                 code="VSt19",
+                kind="input",
                 rate=Decimal("19.00"),
                 vat_account_id=account_id("1576"),
             ),

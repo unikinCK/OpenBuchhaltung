@@ -3005,7 +3005,11 @@ TOOLS: list[ToolSpec] = [
         name="create_tax_code",
         description=(
             "Legt einen Steuercode an. Das Steuerkonto per interner ID "
-            "(vat_account_id) oder Kontonummer (vat_account_code, z. B. '3806')."
+            "(vat_account_id) oder Kontonummer (vat_account_code, z. B. '3806'). "
+            "kind legt die Richtung fest: 'input' = Vorsteuer (Bemessungsgrundlage "
+            "auf Aufwands-/Anlagenkonten, Kz 66), 'output' = Umsatzsteuer "
+            "(Erlöskonten, Kz 81/86/48); ohne Angabe wird sie aus Steuerkonto "
+            "bzw. Kürzel abgeleitet."
         ),
         input_schema={
             "type": "object",
@@ -3013,6 +3017,11 @@ TOOLS: list[ToolSpec] = [
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "code": {"type": "string", "description": "Kürzel, z. B. 'USt19'."},
                 "rate": {"type": "string", "description": "Steuersatz, z. B. '19.00'."},
+                "kind": {
+                    "type": "string",
+                    "enum": ["input", "output"],
+                    "description": "Richtung: input = Vorsteuer, output = Umsatzsteuer.",
+                },
                 "description": {"type": "string"},
                 "vat_account_id": {"type": "integer"},
                 "vat_account_code": {"type": "string"},

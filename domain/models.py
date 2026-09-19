@@ -289,11 +289,19 @@ class ControllingUnit(Base):
     )
 
 
+# Richtung eines Steuercodes: Vorsteuer (Eingangsleistungen, Kz 66) oder
+# Umsatzsteuer (Ausgangsumsätze, Kz 81/86/48).
+TAX_KIND_INPUT = "input"
+TAX_KIND_OUTPUT = "output"
+TAX_CODE_KINDS = (TAX_KIND_INPUT, TAX_KIND_OUTPUT)
+
+
 class TaxCode(Base):
     __tablename__ = "tax_code"
     __table_args__ = (
         UniqueConstraint("company_id", "code", name="uq_tax_code_company_code"),
         CheckConstraint("rate >= 0", name="ck_tax_code_rate_non_negative"),
+        CheckConstraint("kind IN ('input', 'output')", name="ck_tax_code_kind_known"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -305,6 +313,11 @@ class TaxCode(Base):
     )
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # "input" = Vorsteuer (Bemessungsgrundlage auf Aufwand/Anlagen),
+    # "output" = Umsatzsteuer (Bemessungsgrundlage auf Erlösen).
+    kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=TAX_KIND_OUTPUT, server_default=TAX_KIND_OUTPUT
+    )
     description: Mapped[str | None] = mapped_column(String(255))
     vat_account_id: Mapped[int | None] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT")

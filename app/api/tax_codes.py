@@ -15,7 +15,7 @@ from app.api.helpers import (
     validation_error,
 )
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
-from app.services.tax_codes import ensure_default_tax_codes
+from app.services.tax_codes import TaxCodeError, ensure_default_tax_codes, normalize_tax_kind
 from domain.models import Account, TaxCode
 
 
@@ -25,6 +25,7 @@ def _tax_code_dict(tax_code: TaxCode) -> dict[str, object]:
         "company_id": tax_code.company_id,
         "code": tax_code.code,
         "rate": str(tax_code.rate),
+        "kind": tax_code.kind,
         "description": tax_code.description,
         "vat_account_id": tax_code.vat_account_id,
         "is_active": tax_code.is_active,
@@ -96,16 +97,28 @@ def create_tax_code_via_api():
                 return validation_error(
                     f"Steuerkonto {vat_account_code} wurde nicht gefunden."
                 )
+        vat_account_type = None
         if vat_account_id is not None:
             account = session.get(Account, vat_account_id)
             if account is None or account.company_id != company.id:
                 return validation_error("Steuerkonto gehört nicht zur Gesellschaft.")
+            vat_account_type = account.account_type
+
+        # Richtung (input = Vorsteuer, output = Umsatzsteuer): explizit oder aus
+        # Steuerkonto/Kürzel abgeleitet; muss zum Steuerkonto passen.
+        try:
+            kind = normalize_tax_kind(
+                payload.get("kind"), code=code, vat_account_type=vat_account_type
+            )
+        except TaxCodeError as exc:
+            return validation_error(str(exc))
 
         tax_code = TaxCode(
             tenant_id=company.tenant_id,
             company_id=company.id,
             code=code,
             rate=rate,
+            kind=kind,
             description=(payload.get("description") or "").strip() or None,
             vat_account_id=vat_account_id,
         )

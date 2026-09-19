@@ -15,10 +15,9 @@ Ertragszeilen derselben Buchung bilden die Bemessungsgrundlage, deren
 Steuersatz aus dem Verhältnis USt/Bemessungsgrundlage abgeleitet wird.
 Ertragsbuchungen ohne Umsatzsteuerzeile gelten als steuerfrei (Kz 48).
 
-Die Richtung ergibt sich datengetrieben aus dem Kontotyp des Steuerkontos:
-``liability`` = Umsatzsteuer (Ausgangsumsätze), ``asset`` = Vorsteuer
-(Eingangsleistungen). Steuerfreie Umsätze (Steuersatz 0 %) werden über
-Basiszeilen auf Erlöskonten erkannt.
+Die Richtung ergibt sich aus ``TaxCode.kind``: ``output`` = Umsatzsteuer
+(Ausgangsumsätze), ``input`` = Vorsteuer (Eingangsleistungen). Steuerfreie
+Umsätze (Steuersatz 0 %) werden über Basiszeilen auf Erlöskonten erkannt.
 
 Kennziffern (amtliches UStVA-Formular, Basisfälle):
 * Kz 81: Steuerpflichtige Umsätze 19 % (Bemessungsgrundlage, volle EUR)
@@ -42,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
 from domain.models import (
+    TAX_KIND_INPUT,
     Account,
     Company,
     JournalEntry,
@@ -135,16 +135,17 @@ def period_bounds(period_label: str) -> tuple[date, date, str]:
 def _company_vat_accounts(session: Session, company_id: int) -> dict[int, str]:
     """Steuerkonten der Gesellschaft laut Steuercode-Definitionen.
 
-    Liefert ``{account_id: account_type}`` für alle Konten, die von einem
-    Steuercode als Steuerkonto referenziert werden. Über diese Zuordnung werden
-    auch Buchungszeilen ohne Steuercode als Umsatz-/Vorsteuerzeilen erkannt.
+    Liefert ``{account_id: kind}`` (``input``/``output``) für alle Konten, die
+    von einem Steuercode als Steuerkonto referenziert werden. Über diese
+    Zuordnung werden auch Buchungszeilen ohne Steuercode als
+    Umsatz-/Vorsteuerzeilen erkannt.
     """
     rows = session.execute(
-        select(TaxCode.vat_account_id, Account.account_type)
-        .join(Account, Account.id == TaxCode.vat_account_id)
-        .where(TaxCode.company_id == company_id, TaxCode.vat_account_id.is_not(None))
+        select(TaxCode.vat_account_id, TaxCode.kind).where(
+            TaxCode.company_id == company_id, TaxCode.vat_account_id.is_not(None)
+        )
     ).all()
-    return {row.vat_account_id: row.account_type for row in rows}
+    return {row.vat_account_id: row.kind for row in rows}
 
 
 def _match_rate(raw_rate: Decimal, known_rates: set[Decimal]) -> Decimal:
@@ -172,7 +173,6 @@ def compute_vat_return(
     ganz ohne Umsatzsteuerzeile gelten als steuerfrei (Kz 48).
     """
     line_account = Account.__table__.alias("line_account")
-    vat_account = Account.__table__.alias("vat_account")
 
     rows = session.execute(
         select(
@@ -183,13 +183,12 @@ def compute_vat_return(
             JournalEntryLine.tax_code_id,
             TaxCode.rate,
             TaxCode.vat_account_id,
+            TaxCode.kind.label("tax_kind"),
             line_account.c.account_type.label("line_account_type"),
-            vat_account.c.account_type.label("vat_account_type"),
         )
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
         .outerjoin(TaxCode, TaxCode.id == JournalEntryLine.tax_code_id)
         .join(line_account, line_account.c.id == JournalEntryLine.account_id)
-        .outerjoin(vat_account, vat_account.c.id == TaxCode.vat_account_id)
         .where(
             JournalEntry.company_id == company_id,
             JournalEntry.entry_date >= date_from,
@@ -222,7 +221,7 @@ def compute_vat_return(
                 row.vat_account_id is not None and row.account_id == row.vat_account_id
             )
             if is_tax_line:
-                if row.vat_account_type == "asset":
+                if row.tax_kind == TAX_KIND_INPUT:
                     # Vorsteuer: Sollsaldo (Storno bucht Haben und mindert).
                     input_tax += row.debit_amount - row.credit_amount
                 else:
@@ -236,7 +235,7 @@ def compute_vat_return(
                     tax_free_base += row.credit_amount - row.debit_amount
                 continue
 
-            if row.vat_account_type == "asset":
+            if row.tax_kind == TAX_KIND_INPUT:
                 # Bemessungsgrundlagen von Eingangsleistungen werden in der UStVA
                 # nicht gemeldet (nur die Vorsteuer, Kz 66).
                 continue
@@ -247,11 +246,11 @@ def compute_vat_return(
             continue
 
         # Ohne Steuercode: Steuerkonten über die Steuercode-Definitionen erkennen.
-        vat_account_type = vat_accounts.get(row.account_id)
-        if vat_account_type == "asset":
+        vat_kind = vat_accounts.get(row.account_id)
+        if vat_kind == TAX_KIND_INPUT:
             input_tax += row.debit_amount - row.credit_amount
             continue
-        if vat_account_type is not None:
+        if vat_kind is not None:
             amount = row.credit_amount - row.debit_amount
             output_tax += amount
             untagged_output_by_entry[row.journal_entry_id] = (

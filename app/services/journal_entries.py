@@ -13,6 +13,8 @@ from app.services.audit_log import log_audit_event
 from app.services.compliance_integrity import seal_journal_entry
 from app.services.controlling import ControllingError, validate_controlling_assignment
 from domain.models import (
+    TAX_KIND_INPUT,
+    TAX_KIND_OUTPUT,
     Account,
     Company,
     FiscalYear,
@@ -156,8 +158,9 @@ def create_journal_entry(
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
     lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
+    tax_codes = _load_tax_codes(session=session, company=company, lines=lines)
     if payload.expand_tax_lines:
-        lines = _expand_tax_lines(session=session, company=company, lines=lines)
+        lines = _expand_tax_lines(lines=lines, tax_codes=tax_codes)
 
     JournalEntryValidator.validate(
         JournalEntryDraft(
@@ -208,6 +211,8 @@ def create_journal_entry(
             )
         except ControllingError as exc:
             raise JournalEntryCreationError(str(exc)) from exc
+
+    _validate_tax_code_usage(lines=lines, accounts=accounts, tax_codes=tax_codes)
 
     fiscal_year = _get_or_create_fiscal_year(
         session=session,
@@ -339,22 +344,14 @@ def _resolve_account_codes(
     return resolved
 
 
-def _expand_tax_lines(
-    *,
-    session: Session,
-    company: Company,
-    lines: list[JournalLineInput],
-) -> list[JournalLineInput]:
-    """Erzeugt für Zeilen mit Steuercode die automatische USt-/VSt-Teilbuchung.
-
-    Beträge der Ursprungszeile gelten als Netto; die Steuerzeile wird auf derselben
-    Seite (Soll/Haben) auf dem Steuerkonto des Steuercodes ergänzt.
-    """
+def _load_tax_codes(
+    *, session: Session, company: Company, lines: list[JournalLineInput]
+) -> dict[int, TaxCode]:
+    """Steuercodes der Gesellschaft, die in den Zeilen referenziert werden."""
     tax_code_ids = {line.tax_code_id for line in lines if line.tax_code_id is not None}
     if not tax_code_ids:
-        return list(lines)
-
-    tax_codes = {
+        return {}
+    return {
         tax_code.id: tax_code
         for tax_code in session.execute(
             select(TaxCode).where(
@@ -365,6 +362,80 @@ def _expand_tax_lines(
         .scalars()
         .all()
     }
+
+
+# Kontoarten, auf denen die Bemessungsgrundlage eines Steuercodes liegen darf:
+# Vorsteuer entsteht aus Aufwand und Anlagenzugängen, Umsatzsteuer aus Erlösen
+# (und erhaltenen Anzahlungen auf Verbindlichkeitskonten).
+_ALLOWED_BASE_ACCOUNT_TYPES = {
+    TAX_KIND_INPUT: {"expense", "asset"},
+    TAX_KIND_OUTPUT: {"revenue", "income", "liability"},
+}
+_TAX_KIND_HINTS = {
+    TAX_KIND_INPUT: "Vorsteuer gehört auf Aufwands- oder Anlagenkonten",
+    TAX_KIND_OUTPUT: "Umsatzsteuer gehört auf Erlös- bzw. Ertragskonten",
+}
+
+
+def _validate_tax_code_usage(
+    *,
+    lines: list[JournalLineInput],
+    accounts: dict[int, Account],
+    tax_codes: dict[int, TaxCode],
+) -> None:
+    """Prüft die Richtung der Steuercodes gegen Kontoart und Soll-/Haben-Seite.
+
+    Ein Vorsteuercode auf einer Erlöszeile würde die Vorsteuer im Haben mindern
+    statt Umsatzsteuer auszuweisen (Kz 66 sinkt statt Kz 81 steigt). Explizite
+    Steuerzeilen (Zeile auf dem Steuerkonto des Codes, z. B. Storno oder
+    Netto-aus-Brutto) müssen auf derselben Seite stehen wie ihre
+    Bemessungsgrundlage. Codes mit 0 % erzeugen keine Steuer und werden nicht
+    gegen die Kontoart geprüft.
+    """
+    base_sides: dict[int, set[str]] = {}
+    tax_lines: list[tuple[TaxCode, str]] = []
+    for line in lines:
+        if line.tax_code_id is None:
+            continue
+        tax_code = tax_codes.get(line.tax_code_id)
+        if tax_code is None:
+            raise JournalEntryCreationError("Steuercode für Buchungszeile nicht gefunden.")
+        side = "debit" if line.debit_amount > Decimal("0.00") else "credit"
+        if tax_code.vat_account_id is not None and line.account_id == tax_code.vat_account_id:
+            tax_lines.append((tax_code, side))
+            continue
+        base_sides.setdefault(tax_code.id, set()).add(side)
+        if tax_code.rate == Decimal("0.00"):
+            continue
+        account = accounts[line.account_id]
+        if account.account_type not in _ALLOWED_BASE_ACCOUNT_TYPES.get(tax_code.kind, set()):
+            label = "Vorsteuer" if tax_code.kind == TAX_KIND_INPUT else "Umsatzsteuer"
+            raise JournalEntryCreationError(
+                f"Steuercode {tax_code.code} ({label}) ist auf Konto {account.code} "
+                f"(Kontoart {account.account_type}) nicht zulässig — "
+                f"{_TAX_KIND_HINTS.get(tax_code.kind, '')}."
+            )
+    for tax_code, side in tax_lines:
+        sides = base_sides.get(tax_code.id)
+        if sides and side not in sides:
+            raise JournalEntryCreationError(
+                f"Die Steuerzeile zu {tax_code.code} muss auf derselben Seite (Soll/Haben) "
+                "stehen wie ihre Bemessungsgrundlage."
+            )
+
+
+def _expand_tax_lines(
+    *,
+    lines: list[JournalLineInput],
+    tax_codes: dict[int, TaxCode],
+) -> list[JournalLineInput]:
+    """Erzeugt für Zeilen mit Steuercode die automatische USt-/VSt-Teilbuchung.
+
+    Beträge der Ursprungszeile gelten als Netto; die Steuerzeile wird auf derselben
+    Seite (Soll/Haben) auf dem Steuerkonto des Steuercodes ergänzt.
+    """
+    if not tax_codes:
+        return list(lines)
 
     expanded: list[JournalLineInput] = []
     for line in lines:
