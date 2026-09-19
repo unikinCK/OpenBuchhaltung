@@ -160,6 +160,35 @@ class Period(Base):
     )
 
 
+class PostingNumberSequence(Base):
+    """Nummernkreis für Buchungsnummern je Geschäftsjahr.
+
+    Die Zeile wird beim Ziehen einer Nummer mit ``FOR UPDATE`` gesperrt, damit
+    parallele Buchungen keine gleichen Nummern erhalten; ``last_number`` ist
+    die zuletzt vergebene laufende Nummer.
+    """
+
+    __tablename__ = "posting_number_sequence"
+    __table_args__ = (
+        UniqueConstraint("fiscal_year_id", name="uq_posting_sequence_fiscal_year"),
+        CheckConstraint("last_number >= 0", name="ck_posting_sequence_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="CASCADE"), nullable=False
+    )
+    last_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+
 class PeriodLock(Base):
     __tablename__ = "period_lock"
 

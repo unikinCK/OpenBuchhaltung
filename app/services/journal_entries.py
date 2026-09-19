@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import calendar
+import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,6 +23,7 @@ from domain.models import (
     JournalEntryLine,
     Period,
     PeriodLock,
+    PostingNumberSequence,
     TaxCode,
 )
 from domain.services.journal_entry_validation import (
@@ -72,6 +74,9 @@ class JournalEntryInput:
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
 CLOSING_PERIOD_NUMBER = 13
 MAX_REGULAR_PERIODS = 12
+# Versuche, eine Buchung mit neuer Nummer anzulegen, wenn die gezogene Nummer
+# bereits vergeben ist (Altbestand mit gesellschaftsweitem Zähler, Wettlauf).
+POSTING_NUMBER_ATTEMPTS = 5
 
 
 def _last_day_of_month(year: int, month: int) -> int:
@@ -233,25 +238,29 @@ def create_journal_entry(
     )
     _ensure_period_is_open(session=session, period_id=period.id)
 
-    posting_number = _next_posting_number(
-        session=session,
-        company_id=company.id,
-        year=payload.entry_date.year,
-    )
-
-    entry = JournalEntry(
-        tenant_id=company.tenant_id,
-        company_id=company.id,
-        fiscal_year_id=fiscal_year.id,
-        period_id=period.id,
-        posting_number=posting_number,
-        entry_date=payload.entry_date,
-        description=payload.description,
-        source=payload.source,
-        reversal_of_id=payload.reversal_of_id,
-    )
-    session.add(entry)
-    session.flush()
+    for attempt in range(1, POSTING_NUMBER_ATTEMPTS + 1):
+        posting_number = _next_posting_number(session=session, fiscal_year=fiscal_year)
+        entry = JournalEntry(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            fiscal_year_id=fiscal_year.id,
+            period_id=period.id,
+            posting_number=posting_number,
+            entry_date=payload.entry_date,
+            description=payload.description,
+            source=payload.source,
+            reversal_of_id=payload.reversal_of_id,
+        )
+        try:
+            with session.begin_nested():
+                session.add(entry)
+                session.flush()
+        except IntegrityError as exc:
+            if not _is_posting_number_conflict(exc) or attempt == POSTING_NUMBER_ATTEMPTS:
+                raise
+            # Nummer bereits vergeben (Altbestand/Wettlauf): nächste Nummer ziehen.
+            continue
+        break
 
     for idx, line in enumerate(lines, start=1):
         line_payload = {
@@ -766,14 +775,74 @@ def _insert_period(*, session: Session, period: Period) -> bool:
     return True
 
 
-def _next_posting_number(*, session: Session, company_id: int, year: int) -> str:
-    count = (
-        session.scalar(
-            select(func.count(JournalEntry.id)).where(JournalEntry.company_id == company_id)
+def posting_number_prefix(fiscal_year: FiscalYear) -> str:
+    """Präfix der Buchungsnummern eines Geschäftsjahres (z. B. ``2026``, ``2026/2027``).
+
+    Freie Bezeichnungen werden auf Ziffern, Buchstaben und ``/`` reduziert
+    (``2026 (Rumpf)`` → ``2026-Rumpf``), damit die Nummer DATEV-tauglich bleibt.
+    """
+    label = re.sub(r"[^0-9A-Za-z/]+", "-", fiscal_year.label.strip()).strip("-")
+    return label or str(fiscal_year.end_date.year)
+
+
+def _max_existing_posting_number(*, session: Session, company_id: int, prefix: str) -> int:
+    """Höchste bereits vergebene laufende Nummer mit diesem Präfix (Altbestand).
+
+    Vor Einführung des Nummernkreises je Geschäftsjahr wurde gesellschaftsweit
+    gezählt; der neue Zähler startet oberhalb der vorhandenen Nummern.
+    """
+    posting_numbers = session.execute(
+        select(JournalEntry.posting_number).where(
+            JournalEntry.company_id == company_id,
+            JournalEntry.posting_number.like(f"{prefix}-%"),
         )
-        or 0
+    ).scalars()
+    highest = 0
+    for posting_number in posting_numbers:
+        suffix = posting_number[len(prefix) + 1 :]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest
+
+
+def _next_posting_number(*, session: Session, fiscal_year: FiscalYear) -> str:
+    """Zieht die nächste Buchungsnummer aus dem Nummernkreis des Geschäftsjahres.
+
+    Die Sequenzzeile wird mit ``FOR UPDATE`` gesperrt (PostgreSQL), sodass
+    parallele Buchungen nacheinander nummeriert werden. Fehlt die Zeile noch,
+    wird sie oberhalb vorhandener Altnummern angelegt; legt eine parallele
+    Transaktion sie gleichzeitig an, gewinnt der UNIQUE-Constraint und die
+    Zeile wird erneut gesperrt gelesen.
+    """
+    prefix = posting_number_prefix(fiscal_year)
+    sequence_stmt = (
+        select(PostingNumberSequence)
+        .where(PostingNumberSequence.fiscal_year_id == fiscal_year.id)
+        .with_for_update()
     )
-    return f"{year}-{count + 1:04d}"
+    sequence = session.execute(sequence_stmt).scalar_one_or_none()
+    if sequence is None:
+        sequence = PostingNumberSequence(
+            tenant_id=fiscal_year.tenant_id,
+            company_id=fiscal_year.company_id,
+            fiscal_year_id=fiscal_year.id,
+            last_number=_max_existing_posting_number(
+                session=session, company_id=fiscal_year.company_id, prefix=prefix
+            ),
+        )
+        try:
+            with session.begin_nested():
+                session.add(sequence)
+        except IntegrityError:
+            sequence = session.execute(sequence_stmt).scalar_one()
+    sequence.last_number += 1
+    session.flush()
+    return f"{prefix}-{sequence.last_number:04d}"
+
+
+def _is_posting_number_conflict(exc: IntegrityError) -> bool:
+    message = str(exc.orig if exc.orig is not None else exc)
+    return "posting_number" in message or "uq_journal_entry_company_no" in message
 
 
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:

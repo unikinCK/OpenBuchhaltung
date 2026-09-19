@@ -504,3 +504,134 @@ def test_auto_fiscal_year_rejects_overlap_with_manual_year(session: Session) -> 
     )
     assert session.get(FiscalYear, entry.fiscal_year_id).label == "2026 (Rumpf)"
     assert session.scalar(select(func.count(FiscalYear.id))) == 1
+
+
+def test_posting_numbers_count_per_fiscal_year(session: Session) -> None:
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+
+    def book(entry_date: date) -> str:
+        return create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=entry_date,
+                description="Buchung",
+                status="posted",
+                lines=_balanced_lines(account_ids),
+            ),
+        ).posting_number
+
+    assert book(date(2025, 3, 1)) == "2025-0001"
+    assert book(date(2025, 4, 1)) == "2025-0002"
+    # Erste Buchung des neuen Jahres beginnt wieder bei 1 — nicht bei 3.
+    assert book(date(2026, 1, 15)) == "2026-0001"
+    # Nachbuchung ins Vorjahr zählt im Nummernkreis des Vorjahres weiter.
+    assert book(date(2025, 6, 1)) == "2025-0003"
+    assert book(date(2026, 2, 1)) == "2026-0002"
+
+
+def test_posting_number_prefix_uses_fiscal_year_label(session: Session) -> None:
+    company = _seed_company_and_accounts(session)
+    company.fiscal_year_start_month = 7
+    session.commit()
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 8, 1),
+            description="Abweichendes WJ",
+            status="posted",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+    assert entry.posting_number == "2026/2027-0001"
+
+
+def test_posting_number_sequence_starts_above_legacy_numbers(session: Session) -> None:
+    from domain.models import PostingNumberSequence
+
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+    first = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 1, 10),
+            description="Altbestand",
+            status="posted",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+    # Altbestand simulieren: gesellschaftsweit gezählte Nummer, noch kein Nummernkreis.
+    first.posting_number = "2026-0120"
+    for sequence in session.execute(select(PostingNumberSequence)).scalars().all():
+        session.delete(sequence)
+    session.commit()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 2, 10),
+            description="Erste Buchung mit Nummernkreis",
+            status="posted",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+    assert entry.posting_number == "2026-0121"
+
+
+def test_posting_number_conflict_is_retried_with_next_number(session: Session) -> None:
+    company = _seed_company_and_accounts(session)
+    account_ids = session.scalars(
+        select(Account.id).where(Account.company_id == company.id).order_by(Account.code)
+    ).all()
+    first = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 1, 10),
+            description="Erste",
+            status="posted",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+    # Die nächste Nummer des Nummernkreises ist bereits belegt (z. B. durch
+    # einen Import am Nummernkreis vorbei) — der Service zieht die übernächste.
+    from domain.models import JournalEntry
+
+    session.add(
+        JournalEntry(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            fiscal_year_id=first.fiscal_year_id,
+            period_id=first.period_id,
+            posting_number="2026-0002",
+            entry_date=date(2026, 1, 11),
+            description="Fremdnummer",
+        )
+    )
+    session.commit()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 1, 12),
+            description="Nach Kollision",
+            status="posted",
+            lines=_balanced_lines(account_ids),
+        ),
+    )
+    assert entry.posting_number == "2026-0003"
+    assert entry.id is not None
+    assert len(session.execute(select(JournalEntry)).scalars().all()) == 3
