@@ -244,7 +244,7 @@
           <select id="rule_tax" name="tax_code_id">
             <option value="">Ohne Steuer</option>
             {% for tax_code in tax_codes %}
-              <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+              <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate }} %, {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
             {% endfor %}
           </select>
 
@@ -407,7 +407,7 @@
                       <option value="">Ohne Steuer</option>
                       {% for tax_code in tax_codes %}
                         <option value="{{ tax_code.id }}"
-                          {% if rule and tax_code.id == rule.tax_code_id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                          {% if rule and tax_code.id == rule.tax_code_id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate }} %, {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
                       {% endfor %}
                     </select>
                     <select name="cost_center_id">
