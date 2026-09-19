@@ -744,7 +744,10 @@ TOOLS: list[ToolSpec] = [
             "Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip): Das "
             "Original bleibt unverändert, die Stornobuchung spiegelt alle Zeilen "
             "(Soll/Haben getauscht) und wird sofort festgeschrieben. Eine Buchung kann "
-            "nur einmal storniert werden; Stornobuchungen selbst sind nicht stornierbar."
+            "nur einmal storniert werden; Stornobuchungen selbst sind nicht stornierbar. "
+            "Nebenbücher werden mitgezogen: ein daraus verbuchter Bankumsatz wird wieder "
+            "'open', ein AfA-Satz zurückgenommen, ein Lohnlauf wieder Entwurf, ein damit "
+            "ausgeglichener offener Posten wieder offen."
         ),
         input_schema={
             "type": "object",
@@ -757,7 +760,8 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": (
                         "Stornodatum im Format JJJJ-MM-TT (optional, Standard heute); "
-                        "muss in einer offenen Periode liegen."
+                        "muss in einer offenen Periode liegen und darf nicht vor dem "
+                        "Buchungsdatum des Originals liegen."
                     ),
                 },
             },
@@ -1981,7 +1985,10 @@ TOOLS: list[ToolSpec] = [
                 },
                 "journal_entry_id": {
                     "type": "integer",
-                    "description": "Optional verknüpfte Ausgleichsbuchung.",
+                    "description": (
+                        "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
+                        "lebt der Posten um den Ausgleichsbetrag wieder auf."
+                    ),
                 },
             },
             "required": ["open_item_id"],

@@ -736,6 +736,12 @@ class OpenItem(Base):
     bank_transaction_id: Mapped[int | None] = mapped_column(
         ForeignKey("bank_transaction.id", ondelete="SET NULL")
     )
+    # Letzte Ausgleichsbuchung samt Betrag: wird diese Buchung storniert, lebt
+    # der Posten mit dem Betrag wieder auf (Storno-Hook).
+    settlement_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    settlement_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     reference: Mapped[str] = mapped_column(String(120), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
@@ -758,7 +764,10 @@ class OpenItem(Base):
     settled_by: Mapped[str | None] = mapped_column(String(120))
 
     account: Mapped[Account] = relationship()
-    journal_entry: Mapped[JournalEntry | None] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship(foreign_keys=[journal_entry_id])
+    settlement_journal_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[settlement_journal_entry_id]
+    )
     bank_transaction: Mapped[BankTransaction | None] = relationship()
 
 

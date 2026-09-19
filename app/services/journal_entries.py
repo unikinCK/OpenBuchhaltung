@@ -17,10 +17,15 @@ from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
     Account,
+    BankTransaction,
     Company,
+    DepreciationEntry,
     FiscalYear,
+    FixedAsset,
     JournalEntry,
     JournalEntryLine,
+    OpenItem,
+    PayrollRun,
     Period,
     PeriodLock,
     PostingNumberSequence,
@@ -957,6 +962,12 @@ def reverse_journal_entry(
     Die Originalbuchung bleibt unverändert; die Stornobuchung spiegelt alle
     Zeilen (Soll/Haben vertauscht) und verweist über ``reversal_of_id`` auf das
     Original. Die Stornobuchung wird sofort festgeschrieben.
+
+    Nebenbücher werden mitgezogen (Storno-Hooks): ein aus der Buchung
+    entstandener Bankumsatz geht zurück auf „open“, ein AfA-Satz wird
+    zurückgenommen (Buchwert und Anlagenstatus folgen dem Hauptbuch), ein
+    gebuchter Lohnlauf wird wieder zum Entwurf und ein mit dieser Buchung
+    ausgeglichener offener Posten lebt wieder auf. Alles in einer Transaktion.
     """
     original = session.get(JournalEntry, journal_entry_id)
     if original is None:
@@ -1026,6 +1037,10 @@ def reverse_journal_entry(
         finalized_by=changed_by,
     )
 
+    released = _release_subledgers(
+        session=session, original=original, reversal=reversal, changed_by=changed_by
+    )
+
     log_audit_event(
         session=session,
         tenant_id=original.tenant_id,
@@ -1039,8 +1054,139 @@ def reverse_journal_entry(
             "reversal_posting_number": reversal.posting_number,
             "reversal_entry_id": reversal.id,
             "reversal_date": reversal_date.isoformat(),
+            "subledgers": released,
         },
     )
     session.commit()
     session.refresh(reversal)
     return reversal
+
+
+def _release_subledgers(
+    *, session: Session, original: JournalEntry, reversal: JournalEntry, changed_by: str
+) -> dict[str, list[int]]:
+    """Storno-Hooks: Nebenbücher an den Storno der Originalbuchung anpassen.
+
+    Gibt je Nebenbuch die IDs der angepassten Datensätze zurück (für das
+    Audit-Payload). Kein eigener Commit — läuft in der Storno-Transaktion.
+    """
+    released: dict[str, list[int]] = {}
+    audit_common = {
+        "session": session,
+        "tenant_id": original.tenant_id,
+        "company_id": original.company_id,
+        "changed_by": changed_by,
+    }
+    link = {
+        "journal_entry_id": original.id,
+        "posting_number": original.posting_number,
+        "reversal_entry_id": reversal.id,
+        "reversal_posting_number": reversal.posting_number,
+    }
+
+    # Bank: verbuchter (oder per OPOS zugeordneter) Umsatz wieder offen.
+    transactions = (
+        session.execute(
+            select(BankTransaction).where(BankTransaction.journal_entry_id == original.id)
+        )
+        .scalars()
+        .all()
+    )
+    for transaction in transactions:
+        previous_status = transaction.status
+        transaction.status = "open"
+        transaction.journal_entry_id = None
+        log_audit_event(
+            **audit_common,
+            entity_type="bank_transaction",
+            entity_id=str(transaction.id),
+            action="unbooked",
+            payload={**link, "previous_status": previous_status},
+        )
+        released.setdefault("bank_transactions", []).append(transaction.id)
+
+    # Anlagen: AfA-/Abgangssatz zurücknehmen, damit Buchwert = Hauptbuch.
+    depreciation_entries = (
+        session.execute(
+            select(DepreciationEntry).where(DepreciationEntry.journal_entry_id == original.id)
+        )
+        .scalars()
+        .all()
+    )
+    for depreciation in depreciation_entries:
+        asset = session.get(FixedAsset, depreciation.fixed_asset_id)
+        payload = {
+            **link,
+            "depreciation_entry_id": depreciation.id,
+            "fiscal_year": depreciation.fiscal_year,
+            "kind": depreciation.kind,
+            "amount": str(depreciation.amount),
+        }
+        session.delete(depreciation)
+        if asset is not None:
+            if depreciation.kind == "abgang":
+                asset.disposal_date = None
+                asset.disposal_proceeds = None
+            if asset.status in {"fully_depreciated", "disposed"}:
+                asset.status = "active"
+            log_audit_event(
+                **audit_common,
+                entity_type="fixed_asset",
+                entity_id=str(asset.id),
+                action="depreciation_reversed",
+                payload={**payload, "status": asset.status},
+            )
+        released.setdefault("depreciation_entries", []).append(depreciation.id)
+
+    # Lohn: gebuchter Lauf zurück auf Entwurf (kann erneut gebucht werden).
+    payroll_runs = (
+        session.execute(select(PayrollRun).where(PayrollRun.journal_entry_id == original.id))
+        .scalars()
+        .all()
+    )
+    for run in payroll_runs:
+        run.status = "draft"
+        run.journal_entry_id = None
+        run.posted_at = None
+        log_audit_event(
+            **audit_common,
+            entity_type="payroll_run",
+            entity_id=str(run.id),
+            action="unposted",
+            payload={**link, "period_label": run.period_label},
+        )
+        released.setdefault("payroll_runs", []).append(run.id)
+
+    # OPOS: mit dieser Buchung ausgeglichene Posten leben wieder auf.
+    open_items = (
+        session.execute(
+            select(OpenItem).where(OpenItem.settlement_journal_entry_id == original.id)
+        )
+        .scalars()
+        .all()
+    )
+    for item in open_items:
+        restored = item.settlement_amount or (item.original_amount - item.open_amount)
+        item.open_amount = min(
+            item.original_amount, (item.open_amount + restored).quantize(Decimal("0.01"))
+        )
+        item.status = "open"
+        item.settled_at = None
+        item.settled_by = None
+        item.settlement_journal_entry_id = None
+        item.settlement_amount = None
+        log_audit_event(
+            **audit_common,
+            entity_type="open_item",
+            entity_id=str(item.id),
+            action="reopened",
+            payload={
+                **link,
+                "restored_amount": str(restored),
+                "open_amount": str(item.open_amount),
+            },
+        )
+        released.setdefault("open_items", []).append(item.id)
+
+    session.flush()
+    return released
