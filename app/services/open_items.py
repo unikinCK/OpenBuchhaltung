@@ -151,6 +151,12 @@ def settle_open_item(
         raise OpenItemError("Ausgleichsbetrag darf den offenen Betrag nicht übersteigen.")
 
     item.open_amount = (item.open_amount - settlement_amount).quantize(Decimal("0.01"))
+    if linked_entry is not None:
+        # Wird die Ausgleichsbuchung storniert, lebt der Posten um diesen
+        # Betrag wieder auf (siehe reverse_journal_entry). Es wird nur der
+        # letzte Ausgleich mit Buchung gemerkt.
+        item.settlement_journal_entry_id = linked_entry.id
+        item.settlement_amount = settlement_amount
     if bank_transaction is not None:
         item.bank_transaction_id = bank_transaction.id
         if bank_transaction.status == "open":

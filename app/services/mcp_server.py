@@ -76,6 +76,18 @@ def _company_id_schema() -> dict[str, Any]:
     }
 
 
+def _include_closing_entries_property() -> dict[str, Any]:
+    return {
+        "type": "boolean",
+        "description": (
+            "Abschlussbuchungen (Periode 13, z. B. AfA) einbeziehen; Standard false = "
+            "Stand vor dem Jahresabschluss. Ergebnis- und Saldovorträge zählen in "
+            "GuV/UStVA/Ertragsteuern nie mit."
+        ),
+        "default": False,
+    }
+
+
 def _period_report_schema() -> dict[str, Any]:
     """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
     return {
@@ -90,6 +102,7 @@ def _period_report_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
             },
+            "include_closing_entries": _include_closing_entries_property(),
         },
         "required": ["company_id"],
         "additionalProperties": False,
@@ -106,6 +119,7 @@ def _asof_report_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": "Stichtag: Buchungen bis einschließlich (JJJJ-MM-TT, optional).",
             },
+            "include_closing_entries": _include_closing_entries_property(),
         },
         "required": ["company_id"],
         "additionalProperties": False,
@@ -817,7 +831,10 @@ TOOLS: list[ToolSpec] = [
             "Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip): Das "
             "Original bleibt unverändert, die Stornobuchung spiegelt alle Zeilen "
             "(Soll/Haben getauscht) und wird sofort festgeschrieben. Eine Buchung kann "
-            "nur einmal storniert werden; Stornobuchungen selbst sind nicht stornierbar."
+            "nur einmal storniert werden; Stornobuchungen selbst sind nicht stornierbar. "
+            "Nebenbücher werden mitgezogen: ein daraus verbuchter Bankumsatz wird wieder "
+            "'open', ein AfA-Satz zurückgenommen, ein Lohnlauf wieder Entwurf, ein damit "
+            "ausgeglichener offener Posten wieder offen."
         ),
         input_schema={
             "type": "object",
@@ -830,7 +847,8 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": (
                         "Stornodatum im Format JJJJ-MM-TT (optional, Standard heute); "
-                        "muss in einer offenen Periode liegen."
+                        "muss in einer offenen Periode liegen und darf nicht vor dem "
+                        "Buchungsdatum des Originals liegen."
                     ),
                 },
             },
@@ -877,8 +895,11 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="export_trial_balance_csv",
-        description="Exportiert die Summen- und Saldenliste als CSV.",
-        input_schema=_company_id_schema(),
+        description=(
+            "Exportiert die Summen- und Saldenliste als CSV (optional je Zeitraum, "
+            "Saldovorträge als EB-Werte nur mit date_from)."
+        ),
+        input_schema=_period_report_schema(),
         http_method="GET",
         path="/exports/trial-balance.csv",
         arg_location="query",
@@ -2054,7 +2075,10 @@ TOOLS: list[ToolSpec] = [
                 },
                 "journal_entry_id": {
                     "type": "integer",
-                    "description": "Optional verknüpfte Ausgleichsbuchung.",
+                    "description": (
+                        "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
+                        "lebt der Posten um den Ausgleichsbetrag wieder auf."
+                    ),
                 },
             },
             "required": ["open_item_id"],
@@ -2123,7 +2147,13 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="close_fiscal_year",
-        description="Schließt ein Geschäftsjahr ab und sperrt seine Perioden.",
+        description=(
+            "Schließt ein Geschäftsjahr ab (Vorjahre müssen abgeschlossen sein): bucht "
+            "den Ergebnisvortrag in die Abschlussperiode, den Saldovortrag der "
+            "Bestandskonten als EB-Werte ins Folgejahr (wird bei Bedarf angelegt) und "
+            "sperrt alle Perioden — in einer Transaktion. Antwort enthält "
+            "carryforward_entry_id und opening_balance_entry_id."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -2251,6 +2281,7 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Zeitraumende JJJJ-MM-TT (alternativ zu period).",
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id"],
             "additionalProperties": False,
@@ -2288,6 +2319,7 @@ TOOLS: list[ToolSpec] = [
                         "'JJJJ-Hn' oder Jahr 'JJJJ'."
                     ),
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "period"],
             "additionalProperties": False,
@@ -2307,6 +2339,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "year"],
             "additionalProperties": False,
@@ -2326,6 +2359,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "year"],
             "additionalProperties": False,
@@ -2391,6 +2425,7 @@ TOOLS: list[ToolSpec] = [
                     "description": "Gewerbesteuer-Freibetrag, bei Kapitalgesellschaften 0.",
                     "default": "0",
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "tax_type"],
             "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],
@@ -2433,6 +2468,7 @@ TOOLS: list[ToolSpec] = [
                 "prepayments": {"type": "string", "default": "0"},
                 "municipality_multiplier": {"type": "string"},
                 "trade_tax_allowance": {"type": "string", "default": "0"},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "tax_type"],
             "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],
@@ -3078,7 +3114,11 @@ TOOLS: list[ToolSpec] = [
         name="create_tax_code",
         description=(
             "Legt einen Steuercode an. Das Steuerkonto per interner ID "
-            "(vat_account_id) oder Kontonummer (vat_account_code, z. B. '3806')."
+            "(vat_account_id) oder Kontonummer (vat_account_code, z. B. '3806'). "
+            "kind legt die Richtung fest: 'input' = Vorsteuer (Bemessungsgrundlage "
+            "auf Aufwands-/Anlagenkonten, Kz 66), 'output' = Umsatzsteuer "
+            "(Erlöskonten, Kz 81/86/48); ohne Angabe wird sie aus Steuerkonto "
+            "bzw. Kürzel abgeleitet."
         ),
         input_schema={
             "type": "object",
@@ -3086,6 +3126,11 @@ TOOLS: list[ToolSpec] = [
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "code": {"type": "string", "description": "Kürzel, z. B. 'USt19'."},
                 "rate": {"type": "string", "description": "Steuersatz, z. B. '19.00'."},
+                "kind": {
+                    "type": "string",
+                    "enum": ["input", "output"],
+                    "description": "Richtung: input = Vorsteuer, output = Umsatzsteuer.",
+                },
                 "description": {"type": "string"},
                 "vat_account_id": {"type": "integer"},
                 "vat_account_code": {"type": "string"},

@@ -134,7 +134,7 @@
                 <option value="">Ohne Steuer</option>
                 {% for tax_code in tax_codes %}
                   <option value="{{ tax_code.id }}"
-                    {% if suggestion.tax_rate is not none and tax_code.rate == suggestion.tax_rate and 'VSt' in tax_code.code %}selected{% endif %}>
+                    {% if suggestion.tax_rate is not none and tax_code.rate == suggestion.tax_rate and tax_code.kind == 'input' %}selected{% endif %}>
                     {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
                 {% endfor %}
               </select>

@@ -355,7 +355,9 @@ Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
 (Vorschläge per Betrags-Matching auf dem Bankkonto; eine Buchung ist höchstens
 mit einem Umsatz verknüpfbar — Teilzahlungen laufen über OPOS) oder **direkt
 verbucht** werden: Gegenkonto wählen, optional Steuercode, Kostenstelle und
-Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt.
+Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt
+(Netto = gerundet Brutto/(1+Satz), Steuer = Brutto − Netto als eigene Zeile; ein
+Rundungscent liegt auf der Steuerzeile, sodass jeder Bruttobetrag aufgeht).
 Die Dimensionen liegen auf Gegenkonto und automatisch erzeugter Steuerzeile,
 nicht auf dem Bankkonto. Umsätze in Fremdwährung werden nicht automatisch
 verbucht. Die Umsatzliste ist paginiert und nach Status, Suchbegriff
@@ -387,7 +389,8 @@ sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
 Unter **OPOS** lassen sich debitorische und kreditorische offene Posten erfassen,
 optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ein
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
-werden; die Aktion wird im Audit-Log protokolliert.
+werden; die Aktion wird im Audit-Log protokolliert. Wird die verknüpfte
+Ausgleichsbuchung storniert, lebt der Posten um den Ausgleichsbetrag wieder auf.
 
 ## Buchungsvorlagen (wiederkehrende Buchungen)
 
@@ -468,11 +471,44 @@ REST: `POST/GET /api/v1/fixed-assets`,
 ## Perioden & Jahresabschluss
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
-(Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin)
-bucht zunächst den **Ergebnisvortrag** (die GuV-Konten werden gegen das
-Gewinnvortragskonto glattgestellt — SKR03 `0860`, SKR04 `2970`) und sperrt dann
-alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht mehr
-gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
+(Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin,
+Vorjahre müssen abgeschlossen sein) läuft in einer Transaktion:
+
+1. **Ergebnisvortrag** (`source=year_end_close`, Abschlussperiode 13): die
+   GuV-Konten werden gegen das Gewinnvortragskonto glattgestellt (SKR03 `0860`,
+   SKR04 `2970`).
+2. **Saldovortrag** (`source=carryforward`): die Salden der Bestandskonten
+   werden als EB-Werte am ersten Tag des Folgejahres gebucht (Periode 1); das
+   Folgejahr wird bei Bedarf regulär angelegt.
+3. Alle Perioden werden gesperrt; in abgeschlossene Jahre kann nicht mehr
+   gebucht werden. Vortragsbuchungen sind nicht stornierbar.
+
+**Abschlussbuchungen in Auswertungen:** SuSa, GuV, Bilanz, UStVA und
+KSt/GewSt klammern Buchungen der Abschlussperiode (13, z. B. AfA)
+standardmäßig aus und zeigen den Stand vor dem Jahresabschluss. Der Schalter
+**inkl. Abschlussbuchungen** (UI-Checkbox, API/MCP-Parameter
+`include_closing_entries`) zieht sie ein. Der Ergebnisvortrag zählt in GuV,
+UStVA und Ertragsteuern nie mit — die GuV eines abgeschlossenen Jahres bleibt
+aussagekräftig. Die Bilanz kumuliert bis zum Stichtag ohne Saldovorträge; für
+das Geschäftsjahr des Stichtags gilt der Schalter, das Jahresergebnis
+erscheint als eigene Position, Vorjahresergebnisse stehen im Gewinnvortrag.
+Saldovorträge (EB-Werte) erscheinen in der SuSa nur bei Auswertung ab einem
+Startdatum (`date_from`).
+
+**Buchungsnummern** zählen je Geschäftsjahr in einem eigenen Nummernkreis
+(Sequenztabelle, `FOR UPDATE`): Präfix ist das WJ-Label (`2026-0001`,
+`2026/2027-0001`), Nachbuchungen ins Vorjahr zählen dort weiter; bereits
+vergebene Nummern werden übersprungen.
+
+## Storno & Nebenbücher
+
+Ein Storno (`reverse_journal_entry`, UI-Button, `POST /journal-entries/<id>/reverse`)
+erzeugt die festgeschriebene Gegenbuchung und zieht die Nebenbücher in
+derselben Transaktion mit: ein aus der Buchung verbuchter Bankumsatz wird wieder
+„open“, ein AfA-/Abgangssatz wird zurückgenommen (Buchwert und Anlagenstatus
+folgen dem Hauptbuch), ein gebuchter Lohnlauf wird wieder Entwurf und ein mit
+der Buchung ausgeglichener offener Posten lebt um den Ausgleichsbetrag wieder
+auf. Das Stornodatum darf nicht vor dem Buchungsdatum des Originals liegen.
 
 ## E-Rechnung importieren (XRechnung / ZUGFeRD)
 
@@ -518,6 +554,16 @@ bereits als eigene Buchungszeile geführt wird.
 ## Steuercodes (USt/VSt)
 
 `seed-demo` legt Standard-Steuercodes je Gesellschaft an: `USt19`, `USt7`, `VSt19`, `VSt7`, `frei`.
+Jeder Steuercode hat eine **Richtung** (`kind`): `output` = Umsatzsteuer
+(Bemessungsgrundlage auf Erlös-/Ertragskonten oder erhaltenen Anzahlungen),
+`input` = Vorsteuer (Aufwands- und Anlagenkonten). Beim Buchen wird die Richtung
+gegen die Kontoart geprüft (ein Vorsteuercode auf einer Erlöszeile wird
+abgewiesen), explizite Steuerzeilen müssen auf derselben Soll-/Haben-Seite wie
+ihre Bemessungsgrundlage stehen; 0-%-Codes bleiben frei verwendbar. Die UStVA
+leitet Umsatz-/Vorsteuer aus `kind` ab. Über die API (`POST /tax-codes`, Feld
+`kind`) wird die Richtung ohne Angabe aus dem Steuerkonto bzw. Kürzel abgeleitet
+und gegen die Kontoart des Steuerkontos geprüft (Vorsteuer = asset,
+Umsatzsteuer = liability).
 In der Buchungsmaske wird der Betrag einer Zeile mit Steuercode als **Netto** interpretiert;
 die Steuerzeile (z. B. auf 1776 Umsatzsteuer 19 %) wird automatisch ergänzt.
 

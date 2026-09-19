@@ -48,6 +48,10 @@
         <input id="municipality_multiplier" name="municipality_multiplier" value="{{ params.municipality_multiplier or '' }}" style="width:7rem;" />
         <label for="trade_tax_allowance">GewSt-Freibetrag</label>
         <input id="trade_tax_allowance" name="trade_tax_allowance" value="{{ params.trade_tax_allowance }}" style="width:8rem;" />
+        <label for="include_closing_entries">
+          <input id="include_closing_entries" name="include_closing_entries" type="checkbox" value="1" {% if params.include_closing_entries %}checked{% endif %} />
+          inkl. Abschlussbuchungen
+        </label>
         <button type="submit">Anzeigen</button>
       </form>
 
@@ -99,6 +103,7 @@
           <input type="hidden" name="prepayments" value="{{ params.prepayments }}" />
           <input type="hidden" name="municipality_multiplier" value="{{ params.municipality_multiplier or '' }}" />
           <input type="hidden" name="trade_tax_allowance" value="{{ params.trade_tax_allowance }}" />
+          <input type="hidden" name="include_closing_entries" value="{{ '1' if params.include_closing_entries else '' }}" />
           <button type="submit">Snapshot festhalten</button>
         </form>
       {% endif %}

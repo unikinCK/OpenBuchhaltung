@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -9,12 +9,16 @@ from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
 from app.services.journal_entries import (
+    SOURCE_CARRYFORWARD,
+    SOURCE_YEAR_END_CLOSE,
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
     build_periods_for_fiscal_year,
     create_journal_entry,
+    get_or_create_fiscal_year,
 )
+from app.services.opening_balance import find_carryforward_account
 from domain.models import (
     Account,
     Company,
@@ -28,6 +32,7 @@ from domain.models import (
 # Gewinnvortrag vor Verwendung: SKR03 = 0860, SKR04 = 2970
 RETAINED_EARNINGS_CODES = ("0860", "2970")
 PROFIT_AND_LOSS_ACCOUNT_TYPES = ("income", "revenue", "expense")
+BALANCE_SHEET_ACCOUNT_TYPES = ("asset", "liability", "equity")
 
 
 class PeriodActionError(ValueError):
@@ -37,7 +42,10 @@ class PeriodActionError(ValueError):
 @dataclass(slots=True)
 class FiscalYearCloseResult:
     fiscal_year: FiscalYear
+    # Ergebnisvortrag: Erfolgskonten gegen Gewinnvortrag (Abschlussperiode).
     carryforward_entry: JournalEntry | None
+    # Saldovortrag: Bestandskonten als EB-Werte ins Folgejahr (Periode 1).
+    opening_balance_entry: JournalEntry | None = None
 
 
 def _company_for_period(session: Session, period: Period) -> Company:
@@ -327,7 +335,10 @@ def _create_carryforward_entry(
                 changed_by=changed_by,
                 lines=lines,
                 post_to_closing_period=True,
+                source=SOURCE_YEAR_END_CLOSE,
+                expand_tax_lines=False,
             ),
+            commit=False,
         )
     except JournalEntryCreationError as exc:
         raise PeriodActionError(
@@ -336,20 +347,152 @@ def _create_carryforward_entry(
         ) from exc
 
 
+def _create_opening_balance_entry(
+    *, session: Session, fiscal_year: FiscalYear, changed_by: str
+) -> JournalEntry | None:
+    """Saldovortrag: Salden der Bestandskonten als EB-Werte ins Folgejahr.
+
+    Grundlage sind alle Buchungen bis zum Ende des Geschäftsjahres ohne frühere
+    Saldovorträge (die Vorjahre stecken bereits in den Summen) — inklusive des
+    soeben gebuchten Ergebnisvortrags, sodass der Gewinnvortrag das Ergebnis
+    trägt und die Erfolgskonten nicht vorgetragen werden. Die Buchung landet
+    am ersten Tag des Folgejahres (Periode 1); das Folgejahr wird bei Bedarf
+    regulär angelegt.
+    """
+    rows = session.execute(
+        select(
+            Account.id,
+            Account.code,
+            func.coalesce(func.sum(JournalEntryLine.debit_amount), 0),
+            func.coalesce(func.sum(JournalEntryLine.credit_amount), 0),
+        )
+        .join(JournalEntryLine, JournalEntryLine.account_id == Account.id)
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .where(
+            JournalEntry.company_id == fiscal_year.company_id,
+            JournalEntry.entry_date <= fiscal_year.end_date,
+            JournalEntry.source != SOURCE_CARRYFORWARD,
+            Account.account_type.in_(BALANCE_SHEET_ACCOUNT_TYPES),
+        )
+        .group_by(Account.id, Account.code)
+        .order_by(Account.code)
+    ).all()
+
+    zero = Decimal("0.00")
+    lines: list[JournalLineInput] = []
+    total = zero
+    for account_id, _code, debit_total, credit_total in rows:
+        saldo = (Decimal(debit_total) - Decimal(credit_total)).quantize(zero)
+        if saldo == zero:
+            continue
+        lines.append(
+            JournalLineInput(
+                account_id=account_id,
+                debit_amount=saldo if saldo > zero else zero,
+                credit_amount=-saldo if saldo < zero else zero,
+                description=f"Saldovortrag {fiscal_year.label}",
+            )
+        )
+        total += saldo
+    if not lines:
+        return None
+
+    if total != zero:
+        # Nach dem Ergebnisvortrag summieren sich die Bestandskonten zu null;
+        # ein Rest deutet auf Konten ohne bekannte Kontoart hin und wird über
+        # das Saldenvortragskonto ausgeglichen, damit der Vortrag aufgeht.
+        carryforward_account = find_carryforward_account(
+            session=session, company_id=fiscal_year.company_id
+        )
+        if carryforward_account is None:
+            raise PeriodActionError(
+                f"Die Bestandskonten gehen nicht auf (Differenz {total}); vermutlich "
+                "haben Konten keine der Kontoarten asset/liability/equity/expense/"
+                "income. Bitte die Kontoarten prüfen oder ein Saldenvortragskonto "
+                "(9000 bzw. „Saldenvortrag“) anlegen."
+            )
+        lines.append(
+            JournalLineInput(
+                account_id=carryforward_account.id,
+                debit_amount=-total if total < zero else zero,
+                credit_amount=total if total > zero else zero,
+                description="Saldovortrag (Ausgleich)",
+            )
+        )
+
+    next_start = fiscal_year.end_date + timedelta(days=1)
+    try:
+        next_year = get_or_create_fiscal_year(
+            session=session,
+            tenant_id=fiscal_year.tenant_id,
+            company_id=fiscal_year.company_id,
+            dt=next_start,
+        )
+    except JournalEntryCreationError as exc:
+        raise PeriodActionError(f"Saldovortrag ins Folgejahr nicht möglich: {exc}") from exc
+    if next_year.is_closed:
+        raise PeriodActionError(
+            f"Das Folgejahr {next_year.label} ist bereits abgeschlossen; der Saldovortrag "
+            "kann dort nicht mehr gebucht werden."
+        )
+
+    try:
+        return create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=fiscal_year.company_id,
+                entry_date=next_start,
+                description=f"Saldovortrag aus {fiscal_year.label}",
+                status="posted",
+                changed_by=changed_by,
+                lines=lines,
+                source=SOURCE_CARRYFORWARD,
+                expand_tax_lines=False,
+            ),
+            commit=False,
+        )
+    except JournalEntryCreationError as exc:
+        raise PeriodActionError(
+            f"Saldovortrag konnte nicht gebucht werden: {exc} "
+            f"(ggf. Periode 1 des Geschäftsjahres {next_year.label} entsperren)."
+        ) from exc
+
+
 def close_fiscal_year(
     *, session: Session, fiscal_year_id: int, changed_by: str
 ) -> FiscalYearCloseResult:
-    """Schließt ein Geschäftsjahr ab.
+    """Schließt ein Geschäftsjahr ab — in einer Transaktion.
 
-    Reihenfolge: erst Ergebnisvortrag buchen (GuV-Konten gegen Gewinnvortrag
-    glattstellen), dann alle Perioden sperren und das Jahr als abgeschlossen
-    markieren.
+    Reihenfolge: Vorjahre müssen abgeschlossen sein; Ergebnisvortrag buchen
+    (GuV-Konten gegen Gewinnvortrag glattstellen, Abschlussperiode); Salden
+    der Bestandskonten als Saldovortrag ins Folgejahr buchen; alle Perioden
+    sperren und das Jahr als abgeschlossen markieren. Schlägt ein Schritt
+    fehl, bleibt nichts davon zurück.
     """
     fiscal_year = session.get(FiscalYear, fiscal_year_id)
     if fiscal_year is None:
         raise PeriodActionError("Geschäftsjahr nicht gefunden.")
     if fiscal_year.is_closed:
         raise PeriodActionError("Das Geschäftsjahr ist bereits abgeschlossen.")
+
+    open_previous = (
+        session.execute(
+            select(FiscalYear.label)
+            .where(
+                FiscalYear.company_id == fiscal_year.company_id,
+                FiscalYear.end_date < fiscal_year.start_date,
+                FiscalYear.is_closed.is_(False),
+            )
+            .order_by(FiscalYear.start_date)
+        )
+        .scalars()
+        .all()
+    )
+    if open_previous:
+        raise PeriodActionError(
+            "Bitte Geschäftsjahre in zeitlicher Reihenfolge abschließen — noch offen: "
+            f"{', '.join(open_previous)}."
+        )
 
     retained_account = _find_retained_earnings_account(session, fiscal_year.company_id)
     if retained_account is None:
@@ -363,6 +506,9 @@ def close_fiscal_year(
         fiscal_year=fiscal_year,
         retained_account=retained_account,
         changed_by=changed_by,
+    )
+    opening_balance_entry = _create_opening_balance_entry(
+        session=session, fiscal_year=fiscal_year, changed_by=changed_by
     )
 
     periods = (
@@ -409,10 +555,19 @@ def close_fiscal_year(
             "carryforward_posting_number": (
                 carryforward_entry.posting_number if carryforward_entry else None
             ),
+            "opening_balance_posting_number": (
+                opening_balance_entry.posting_number if opening_balance_entry else None
+            ),
         },
     )
     session.commit()
     session.refresh(fiscal_year)
     if carryforward_entry is not None:
         session.refresh(carryforward_entry)
-    return FiscalYearCloseResult(fiscal_year=fiscal_year, carryforward_entry=carryforward_entry)
+    if opening_balance_entry is not None:
+        session.refresh(opening_balance_entry)
+    return FiscalYearCloseResult(
+        fiscal_year=fiscal_year,
+        carryforward_entry=carryforward_entry,
+        opening_balance_entry=opening_balance_entry,
+    )

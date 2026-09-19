@@ -349,11 +349,249 @@ def test_close_fiscal_year_books_result_carryforward(session: Session) -> None:
     assert by_code["8400"].debit_amount == Decimal("100.00")
     assert by_code["0860"].credit_amount == Decimal("100.00")
 
-    # Nach dem Vortrag ist der GuV-Saldo im Geschäftsjahr null
-    from app.services.reports import income_statement_for_company
+    assert carry.source == "year_end_close"
+
+    # Der Ergebnisvortrag verfälscht die GuV nicht: Das Jahresergebnis bleibt
+    # 100 — auch mit Abschlussbuchungen, denn der Vortrag stellt nur Konten glatt.
+    from app.services.reports import income_statement_for_company, trial_balance_for_company
 
     totals = income_statement_for_company(session=session, company_id=company.id)["totals"]
-    assert totals["net_income"] == Decimal("0.00")
+    assert totals["net_income"] == Decimal("100.00")
+    totals_incl = income_statement_for_company(
+        session=session, company_id=company.id, include_closing_entries=True
+    )["totals"]
+    assert totals_incl["net_income"] == Decimal("100.00")
+
+    # SuSa: ohne Abschlussbuchungen Saldo −100 auf 8400, mit Abschluss glatt.
+    susa = {row["code"]: row for row in trial_balance_for_company(
+        session=session, company_id=company.id
+    )}
+    assert susa["8400"]["balance"] == Decimal("-100.00")
+    assert "0860" not in susa
+    susa_incl = {row["code"]: row for row in trial_balance_for_company(
+        session=session, company_id=company.id, include_closing_entries=True
+    )}
+    assert susa_incl["8400"]["debit_total"] == Decimal("100.00")
+    assert susa_incl["8400"]["balance"] == Decimal("0.00")
+    assert susa_incl["0860"]["balance"] == Decimal("-100.00")
+
+
+def test_close_fiscal_year_carries_balances_into_next_year(session: Session) -> None:
+    from app.services.reports import balance_sheet_for_company, trial_balance_for_company
+    from domain.models import JournalEntry
+
+    company, fiscal_year, _ = _seed_company_with_entry(session)
+    result = close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="admin")
+
+    opening = result.opening_balance_entry
+    assert opening is not None
+    assert opening.source == "carryforward"
+    assert opening.entry_date == date(2027, 1, 1)
+    assert opening.description == "Saldovortrag aus 2026"
+    next_year = session.get(FiscalYear, opening.fiscal_year_id)
+    assert next_year.label == "2027" and next_year.is_closed is False
+    assert session.get(Period, opening.period_id).period_number == 1
+    by_code = {
+        session.get(Account, line.account_id).code: line
+        for line in session.execute(
+            select(JournalEntryLine).where(JournalEntryLine.journal_entry_id == opening.id)
+        ).scalars()
+    }
+    # Bank 100 im Soll, Gewinnvortrag (nach Ergebnisvortrag) 100 im Haben; kein Erlöskonto.
+    assert set(by_code) == {"1200", "0860"}
+    assert by_code["1200"].debit_amount == Decimal("100.00")
+    assert by_code["0860"].credit_amount == Decimal("100.00")
+
+    # SuSa des Folgejahres zeigt die EB-Werte; kumuliert ohne Startdatum nicht doppelt.
+    susa_2027 = {row["code"]: row for row in trial_balance_for_company(
+        session=session, company_id=company.id, date_from=date(2027, 1, 1)
+    )}
+    assert susa_2027["1200"]["debit_total"] == Decimal("100.00")
+    susa_all = {row["code"]: row for row in trial_balance_for_company(
+        session=session, company_id=company.id
+    )}
+    assert susa_all["1200"]["debit_total"] == Decimal("100.00")
+
+    # Bilanz zum 31.12.2026: Jahresergebnis als eigene Position, Gewinnvortrag noch 0.
+    closing_bs = balance_sheet_for_company(
+        session=session, company_id=company.id, date_to=date(2026, 12, 31)
+    )
+    passiva = {row["code"]: row["amount"] for row in closing_bs["liabilities_and_equity"]}
+    assert passiva == {"P&L": Decimal("100.00")}
+    assert closing_bs["totals"]["is_balanced"] is True
+    assert closing_bs["period"]["fiscal_year"] == "2026"
+
+    # Bilanz im Folgejahr: Ergebnis im Gewinnvortrag, kein doppelter Saldovortrag.
+    next_bs = balance_sheet_for_company(
+        session=session, company_id=company.id, date_to=date(2027, 6, 30)
+    )
+    assert {row["code"]: row["amount"] for row in next_bs["assets"]} == {
+        "1200": Decimal("100.00")
+    }
+    assert {row["code"]: row["amount"] for row in next_bs["liabilities_and_equity"]} == {
+        "0860": Decimal("100.00")
+    }
+    assert next_bs["totals"]["is_balanced"] is True
+
+    # Vortragsbuchungen sind nicht stornierbar.
+    from app.services.journal_entries import reverse_journal_entry
+
+    for entry_id in (opening.id, result.carryforward_entry.id):
+        with pytest.raises(JournalEntryCreationError, match="Vortragsbuchung"):
+            reverse_journal_entry(
+                session=session,
+                journal_entry_id=entry_id,
+                reversal_date=date(2027, 1, 2),
+                changed_by="admin",
+            )
+    assert session.execute(
+        select(JournalEntry.id).where(JournalEntry.source == "storno")
+    ).first() is None
+
+
+def test_closing_period_entries_are_excluded_by_default(session: Session) -> None:
+    from app.services.income_taxes import compute_income_tax_return
+    from app.services.reports import balance_sheet_for_company, income_statement_for_company
+
+    company, fiscal_year, _ = _seed_company_with_entry(session)
+    afa_account = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="4830",
+        name="Abschreibungen",
+        account_type="expense",
+    )
+    session.add(afa_account)
+    session.commit()
+    bank_id = session.execute(select(Account.id).where(Account.code == "1200")).scalar_one()
+    # Abschlussbuchung in Periode 13 (wie eine AfA): 30 Aufwand.
+    create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 12, 31),
+            description="AfA 2026",
+            status="posted",
+            post_to_closing_period=True,
+            lines=[
+                JournalLineInput(afa_account.id, Decimal("30.00"), Decimal("0.00")),
+                JournalLineInput(bank_id, Decimal("0.00"), Decimal("30.00")),
+            ],
+        ),
+    )
+
+    def net_income(include: bool) -> Decimal:
+        return income_statement_for_company(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 1, 1),
+            date_to=date(2026, 12, 31),
+            include_closing_entries=include,
+        )["totals"]["net_income"]
+
+    assert net_income(False) == Decimal("100.00")
+    assert net_income(True) == Decimal("70.00")
+
+    close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="admin")
+    # Nach dem Abschluss unverändert — der Ergebnisvortrag zählt nie mit.
+    assert net_income(False) == Decimal("100.00")
+    assert net_income(True) == Decimal("70.00")
+
+    taxable = {
+        include: compute_income_tax_return(
+            session=session,
+            company_id=company.id,
+            year=2026,
+            tax_type="corporate_income",
+            include_closing_entries=include,
+        )["basis"]["net_income"]
+        for include in (False, True)
+    }
+    assert taxable == {False: "100.00", True: "70.00"}
+
+    bs_incl = balance_sheet_for_company(
+        session=session,
+        company_id=company.id,
+        date_to=date(2026, 12, 31),
+        include_closing_entries=True,
+    )
+    assert {row["code"]: row["amount"] for row in bs_incl["assets"]} == {
+        "1200": Decimal("70.00")
+    }
+    assert {row["code"]: row["amount"] for row in bs_incl["liabilities_and_equity"]} == {
+        "P&L": Decimal("70.00")
+    }
+    assert bs_incl["totals"]["is_balanced"] is True
+
+
+def test_close_fiscal_year_requires_previous_years_closed(session: Session) -> None:
+    company = _seed_company(session)
+    session.add(
+        Account(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            code="0860",
+            name="Gewinnvortrag vor Verwendung",
+            account_type="equity",
+        )
+    )
+    session.commit()
+    _book(session, company, date(2025, 6, 1))
+    _book(session, company, date(2026, 6, 1))
+    years = {
+        year.label: year for year in session.execute(select(FiscalYear)).scalars().all()
+    }
+
+    with pytest.raises(PeriodActionError, match="zeitlicher Reihenfolge.*2025"):
+        close_fiscal_year(session=session, fiscal_year_id=years["2026"].id, changed_by="admin")
+
+    first = close_fiscal_year(session=session, fiscal_year_id=years["2025"].id, changed_by="admin")
+    assert first.opening_balance_entry.entry_date == date(2026, 1, 1)
+    second = close_fiscal_year(
+        session=session, fiscal_year_id=years["2026"].id, changed_by="admin"
+    )
+    # Saldovortrag 2027 kumuliert beide Jahre: Bank 200 / Gewinnvortrag 200.
+    amounts = {
+        session.get(Account, line.account_id).code: line.debit_amount or -line.credit_amount
+        for line in session.execute(
+            select(JournalEntryLine).where(
+                JournalEntryLine.journal_entry_id == second.opening_balance_entry.id
+            )
+        ).scalars()
+    }
+    assert amounts == {"1200": Decimal("200.00"), "0860": Decimal("-200.00")}
+
+
+def test_close_fiscal_year_is_atomic(session: Session, monkeypatch) -> None:
+    from app.services import periods as periods_module
+    from domain.models import JournalEntry
+
+    company, fiscal_year, _ = _seed_company_with_entry(session)
+
+    def failing_audit(**kwargs):
+        raise RuntimeError("Audit-Log nicht erreichbar")
+
+    monkeypatch.setattr(periods_module, "log_audit_event", failing_audit)
+    with pytest.raises(RuntimeError):
+        close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="admin")
+    session.rollback()
+
+    # Weder Vortragsbuchungen noch Sperren noch ein Folgejahr bleiben zurück.
+    assert session.execute(
+        select(JournalEntry.id).where(
+            JournalEntry.source.in_(["year_end_close", "carryforward"])
+        )
+    ).first() is None
+    assert session.execute(select(PeriodLock.id)).first() is None
+    assert session.execute(select(FiscalYear.label)).scalars().all() == ["2026"]
+    assert session.get(FiscalYear, fiscal_year.id).is_closed is False
+
+    monkeypatch.undo()
+    result = close_fiscal_year(
+        session=session, fiscal_year_id=fiscal_year.id, changed_by="admin"
+    )
+    assert result.fiscal_year.is_closed is True
+    assert result.opening_balance_entry is not None
 
 
 def test_close_fiscal_year_without_retained_account_fails(session: Session) -> None:
@@ -565,3 +803,78 @@ def test_periods_api_lifecycle(tmp_path: Path) -> None:
     assert close_response.status_code == 200
     assert close_response.get_json()["is_closed"] is True
     assert {period["status"] for period in close_response.get_json()["periods"]} == {"locked"}
+
+
+def test_reports_api_exposes_closing_switch_and_carryforward(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Abschluss API", "company_name": "Abschluss API GmbH"},
+    )
+    for code, name, account_type in (
+        ("1200", "Bank", "asset"),
+        ("8400", "Erlöse", "income"),
+        ("0860", "Gewinnvortrag vor Verwendung", "equity"),
+    ):
+        client.post(
+            "/api/v1/accounts",
+            json={"company_id": 1, "code": code, "name": name, "account_type": account_type},
+        )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-05-10",
+            "description": "Erlös",
+            "lines": [
+                {"account_code": "1200", "debit_amount": "100.00"},
+                {"account_code": "8400", "credit_amount": "100.00"},
+            ],
+        },
+    )
+    fiscal_year_id = client.get(
+        "/api/v1/fiscal-years", query_string={"company_id": 1}
+    ).get_json()["fiscal_years"][0]["id"]
+
+    closed = client.post(f"/api/v1/fiscal-years/{fiscal_year_id}/close", json={})
+    assert closed.status_code == 200
+    assert closed.get_json()["carryforward_entry_id"] is not None
+    assert closed.get_json()["opening_balance_entry_id"] is not None
+
+    income = client.get("/api/v1/income-statement", query_string={"company_id": 1}).get_json()
+    assert income["totals"]["net_income"] == "100.00"
+    assert income["period"]["include_closing_entries"] is False
+
+    susa_incl = client.get(
+        "/api/v1/trial-balance",
+        query_string={"company_id": 1, "include_closing_entries": "true"},
+    ).get_json()
+    assert susa_incl["period"]["include_closing_entries"] is True
+    assert {row["code"]: row["balance"] for row in susa_incl["rows"]} == {
+        "0860": "-100.00",
+        "1200": "100.00",
+        "8400": "0.00",
+    }
+
+    balance = client.get(
+        "/api/v1/balance-sheet", query_string={"company_id": 1, "date_to": "2027-06-30"}
+    ).get_json()
+    assert balance["period"]["fiscal_year"] == "2027"
+    assert balance["totals"]["is_balanced"] is True
+    assert {row["code"]: row["amount"] for row in balance["liabilities_and_equity"]} == {
+        "0860": "100.00"
+    }
+
+    csv_export = client.get(
+        "/api/v1/exports/trial-balance.csv",
+        query_string={"company_id": 1, "date_from": "2027-01-01"},
+    )
+    assert csv_export.status_code == 200
+    assert "1200,Bank,100.00,0.00,100.00" in csv_export.get_data(as_text=True)
+
+    ui = app.test_client()
+    _login(ui, "admin", "admin123")
+    page = ui.get("/berichte?company_id=1&include_closing_entries=1")
+    assert page.status_code == 200
+    assert b"inkl. Abschlussbuchungen" in page.data

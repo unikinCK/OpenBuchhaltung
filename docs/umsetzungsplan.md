@@ -514,12 +514,26 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 Grundlage: `docs/review/projektreview-2026-09-19.md` (Befund-Nummern F/S/A/T/U/O
 und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
 
-- [ ] **Sprint 1 – Fachliche Korrektheit**: Abschlussbuchungen in GuV/Bilanz/
-      UStVA/KSt ausklammern + Saldovortrag (F1, F7); Netto-aus-Brutto mit
-      Rundungszeile (F2); `commit=False` in AfA/Lohn/Belegabgleich/Storno
-      (A1, F11); `TaxCode.kind` input/output (F5); Buchungsnummer je WJ mit
-      Sequenz und Retry (F6); Storno-Hooks für Bank/AfA/OPOS/Lohn (F4);
-      Cent-Quantisierung, Storno-Datum, WJ-Überlappung (F12, F13).
+- [x] **Sprint 1 – Fachliche Korrektheit** *(umgesetzt 2026-09-19)*:
+      Abschlussbuchungen (Periode 13) in SuSa/GuV/Bilanz/UStVA/KSt standardmäßig
+      ausgeklammert, Schalter `include_closing_entries` in Service/API/MCP/UI;
+      Ergebnisvortrag (`source=year_end_close`) zählt in GuV/UStVA/KSt nie mit,
+      Bilanz je Stichtags-WJ mit Jahresergebnis als eigener Position (F1).
+      Jahresabschluss atomar mit Vorjahresprüfung und Saldovortrag der
+      Bestandskonten ins Folgejahr (`source=carryforward`, EB-Werte in der SuSa
+      ab Startdatum), Vortragsbuchungen nicht stornierbar (F7). Netto-aus-Brutto
+      mit Rundungscent auf expliziter Steuerzeile (F2). `commit=False` in AfA
+      (inkl. Abgang), Lohn, Belegabgleich und Storno; Lohnaufwand am Monatsende
+      des Lohnmonats (A1, F11). `TaxCode.kind` input/output mit Migration 0037,
+      Validierung gegen Kontoart und Soll-/Haben-Seite, UStVA-Richtung aus
+      `kind` (F5). Nummernkreis je WJ (`posting_number_sequence`, Migration
+      0038, `FOR UPDATE`, Präfix = WJ-Label, Retry bei Kollision) (F6).
+      Storno-Hooks: Bankumsatz → open, AfA-Satz zurück, Lohnlauf → draft, OPOS
+      per `settlement_journal_entry_id`/`settlement_amount` (Migration 0039)
+      wieder offen (F4). `parse_decimal` quantisiert auf Cent und lehnt mehr als
+      zwei Nachkommastellen ab (Sätze/Mengen mit `places=None`), Validator prüft
+      Zeilen; Stornodatum ≥ Originaldatum; automatisches WJ prüft Überlappung,
+      mehrdeutige Zuordnung ist ein Fehler (F12, F13).
 - [x] **Sprint 2 – Sicherheit** (2026-09-19): Chat-Tool-Allowlist (nur lesende
       Tools sofort) + Human-in-the-Loop für schreibende Tools mit
       Bestätigungsschritt in UI/API/MCP, Benutzer-/Token-/Passwort-/ELSTER-/

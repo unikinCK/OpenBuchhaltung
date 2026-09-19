@@ -863,23 +863,23 @@ def _resolve_bank_account(
 
 
 def net_from_gross(gross: Decimal, rate: Decimal) -> tuple[Decimal, Decimal]:
-    """Zerlegt einen Bruttobetrag in Netto + Steuer, konsistent zur Steuer-Expansion.
+    """Zerlegt einen Bruttobetrag in Netto + Steuer.
 
-    Sucht den Nettobetrag, dessen gerundete Steuer exakt zum Brutto aufsummiert.
+    Netto ist der kaufmännisch gerundete Anteil ``Brutto / (1 + Satz)``, die
+    Steuer die Differenz ``Brutto − Netto``. Damit geht jeder Bruttobetrag auf;
+    ein etwaiger Rundungscent gegenüber ``Netto × Satz`` liegt auf der
+    Steuerzeile (bei 19 % betrifft das rund jeden sechsten Centbetrag, z. B.
+    1,22 € → 1,03 € + 0,19 €).
     """
+    cent = Decimal("0.01")
+    gross = gross.quantize(cent)
     if rate <= 0:
         return gross, Decimal("0.00")
 
-    cent = Decimal("0.01")
-    base = (gross / (Decimal("1") + rate / Decimal("100"))).quantize(cent, rounding=ROUND_HALF_UP)
-    for offset in (Decimal("0.00"), -cent, cent, -2 * cent, 2 * cent):
-        net = base + offset
-        tax = (net * rate / Decimal("100")).quantize(cent, rounding=ROUND_HALF_UP)
-        if net + tax == gross:
-            return net, tax
-    raise BankImportError(
-        f"Bruttobetrag {gross} lässt sich nicht sauber in Netto + {rate}% Steuer zerlegen."
+    net = (gross / (Decimal("1") + rate / Decimal("100"))).quantize(
+        cent, rounding=ROUND_HALF_UP
     )
+    return net, gross - net
 
 
 def book_transaction(
@@ -914,11 +914,19 @@ def book_transaction(
 
     gross = abs(transaction.amount)
     contra_net = gross
+    tax_amount = Decimal("0.00")
+    tax_code = None
     if tax_code_id is not None:
         tax_code = session.get(TaxCode, tax_code_id)
         if tax_code is None or tax_code.company_id != transaction.company_id:
             raise BankImportError("Steuercode nicht gefunden.")
-        contra_net, _ = net_from_gross(gross, tax_code.rate)
+        if not tax_code.is_active:
+            raise BankImportError("Inaktive Steuercodes dürfen nicht verwendet werden.")
+        contra_net, tax_amount = net_from_gross(gross, tax_code.rate)
+        if tax_amount > Decimal("0.00") and tax_code.vat_account_id is None:
+            raise BankImportError(
+                f"Steuercode {tax_code.code} hat kein Steuerkonto hinterlegt."
+            )
 
     zero = Decimal("0.00")
     incoming = transaction.amount > 0
@@ -935,6 +943,25 @@ def book_transaction(
         cost_center_id=cost_center_id,
         profit_center_id=profit_center_id,
     )
+    lines = [bank_line, contra_line]
+    if tax_code is not None and tax_amount > zero:
+        # Steuer = Brutto − Netto als explizite Zeile (Rundungscent liegt hier),
+        # statt sie über die Auto-Expansion aus dem Netto neu zu berechnen —
+        # sonst ginge das Brutto bei jedem sechsten Centbetrag nicht auf.
+        lines.append(
+            JournalLineInput(
+                account_id=tax_code.vat_account_id,
+                debit_amount=zero if incoming else tax_amount,
+                credit_amount=tax_amount if incoming else zero,
+                description=(
+                    f"{tax_code.code} {tax_code.rate}% auf {contra_net} "
+                    f"(aus Brutto {gross})"
+                ),
+                tax_code_id=tax_code.id,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
+            )
+        )
 
     # commit=False: Buchung und Statuswechsel des Bankumsatzes müssen atomar
     # persistiert werden, sonst kann derselbe Umsatz doppelt verbucht werden.
@@ -946,7 +973,8 @@ def book_transaction(
             description=description or f"Bank: {transaction.purpose}",
             status="posted",
             changed_by=changed_by,
-            lines=[bank_line, contra_line],
+            lines=lines,
+            expand_tax_lines=False,
         ),
         commit=False,
     )

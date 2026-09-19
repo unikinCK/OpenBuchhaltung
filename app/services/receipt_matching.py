@@ -576,6 +576,9 @@ def book_new_booking_suggestion(
         )
     )
 
+    # commit=False: Buchung, Belegverknüpfung und Vorschlagsstatus werden
+    # gemeinsam persistiert — sonst bliebe bei einem Fehler eine Buchung ohne
+    # Beleg zurück und der Vorschlag könnte erneut gebucht werden.
     entry = create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -586,6 +589,7 @@ def book_new_booking_suggestion(
             changed_by=changed_by,
             lines=lines,
         ),
+        commit=False,
     )
 
     document.journal_entry_id = entry.id

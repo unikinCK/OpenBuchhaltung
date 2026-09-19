@@ -58,3 +58,23 @@ def test_validator_rejects_zero_line_amount() -> None:
 
     with pytest.raises(JournalEntryValidationError, match="Betrag muss größer 0"):
         JournalEntryValidator.validate(draft)
+
+
+def test_validator_rejects_sub_cent_amounts() -> None:
+    # 0,015 + 0,015 = 0,03 ginge rechnerisch auf, ist aber nicht centgenau buchbar.
+    draft = JournalEntryDraft(
+        status="posted",
+        lines=[_line("0.015", "0.00"), _line("0.015", "0.00"), _line("0.00", "0.03")],
+    )
+
+    with pytest.raises(JournalEntryValidationError, match="zwei Nachkommastellen"):
+        JournalEntryValidator.validate(draft)
+
+
+def test_validator_accepts_integer_amounts() -> None:
+    draft = JournalEntryDraft(
+        status="posted",
+        lines=[_line("100", "0"), _line("0", "100")],
+    )
+
+    JournalEntryValidator.validate(draft)

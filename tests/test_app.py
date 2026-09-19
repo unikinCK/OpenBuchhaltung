@@ -845,7 +845,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
 
     # Ohne Zeitraum: beide Buchungen.
     full = client.get("/api/v1/income-statement", query_string={"company_id": 1}).get_json()
-    assert full["period"] == {"date_from": None, "date_to": None}
+    assert full["period"] == {
+        "date_from": None,
+        "date_to": None,
+        "include_closing_entries": False,
+    }
     assert full["totals"]["total_revenue"] == "100.00"
     assert full["totals"]["total_expense"] == "40.00"
     assert full["totals"]["net_income"] == "60.00"
@@ -855,7 +859,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
         "/api/v1/income-statement",
         query_string={"company_id": 1, "date_from": "2026-02-01", "date_to": "2026-02-28"},
     ).get_json()
-    assert feb["period"] == {"date_from": "2026-02-01", "date_to": "2026-02-28"}
+    assert feb["period"] == {
+        "date_from": "2026-02-01",
+        "date_to": "2026-02-28",
+        "include_closing_entries": False,
+    }
     assert feb["totals"]["total_revenue"] == "0.00"
     assert feb["totals"]["total_expense"] == "40.00"
     assert feb["totals"]["net_income"] == "-40.00"
@@ -865,7 +873,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
         "/api/v1/balance-sheet",
         query_string={"company_id": 1, "date_to": "2026-01-31"},
     ).get_json()
-    assert jan_bs["period"] == {"as_of": "2026-01-31"}
+    assert jan_bs["period"] == {
+        "as_of": "2026-01-31",
+        "fiscal_year": "2026",
+        "include_closing_entries": False,
+    }
     # Bank = 100 (nur Januar-Erlös), Jahresergebnis = 100.
     bank = next(row for row in jan_bs["assets"] if row["code"] == "1200")
     assert bank["amount"] == "100.00"

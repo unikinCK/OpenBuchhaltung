@@ -344,3 +344,62 @@ def test_datev_header_finalized_flag(session: Session) -> None:
         session=session, company_id=company.id, generated_at=generated_at
     ).splitlines()[0]
     assert header.split(";")[20] == "1"
+
+
+def test_reverse_before_original_date_fails(session: Session) -> None:
+    company = _seed_company(session)
+    entry = _create_entry(session, company, entry_date=date(2026, 5, 10))
+
+    with pytest.raises(JournalEntryCreationError, match="nicht vor dem Buchungsdatum"):
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=entry.id,
+            reversal_date=date(2026, 5, 9),
+            changed_by="pytest",
+        )
+
+    # Am Originaldatum selbst ist der Storno zulässig.
+    reversal = reverse_journal_entry(
+        session=session,
+        journal_entry_id=entry.id,
+        reversal_date=date(2026, 5, 10),
+        changed_by="pytest",
+    )
+    assert reversal.entry_date == date(2026, 5, 10)
+
+
+def test_reverse_is_atomic_with_finalization(session: Session, monkeypatch) -> None:
+    from app.services import journal_entries as journal_entries_module
+
+    company = _seed_company(session)
+    entry = _create_entry(session, company)
+
+    def failing_seal(*args, **kwargs):
+        raise RuntimeError("Hash-Kette nicht verfügbar")
+
+    monkeypatch.setattr(journal_entries_module, "seal_journal_entry", failing_seal)
+    with pytest.raises(RuntimeError):
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=entry.id,
+            reversal_date=date(2026, 5, 15),
+            changed_by="pytest",
+        )
+    session.rollback()
+
+    # Keine halbfertige (nicht festgeschriebene) Stornobuchung im Journal.
+    assert (
+        session.execute(
+            select(JournalEntry.id).where(JournalEntry.reversal_of_id == entry.id)
+        ).first()
+        is None
+    )
+
+    monkeypatch.undo()
+    reversal = reverse_journal_entry(
+        session=session,
+        journal_entry_id=entry.id,
+        reversal_date=date(2026, 5, 15),
+        changed_by="pytest",
+    )
+    assert reversal.is_finalized is True

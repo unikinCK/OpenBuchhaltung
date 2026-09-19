@@ -340,3 +340,281 @@ def test_tax_codes_api_list_create_and_defaults(tmp_path) -> None:
         json={"company_id": 1, "code": "X", "rate": "19.00", "vat_account_code": "9999"},
     )
     assert bad_account.status_code == 422
+
+
+def test_default_tax_codes_carry_direction(session: Session) -> None:
+    company = _seed_company(session)
+    ensure_default_tax_codes(session=session, company=company)
+    kinds = dict(
+        session.execute(
+            select(TaxCode.code, TaxCode.kind).where(TaxCode.company_id == company.id)
+        ).all()
+    )
+    assert kinds == {
+        "USt19": "output",
+        "USt7": "output",
+        "VSt19": "input",
+        "VSt7": "input",
+        "frei": "output",
+    }
+
+
+def _add_expense_account(session: Session, company: Company) -> int:
+    account = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="4200",
+        name="Raumkosten",
+        account_type="expense",
+    )
+    session.add(account)
+    session.commit()
+    return account.id
+
+
+def test_input_tax_code_on_revenue_line_is_rejected(session: Session) -> None:
+    # Befund F5: VSt19 auf einer Erlöszeile würde Haben 1576 buchen (Kz 66 sinkt).
+    company = _seed_company(session)
+    ensure_default_tax_codes(session=session, company=company)
+    vst19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
+    ).scalar_one()
+
+    with pytest.raises(JournalEntryCreationError, match="Vorsteuer.*nicht zulässig"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 7, 5),
+                description="Falscher Steuercode",
+                status="posted",
+                lines=[
+                    JournalLineInput(
+                        account_id=_account_id(session, company, "1400"),
+                        debit_amount=Decimal("1190.00"),
+                    ),
+                    JournalLineInput(
+                        account_id=_account_id(session, company, "8400"),
+                        credit_amount=Decimal("1000.00"),
+                        tax_code_id=vst19.id,
+                    ),
+                ],
+            ),
+        )
+    assert session.execute(select(JournalEntryLine.id)).first() is None
+
+
+def test_output_tax_code_on_expense_line_is_rejected(session: Session) -> None:
+    company = _seed_company(session)
+    expense_id = _add_expense_account(session, company)
+    ensure_default_tax_codes(session=session, company=company)
+    ust19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+
+    with pytest.raises(JournalEntryCreationError, match="Umsatzsteuer.*nicht zulässig"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 7, 5),
+                description="USt auf Aufwand",
+                status="posted",
+                lines=[
+                    JournalLineInput(
+                        account_id=expense_id,
+                        debit_amount=Decimal("100.00"),
+                        tax_code_id=ust19.id,
+                    ),
+                    JournalLineInput(
+                        account_id=_account_id(session, company, "1400"),
+                        credit_amount=Decimal("119.00"),
+                    ),
+                ],
+            ),
+        )
+
+
+def test_zero_rate_code_is_allowed_on_any_account(session: Session) -> None:
+    company = _seed_company(session)
+    expense_id = _add_expense_account(session, company)
+    ensure_default_tax_codes(session=session, company=company)
+    frei = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "frei")
+    ).scalar_one()
+
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 5),
+            description="Steuerfreie Eingangsleistung",
+            status="posted",
+            lines=[
+                JournalLineInput(
+                    account_id=expense_id, debit_amount=Decimal("100.00"), tax_code_id=frei.id
+                ),
+                JournalLineInput(
+                    account_id=_account_id(session, company, "1400"),
+                    credit_amount=Decimal("100.00"),
+                ),
+            ],
+        ),
+    )
+    assert entry.id is not None
+
+
+def test_explicit_tax_line_must_be_on_base_line_side(session: Session) -> None:
+    company = _seed_company(session)
+    expense_id = _add_expense_account(session, company)
+    ensure_default_tax_codes(session=session, company=company)
+    vst19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
+    ).scalar_one()
+
+    with pytest.raises(JournalEntryCreationError, match="derselben Seite"):
+        create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 7, 5),
+                description="Steuerzeile auf falscher Seite",
+                status="posted",
+                expand_tax_lines=False,
+                lines=[
+                    JournalLineInput(
+                        account_id=expense_id, debit_amount=Decimal("100.00"), tax_code_id=vst19.id
+                    ),
+                    JournalLineInput(
+                        account_id=_account_id(session, company, "1576"),
+                        credit_amount=Decimal("19.00"),
+                        tax_code_id=vst19.id,
+                    ),
+                    JournalLineInput(
+                        account_id=_account_id(session, company, "1400"),
+                        credit_amount=Decimal("81.00"),
+                    ),
+                ],
+            ),
+        )
+
+    # Richtig herum (Steuerzeile im Soll wie die Bemessungsgrundlage) geht es durch.
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 5),
+            description="Explizite Steuerzeile",
+            status="posted",
+            expand_tax_lines=False,
+            lines=[
+                JournalLineInput(
+                    account_id=expense_id, debit_amount=Decimal("100.00"), tax_code_id=vst19.id
+                ),
+                JournalLineInput(
+                    account_id=_account_id(session, company, "1576"),
+                    debit_amount=Decimal("19.00"),
+                    tax_code_id=vst19.id,
+                ),
+                JournalLineInput(
+                    account_id=_account_id(session, company, "1400"),
+                    credit_amount=Decimal("119.00"),
+                ),
+            ],
+        ),
+    )
+    assert entry.id is not None
+
+
+def test_tax_codes_api_kind_is_validated_and_derived(tmp_path) -> None:
+    from app import create_app
+    from app.auth import hash_password
+    from domain.models import User
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'tax_codes_kind.db'}",
+        }
+    )
+    with app.extensions["db_session_factory"]() as db_session:
+        db_session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        db_session.commit()
+    client = app.test_client()
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Kind API", "company_name": "Kind API GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1406", "name": "Vorsteuer 19 %", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "3806",
+            "name": "Umsatzsteuer 19 %",
+            "account_type": "liability",
+        },
+    )
+
+    explicit = client.post(
+        "/api/v1/tax-codes",
+        json={
+            "company_id": 1,
+            "code": "VSt19-Import",
+            "rate": "19.00",
+            "kind": "input",
+            "vat_account_code": "1406",
+        },
+    )
+    assert explicit.status_code == 201
+    assert explicit.get_json()["kind"] == "input"
+
+    derived_from_account = client.post(
+        "/api/v1/tax-codes",
+        json={"company_id": 1, "code": "Sonder19", "rate": "19.00", "vat_account_code": "3806"},
+    )
+    assert derived_from_account.status_code == 201
+    assert derived_from_account.get_json()["kind"] == "output"
+
+    derived_from_code = client.post(
+        "/api/v1/tax-codes",
+        json={"company_id": 1, "code": "VSt0", "rate": "0.00"},
+    )
+    assert derived_from_code.status_code == 201
+    assert derived_from_code.get_json()["kind"] == "input"
+
+    mismatch = client.post(
+        "/api/v1/tax-codes",
+        json={
+            "company_id": 1,
+            "code": "Verdreht",
+            "rate": "19.00",
+            "kind": "output",
+            "vat_account_code": "1406",
+        },
+    )
+    assert mismatch.status_code == 422
+    assert "Kontoart liability" in mismatch.get_json()["error"]
+
+    unknown = client.post(
+        "/api/v1/tax-codes",
+        json={"company_id": 1, "code": "Unbekannt", "rate": "19.00", "kind": "sideways"},
+    )
+    assert unknown.status_code == 422
+
+    listed = client.get("/api/v1/tax-codes?company_id=1").get_json()["tax_codes"]
+    assert {item["code"]: item["kind"] for item in listed} == {
+        "VSt19-Import": "input",
+        "Sonder19": "output",
+        "VSt0": "input",
+    }

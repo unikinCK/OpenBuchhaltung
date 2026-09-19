@@ -231,6 +231,11 @@ def close_fiscal_year_via_api(fiscal_year_id: int):
                     "carryforward_entry_id": (
                         result.carryforward_entry.id if result.carryforward_entry else None
                     ),
+                    "opening_balance_entry_id": (
+                        result.opening_balance_entry.id
+                        if result.opening_balance_entry
+                        else None
+                    ),
                 }
             ),
             200,
