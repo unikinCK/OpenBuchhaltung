@@ -531,6 +531,14 @@ a.task-card:hover {
   font-size: 0.82rem;
 }
 
+.token-notice {
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: var(--success-bg);
+  color: var(--success-text);
+  word-break: break-all;
+}
+
 /* Login page */
 .login-wrapper {
   min-height: calc(100vh - 56px);

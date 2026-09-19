@@ -28,6 +28,9 @@ from app.services.mcp_server import MCPServer, build_server_from_env
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 DEFAULT_PATH = "/mcp"
+# Obergrenze für Request-Bodies (Speicher-DoS über Content-Length); Beleg-Uploads
+# per MCP sind Base64 und bleiben mit 16 MiB deutlich unter dem Upload-Limit.
+DEFAULT_MAX_BODY_BYTES = 16 * 1024 * 1024
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
@@ -132,7 +135,10 @@ def authorization_allowed(authorization: str | None, auth_token: str | None) -> 
     if not authorization or not authorization.startswith("Bearer "):
         return False
     supplied_token = authorization.removeprefix("Bearer ").strip()
-    return bool(supplied_token) and secrets.compare_digest(supplied_token, auth_token)
+    # Byte-Vergleich: compare_digest wirft bei Nicht-ASCII-Strings einen TypeError.
+    return bool(supplied_token) and secrets.compare_digest(
+        supplied_token.encode("utf-8"), auth_token.encode("utf-8")
+    )
 
 
 def _make_handler(
@@ -140,6 +146,7 @@ def _make_handler(
     path: str,
     allowed_origins: frozenset[str],
     auth_token: str | None,
+    max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
 ):
     class MCPRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -175,7 +182,20 @@ def _make_handler(
                 self._reject(403, "Origin not allowed.")
                 return
 
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                length = -1
+            if length < 0:
+                self.close_connection = True
+                self._reject(400, "Invalid Content-Length.")
+                return
+            if length > max_body_bytes:
+                # Body nicht lesen; Verbindung schließen, damit kein Rest-Body als
+                # nächster Request interpretiert wird.
+                self.close_connection = True
+                self._reject(413, "Request body too large.")
+                return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
             result = process_post(server, raw_body, self.headers.get("Accept"))
             self._send(result)
@@ -203,12 +223,13 @@ def make_server(
     path: str = DEFAULT_PATH,
     allowed_origins: frozenset[str] = frozenset(),
     auth_token: str | None = None,
+    max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
 ) -> ThreadingHTTPServer:
     if host not in LOOPBACK_HOSTS and not auth_token:
         raise RuntimeError(
             "MCP_HTTP_AUTH_TOKEN muss gesetzt sein, wenn MCP_HTTP_HOST nicht auf Loopback bindet."
         )
-    handler = _make_handler(server, path, allowed_origins, auth_token)
+    handler = _make_handler(server, path, allowed_origins, auth_token, max_body_bytes)
     return ThreadingHTTPServer((host, port), handler)
 
 
@@ -225,8 +246,9 @@ def main() -> None:
     path = os.environ.get("MCP_HTTP_PATH", DEFAULT_PATH)
     allowed_origins = _allowed_origins_from_env(os.environ.get("MCP_HTTP_ALLOWED_ORIGINS"))
     auth_token = (os.environ.get("MCP_HTTP_AUTH_TOKEN") or "").strip() or None
+    max_body_bytes = int(os.environ.get("MCP_HTTP_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES)))
 
-    httpd = make_server(server, host, port, path, allowed_origins, auth_token)
+    httpd = make_server(server, host, port, path, allowed_origins, auth_token, max_body_bytes)
     print(f"OpenBuchhaltung MCP-Server (Streamable HTTP) läuft auf http://{host}:{port}{path}")
     try:
         httpd.serve_forever()

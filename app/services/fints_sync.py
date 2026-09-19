@@ -249,7 +249,11 @@ def start_fints_sync(
     except FinTSSyncError:
         raise
     except Exception as exc:  # fints wirft eigene Fehlerklassen + requests-Fehler
-        raise FinTSSyncError(f"FinTS-Abruf fehlgeschlagen: {exc}") from exc
+        # Details (inkl. Bank-URL/Antwort) nur ins Log, nicht an den Client.
+        logger.warning("FinTS-Abruf fehlgeschlagen: %s", exc, exc_info=True)
+        raise FinTSSyncError(
+            f"FinTS-Abruf fehlgeschlagen ({type(exc).__name__}). Details im Server-Log."
+        ) from exc
 
     if step is not None:
         return FinTSSyncResult(
@@ -328,7 +332,10 @@ def submit_fints_tan(
         session.commit()
         if isinstance(exc, FinTSSyncError):
             raise
-        raise FinTSSyncError(f"TAN-Bestätigung fehlgeschlagen: {exc}") from exc
+        logger.warning("TAN-Bestätigung fehlgeschlagen: %s", exc, exc_info=True)
+        raise FinTSSyncError(
+            f"TAN-Bestätigung fehlgeschlagen ({type(exc).__name__}). Details im Server-Log."
+        ) from exc
 
     if next_step is not None:
         challenge = _freeze_dialog(

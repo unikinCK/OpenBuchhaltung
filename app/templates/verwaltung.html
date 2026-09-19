@@ -55,6 +55,12 @@
 
   <section class="card">
     <h2>Benutzerverwaltung</h2>
+    {% if new_api_token %}
+      <p class="token-notice">
+        API-Token für {{ new_api_token.username }}: <code>{{ new_api_token.token }}</code>
+        — wird nur einmal angezeigt.
+      </p>
+    {% endif %}
     {% if is_admin %}
       <form method="post" action="{{ url_for('main.create_user_action') }}" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -114,6 +120,17 @@
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}" />
                     <button type="submit">{{ "Deaktivieren" if user.is_active else "Aktivieren" }}</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.unlock_user_action', user_id=user.id) }}" style="display:inline"
+                        title="Login-Sperre nach Fehlversuchen aufheben">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit">Entsperren</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.set_user_password_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="password" name="new_password" placeholder="Neues Passwort"
+                           autocomplete="new-password" minlength="8" required style="width:11rem" />
+                    <button type="submit">Passwort setzen</button>
                   </form>
                 </td>
               </tr>

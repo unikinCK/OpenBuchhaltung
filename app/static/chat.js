@@ -78,14 +78,26 @@
       return wrap;
     }
 
+    var STATUS_LABELS = {
+      pending: "Bestätigung erforderlich",
+      deferred: "zurückgestellt",
+      confirmed: "bestätigt und ausgeführt",
+      rejected: "abgelehnt",
+    };
+
     function toolCallDetails(calls) {
       var wrap = document.createElement("div");
       wrap.className = "chat-tool-calls";
       (calls || []).forEach(function (call) {
         var details = document.createElement("details");
-        details.className = "chat-tool-call" + (call.is_error ? " error" : "");
+        details.className =
+          "chat-tool-call" +
+          (call.is_error ? " error" : "") +
+          (call.status === "pending" ? " pending" : "");
+        if (call.status === "pending") details.open = true;
         var summary = document.createElement("summary");
-        summary.textContent = "🔧 " + call.name;
+        var label = STATUS_LABELS[call.status];
+        summary.textContent = "🔧 " + call.name + (label ? " – " + label : "");
         details.appendChild(summary);
         var body = document.createElement("div");
         body.className = "chat-tool-call-body";
@@ -109,9 +121,43 @@
       return wrap;
     }
 
-    function appendMessage(message) {
+    // Human-in-the-Loop: Hinweisbox mit Ausführen/Ablehnen für eine wartende Aktion.
+    function pendingActionBox(message) {
+      var box = document.createElement("div");
+      box.className = "chat-action-confirm";
+      box.dataset.messageId = message.id;
+      var text = document.createElement("p");
+      text.appendChild(document.createTextNode("Der Assistent möchte "));
+      var code = document.createElement("code");
+      code.textContent = message.pending_action.name;
+      text.appendChild(code);
+      text.appendChild(
+        document.createTextNode(
+          " ausführen. Diese Aktion ändert Daten und wird erst nach Ihrer Bestätigung ausgeführt."
+        )
+      );
+      box.appendChild(text);
+      var buttons = document.createElement("div");
+      buttons.className = "chat-action-buttons";
+      [
+        ["confirm", "Ausführen", "primary"],
+        ["reject", "Ablehnen", "secondary"],
+      ].forEach(function (spec) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = spec[2];
+        button.dataset.chatAction = spec[0];
+        button.textContent = spec[1];
+        buttons.appendChild(button);
+      });
+      box.appendChild(buttons);
+      return box;
+    }
+
+    function buildMessageRow(message) {
       var row = document.createElement("div");
       row.className = "chat-message chat-message-" + message.role;
+      row.dataset.messageId = message.id;
       var avatar = document.createElement("div");
       avatar.className = "chat-avatar";
       avatar.textContent = message.role === "user" ? "Du" : "KI";
@@ -123,16 +169,84 @@
       if (message.tool_calls && message.tool_calls.length) {
         bubble.appendChild(toolCallDetails(message.tool_calls));
       }
+      if (message.pending_action) {
+        bubble.appendChild(pendingActionBox(message));
+      }
       var content = document.createElement("div");
       content.className = "chat-content";
       content.textContent = message.content || "";
       bubble.appendChild(content);
       row.appendChild(avatar);
       row.appendChild(bubble);
-      messagesBox.insertBefore(row, pending);
+      return row;
+    }
+
+    function appendMessage(message) {
+      messagesBox.insertBefore(buildMessageRow(message), pending);
       if (welcome) welcome.hidden = true;
       scrollToBottom();
     }
+
+    function replaceMessage(message) {
+      var existing = messagesBox.querySelector(
+        '.chat-message[data-message-id="' + message.id + '"]'
+      );
+      var row = buildMessageRow(message);
+      if (existing) {
+        existing.replaceWith(row);
+      } else {
+        messagesBox.insertBefore(row, pending);
+      }
+    }
+
+    function actionUrl(messageId, action) {
+      // Vorlage aus url_for(..., message_id=0, action='confirm').
+      return root.dataset.actionUrl.replace("/0/confirm", "/" + messageId + "/" + action);
+    }
+
+    messagesBox.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-chat-action]");
+      if (!button || sending) return;
+      var box = button.closest(".chat-action-confirm");
+      if (!box) return;
+      var messageId = box.dataset.messageId;
+      var action = button.dataset.chatAction;
+      clearError();
+      box.querySelectorAll("button").forEach(function (item) {
+        item.disabled = true;
+      });
+
+      var data = new FormData();
+      var csrf = form.querySelector('input[name="_csrf_token"]');
+      if (csrf) data.set("_csrf_token", csrf.value);
+
+      setSending(true);
+      fetch(actionUrl(messageId, action), {
+        method: "POST",
+        body: data,
+        headers: { Accept: "application/json" },
+      })
+        .then(function (response) {
+          return response.json().then(function (payload) {
+            return { ok: response.ok, payload: payload };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok) {
+            throw new Error(result.payload.error || "Unbekannter Fehler.");
+          }
+          replaceMessage(result.payload.updated_message);
+          appendMessage(result.payload.assistant_message);
+          setSending(false);
+        })
+        .catch(function (error) {
+          box.querySelectorAll("button").forEach(function (item) {
+            item.disabled = false;
+          });
+          setSending(false);
+          showError(error.message || "Aktion fehlgeschlagen.");
+        });
+    });
 
     function setSending(active) {
       sending = active;

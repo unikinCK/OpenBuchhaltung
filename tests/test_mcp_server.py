@@ -139,6 +139,11 @@ EXPECTED_TOOL_NAMES = {
     "get_chat_conversation",
     "send_chat_message",
     "delete_chat_conversation",
+    "confirm_chat_action",
+    "reject_chat_action",
+    "unlock_user_login",
+    "set_user_password",
+    "change_own_password",
 }
 
 

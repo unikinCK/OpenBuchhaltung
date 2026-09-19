@@ -6,7 +6,13 @@
 {% endblock %}
 {% block content %}
 {% macro render_message(message) %}
-  <div class="chat-message chat-message-{{ message.role }}">
+  {% set status_labels = {
+    'pending': 'Bestätigung erforderlich',
+    'deferred': 'zurückgestellt',
+    'confirmed': 'bestätigt und ausgeführt',
+    'rejected': 'abgelehnt',
+  } %}
+  <div class="chat-message chat-message-{{ message.role }}" data-message-id="{{ message.id }}">
     <div class="chat-avatar">{{ 'Du' if message.role == 'user' else 'KI' }}</div>
     <div class="chat-bubble">
       {% if message.attachments %}
@@ -22,8 +28,9 @@
       {% if message.tool_calls %}
         <div class="chat-tool-calls">
           {% for call in message.tool_calls %}
-            <details class="chat-tool-call{% if call.is_error %} error{% endif %}">
-              <summary>🔧 {{ call.name }}</summary>
+            <details class="chat-tool-call{% if call.is_error %} error{% endif %}{% if call.status == 'pending' %} pending{% endif %}"
+                     {% if call.status == 'pending' %}open{% endif %}>
+              <summary>🔧 {{ call.name }}{% if call.status in status_labels %} – {{ status_labels[call.status] }}{% endif %}</summary>
               <div class="chat-tool-call-body">
                 <div class="chat-tool-call-label">Argumente</div>
                 <pre>{{ call.arguments | tojson(indent=2) }}</pre>
@@ -34,6 +41,18 @@
           {% endfor %}
         </div>
       {% endif %}
+      {% if message.pending_action %}
+        <div class="chat-action-confirm" data-message-id="{{ message.id }}">
+          <p>
+            Der Assistent möchte <code>{{ message.pending_action.name }}</code> ausführen.
+            Diese Aktion ändert Daten und wird erst nach Ihrer Bestätigung ausgeführt.
+          </p>
+          <div class="chat-action-buttons">
+            <button type="button" class="primary" data-chat-action="confirm">Ausführen</button>
+            <button type="button" class="secondary" data-chat-action="reject">Ablehnen</button>
+          </div>
+        </div>
+      {% endif %}
       <div class="chat-content">{{ message.content }}</div>
     </div>
   </div>
@@ -42,7 +61,8 @@
      id="chat-root"
      data-company-id="{{ selected_company_id or '' }}"
      data-conversation-id="{{ selected_conversation.id if selected_conversation else '' }}"
-     data-page-url="{{ url_for('main.chat_page', company_id=selected_company_id) }}">
+     data-page-url="{{ url_for('main.chat_page', company_id=selected_company_id) }}"
+     data-action-url="{{ url_for('main.chat_action', message_id=0, action='confirm') }}">
   <aside class="chat-sidebar">
     <a class="chat-new-button" href="{{ url_for('main.chat_page', company_id=selected_company_id) }}">
       <span>＋</span> Neue Unterhaltung
@@ -107,8 +127,8 @@
           <button type="submit" class="chat-send-button" id="chat-send-button" title="Senden">➤</button>
         </div>
         <p class="chat-hint">
-          Der Assistent kann Buchungen und Änderungen direkt ausführen. Anhänge:
-          PDF, PNG, JPG, TXT, CSV, MD.
+          Der Assistent liest Daten direkt; Buchungen und Änderungen führt er erst nach
+          Ihrer Bestätigung aus. Anhänge: PDF, PNG, JPG, TXT, CSV, MD.
         </p>
       </form>
     {% endif %}
