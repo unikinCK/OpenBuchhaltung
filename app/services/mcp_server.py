@@ -126,7 +126,21 @@ def _asof_report_schema() -> dict[str, Any]:
     }
 
 
-# Ein Tool je REST-Endpunkt unter /api/v1 (ohne den rekursiven /mcp/call-Proxy).
+def _chat_action_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "message_id": {
+                "type": "integer",
+                "description": "ID der Assistenten-Nachricht mit wartender Aktion.",
+            }
+        },
+        "required": ["message_id"],
+        "additionalProperties": False,
+    }
+
+
+# Ein Tool je REST-Endpunkt unter /api/v1 (ohne die rekursive /mcp/call-Bridge).
 TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="health",
@@ -227,6 +241,65 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/users/{user_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="unlock_user_login",
+        description=(
+            "Hebt die Login-Sperre eines Benutzers auf (Rate-Limit nach zu vielen "
+            "fehlgeschlagenen Anmeldeversuchen)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/unlock",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_user_password",
+        description="Setzt das Passwort eines Benutzers neu (Administrator).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+                "new_password": {
+                    "type": "string",
+                    "description": "Neues Passwort (mindestens 8 Zeichen).",
+                },
+            },
+            "required": ["user_id", "new_password"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/password",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="change_own_password",
+        description=(
+            "Ändert das Passwort des aufrufenden Benutzers (Benutzer-Token erforderlich; "
+            "das aktuelle Passwort muss angegeben werden)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "current_password": {"type": "string", "description": "Aktuelles Passwort."},
+                "new_password": {
+                    "type": "string",
+                    "description": "Neues Passwort (mindestens 8 Zeichen).",
+                },
+            },
+            "required": ["current_password", "new_password"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/me/password",
         arg_location="json",
     ),
     ToolSpec(
@@ -3254,6 +3327,29 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/chat/conversations/{conversation_id}/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="confirm_chat_action",
+        description=(
+            "Bestätigt die wartende schreibende Aktion (pending_action) einer "
+            "KI-Chat-Antwort, führt sie mit den Rechten des Aufrufers aus und "
+            "setzt die Unterhaltung fort."
+        ),
+        input_schema=_chat_action_schema(),
+        http_method="POST",
+        path="/chat/actions/{message_id}/confirm",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="reject_chat_action",
+        description=(
+            "Lehnt die wartende schreibende Aktion einer KI-Chat-Antwort ab; "
+            "die Unterhaltung wird mit der Ablehnung fortgesetzt."
+        ),
+        input_schema=_chat_action_schema(),
+        http_method="POST",
+        path="/chat/actions/{message_id}/reject",
         arg_location="json",
     ),
 ]

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from flask import jsonify, redirect, render_template, request, url_for
+from flask import abort, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import select
 
 from app.auth import current_user
 from app.services.chat import (
     ChatError,
     accessible_conversation,
+    resolve_chat_action,
     run_chat_message,
     serialize_message,
 )
@@ -120,6 +121,33 @@ def chat_send():
             "created_conversation": exchange.created_conversation,
             "user_message": exchange.user_message,
             "assistant_message": exchange.assistant_message,
+        }
+    )
+
+
+@main_bp.post("/chat/actions/<int:message_id>/<action>")
+def chat_action(message_id: int, action: str):
+    """Human-in-the-Loop: wartende schreibende Aktion bestätigen oder ablehnen."""
+    if action not in {"confirm", "reject"}:
+        abort(404)
+    user = current_user()
+    try:
+        result = resolve_chat_action(
+            session_factory=get_session_factory(),
+            message_id=message_id,
+            approve=action == "confirm",
+            api_user=user,
+            global_access=user.get("tenant_id") is None,
+        )
+    except ChatError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except ChatLLMError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(
+        {
+            "conversation_id": result.conversation_id,
+            "updated_message": result.updated_message,
+            "assistant_message": result.assistant_message,
         }
     )
 

@@ -233,6 +233,56 @@
   border-color: var(--error-text);
 }
 
+.chat-tool-call.pending {
+  border-color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+/* --- Bestätigung schreibender Aktionen (Human-in-the-Loop) --- */
+
+.chat-action-confirm {
+  margin-bottom: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--warning-text);
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 0.9rem;
+}
+
+.chat-action-confirm p {
+  margin: 0 0 0.5rem;
+}
+
+.chat-action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-action-buttons button {
+  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chat-action-buttons button.primary {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+}
+
+.chat-action-buttons button.secondary {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+.chat-action-buttons button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-tool-call summary {
   cursor: pointer;
   padding: 0.35rem 0.6rem;

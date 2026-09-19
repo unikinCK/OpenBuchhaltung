@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
-import threading
-import time
+from datetime import datetime, timedelta, timezone
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (
     Blueprint,
@@ -18,10 +19,13 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from domain.models import User
+from app.services.security_events import record_security_event
+from domain.models import LoginAttempt, User
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -30,15 +34,38 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 def _protect_auth_posts():
     validate_csrf()
 
+
 ROLE_ADMIN = "Admin"
 ROLE_BUCHHALTER = "Buchhalter"
 ROLE_PRUEFER = "Pruefer"
 ROLE_SUPPORT = "Support"
 WRITE_ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER}
 
+MIN_PASSWORD_LENGTH = 8
+
+# Bei unbekanntem Benutzernamen wird gegen diesen Hash geprüft, damit die
+# Antwortzeit keinen Rückschluss auf die Existenz des Kontos erlaubt.
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(16))
+
 
 def hash_password(password: str) -> str:
     return generate_password_hash(password)
+
+
+def password_policy_error(password: str) -> str | None:
+    """Liefert die Verletzung der Passwortrichtlinie oder None."""
+    if len(password or "") < MIN_PASSWORD_LENGTH:
+        return f"Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein."
+    return None
+
+
+def constant_time_equals(left: str, right: str) -> bool:
+    """Zeitkonstanter Vergleich, der auch Nicht-ASCII-Eingaben verträgt.
+
+    ``secrets.compare_digest`` wirft bei Nicht-ASCII-Strings einen ``TypeError``
+    (HTTP 500); die Byte-Variante vergleicht beliebige Eingaben.
+    """
+    return secrets.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 def generate_api_token() -> str:
@@ -124,7 +151,7 @@ def validate_csrf() -> None:
         return
     token = session.get("_csrf_token", "")
     submitted = request.form.get("_csrf_token", "")
-    if not token or not submitted or not secrets.compare_digest(token, submitted):
+    if not token or not submitted or not constant_time_equals(token, submitted):
         abort(400, description="CSRF-Token fehlt oder ist ungültig.")
 
 
@@ -167,9 +194,9 @@ def require_api_token():
     if request.endpoint == "api.health":
         return None
 
-    # Interne In-Process-Aufrufe (KI-Chat-Tools) übergeben den Auth-Kontext über
-    # einen WSGI-environ-Eintrag. Externe Clients können nur HTTP_*-Schlüssel
-    # setzen, diesen Eintrag also nicht fälschen.
+    # Interne In-Process-Aufrufe (KI-Chat-Tools, MCP-Bridge) übergeben den
+    # Auth-Kontext über einen WSGI-environ-Eintrag. Externe Clients können nur
+    # HTTP_*-Schlüssel setzen, diesen Eintrag also nicht fälschen.
     internal_context = request.environ.get("openbuchhaltung.internal_api")
     if isinstance(internal_context, dict):
         internal_user = internal_context.get("user")
@@ -192,7 +219,7 @@ def require_api_token():
         return None
 
     token = auth_header.removeprefix("Bearer ").strip()
-    if configured_token and secrets.compare_digest(token, configured_token):
+    if configured_token and constant_time_equals(token, configured_token):
         g.api_global_access = True
         return None
 
@@ -255,42 +282,87 @@ def _get_session_factory():
     return session_factory
 
 
-# Fehlversuchszähler für das Login-Rate-Limit: (remote_addr, username) -> Zeitstempel.
-_failed_logins: dict[tuple[str, str], list[float]] = {}
-_failed_logins_lock = threading.Lock()
+# ---------------------------------------------------------------------------
+# Login-Rate-Limit (Fehlversuche in der DB, damit es über Worker/Prozesse hinweg
+# und hinter einem Reverse-Proxy je Client-Adresse gilt)
+# ---------------------------------------------------------------------------
 
 
-def reset_login_rate_limiter() -> None:
-    """Setzt alle Fehlversuchszähler zurück (für Tests)."""
-    with _failed_logins_lock:
-        _failed_logins.clear()
+def _login_attempt_key(username: str) -> str:
+    return (username or "").strip().lower()[:120]
 
 
-def _login_rate_key(username: str) -> tuple[str, str]:
-    return (request.remote_addr or "unknown", username.lower())
+def _login_window_cutoff() -> datetime:
+    window = int(current_app.config.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900))
+    return datetime.now(timezone.utc) - timedelta(seconds=window)
 
 
-def _login_blocked(key: tuple[str, str]) -> bool:
-    window = current_app.config.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900)
-    max_attempts = current_app.config.get("LOGIN_RATE_LIMIT_ATTEMPTS", 5)
-    now = time.monotonic()
-    with _failed_logins_lock:
-        attempts = [stamp for stamp in _failed_logins.get(key, []) if now - stamp < window]
-        if attempts:
-            _failed_logins[key] = attempts
-        else:
-            _failed_logins.pop(key, None)
-        return len(attempts) >= max_attempts
+def login_blocked(db_session, *, username: str, remote_addr: str) -> bool:
+    """Ob (Benutzername, Client-Adresse) im Zeitfenster zu viele Fehlversuche hat."""
+    max_attempts = int(current_app.config.get("LOGIN_RATE_LIMIT_ATTEMPTS", 5))
+    count = db_session.scalar(
+        select(func.count(LoginAttempt.id)).where(
+            LoginAttempt.username == _login_attempt_key(username),
+            LoginAttempt.remote_addr == remote_addr,
+            LoginAttempt.attempted_at >= _login_window_cutoff(),
+        )
+    )
+    return (count or 0) >= max_attempts
 
 
-def _register_failed_login(key: tuple[str, str]) -> None:
-    with _failed_logins_lock:
-        _failed_logins.setdefault(key, []).append(time.monotonic())
+def register_failed_login(db_session, *, username: str, remote_addr: str) -> None:
+    """Zählt einen Fehlversuch und räumt abgelaufene Einträge auf."""
+    db_session.execute(
+        delete(LoginAttempt).where(LoginAttempt.attempted_at < _login_window_cutoff())
+    )
+    db_session.add(
+        LoginAttempt(
+            username=_login_attempt_key(username),
+            remote_addr=remote_addr[:64],
+            attempted_at=datetime.now(timezone.utc),
+        )
+    )
 
 
-def _reset_failed_logins(key: tuple[str, str]) -> None:
-    with _failed_logins_lock:
-        _failed_logins.pop(key, None)
+def reset_failed_logins(db_session, *, username: str, remote_addr: str) -> None:
+    db_session.execute(
+        delete(LoginAttempt).where(
+            LoginAttempt.username == _login_attempt_key(username),
+            LoginAttempt.remote_addr == remote_addr,
+        )
+    )
+
+
+def unlock_user_login(db_session, *, username: str) -> int:
+    """Admin-Entsperrung: löscht alle Fehlversuche eines Benutzernamens."""
+    result = db_session.execute(
+        delete(LoginAttempt).where(LoginAttempt.username == _login_attempt_key(username))
+    )
+    return int(result.rowcount or 0)
+
+
+def safe_next_path(candidate: str | None) -> str | None:
+    """Erlaubt als ``next``-Ziel nur relative Pfade dieser Anwendung.
+
+    Abgelehnt werden absolute URLs, protokollrelative Ziele (``//host``),
+    Backslashes (Browser normalisieren ``/\\host`` zu ``//host``) sowie
+    Steuer- und Leerzeichen.
+    """
+    if not candidate:
+        return None
+    if "\\" in candidate or any(ch.isspace() or ord(ch) < 32 for ch in candidate):
+        return None
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return None
+    if not parts.path.startswith("/") or parts.path.startswith("//"):
+        return None
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# Login / Logout / Passwort
+# ---------------------------------------------------------------------------
 
 
 @auth_bp.get("/login")
@@ -302,15 +374,9 @@ def login_form():
 def login():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
-
+    remote_addr = request.remote_addr or "unknown"
     rate_limit_active = current_app.config.get("LOGIN_RATE_LIMIT", True)
-    rate_key = _login_rate_key(username)
-    if rate_limit_active and _login_blocked(rate_key):
-        flash(
-            "Zu viele fehlgeschlagene Anmeldeversuche. Bitte später erneut versuchen.",
-            "error",
-        )
-        return render_template("login.html"), 429
+    event_payload = {"remote_addr": remote_addr}
 
     session_factory = _get_session_factory()
     with session_factory() as db_session:
@@ -318,31 +384,107 @@ def login():
             select(User).where(User.username == username, User.is_active.is_(True))
         ).scalar_one_or_none()
 
-        if user is None or not check_password_hash(user.password_hash, password):
+        if rate_limit_active and login_blocked(
+            db_session, username=username, remote_addr=remote_addr
+        ):
+            # Nur ins App-Log: gesperrte Versuche sind beliebig oft auslösbar und
+            # sollen die Audit-Hashkette nicht fluten.
+            record_security_event(
+                db_session,
+                user=user,
+                action="login_blocked",
+                actor=username or "-",
+                payload=event_payload,
+                audit=False,
+            )
+            flash(
+                "Zu viele fehlgeschlagene Anmeldeversuche. Bitte später erneut versuchen.",
+                "error",
+            )
+            return render_template("login.html"), 429
+
+        password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+        if user is None or not check_password_hash(password_hash, password):
             if rate_limit_active:
-                _register_failed_login(rate_key)
+                register_failed_login(db_session, username=username, remote_addr=remote_addr)
+            record_security_event(
+                db_session,
+                user=user,
+                action="login_failed",
+                actor=username or "-",
+                payload=event_payload,
+            )
+            db_session.commit()
             flash("Ungültige Zugangsdaten", "error")
             return redirect(url_for("auth.login_form"))
 
         if rate_limit_active:
-            _reset_failed_logins(rate_key)
+            reset_failed_logins(db_session, username=username, remote_addr=remote_addr)
+        record_security_event(
+            db_session, user=user, action="login", actor=user.username, payload=event_payload
+        )
+        db_session.commit()
+        session_user = _api_user_dict(user)
 
-        session["user"] = {
-            "id": user.id,
-            "username": user.username,
-            "role": user.role,
-            "tenant_id": user.tenant_id,
-        }
+    # Neue Session je Login: verhindert Session-Fixation und rotiert den
+    # CSRF-Token; ``permanent`` aktiviert die konfigurierte Session-Laufzeit
+    # (PERMANENT_SESSION_LIFETIME wirkt als Idle-Timeout).
+    session.clear()
+    session["user"] = session_user
+    session.permanent = True
 
     flash("Login erfolgreich", "success")
-    next_path = request.args.get("next", "")
-    if next_path.startswith("/") and not next_path.startswith("//"):
-        return redirect(next_path)
-    return redirect(url_for("main.index"))
+    next_path = safe_next_path(request.args.get("next", ""))
+    return redirect(next_path or url_for("main.index"))
 
 
 @auth_bp.post("/logout")
 def logout():
-    session.pop("user", None)
+    session.clear()
     flash("Abgemeldet", "success")
     return redirect(url_for("auth.login_form"))
+
+
+@auth_bp.get("/password")
+@login_required
+def password_form():
+    return render_template("password.html", companies=[], selected_company_id=None)
+
+
+@auth_bp.post("/password")
+@login_required
+def change_password():
+    """Selbstbedienung: eigenes Passwort ändern (aktuelles Passwort erforderlich)."""
+    user = current_user()
+    current_password = request.form.get("current_password", "")
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+
+    error = password_policy_error(new_password)
+    if error is None and new_password != confirm_password:
+        error = "Die Wiederholung stimmt nicht mit dem neuen Passwort überein."
+
+    session_factory = _get_session_factory()
+    with session_factory() as db_session:
+        db_user = db_session.get(User, user["id"])
+        if db_user is None or not check_password_hash(db_user.password_hash, current_password):
+            record_security_event(
+                db_session,
+                user=db_user,
+                action="password_change_failed",
+                actor=user["username"],
+                audit=False,
+            )
+            flash("Das aktuelle Passwort ist falsch.", "error")
+            return redirect(url_for("auth.password_form"))
+        if error is not None:
+            flash(error, "error")
+            return redirect(url_for("auth.password_form"))
+        db_user.password_hash = hash_password(new_password)
+        record_security_event(
+            db_session, user=db_user, action="password_changed", actor=db_user.username
+        )
+        db_session.commit()
+
+    flash("Passwort wurde geändert.", "success")
+    return redirect(url_for("main.index"))

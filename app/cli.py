@@ -16,6 +16,7 @@ from app.auth import (
     generate_api_token,
     hash_api_token,
     hash_password,
+    password_policy_error,
 )
 from app.services.account_chart_import import import_account_chart_file
 from app.services.audit_export import verify_audit_export_package
@@ -26,6 +27,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.security_events import record_security_event
 from app.services.tax_codes import ensure_default_tax_codes
 from domain.models import Account, Company, JournalEntry, TaxCode, Tenant, User
 
@@ -44,6 +46,14 @@ DEMO_USERS = (
     ("pruefer", "pruefer123", ROLE_PRUEFER, True),
     ("support", "support123", ROLE_SUPPORT, False),
 )
+CLI_ACTOR = "cli"
+
+
+def _is_production_app(app: Flask) -> bool:
+    # Lokaler Import: app/__init__ importiert dieses Modul (Zirkularität vermeiden).
+    from app import is_production
+
+    return is_production(app)
 
 
 def register_cli_commands(app: Flask) -> None:
@@ -164,7 +174,14 @@ def register_cli_commands(app: Flask) -> None:
 
     @app.cli.command("create-user")
     @click.option("--username", required=True)
-    @click.option("--password", required=True)
+    @click.option(
+        "--password",
+        prompt="Passwort",
+        hide_input=True,
+        confirmation_prompt=True,
+        help="Wird interaktiv abgefragt, wenn nicht angegeben (empfohlen: nicht als "
+        "Option übergeben, sonst landet es in der Shell-History).",
+    )
     @click.option(
         "--role",
         type=click.Choice([ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT]),
@@ -174,6 +191,9 @@ def register_cli_commands(app: Flask) -> None:
     @click.option("--tenant-id", type=int, default=None, help="Leer = globaler Zugriff")
     def create_user(username: str, password: str, role: str, tenant_id: int | None):
         """Legt einen Benutzer für den Web-Login an."""
+        policy_error = password_policy_error(password)
+        if policy_error:
+            raise click.ClickException(policy_error)
         session_factory = app.extensions["db_session_factory"]
         with session_factory() as session:
             existing = session.execute(
@@ -182,16 +202,49 @@ def register_cli_commands(app: Flask) -> None:
             if existing is not None:
                 raise click.ClickException(f"Benutzer {username} existiert bereits.")
 
-            session.add(
-                User(
-                    username=username,
-                    password_hash=hash_password(password),
-                    role=role,
-                    tenant_id=tenant_id,
-                )
+            user = User(
+                username=username,
+                password_hash=hash_password(password),
+                role=role,
+                tenant_id=tenant_id,
+            )
+            session.add(user)
+            session.flush()
+            record_security_event(
+                session,
+                user=user,
+                action="created",
+                actor=CLI_ACTOR,
+                payload={"username": username, "role": role, "tenant_id": tenant_id},
             )
             session.commit()
         click.echo(f"Benutzer {username} ({role}) wurde angelegt.")
+
+    @app.cli.command("set-password")
+    @click.option("--username", required=True)
+    @click.option(
+        "--password",
+        prompt="Neues Passwort",
+        hide_input=True,
+        confirmation_prompt=True,
+        help="Wird interaktiv abgefragt, wenn nicht angegeben.",
+    )
+    def set_password(username: str, password: str):
+        """Setzt das Passwort eines Benutzers neu (z. B. zur Wiederherstellung)."""
+        policy_error = password_policy_error(password)
+        if policy_error:
+            raise click.ClickException(policy_error)
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            user = session.execute(
+                select(User).where(User.username == username)
+            ).scalar_one_or_none()
+            if user is None:
+                raise click.ClickException(f"Benutzer {username} wurde nicht gefunden.")
+            user.password_hash = hash_password(password)
+            record_security_event(session, user=user, action="password_reset", actor=CLI_ACTOR)
+            session.commit()
+        click.echo(f"Passwort für {username} wurde gesetzt.")
 
     @app.cli.command("set-api-token")
     @click.option("--username", required=True)
@@ -207,6 +260,13 @@ def register_cli_commands(app: Flask) -> None:
                 raise click.ClickException(f"Benutzer {username} wurde nicht gefunden.")
             user.api_token_hash = hash_api_token(token)
             user.api_token_last4 = token[-4:]
+            record_security_event(
+                session,
+                user=user,
+                action="api_token_rotated",
+                actor=CLI_ACTOR,
+                payload={"api_token_last4": token[-4:]},
+            )
             session.commit()
 
         click.echo(f"API-Token für {username}: {token}")
@@ -215,6 +275,11 @@ def register_cli_commands(app: Flask) -> None:
     @app.cli.command("seed-demo")
     def seed_demo():
         """Legt Demo-Mandant, SKR03-Konten, Steuercodes, Benutzer und Buchungen an (idempotent)."""
+        if _is_production_app(app):
+            raise click.ClickException(
+                "seed-demo legt Demo-Benutzer mit bekannten Passwörtern an und ist in "
+                "Produktion (APP_ENV ist keine Entwicklungsumgebung) nicht erlaubt."
+            )
         session_factory = app.extensions["db_session_factory"]
         with session_factory() as session:
             tenant = session.execute(

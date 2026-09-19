@@ -22,6 +22,7 @@ Die Pipeline besteht aus zwei klar getrennten Stufen:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import zlib
 from dataclasses import dataclass, field
@@ -30,6 +31,8 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 _CENT = Decimal("0.01")
 
@@ -301,8 +304,10 @@ def _ocr_via_endpoint(
         with urlopen(request, timeout=30) as response:
             body = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise ReceiptOCRError(f"OCR-Endpoint antwortete mit HTTP {exc.code}: {detail}") from exc
+        # Upstream-Fehlertexte nur ins Log, nicht an den Client.
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        logger.warning("OCR-Endpoint antwortete mit HTTP %s: %s", exc.code, detail)
+        raise ReceiptOCRError(f"OCR-Endpoint antwortete mit HTTP {exc.code}.") from exc
     except URLError as exc:
         raise ReceiptOCRError("OCR-Endpoint ist nicht erreichbar.") from exc
     except json.JSONDecodeError as exc:
@@ -740,8 +745,9 @@ def extract_receipt_fields_llm(
         with urlopen(request, timeout=30) as response:
             body = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise ReceiptLLMError(f"LLM-Endpoint antwortete mit HTTP {exc.code}: {detail}") from exc
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        logger.warning("LLM-Endpoint antwortete mit HTTP %s: %s", exc.code, detail)
+        raise ReceiptLLMError(f"LLM-Endpoint antwortete mit HTTP {exc.code}.") from exc
     except URLError as exc:
         raise ReceiptLLMError("LLM-Endpoint ist nicht erreichbar.") from exc
     except json.JSONDecodeError as exc:

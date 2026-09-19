@@ -1250,6 +1250,28 @@ class User(Base):
     tenant: Mapped[Tenant | None] = relationship()
 
 
+class LoginAttempt(Base):
+    """Fehlgeschlagener UI-Login (Rate-Limit über alle Prozesse/Worker hinweg).
+
+    Pro (Benutzername, Client-Adresse) zählt das Login die Fehlversuche im
+    konfigurierten Zeitfenster; erfolgreiche Logins und die Admin-Entsperrung
+    löschen die Einträge.
+    """
+
+    __tablename__ = "login_attempt"
+    __table_args__ = (
+        Index("ix_login_attempt_username_addr", "username", "remote_addr"),
+        Index("ix_login_attempt_attempted_at", "attempted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
+    remote_addr: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (

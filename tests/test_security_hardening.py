@@ -9,15 +9,8 @@ from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
 from app import create_app
-from app.auth import generate_api_token, hash_api_token, hash_password, reset_login_rate_limiter
+from app.auth import generate_api_token, hash_api_token, hash_password
 from domain.models import Tenant, User
-
-
-@pytest.fixture(autouse=True)
-def _clean_rate_limiter():
-    reset_login_rate_limiter()
-    yield
-    reset_login_rate_limiter()
 
 
 def _create_app(tmp_path: Path, **overrides):

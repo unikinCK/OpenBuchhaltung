@@ -534,11 +534,21 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       zwei Nachkommastellen ab (Sätze/Mengen mit `places=None`), Validator prüft
       Zeilen; Stornodatum ≥ Originaldatum; automatisches WJ prüft Überlappung,
       mehrdeutige Zuordnung ist ein Fehler (F12, F13).
-- [ ] **Sprint 2 – Sicherheit**: Chat-Tool-Allowlist + Human-in-the-Loop für
-      schreibende Tools (S1); Secret-Redaktion im Chat-Verlauf (S2);
-      `/mcp/call` entfernen oder in-process (S3); ProxyFix + Rate-Limit in DB
-      (S4); Open Redirect, Cookie/HSTS, Admin-Check, MCP-Body-Limit,
-      Einzeiler (S6–S10); Login-/Admin-Audit-Events; Passwort ändern.
+- [x] **Sprint 2 – Sicherheit** (2026-09-19): Chat-Tool-Allowlist (nur lesende
+      Tools sofort) + Human-in-the-Loop für schreibende Tools mit
+      Bestätigungsschritt in UI/API/MCP, Benutzer-/Token-/Passwort-/ELSTER-/
+      SEPA-/FinTS-Tools im Chat gesperrt, Anhänge und Tool-Ergebnisse als
+      „untrusted data“ gekennzeichnet (S1); Secret-Redaktion (pin/tan/password/
+      api_token) vor Persistierung (S2); `/mcp/call` in-process mit
+      Aufruferkontext (S3); ProxyFix in Produktion, Rate-Limit in Tabelle
+      `login_attempt`, Admin-Entsperrung (S4); Open Redirect via `urlsplit`/
+      Backslash (S6); Secure-Cookie/HSTS/Session-Laufzeit in Produktion (S7);
+      Admin-Check bei Mandantenanlage (S8); MCP-HTTP-Body-Limit (S9);
+      `compare_digest` auf Bytes, generische Upstream-Fehlertexte, CLI-Passwort
+      per Prompt, `seed-demo` in Produktion verweigert, Session-Rotation beim
+      Login, Dummy-Hash gegen Timing-Enumeration, Mindestlänge 8 (S10);
+      Audit-Events für Login/Fehlversuche/Token/Benutzeranlage/Passwort;
+      Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) offen.
 - [ ] **Sprint 3 – Betrieb**: `redeploy.sh` auf Prod-Compose (O1);
       `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
       + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,

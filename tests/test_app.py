@@ -333,30 +333,48 @@ def test_api_create_account_and_validate_required_fields(tmp_path):
     assert "required" in invalid_response.get_json()["error"]
 
 
-def test_api_mcp_call_when_not_configured(tmp_path):
+def test_api_mcp_call_lists_tools_in_process(tmp_path):
     app = _create_test_app(tmp_path)
-    client = _logged_in_client(app)
+    client = app.test_client()
 
-    response = client.post("/api/v1/mcp/call", json={"method": "tools/list", "params": {}})
-
-    assert response.status_code == 503
-    assert "not configured" in response.get_json()["error"]
-
-
-def test_api_mcp_call_success_with_mock(tmp_path):
-    app = _create_test_app(tmp_path)
-    app.config["MCP_SERVER_URL"] = "http://mcp.local/rpc"
-    client = _logged_in_client(app)
-
-    with patch("app.api.mcp.call_mcp_server") as call_mock:
-        call_mock.return_value = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
-        response = client.post(
-            "/api/v1/mcp/call",
-            json={"id": "1", "method": "tools/list", "params": {}},
-        )
+    response = client.post(
+        "/api/v1/mcp/call", json={"id": "1", "method": "tools/list", "params": {}}
+    )
 
     assert response.status_code == 200
-    assert response.get_json()["result"]["ok"] is True
+    payload = response.get_json()
+    assert payload["id"] == "1"
+    assert any(tool["name"] == "list_companies" for tool in payload["result"]["tools"])
+
+
+def test_api_mcp_call_requires_method(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    response = client.post("/api/v1/mcp/call", json={"params": {}})
+
+    assert response.status_code == 400
+    assert "method" in response.get_json()["error"]
+
+
+def test_api_mcp_call_executes_tool_against_own_api(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+    client.post("/api/v1/tenants", json={"tenant_name": "MCP", "company_name": "MCP GmbH"})
+
+    response = client.post(
+        "/api/v1/mcp/call",
+        json={
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "list_companies", "arguments": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["isError"] is False
+    assert "MCP GmbH" in result["content"][0]["text"]
 
 
 def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
