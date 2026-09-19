@@ -7,6 +7,7 @@ dieses MVPs und muessen spaeter als eigene Fachmodule angebunden werden.
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -321,25 +322,28 @@ def post_payroll_run(
     journal_lines = _journal_lines_for_run(run)
     if len(journal_lines) < 2:
         raise PayrollError("Lohnlauf erzeugt keine buchbare Journalbuchung.")
+    # Der Lohnaufwand gehört periodengerecht in den Lohnmonat (Monatsende),
+    # nicht auf das Zahlungsdatum. Buchung und Statuswechsel des Lohnlaufs
+    # werden gemeinsam committet (commit=False), sonst bliebe bei einem
+    # Fehler eine Buchung ohne "posted"-Lauf zurück, die ein erneuter
+    # Versuch doppelt buchen würde.
     try:
         entry = create_journal_entry(
             session=session,
             payload=JournalEntryInput(
                 company_id=run.company_id,
-                entry_date=run.payment_date,
+                entry_date=period_end_date(run.period_label),
                 description=f"Lohnlauf {run.period_label}",
                 status="posted",
                 source="payroll",
                 changed_by=changed_by,
                 lines=journal_lines,
             ),
+            commit=False,
         )
     except JournalEntryCreationError as exc:
         raise PayrollError(str(exc)) from exc
 
-    run = get_payroll_run(session=session, payroll_run_id=payroll_run_id)
-    if run is None:
-        raise PayrollError("Lohnlauf nicht gefunden.")
     run.status = "posted"
     run.journal_entry_id = entry.id
     run.posted_at = datetime.now(timezone.utc)
@@ -573,6 +577,12 @@ def _normalize_period(period_label: str) -> str:
     except ValueError as exc:
         raise PayrollError("Zeitraum muss das Format JJJJ-MM haben.") from exc
     return period_label
+
+
+def period_end_date(period_label: str) -> date:
+    """Letzter Tag des Lohnmonats ``JJJJ-MM`` (Buchungsdatum des Lohnaufwands)."""
+    first_day = date.fromisoformat(f"{_normalize_period(period_label)}-01")
+    return date(first_day.year, first_day.month, monthrange(first_day.year, first_day.month)[1])
 
 
 def _money(value: Decimal) -> Decimal:

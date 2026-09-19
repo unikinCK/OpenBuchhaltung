@@ -1015,6 +1015,8 @@ def reverse_journal_entry(
             reversal_of_id=original.id,
             expand_tax_lines=False,
         ),
+        # Stornobuchung, Festschreibung und Audit werden gemeinsam committet.
+        commit=False,
     )
 
     # Stornobuchungen sind Korrekturbelege und werden sofort festgeschrieben.
