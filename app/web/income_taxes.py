@@ -55,6 +55,10 @@ def _request_params() -> dict[str, object]:
         "prepayments": request.values.get("prepayments") or "0",
         "municipality_multiplier": request.values.get("municipality_multiplier") or None,
         "trade_tax_allowance": request.values.get("trade_tax_allowance") or "0",
+        "include_closing_entries": (
+            (request.values.get("include_closing_entries") or "").strip().lower()
+            in {"1", "true", "on", "yes", "ja"}
+        ),
     }
 
 

@@ -10,19 +10,18 @@ from flask import Response, current_app, jsonify, request
 from sqlalchemy.orm import aliased
 
 from app.api.blueprint import api_bp
-from app.api.helpers import DateArgError, api_scoped_company, date_arg, get_session_factory
+from app.api.helpers import (
+    DateArgError,
+    api_scoped_company,
+    bool_arg,
+    date_arg,
+    get_session_factory,
+)
 from app.services.audit_export import build_audit_export_package
 from app.services.controlling import ControllingError, controlling_result_report
 from app.services.datev_export import DatevExportOptions, build_datev_export
 from app.services.reports import trial_balance_for_company
 from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine
-
-
-def _bool_arg(name: str, *, default: bool = False) -> bool:
-    raw = request.args.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "ja", "on"}
 
 
 @api_bp.get("/exports/trial-balance.csv")
@@ -31,12 +30,25 @@ def export_trial_balance_csv():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
 
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    include_closing_entries = bool_arg("include_closing_entries")
+
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
-        rows = trial_balance_for_company(session=session, company_id=company_id)
+        rows = trial_balance_for_company(
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=include_closing_entries,
+        )
 
     csv_buffer = StringIO()
     writer = csv.writer(csv_buffer)
@@ -252,8 +264,8 @@ def export_audit_package():
     if date_from and date_to and date_from > date_to:
         return jsonify({"error": "date_from must be before or equal to date_to."}), 400
 
-    include_documents = _bool_arg("include_documents", default=True)
-    manifest_only = _bool_arg("manifest_only", default=False)
+    include_documents = bool_arg("include_documents", default=True)
+    manifest_only = bool_arg("manifest_only", default=False)
     generated_at = datetime.now(timezone.utc)
 
     session_factory = get_session_factory()

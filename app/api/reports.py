@@ -8,6 +8,7 @@ from app.api.blueprint import api_bp
 from app.api.helpers import (
     DateArgError,
     api_scoped_company,
+    bool_arg,
     date_arg,
     get_session_factory,
 )
@@ -30,6 +31,7 @@ def get_trial_balance():
     except DateArgError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    include_closing_entries = bool_arg("include_closing_entries")
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
@@ -37,7 +39,11 @@ def get_trial_balance():
             return jsonify({"error": "Company not found."}), 404
 
         rows = trial_balance_for_company(
-            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=include_closing_entries,
         )
 
     return (
@@ -47,6 +53,7 @@ def get_trial_balance():
                 "period": {
                     "date_from": date_from.isoformat() if date_from else None,
                     "date_to": date_to.isoformat() if date_to else None,
+                    "include_closing_entries": include_closing_entries,
                 },
                 "rows": [
                     {
@@ -83,7 +90,11 @@ def get_income_statement():
             return jsonify({"error": "Company not found."}), 404
 
         report = income_statement_for_company(
-            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=bool_arg("include_closing_entries"),
         )
 
     return (
@@ -125,7 +136,10 @@ def get_balance_sheet():
             return jsonify({"error": "Company not found."}), 404
 
         report = balance_sheet_for_company(
-            session=session, company_id=company_id, date_to=date_to
+            session=session,
+            company_id=company_id,
+            date_to=date_to,
+            include_closing_entries=bool_arg("include_closing_entries"),
         )
 
     totals = report["totals"]

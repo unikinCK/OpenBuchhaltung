@@ -99,6 +99,10 @@
             </optgroup>
           {% endfor %}
         </select>
+        <label for="include_closing_entries">
+          <input id="include_closing_entries" name="include_closing_entries" type="checkbox" value="1" {% if include_closing_entries %}checked{% endif %} />
+          inkl. Abschlussbuchungen
+        </label>
         <button type="submit">Anzeigen</button>
       </form>
 
@@ -130,6 +134,7 @@
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
           <input type="hidden" name="period" value="{{ period_label }}" />
+          <input type="hidden" name="include_closing_entries" value="{{ '1' if include_closing_entries else '' }}" />
           <button type="submit" data-confirm="{{ declaration_display_name }} {{ period_label }} als Snapshot festhalten?">{{ declaration_display_name }} festhalten</button>
         </form>
       {% endif %}

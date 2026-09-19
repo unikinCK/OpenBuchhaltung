@@ -76,6 +76,18 @@ def _company_id_schema() -> dict[str, Any]:
     }
 
 
+def _include_closing_entries_property() -> dict[str, Any]:
+    return {
+        "type": "boolean",
+        "description": (
+            "Abschlussbuchungen (Periode 13, z. B. AfA) einbeziehen; Standard false = "
+            "Stand vor dem Jahresabschluss. Ergebnis- und Saldovorträge zählen in "
+            "GuV/UStVA/Ertragsteuern nie mit."
+        ),
+        "default": False,
+    }
+
+
 def _period_report_schema() -> dict[str, Any]:
     """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
     return {
@@ -90,6 +102,7 @@ def _period_report_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
             },
+            "include_closing_entries": _include_closing_entries_property(),
         },
         "required": ["company_id"],
         "additionalProperties": False,
@@ -106,6 +119,7 @@ def _asof_report_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": "Stichtag: Buchungen bis einschließlich (JJJJ-MM-TT, optional).",
             },
+            "include_closing_entries": _include_closing_entries_property(),
         },
         "required": ["company_id"],
         "additionalProperties": False,
@@ -808,8 +822,11 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="export_trial_balance_csv",
-        description="Exportiert die Summen- und Saldenliste als CSV.",
-        input_schema=_company_id_schema(),
+        description=(
+            "Exportiert die Summen- und Saldenliste als CSV (optional je Zeitraum, "
+            "Saldovorträge als EB-Werte nur mit date_from)."
+        ),
+        input_schema=_period_report_schema(),
         http_method="GET",
         path="/exports/trial-balance.csv",
         arg_location="query",
@@ -2057,7 +2074,13 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="close_fiscal_year",
-        description="Schließt ein Geschäftsjahr ab und sperrt seine Perioden.",
+        description=(
+            "Schließt ein Geschäftsjahr ab (Vorjahre müssen abgeschlossen sein): bucht "
+            "den Ergebnisvortrag in die Abschlussperiode, den Saldovortrag der "
+            "Bestandskonten als EB-Werte ins Folgejahr (wird bei Bedarf angelegt) und "
+            "sperrt alle Perioden — in einer Transaktion. Antwort enthält "
+            "carryforward_entry_id und opening_balance_entry_id."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -2185,6 +2208,7 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Zeitraumende JJJJ-MM-TT (alternativ zu period).",
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id"],
             "additionalProperties": False,
@@ -2222,6 +2246,7 @@ TOOLS: list[ToolSpec] = [
                         "'JJJJ-Hn' oder Jahr 'JJJJ'."
                     ),
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "period"],
             "additionalProperties": False,
@@ -2241,6 +2266,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "year"],
             "additionalProperties": False,
@@ -2260,6 +2286,7 @@ TOOLS: list[ToolSpec] = [
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
                 "year": {"type": "integer", "description": "Kalenderjahr, z. B. 2026."},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "year"],
             "additionalProperties": False,
@@ -2325,6 +2352,7 @@ TOOLS: list[ToolSpec] = [
                     "description": "Gewerbesteuer-Freibetrag, bei Kapitalgesellschaften 0.",
                     "default": "0",
                 },
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "tax_type"],
             "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],
@@ -2367,6 +2395,7 @@ TOOLS: list[ToolSpec] = [
                 "prepayments": {"type": "string", "default": "0"},
                 "municipality_multiplier": {"type": "string"},
                 "trade_tax_allowance": {"type": "string", "default": "0"},
+                "include_closing_entries": _include_closing_entries_property(),
             },
             "required": ["company_id", "tax_type"],
             "anyOf": [{"required": ["year"]}, {"required": ["fiscal_year_id"]}],

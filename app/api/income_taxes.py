@@ -5,7 +5,13 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    api_can_write,
+    api_scoped_company,
+    bool_payload,
+    forbidden,
+    get_session_factory,
+)
 from app.auth import current_api_user
 from app.services.income_taxes import (
     DECLARATION_TYPE_DECLARATION,
@@ -78,6 +84,7 @@ def preview_income_tax_return_via_api():
                 prepayments=payload.get("prepayments") or "0",
                 municipality_multiplier=payload.get("municipality_multiplier"),
                 trade_tax_allowance=payload.get("trade_tax_allowance") or "0",
+                include_closing_entries=bool_payload(payload.get("include_closing_entries")),
             )
         except IncomeTaxError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -153,6 +160,7 @@ def create_income_tax_return_via_api():
                 prepayments=payload.get("prepayments") or "0",
                 municipality_multiplier=payload.get("municipality_multiplier"),
                 trade_tax_allowance=payload.get("trade_tax_allowance") or "0",
+                include_closing_entries=bool_payload(payload.get("include_closing_entries")),
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )
         except IncomeTaxConflict as exc:

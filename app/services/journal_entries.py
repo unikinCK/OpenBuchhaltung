@@ -79,6 +79,18 @@ class JournalEntryInput:
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
 CLOSING_PERIOD_NUMBER = 13
 MAX_REGULAR_PERIODS = 12
+
+# Herkunft (``JournalEntry.source``) von Buchungen, die das System selbst erzeugt.
+SOURCE_MANUAL = "manual"
+SOURCE_STORNO = "storno"
+# Ergebnisvortrag beim Jahresabschluss: Erfolgskonten gegen Gewinnvortrag
+# glattgestellt (Abschlussperiode 13).
+SOURCE_YEAR_END_CLOSE = "year_end_close"
+# Saldovortrag der Bestandskonten ins Folgejahr (EB-Werte, Periode 1).
+SOURCE_CARRYFORWARD = "carryforward"
+# Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
+# UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
+CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
 # Versuche, eine Buchung mit neuer Nummer anzulegen, wenn die gezogene Nummer
 # bereits vergeben ist (Altbestand mit gesellschaftsweitem Zähler, Wettlauf).
 POSTING_NUMBER_ATTEMPTS = 5
@@ -519,6 +531,15 @@ def parse_decimal(value: str, *, places: int | None = 2) -> Decimal:
             f"Betrag darf höchstens {places} Nachkommastellen haben ({parsed})."
         )
     return quantized
+
+
+def get_or_create_fiscal_year(
+    *, session: Session, tenant_id: int, company_id: int, dt: date
+) -> FiscalYear:
+    """Geschäftsjahr zum Datum — vorhanden oder regulär angelegt (siehe unten)."""
+    return _get_or_create_fiscal_year(
+        session=session, tenant_id=tenant_id, company_id=company_id, dt=dt
+    )
 
 
 def _get_or_create_fiscal_year(
@@ -982,6 +1003,11 @@ def reverse_journal_entry(
             f"Das Stornodatum {reversal_date.isoformat()} darf nicht vor dem "
             f"Buchungsdatum {original.entry_date.isoformat()} der Buchung "
             f"{original.posting_number} liegen."
+        )
+    if original.source in CARRYFORWARD_SOURCES:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} ist eine Vortragsbuchung des "
+            "Jahresabschlusses und kann nicht storniert werden."
         )
     already_reversed = session.execute(
         select(JournalEntry.posting_number).where(

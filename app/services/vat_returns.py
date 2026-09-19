@@ -28,6 +28,9 @@ Kennziffern (amtliches UStVA-Formular, Basisfälle):
 * Kz 83: Verbleibende USt-Vorauszahlung bzw. Überschuss (gebuchte USt − VSt)
 
 Stornobuchungen neutralisieren sich automatisch, da mit Salden gerechnet wird.
+Buchungen der Abschlussperiode (13) bleiben standardmäßig außen vor
+(``include_closing_entries``); Ergebnis- und Saldovorträge des
+Jahresabschlusses zählen nie als Umsatz.
 """
 
 from __future__ import annotations
@@ -40,12 +43,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.journal_entries import CARRYFORWARD_SOURCES
 from domain.models import (
     TAX_KIND_INPUT,
     Account,
     Company,
     JournalEntry,
     JournalEntryLine,
+    Period,
     TaxCode,
     VatReturn,
 )
@@ -162,6 +167,7 @@ def compute_vat_return(
     company_id: int,
     date_from: date,
     date_to: date,
+    include_closing_entries: bool = False,
 ) -> list[VatReturnRow]:
     """Berechnet die UStVA-Kennziffern für den Zeitraum aus den Journaldaten.
 
@@ -174,7 +180,7 @@ def compute_vat_return(
     """
     line_account = Account.__table__.alias("line_account")
 
-    rows = session.execute(
+    stmt = (
         select(
             JournalEntryLine.journal_entry_id,
             JournalEntryLine.debit_amount,
@@ -187,14 +193,19 @@ def compute_vat_return(
             line_account.c.account_type.label("line_account_type"),
         )
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .join(Period, Period.id == JournalEntry.period_id)
         .outerjoin(TaxCode, TaxCode.id == JournalEntryLine.tax_code_id)
         .join(line_account, line_account.c.id == JournalEntryLine.account_id)
         .where(
             JournalEntry.company_id == company_id,
             JournalEntry.entry_date >= date_from,
             JournalEntry.entry_date <= date_to,
+            JournalEntry.source.notin_(CARRYFORWARD_SOURCES),
         )
-    ).all()
+    )
+    if not include_closing_entries:
+        stmt = stmt.where(Period.is_closing.is_(False))
+    rows = session.execute(stmt).all()
 
     vat_accounts = _company_vat_accounts(session, company_id)
     known_rates = {
@@ -333,6 +344,7 @@ def save_vat_return(
     company_id: int,
     period_label: str,
     changed_by: str,
+    include_closing_entries: bool = False,
 ) -> VatReturn:
     """Hält Umsatzsteuer-Kennziffern als unveränderlichen Snapshot fest."""
     company = session.get(Company, company_id)
@@ -354,7 +366,11 @@ def save_vat_return(
         )
 
     rows = compute_vat_return(
-        session=session, company_id=company_id, date_from=date_from, date_to=date_to
+        session=session,
+        company_id=company_id,
+        date_from=date_from,
+        date_to=date_to,
+        include_closing_entries=include_closing_entries,
     )
     vat_return = VatReturn(
         tenant_id=company.tenant_id,
@@ -385,6 +401,7 @@ def save_vat_return(
             "declaration_type": vat_return_kind_from_label(period_label),
             "date_from": date_from.isoformat(),
             "date_to": date_to.isoformat(),
+            "include_closing_entries": include_closing_entries,
             "kennzahlen": vat_return.kennzahlen,
         },
     )
