@@ -90,6 +90,7 @@ Wichtig zur Einordnung:
 - Umsetzungsplan: `docs/umsetzungsplan.md`
 - Compliance-Dokumente: `docs/compliance/`
 - Architekturentscheidungen: `docs/adr/`
+- Projekt-Reviews: `docs/review/` (aktuell: `projektreview-2026-09-19.md`)
 
 ## Schnellstart
 1. Virtuelle Umgebung erstellen und aktivieren
