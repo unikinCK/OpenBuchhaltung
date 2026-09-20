@@ -10,7 +10,9 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from .api import api_bp
 from .auth import auth_bp, ensure_csrf_token
 from .cli import register_cli_commands
-from .db import create_session_factory
+from .db import auto_migrate_enabled, create_session_factory, running_from_cli
+from .logging_config import configure_logging, init_request_id
+from .version import get_commit, get_version
 from .web import main_bp
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,13 @@ def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_mapping(
         APP_ENV=os.environ.get("APP_ENV") or os.environ.get("FLASK_ENV") or "production",
+        # Version (pyproject.toml) und Commit (GIT_COMMIT bzw. lokaler Checkout) für
+        # Health-Endpoint und Prüferexport-Manifest.
+        APP_VERSION=get_version(),
+        APP_COMMIT_SHA=os.environ.get("APP_COMMIT_SHA") or get_commit(),
+        # Schema-Migrationen beim Start (Default an). Produktion: DB_AUTO_MIGRATE=0 und
+        # `alembic upgrade head` als eigener Schritt vor dem Start (siehe redeploy.sh).
+        DB_AUTO_MIGRATE=auto_migrate_enabled(),
         SECRET_KEY=os.environ.get("SECRET_KEY"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -95,6 +104,19 @@ def create_app(test_config: dict | None = None) -> Flask:
         SELLER_CITY=os.environ.get("SELLER_CITY", ""),
         SELLER_COUNTRY_CODE=os.environ.get("SELLER_COUNTRY_CODE", "DE"),
         SELLER_VAT_ID=os.environ.get("SELLER_VAT_ID", ""),
+        # ELSTER-Bridge (ERiC-Runner) – optional, siehe app/services/elster.py.
+        ELSTER_ENVIRONMENT=os.environ.get("ELSTER_ENVIRONMENT", "test"),
+        ELSTER_ERIC_LIBRARY_PATH=os.environ.get("ELSTER_ERIC_LIBRARY_PATH"),
+        ELSTER_CERTIFICATE_PATH=os.environ.get("ELSTER_CERTIFICATE_PATH"),
+        ELSTER_CERTIFICATE_ALIAS=os.environ.get("ELSTER_CERTIFICATE_ALIAS"),
+        ELSTER_ERIC_COMMAND=os.environ.get("ELSTER_ERIC_COMMAND"),
+        ELSTER_ERIC_TIMEOUT_SECONDS=int(os.environ.get("ELSTER_ERIC_TIMEOUT_SECONDS", "60")),
+        # Lohn: externe Runner für Lohnsteuer-PAP, ELStAM und DEÜV – optional.
+        PAYROLL_PAP_COMMAND=os.environ.get("PAYROLL_PAP_COMMAND"),
+        PAYROLL_PAP_TIMEOUT_SECONDS=int(os.environ.get("PAYROLL_PAP_TIMEOUT_SECONDS", "30")),
+        PAYROLL_PARAMETER_VERSION=os.environ.get("PAYROLL_PARAMETER_VERSION", "manual"),
+        PAYROLL_ELSTAM_COMMAND=os.environ.get("PAYROLL_ELSTAM_COMMAND"),
+        PAYROLL_DEUEV_COMMAND=os.environ.get("PAYROLL_DEUEV_COMMAND"),
     )
 
     if test_config:
@@ -109,16 +131,22 @@ def create_app(test_config: dict | None = None) -> Flask:
             if "LOGIN_RATE_LIMIT" not in test_config:
                 app.config["LOGIN_RATE_LIMIT"] = False
 
+    configure_logging(app)
     _configure_secret_key(app)
 
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
-    app.extensions["db_session_factory"] = create_session_factory(app.config.get("DATABASE_URL"))
+    app.extensions["db_session_factory"] = create_session_factory(
+        app.config.get("DATABASE_URL"),
+        auto_migrate=bool(app.config.get("DB_AUTO_MIGRATE", True)),
+        cli_context=running_from_cli(),
+    )
 
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
     register_cli_commands(app)
+    init_request_id(app)
 
     @app.context_processor
     def _inject_csrf_token():

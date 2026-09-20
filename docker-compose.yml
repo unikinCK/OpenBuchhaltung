@@ -9,6 +9,9 @@ services:
       - "${APP_BIND_HOST:-127.0.0.1}:8000:8000"
     volumes:
       - ./:/app
+    env_file:
+      - path: .env
+        required: false
     environment:
       - APP_ENV=development
       - DATABASE_URL=postgresql+psycopg://openbuchhaltung:openbuchhaltung@db:5432/openbuchhaltung
@@ -21,17 +24,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  worker:
-    profiles: ["dev-tools"]
-    build: .
-    command: python -m http.server 8010
-    volumes:
-      - ./:/app
-    ports:
-      - "127.0.0.1:8010:8010"
-    depends_on:
-      - redis
 
   mcp:
     profiles: ["mcp", "proxy"]
@@ -56,6 +48,14 @@ services:
       # Kommagetrennte erlaubte Browser-Origins (DNS-Rebinding-Schutz); Clients
       # ohne Origin-Header (Claude Desktop/CLI) sind ohnehin zugelassen.
       - MCP_HTTP_ALLOWED_ORIGINS=${MCP_HTTP_ALLOWED_ORIGINS:-}
+    # Der HEALTHCHECK des Images prüft die App auf Port 8000; der MCP-Server
+    # antwortet auf 8090 (GET /mcp → 405 = Prozess lebt).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,urllib.error,contextlib\nwith contextlib.suppress(urllib.error.HTTPError): urllib.request.urlopen('http://127.0.0.1:8090/mcp', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       - app
 
@@ -91,10 +91,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  redis:
-    profiles: ["dev-tools"]
-    image: redis:7
 
   adminer:
     profiles: ["dev-tools"]

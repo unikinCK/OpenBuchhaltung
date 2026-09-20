@@ -91,6 +91,8 @@ Wichtig zur Einordnung:
 - Compliance-Dokumente: `docs/compliance/`
 - Architekturentscheidungen: `docs/adr/`
 - Projekt-Reviews: `docs/review/` (aktuell: `projektreview-2026-09-19.md`)
+- Änderungen je Release: `CHANGELOG.md` (Git-Tags `v<Version>`)
+- Produktivbetrieb: [`docs/compliance/produktionsbetrieb.md`](docs/compliance/produktionsbetrieb.md) (Backup/Restore, Updates, Timer unter `deploy/systemd/`)
 
 ## Schnellstart
 1. Virtuelle Umgebung erstellen und aktivieren
@@ -152,7 +154,7 @@ schlichtes `docker compose up -d` startet sie bewusst **nicht** mit:
 |---|---|---|
 | `mcp` | `mcp` | MCP-Server (Streamable HTTP) auf `127.0.0.1:8090` |
 | `proxy` | `mcp`, `caddy` | HTTPS-Reverse-Proxy (Let's Encrypt) vor dem MCP-Server |
-| `dev-tools` | `worker`, `redis`, `adminer` | Entwicklungs-Hilfsdienste |
+| `dev-tools` | `adminer` | Datenbank-Web-UI für die Entwicklung |
 
 Profile werden per Flag oder Umgebungsvariable aktiviert (mehrere möglich):
 ```bash
@@ -168,12 +170,68 @@ beendet sich der Container sofort wieder. Auch `docker compose down`/`stop`/`ps`
 wirken nur auf Services der aktiven Profile; zum Stoppen des MCP-Stacks also
 ebenfalls das Profil angeben (`docker compose --profile mcp down`).
 
-Produktionsbeispiel (Secrets nicht ins Repository schreiben):
+### Produktion: Deployment, Update, Backup
+
+Produktiv läuft OpenBuchhaltung ausschließlich über `docker-compose.production.yml`:
+gunicorn (`--timeout 180 --graceful-timeout 30`), PostgreSQL, fail-fast ohne
+`SECRET_KEY`/`POSTGRES_PASSWORD`, Container als unprivilegierter Benutzer `app`,
+Basis-Image per Digest gepinnt, Health-Check gegen `/api/v1/health`. Die
+Konfiguration liegt in einer `.env` neben der Compose-Datei (Vorlage und
+Referenz: [`.env.example`](.env.example), Tabelle unter
+[Konfiguration](#konfiguration-umgebungsvariablen)); Secrets gehören nicht ins Repository.
+
 ```bash
-export SECRET_KEY="$(openssl rand -hex 32)"
-export POSTGRES_PASSWORD="ein-langes-zufaelliges-passwort"
-docker compose -f docker-compose.production.yml up --build -d
+cp .env.example .env     # SECRET_KEY, POSTGRES_PASSWORD, API_AUTH_TOKEN … eintragen
+./redeploy.sh            # Erstinstallation und jedes Update
 ```
+
+`redeploy.sh` führt der Reihe nach aus: `git pull --ff-only` (Commit und Tag werden
+ausgegeben), **Backup** der laufenden Instanz (`backup.sh`), `compose down`,
+`compose build` (Commit als Build-Arg), Eigentümer der Belegablage im Volume
+korrigieren, **`alembic upgrade head` als eigenen Schritt**, `compose up -d` und
+Warten auf `healthy`. Der `app`-Service startet mit `DB_AUTO_MIGRATE=0`: Er migriert
+nie selbst und bricht fail-fast ab, wenn das Schema nicht auf dem Alembic-Head steht
+(kein Rennen zwischen gunicorn-Workern). Optionen: `--skip-backup`, `--no-pull`;
+weitere Argumente gehen an `compose up`.
+
+Die Einzelschritte von Hand:
+```bash
+./backup.sh                                                                  # Sicherung
+docker compose -f docker-compose.production.yml run --rm app alembic upgrade head
+docker compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.production.yml exec app flask --app run.py verify-integrity
+curl -s http://127.0.0.1:8000/api/v1/health   # status, version, commit, database, schema
+```
+
+Die Profile `mcp` (MCP-Server auf `127.0.0.1:8090`) und `proxy` (zusätzlich Caddy) gibt es
+auch in der Produktions-Compose; dauerhaft aktiv über `COMPOSE_PROFILES=mcp` in der
+`.env`, sodass `redeploy.sh` sie mit ausrollt.
+
+**Umstieg von einer bisher produktiv genutzten `docker-compose.yml`:** Beide Dateien
+teilen Projektnamen und das Volume `postgres_data`; die Datenbank bleibt erhalten.
+Vor dem ersten `./redeploy.sh`: alten Stack mit `docker compose down --remove-orphans`
+stoppen; in der `.env` `SECRET_KEY` setzen und `POSTGRES_PASSWORD` auf das Passwort
+des **bestehenden** Clusters (Entwicklungs-Default `openbuchhaltung`) — das
+Postgres-Image übernimmt ein neues Passwort nur bei leerem Datenverzeichnis, sonst
+vorher `ALTER USER openbuchhaltung PASSWORD '…'`; die bisher im Bind-Mount liegende
+Belegablage `./instance/uploads` in das Volume `app_data` übernehmen:
+
+```bash
+tar -czf - instance | docker compose -f docker-compose.production.yml \
+  run --rm --no-deps -T --user root app sh -c 'tar -xzf - -C /app && chown -R app:app /app/instance'
+```
+
+Anschließend `./redeploy.sh` und `verify-integrity` (prüft u. a., dass alle
+Belegdateien vorhanden sind).
+
+`backup.sh` schreibt `pg_dump` (Custom-Format), ein Archiv der Belegablage,
+Metadaten (Commit, Alembic-Revision, Image) und Prüfsummen nach `./backups/`
+(`BACKUP_DIR`; Aufbewahrung `BACKUP_KEEP`, Default 14). Das Restore-Runbook, die
+systemd-Timer für tägliches Backup und `verify-integrity` (`deploy/systemd/`) sowie
+die Betriebsanforderungen stehen in
+[`docs/compliance/produktionsbetrieb.md`](docs/compliance/produktionsbetrieb.md).
+Releases sind als `v<Version>` getaggt (Version in `pyproject.toml`), Änderungen
+stehen im [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Datenbank & Migrationen
 
@@ -187,6 +245,16 @@ Beim Start bringt die App die Datenbank automatisch auf den aktuellen Stand:
   später mit Schema-Fehlern zu laufen.
 - **Bestehende DB ohne Alembic-Verwaltung** (kein `alembic_version`) wird nicht
   angefasst; hier ist Migration manuell durchzuführen.
+
+Steuerung über `DB_AUTO_MIGRATE` (Default `1`):
+- **`DB_AUTO_MIGRATE=0`** (so startet der Produktions-Stack): Die App fasst das Schema
+  nie an. Ist die Datenbank leer oder im Rückstand, bricht der Start mit einer klaren
+  Meldung ab; Migrationen laufen als eigener Schritt (`redeploy.sh` bzw.
+  `docker compose -f docker-compose.production.yml run --rm app alembic upgrade head`).
+  Damit gibt es kein Rennen zwischen mehreren gunicorn-Workern.
+- **`flask --app run.py …`-Kommandos** (z. B. `verify-integrity`, `seed-demo`) legen
+  eine leere Datenbank an, migrieren eine bestehende aber nicht nebenbei (Warnung im
+  Log) — Migrationen bleiben ein bewusster Schritt.
 
 Manuell migrieren (z. B. für eine externe DB):
 ```bash
@@ -234,6 +302,92 @@ Verknüpfungen erkennbar. Ein atomar gepflegter Kettenanker je Mandant erkennt
 auch eine am Ende gekürzte oder vollständig entfernte Historie. Die Kette
 ersetzt keine Zugriffskontrolle oder externe Signatur; der DB-seitige
 Append-only-Schutz bleibt zusätzlich aktiv.
+
+## Konfiguration (Umgebungsvariablen)
+
+Alle Variablen mit Default und Wirkung; Vorlage zum Kopieren: [`.env.example`](.env.example).
+Docker Compose liest eine `.env` neben der Compose-Datei automatisch (Platzhalter
+`${…}`) und reicht sie zusätzlich in den `app`-Container. Ein Test
+(`tests/test_operations.py`) stellt sicher, dass jede im Code oder in den
+Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
+
+**Kern**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `APP_ENV` | `production` | `development`/`dev`/`local` erlauben den Entwicklungs-Secret; sonst ist `SECRET_KEY` Pflicht. `FLASK_ENV` wird als Alias gelesen. |
+| `SECRET_KEY` | – | Session-Secret (`openssl rand -hex 32`); Pflicht außerhalb von `development`. |
+| `DATABASE_URL` | SQLite `instance/openbuchhaltung.db` | SQLAlchemy-URL; der Produktions-Stack setzt PostgreSQL aus `POSTGRES_PASSWORD` zusammen. Wird auch von `alembic` gelesen. |
+| `DB_AUTO_MIGRATE` | `1` | `0`: keine Migration beim Start; Start scheitert bei leerem/veraltetem Schema (Produktion). |
+| `SESSION_COOKIE_SECURE` | `0` | `1` hinter HTTPS. |
+| `PORT` | `8000` | Port des Entwicklungsservers (`python run.py`). |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
+| `LOG_FORMAT` | `text` | `json` für eine JSON-Zeile je Log-Eintrag (mit `request_id`). |
+| `GIT_COMMIT` | – | Commit für Health-Endpoint und Prüferexport-Manifest (Docker-Build-Arg); Fallback `git rev-parse HEAD`. `APP_COMMIT_SHA` überschreibt den Wert. |
+
+**Authentifizierung, Härtung, Upload**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `API_AUTH_TOKEN` | – | Globaler Bearer-Token für die REST-API (und MCP-Server → API). |
+| `API_REQUIRE_AUTH` | `1` | `0` schaltet die API-Auth ab (nur lokale Entwicklung). |
+| `CSRF_PROTECT` | `1` | CSRF-Schutz der UI-Formulare. |
+| `LOGIN_RATE_LIMIT` | `1` | Login-Rate-Limit an/aus. |
+| `LOGIN_RATE_LIMIT_ATTEMPTS` | `5` | Fehlversuche je Fenster. |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `900` | Fensterlänge in Sekunden. |
+| `DOCUMENT_MAX_UPLOAD_BYTES` | `10485760` | Maximale Beleggröße (zugleich Request-Limit). |
+| `DOCUMENT_MIN_UPLOAD_BYTES` | `1024` | Mindestgröße hochgeladener Belege. |
+
+**LLM-Endpunkte** (OpenAI-/responses-kompatibel; ohne Endpoint bleiben die Funktionen inaktiv)
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `DOCUMENT_LLM_ENDPOINT_URL`, `DOCUMENT_LLM_MODEL` | –, `gpt-4.1-mini` | Basis-Endpoint; Fallback für alle folgenden. |
+| `RECEIPT_OCR_ENDPOINT_URL`, `RECEIPT_OCR_MODEL` | Fallback | Beleg-OCR. |
+| `RECEIPT_LLM_ENDPOINT_URL`, `RECEIPT_LLM_MODEL` | Fallback | Feldextraktion und Kontrolle des Buchungsvorschlags. |
+| `RECEIPT_MATCH_LLM_ENDPOINT_URL`, `RECEIPT_MATCH_LLM_MODEL` | Fallback | Belegabgleich. |
+| `CHAT_LLM_ENDPOINT_URL`, `CHAT_LLM_MODEL` | Fallback | KI-Chat. |
+| `CHAT_LLM_API_KEY` | – | Authorization-Header für gehostete Provider. |
+| `CHAT_LLM_MAX_TOOL_CALLS` | `15` | Tool-Aufrufe je Chat-Nachricht. |
+| `CHAT_LLM_TIMEOUT_SECONDS` | `120` | Timeout je LLM-Aufruf. |
+
+**Fachliche Schnittstellen**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `FINTS_PRODUCT_ID` | – | FinTS-Produktkennung (Pflicht für den Direktabruf). |
+| `DATEV_CONSULTANT_NUMBER`, `DATEV_CLIENT_NUMBER` | `1000`, – | Berater-/Mandantennummer im DATEV-Export. |
+| `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rechnungssteller im E-Rechnungs-Export. |
+| `ELSTER_ENVIRONMENT` | `test` | `test` oder `production`. |
+| `ELSTER_ERIC_LIBRARY_PATH`, `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_ALIAS`, `ELSTER_ERIC_COMMAND` | – | Lokaler ERiC-Runner für die ELSTER-Übermittlung. |
+| `ELSTER_ERIC_TIMEOUT_SECONDS` | `60` | Timeout des ERiC-Runners. |
+| `PAYROLL_PAP_COMMAND` | – | Externer Lohnsteuer-PAP-Runner (ohne Runner: manuelle Abzugsraten). |
+| `PAYROLL_PAP_TIMEOUT_SECONDS` | `30` | Timeout des PAP-Runners. |
+| `PAYROLL_PARAMETER_VERSION` | `manual` | Kennung des Lohn-Parametersatzes. |
+| `PAYROLL_ELSTAM_COMMAND`, `PAYROLL_DEUEV_COMMAND` | – | Runner für ELStAM/DEÜV (Readiness-Anzeige). |
+
+**MCP-Server**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `OPENBUCHHALTUNG_API_URL` | `http://localhost:5000/api/v1` | REST-API, die der MCP-Server aufruft (die App läuft auf 8000 → setzen). |
+| `OPENBUCHHALTUNG_API_TOKEN` | – | Backend-Token des MCP-Servers (gleicher Wert wie `API_AUTH_TOKEN`). |
+| `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `MCP_HTTP_PATH` | `127.0.0.1`, `8080`, `/mcp` | Streamable-HTTP-Transport (Compose: `0.0.0.0`, `8090`). |
+| `MCP_HTTP_AUTH_TOKEN` | – | Eingangstoken (Pflicht bei Nicht-Loopback-Bindung). |
+| `MCP_HTTP_ALLOWED_ORIGINS` | – | Erlaubte Browser-Origins (kommagetrennt, `*` = alle). |
+| `MCP_SERVER_URL` | – | Externer MCP-Server für `POST /api/v1/mcp/call`. |
+
+**Docker Compose und Skripte**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `POSTGRES_PASSWORD` | – | Passwort der mitgelieferten PostgreSQL (Pflicht im Produktions-Stack). |
+| `APP_PORT` | `8000` | Host-Port der App im Produktions-Stack (an `127.0.0.1` gebunden). |
+| `APP_BIND_HOST` | `127.0.0.1` | Bind-Adresse der UI im Entwicklungs-Stack (`0.0.0.0` = im Netz erreichbar). |
+| `GUNICORN_WORKERS` | `2` | gunicorn-Worker im Produktions-Stack. |
+| `COMPOSE_PROFILES` | – | Dauerhaft aktive Profile (`mcp`, `proxy`, `dev-tools`). |
+| `MCP_DOMAIN` | – | Öffentliche Domain des Caddy-Proxys vor dem MCP-Server. |
+| `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`. |
 
 ## Login & Benutzer
 
@@ -528,7 +682,9 @@ Lesezugriff.
 
 Basis-Endpunkte:
 
-- `GET /api/v1/health`
+- `GET /api/v1/health` — `status` (`ok`/`unhealthy`, HTTP 503 bei Störung), `version`,
+  `commit`, `database` (`SELECT 1`, Dialekt) und `schema` (Alembic-Revision, Head,
+  `up_to_date`); Basis für Docker-HEALTHCHECK und Monitoring
 - `POST /api/v1/tenants` (legt Mandant + Gesellschaft an)
 - `GET /api/v1/companies`
 - `POST /api/v1/accounts`

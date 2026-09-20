@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenBuchhaltung: Backup (pg_dump + Belegablage + Metadaten)
+Documentation=file:///opt/openbuchhaltung/docs/compliance/produktionsbetrieb.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/openbuchhaltung
+Environment=BACKUP_DIR=/var/backups/openbuchhaltung
+Environment=BACKUP_KEEP=14
+ExecStart=/opt/openbuchhaltung/backup.sh
+TimeoutStartSec=1h

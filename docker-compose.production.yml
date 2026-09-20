@@ -1,10 +1,41 @@
+# Produktions-Stack: gunicorn + PostgreSQL, fail-fast bei fehlenden Secrets.
+#
+#   ./redeploy.sh                      # pull, Backup, build, alembic upgrade head, up
+#   ./backup.sh                        # pg_dump + instance/ + Metadaten nach ./backups
+#   docker compose -f docker-compose.production.yml run --rm app alembic upgrade head
+#
+# Variablen kommen aus der Umgebung oder einer .env neben dieser Datei
+# (Vorlage: .env.example). Die .env wird zusätzlich in die Container gereicht,
+# damit optionale Funktionen (LLM-Endpunkte, FinTS, DATEV, Logging) konfigurierbar sind.
+#
+# Profile (opt-in, dauerhaft über COMPOSE_PROFILES in der .env):
+#   mcp    MCP-Server (Streamable HTTP) auf 127.0.0.1:8090 — verlangt MCP_HTTP_AUTH_TOKEN
+#   proxy  mcp + Caddy (HTTPS mit Let's Encrypt für MCP_DOMAIN)
 services:
   app:
-    build: .
-    command: gunicorn --bind 0.0.0.0:8000 --workers 2 --access-logfile - run:app
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    # --timeout 180: synchrone Langläufer (KI-Chat, OCR, Belegabgleich, FinTS,
+    # Prüferexport) dürfen länger als die gunicorn-Vorgabe von 30 s brauchen.
+    # --graceful-timeout 30: laufende Requests beim Redeploy sauber zu Ende bringen.
+    # Access-Log mit Dauer (%(L)s) und Request-ID aus dem Antwort-Header.
+    command:
+      - gunicorn
+      - --bind=0.0.0.0:8000
+      - --workers=${GUNICORN_WORKERS:-2}
+      - --timeout=180
+      - --graceful-timeout=30
+      - --access-logfile=-
+      - --access-logformat=%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(L)ss req=%({x-request-id}o)s
+      - run:app
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       APP_ENV: production
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
@@ -12,8 +43,20 @@ services:
       DATABASE_URL: postgresql+psycopg://openbuchhaltung:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/openbuchhaltung
       API_REQUIRE_AUTH: "1"
       API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
+      # Keine Migration beim Start der Worker (kein Rennen zwischen gunicorn-Workern):
+      # `alembic upgrade head` läuft als eigener Schritt (redeploy.sh). Steht die DB
+      # nicht auf dem Head, bricht der Start fail-fast mit klarer Meldung ab.
+      DB_AUTO_MIGRATE: "0"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
     volumes:
       - app_data:/app/instance
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +76,60 @@ services:
       timeout: 5s
       retries: 10
 
+  mcp:
+    profiles: ["mcp", "proxy"]
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    command: python -m app.services.mcp_http
+    restart: unless-stopped
+    ports:
+      # Nur lokal; HTTPS davor per Tailscale Serve oder Profil proxy (Caddy).
+      - "127.0.0.1:8090:8090"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENBUCHHALTUNG_API_URL: http://app:8000/api/v1
+      # Backend-Token = API_AUTH_TOKEN des app-Service.
+      OPENBUCHHALTUNG_API_TOKEN: ${OPENBUCHHALTUNG_API_TOKEN:-}
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: "8090"
+      MCP_HTTP_PATH: /mcp
+      # Ohne Token beendet sich der Prozess sofort (fail-fast bei Netzwerkbindung).
+      MCP_HTTP_AUTH_TOKEN: ${MCP_HTTP_AUTH_TOKEN:-}
+      MCP_HTTP_ALLOWED_ORIGINS: ${MCP_HTTP_ALLOWED_ORIGINS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,urllib.error,contextlib\nwith contextlib.suppress(urllib.error.HTTPError): urllib.request.urlopen('http://127.0.0.1:8090/mcp', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      app:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mcp
+
 volumes:
   app_data:
   postgres_data:
+  caddy_data:
+  caddy_config:

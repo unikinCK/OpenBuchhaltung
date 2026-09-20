@@ -525,7 +525,7 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       `/mcp/call` entfernen oder in-process (S3); ProxyFix + Rate-Limit in DB
       (S4); Open Redirect, Cookie/HSTS, Admin-Check, MCP-Body-Limit,
       Einzeiler (S6–S10); Login-/Admin-Audit-Events; Passwort ändern.
-- [ ] **Sprint 3 – Betrieb**: `redeploy.sh` auf Prod-Compose (O1);
+- [x] **Sprint 3 – Betrieb** *(umgesetzt 2026-09-20)*: `redeploy.sh` auf Prod-Compose (O1);
       `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
       + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,
       Logging-Konfiguration, Health mit DB-Check (O3, O7); Tags, CHANGELOG,

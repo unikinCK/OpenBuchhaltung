@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenBuchhaltung: Integritätsprüfung (flask verify-integrity)
+Documentation=file:///opt/openbuchhaltung/docs/compliance/produktionsbetrieb.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/openbuchhaltung
+# Läuft im laufenden app-Container (DB_AUTO_MIGRATE=0: keine Migration nebenbei).
+ExecStart=/usr/bin/docker compose -f docker-compose.production.yml exec -T app flask --app run.py verify-integrity
+TimeoutStartSec=30min
