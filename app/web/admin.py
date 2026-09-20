@@ -1,4 +1,4 @@
-"""Verwaltung: Mandanten- und Gesellschaftsanlage."""
+"""Verwaltung: Mandanten-, Gesellschafts- und Benutzeranlage."""
 
 from __future__ import annotations
 
@@ -17,8 +17,11 @@ from app.auth import (
     generate_api_token,
     hash_api_token,
     hash_password,
+    password_policy_error,
+    unlock_user_login,
 )
 from app.services.scoping import scoped_select
+from app.services.security_events import record_security_event
 from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
 from domain.models import Account, Company, Tenant, User
@@ -31,8 +34,12 @@ def _is_admin() -> bool:
     return user is not None and user["role"] == ROLE_ADMIN
 
 
-@main_bp.get("/verwaltung")
-def admin_page():
+def _actor() -> str:
+    user = current_user()
+    return user["username"] if user else "web-form"
+
+
+def _render_admin_page(**extra):
     tenant_scope = current_tenant_id()
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -63,14 +70,21 @@ def admin_page():
         roles=ROLES,
         selected_company_id=selected_company_id,
         account_count=account_count,
-        is_global_admin=tenant_scope is None,
+        is_global_admin=tenant_scope is None and _is_admin(),
         is_admin=_is_admin(),
+        **extra,
     )
+
+
+@main_bp.get("/verwaltung")
+def admin_page():
+    return _render_admin_page()
 
 
 @main_bp.post("/tenants")
 def create_tenant_and_company():
-    if current_tenant_id() is not None:
+    # Wie die API (api_can_create_tenant): nur globale Administratoren.
+    if not _is_admin() or current_tenant_id() is not None:
         flash("Neue Mandanten kann nur ein globaler Administrator anlegen.", "error")
         return redirect(url_for("main.admin_page"))
 
@@ -115,21 +129,32 @@ def create_user_action():
     if not username or not password or role not in ROLES:
         flash("Benutzername, Passwort und gültige Rolle sind Pflichtfelder.", "error")
         return redirect(url_for("main.admin_page"))
+    policy_error = password_policy_error(password)
+    if policy_error:
+        flash(policy_error, "error")
+        return redirect(url_for("main.admin_page"))
 
     session_factory = get_session_factory()
     with session_factory() as session:
         if tenant_id is not None and session.get(Tenant, tenant_id) is None:
             flash("Mandant wurde nicht gefunden.", "error")
             return redirect(url_for("main.admin_page"))
-        session.add(
-            User(
-                username=username,
-                password_hash=hash_password(password),
-                role=role,
-                tenant_id=tenant_id,
-            )
+        user = User(
+            username=username,
+            password_hash=hash_password(password),
+            role=role,
+            tenant_id=tenant_id,
         )
+        session.add(user)
         try:
+            session.flush()
+            record_security_event(
+                session,
+                user=user,
+                action="created",
+                actor=_actor(),
+                payload={"username": username, "role": role, "tenant_id": tenant_id},
+            )
             session.commit()
         except IntegrityError:
             session.rollback()
@@ -140,27 +165,42 @@ def create_user_action():
     return redirect(url_for("main.admin_page"))
 
 
+def _load_managed_user(session, user_id: int) -> User | None:
+    tenant_scope = current_tenant_id()
+    user = session.get(User, user_id)
+    if user is None or (tenant_scope is not None and user.tenant_id != tenant_scope):
+        return None
+    return user
+
+
 @main_bp.post("/users/<int:user_id>/api-token")
 def rotate_user_api_token_action(user_id: int):
     if not _is_admin():
         flash("API-Token verwalten kann nur ein Administrator.", "error")
         return redirect(url_for("main.admin_page"))
 
-    tenant_scope = current_tenant_id()
     token = generate_api_token()
     session_factory = get_session_factory()
     with session_factory() as session:
-        user = session.get(User, user_id)
-        if user is None or (tenant_scope is not None and user.tenant_id != tenant_scope):
+        user = _load_managed_user(session, user_id)
+        if user is None:
             flash("Benutzer wurde nicht gefunden.", "error")
             return redirect(url_for("main.admin_page"))
         username = user.username
         user.api_token_hash = hash_api_token(token)
         user.api_token_last4 = token[-4:]
+        record_security_event(
+            session,
+            user=user,
+            action="api_token_rotated",
+            actor=_actor(),
+            payload={"api_token_last4": token[-4:]},
+        )
         session.commit()
 
-    flash(f"API-Token für {username}: {token}", "success")
-    return redirect(url_for("main.admin_page"))
+    # Das Token wird einmalig direkt in der Seite angezeigt — nicht per flash(),
+    # das würde es im (signierten, aber lesbaren) Session-Cookie ablegen.
+    return _render_admin_page(new_api_token={"username": username, "token": token})
 
 
 @main_bp.post("/users/<int:user_id>/active")
@@ -169,16 +209,75 @@ def set_user_active_action(user_id: int):
         flash("Benutzer verwalten kann nur ein Administrator.", "error")
         return redirect(url_for("main.admin_page"))
 
-    tenant_scope = current_tenant_id()
     is_active = request.form.get("is_active") == "true"
     session_factory = get_session_factory()
     with session_factory() as session:
-        user = session.get(User, user_id)
-        if user is None or (tenant_scope is not None and user.tenant_id != tenant_scope):
+        user = _load_managed_user(session, user_id)
+        if user is None:
             flash("Benutzer wurde nicht gefunden.", "error")
             return redirect(url_for("main.admin_page"))
         user.is_active = is_active
+        record_security_event(
+            session,
+            user=user,
+            action="activated" if is_active else "deactivated",
+            actor=_actor(),
+        )
         session.commit()
 
     flash("Benutzerstatus wurde aktualisiert.", "success")
+    return redirect(url_for("main.admin_page"))
+
+
+@main_bp.post("/users/<int:user_id>/unlock")
+def unlock_user_action(user_id: int):
+    """Hebt die Login-Sperre (Rate-Limit nach Fehlversuchen) eines Benutzers auf."""
+    if not _is_admin():
+        flash("Benutzer verwalten kann nur ein Administrator.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user = _load_managed_user(session, user_id)
+        if user is None:
+            flash("Benutzer wurde nicht gefunden.", "error")
+            return redirect(url_for("main.admin_page"))
+        removed = unlock_user_login(session, username=user.username)
+        record_security_event(
+            session,
+            user=user,
+            action="login_unlocked",
+            actor=_actor(),
+            payload={"removed_attempts": removed},
+        )
+        session.commit()
+
+    flash("Login-Sperre wurde aufgehoben.", "success")
+    return redirect(url_for("main.admin_page"))
+
+
+@main_bp.post("/users/<int:user_id>/password")
+def set_user_password_action(user_id: int):
+    """Administrator setzt das Passwort eines Benutzers neu."""
+    if not _is_admin():
+        flash("Benutzer verwalten kann nur ein Administrator.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    new_password = request.form.get("new_password", "")
+    policy_error = password_policy_error(new_password)
+    if policy_error:
+        flash(policy_error, "error")
+        return redirect(url_for("main.admin_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user = _load_managed_user(session, user_id)
+        if user is None:
+            flash("Benutzer wurde nicht gefunden.", "error")
+            return redirect(url_for("main.admin_page"))
+        user.password_hash = hash_password(new_password)
+        record_security_event(session, user=user, action="password_reset", actor=_actor())
+        session.commit()
+
+    flash("Passwort wurde gesetzt.", "success")
     return redirect(url_for("main.admin_page"))

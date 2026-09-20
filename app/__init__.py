@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, request
 from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .api import api_bp
 from .auth import auth_bp, ensure_csrf_token
@@ -18,6 +20,31 @@ from .web import main_bp
 logger = logging.getLogger(__name__)
 INSECURE_DEVELOPMENT_SECRET = "dev-secret-key-change-me"
 DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local"}
+DEFAULT_SESSION_LIFETIME_SECONDS = 8 * 60 * 60
+DEFAULT_HSTS_MAX_AGE = 365 * 24 * 60 * 60
+
+
+def _env_flag(name: str) -> bool | None:
+    """Liest ein Ja/Nein-Flag aus der Umgebung; None, wenn nicht gesetzt."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return int(raw)
+
+
+def is_production(app: Flask) -> bool:
+    """Produktionsbetrieb = weder Tests noch explizite Entwicklungsumgebung."""
+    if app.config.get("TESTING"):
+        return False
+    environment = str(app.config.get("APP_ENV") or "production").strip().lower()
+    return environment not in DEVELOPMENT_ENVIRONMENTS
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -37,9 +64,20 @@ def create_app(test_config: dict | None = None) -> Flask:
         SECRET_KEY=os.environ.get("SECRET_KEY"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
+        # None = Vorgabe nach Umgebung (Produktion: an); siehe _configure_hardening.
+        SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE"),
+        # Idle-Timeout der Browser-Session (Login setzt session.permanent).
+        PERMANENT_SESSION_LIFETIME=timedelta(
+            seconds=int(
+                os.environ.get("SESSION_LIFETIME_SECONDS", str(DEFAULT_SESSION_LIFETIME_SECONDS))
+            )
+        ),
+        # Anzahl vertrauenswürdiger Reverse-Proxies (X-Forwarded-*); None = Vorgabe
+        # nach Umgebung (Produktion: 1, sonst 0).
+        TRUSTED_PROXY_COUNT=_env_int("TRUSTED_PROXY_COUNT"),
+        HSTS_ENABLED=_env_flag("HSTS_ENABLED"),
+        HSTS_MAX_AGE=int(os.environ.get("HSTS_MAX_AGE", str(DEFAULT_HSTS_MAX_AGE))),
         DATABASE_URL=os.environ.get("DATABASE_URL"),
-        MCP_SERVER_URL=os.environ.get("MCP_SERVER_URL"),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
         DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
         DOCUMENT_MIN_UPLOAD_BYTES=document_min_upload_bytes,
@@ -133,6 +171,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     configure_logging(app)
     _configure_secret_key(app)
+    _configure_hardening(app)
 
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
@@ -166,6 +205,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             "frame-ancestors 'none'; "
             "form-action 'self'",
         )
+        # HSTS nur über HTTPS senden (Browser ignorieren es sonst ohnehin);
+        # hinter ProxyFix zählt X-Forwarded-Proto.
+        if app.config.get("HSTS_ENABLED") and request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                f"max-age={int(app.config.get('HSTS_MAX_AGE') or DEFAULT_HSTS_MAX_AGE)}; "
+                "includeSubDomains",
+            )
         return response
 
     @app.errorhandler(RequestEntityTooLarge)
@@ -197,3 +244,34 @@ def _configure_secret_key(app: Flask) -> None:
             "SECRET_KEY muss außerhalb einer expliziten Entwicklungsumgebung gesetzt sein. "
             "Für lokale Entwicklung APP_ENV=development setzen."
         )
+
+
+def _configure_hardening(app: Flask) -> None:
+    """Produktionsvorgaben für Cookie-Secure-Flag, HSTS und ProxyFix.
+
+    In Produktion (``APP_ENV`` weder Test- noch Entwicklungsumgebung) sind das
+    Secure-Flag der Session-Cookies und HSTS eingeschaltet und genau ein
+    Reverse-Proxy (Caddy, Tailscale Serve) wird für ``X-Forwarded-For/-Proto``
+    als vertrauenswürdig behandelt. Alle drei Vorgaben lassen sich explizit
+    überschreiben (``SESSION_COOKIE_SECURE``, ``HSTS_ENABLED``,
+    ``TRUSTED_PROXY_COUNT``); ``SESSION_COOKIE_SECURE=0`` in Produktion wird
+    protokolliert, weil Sessions dann über Klartext-HTTP abgreifbar sind.
+    """
+    production = is_production(app)
+
+    if app.config.get("SESSION_COOKIE_SECURE") is None:
+        app.config["SESSION_COOKIE_SECURE"] = production
+    elif production and not app.config["SESSION_COOKIE_SECURE"]:
+        logger.warning(
+            "SESSION_COOKIE_SECURE=0 in Produktion: Session-Cookies werden auch über "
+            "unverschlüsseltes HTTP gesendet."
+        )
+
+    if app.config.get("HSTS_ENABLED") is None:
+        app.config["HSTS_ENABLED"] = production
+
+    if app.config.get("TRUSTED_PROXY_COUNT") is None:
+        app.config["TRUSTED_PROXY_COUNT"] = 1 if production else 0
+    proxies = int(app.config["TRUSTED_PROXY_COUNT"])
+    if proxies > 0:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies, x_host=proxies)

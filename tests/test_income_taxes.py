@@ -196,3 +196,34 @@ def test_income_tax_api_preview_create_and_list(tmp_path: Path) -> None:
     assert [item["id"] for item in listed.get_json()["income_tax_returns"]] == [
         created_payload["id"]
     ]
+
+
+def test_income_tax_basis_survives_year_end_close() -> None:
+    from sqlalchemy import select
+
+    from app.services.periods import close_fiscal_year
+    from domain.models import Account, FiscalYear
+
+    with _session() as session:
+        company = _seed(session)
+        session.add(
+            Account(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                code="0860",
+                name="Gewinnvortrag vor Verwendung",
+                account_type="equity",
+            )
+        )
+        session.commit()
+        _seed_bookings(session, company)
+        fiscal_year = session.execute(select(FiscalYear)).scalar_one()
+        close_fiscal_year(session=session, fiscal_year_id=fiscal_year.id, changed_by="pytest")
+
+        result = compute_income_tax_return(
+            session=session, company_id=company.id, year=2026, tax_type="corporate_income"
+        )
+
+    # Vor dem Sprint war das zu versteuernde Einkommen nach dem Abschluss 0.
+    assert result["basis"]["net_income"] == "900.50"
+    assert result["include_closing_entries"] is False

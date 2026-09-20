@@ -170,7 +170,13 @@ def compute_income_tax_return(
     prepayments: Decimal | str | int = ZERO,
     municipality_multiplier: Decimal | str | int | None = None,
     trade_tax_allowance: Decimal | str | int = ZERO,
+    include_closing_entries: bool = False,
 ) -> dict[str, object]:
+    """Berechnet KSt/GewSt auf Basis der GuV des Wirtschaftsjahres.
+
+    ``include_closing_entries`` zieht die Abschlussbuchungen (Periode 13,
+    z. B. AfA) in die GuV; der Ergebnisvortrag bleibt in jedem Fall außen vor.
+    """
     tax_type = _normalize_tax_type(tax_type)
     declaration_type = _normalize_declaration_type(declaration_type)
     company = session.get(Company, company_id)
@@ -188,6 +194,7 @@ def compute_income_tax_return(
         company_id=company_id,
         date_from=period.date_from,
         date_to=period.date_to,
+        include_closing_entries=include_closing_entries,
     )
     net_income = _money(income_statement["totals"]["net_income"])
     normalized_additions = normalize_adjustments(additions)
@@ -222,6 +229,7 @@ def compute_income_tax_return(
         "period_label": period.label,
         "date_from": period.date_from.isoformat(),
         "date_to": period.date_to.isoformat(),
+        "include_closing_entries": include_closing_entries,
         "basis": {
             "net_income": str(net_income),
             "additions": [_adjustment_payload(item) for item in normalized_additions],
@@ -253,6 +261,7 @@ def save_income_tax_return(
     prepayments: Decimal | str | int = ZERO,
     municipality_multiplier: Decimal | str | int | None = None,
     trade_tax_allowance: Decimal | str | int = ZERO,
+    include_closing_entries: bool = False,
 ) -> IncomeTaxReturn:
     tax_type = _normalize_tax_type(tax_type)
     declaration_type = _normalize_declaration_type(declaration_type)
@@ -293,6 +302,7 @@ def save_income_tax_return(
         prepayments=prepayments,
         municipality_multiplier=municipality_multiplier,
         trade_tax_allowance=trade_tax_allowance,
+        include_closing_entries=include_closing_entries,
     )
     item = IncomeTaxReturn(
         tenant_id=company.tenant_id,

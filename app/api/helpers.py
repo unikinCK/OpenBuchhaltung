@@ -66,6 +66,28 @@ def forbidden():
     return jsonify({"error": "Forbidden."}), 403
 
 
+TRUE_VALUES = {"1", "true", "yes", "ja", "on"}
+
+
+def bool_arg(name: str, *, default: bool = False) -> bool:
+    """Liest einen booleschen Query-Parameter (1/true/yes/ja/on, Groß-/Kleinschreibung egal)."""
+    raw = request.args.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in TRUE_VALUES
+
+
+def bool_payload(value: object, *, default: bool = False) -> bool:
+    """Interpretiert einen JSON-Wert (bool, Zahl oder String) als Schalter."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in TRUE_VALUES
+
+
 class DateArgError(ValueError):
     """Raised when a date query parameter is not ISO-formatted."""
 

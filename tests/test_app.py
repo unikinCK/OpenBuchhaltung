@@ -333,30 +333,48 @@ def test_api_create_account_and_validate_required_fields(tmp_path):
     assert "required" in invalid_response.get_json()["error"]
 
 
-def test_api_mcp_call_when_not_configured(tmp_path):
+def test_api_mcp_call_lists_tools_in_process(tmp_path):
     app = _create_test_app(tmp_path)
-    client = _logged_in_client(app)
+    client = app.test_client()
 
-    response = client.post("/api/v1/mcp/call", json={"method": "tools/list", "params": {}})
-
-    assert response.status_code == 503
-    assert "not configured" in response.get_json()["error"]
-
-
-def test_api_mcp_call_success_with_mock(tmp_path):
-    app = _create_test_app(tmp_path)
-    app.config["MCP_SERVER_URL"] = "http://mcp.local/rpc"
-    client = _logged_in_client(app)
-
-    with patch("app.api.mcp.call_mcp_server") as call_mock:
-        call_mock.return_value = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
-        response = client.post(
-            "/api/v1/mcp/call",
-            json={"id": "1", "method": "tools/list", "params": {}},
-        )
+    response = client.post(
+        "/api/v1/mcp/call", json={"id": "1", "method": "tools/list", "params": {}}
+    )
 
     assert response.status_code == 200
-    assert response.get_json()["result"]["ok"] is True
+    payload = response.get_json()
+    assert payload["id"] == "1"
+    assert any(tool["name"] == "list_companies" for tool in payload["result"]["tools"])
+
+
+def test_api_mcp_call_requires_method(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    response = client.post("/api/v1/mcp/call", json={"params": {}})
+
+    assert response.status_code == 400
+    assert "method" in response.get_json()["error"]
+
+
+def test_api_mcp_call_executes_tool_against_own_api(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+    client.post("/api/v1/tenants", json={"tenant_name": "MCP", "company_name": "MCP GmbH"})
+
+    response = client.post(
+        "/api/v1/mcp/call",
+        json={
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "list_companies", "arguments": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["isError"] is False
+    assert "MCP GmbH" in result["content"][0]["text"]
 
 
 def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
@@ -827,7 +845,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
 
     # Ohne Zeitraum: beide Buchungen.
     full = client.get("/api/v1/income-statement", query_string={"company_id": 1}).get_json()
-    assert full["period"] == {"date_from": None, "date_to": None}
+    assert full["period"] == {
+        "date_from": None,
+        "date_to": None,
+        "include_closing_entries": False,
+    }
     assert full["totals"]["total_revenue"] == "100.00"
     assert full["totals"]["total_expense"] == "40.00"
     assert full["totals"]["net_income"] == "60.00"
@@ -837,7 +859,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
         "/api/v1/income-statement",
         query_string={"company_id": 1, "date_from": "2026-02-01", "date_to": "2026-02-28"},
     ).get_json()
-    assert feb["period"] == {"date_from": "2026-02-01", "date_to": "2026-02-28"}
+    assert feb["period"] == {
+        "date_from": "2026-02-01",
+        "date_to": "2026-02-28",
+        "include_closing_entries": False,
+    }
     assert feb["totals"]["total_revenue"] == "0.00"
     assert feb["totals"]["total_expense"] == "40.00"
     assert feb["totals"]["net_income"] == "-40.00"
@@ -847,7 +873,11 @@ def test_api_income_statement_respects_date_range(tmp_path):
         "/api/v1/balance-sheet",
         query_string={"company_id": 1, "date_to": "2026-01-31"},
     ).get_json()
-    assert jan_bs["period"] == {"as_of": "2026-01-31"}
+    assert jan_bs["period"] == {
+        "as_of": "2026-01-31",
+        "fiscal_year": "2026",
+        "include_closing_entries": False,
+    }
     # Bank = 100 (nur Januar-Erlös), Jahresergebnis = 100.
     bank = next(row for row in jan_bs["assets"] if row["code"] == "1200")
     assert bank["amount"] == "100.00"

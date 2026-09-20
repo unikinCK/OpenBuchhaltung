@@ -9,6 +9,8 @@ from app.api.helpers import (
     DateArgError,
     api_can_write,
     api_scoped_company,
+    bool_arg,
+    bool_payload,
     date_arg,
     forbidden,
     get_session_factory,
@@ -71,12 +73,17 @@ def get_vat_return():
     except DateArgError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    include_closing_entries = bool_arg("include_closing_entries")
     session_factory = get_session_factory()
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
         rows = compute_vat_return(
-            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=include_closing_entries,
         )
 
     return (
@@ -89,6 +96,7 @@ def get_vat_return():
                 ),
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
+                "include_closing_entries": include_closing_entries,
                 "kennzahlen": _rows_payload(rows),
             }
         ),
@@ -154,6 +162,7 @@ def create_vat_return_via_api():
                 company_id=int(company_id),
                 period_label=period_label,
                 changed_by=(current_api_user() or {}).get("username", "api"),
+                include_closing_entries=bool_payload(payload.get("include_closing_entries")),
             )
         except VatReturnError as exc:
             return validation_error(str(exc))
@@ -177,12 +186,17 @@ def get_vat_annual_return():
     except VatReturnError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    include_closing_entries = bool_arg("include_closing_entries")
     session_factory = get_session_factory()
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
         rows = compute_vat_return(
-            session=session, company_id=company_id, date_from=date_from, date_to=date_to
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=include_closing_entries,
         )
 
     return (
@@ -194,6 +208,7 @@ def get_vat_annual_return():
                 "declaration_type": "annual",
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
+                "include_closing_entries": include_closing_entries,
                 "kennzahlen": _rows_payload(rows),
             }
         ),
@@ -222,6 +237,7 @@ def create_vat_annual_return_via_api():
                 company_id=int(company_id),
                 period_label=str(int(year)),
                 changed_by=(current_api_user() or {}).get("username", "api"),
+                include_closing_entries=bool_payload(payload.get("include_closing_entries")),
             )
         except (TypeError, ValueError):
             return jsonify({"error": "year must be an integer."}), 400

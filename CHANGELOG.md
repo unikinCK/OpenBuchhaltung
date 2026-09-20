@@ -13,7 +13,7 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 Erstes versioniertes Release. Fasst den bis dahin auf `main` erreichten Stand
 zusammen (siehe `docs/review/projektreview-2026-09-19.md` für die Bewertung).
 
-### Betrieb (Sprint 3 des Projekt-Reviews)
+### Betrieb (Sprint 3, PR #149)
 
 - `redeploy.sh` arbeitet ausschließlich mit `docker-compose.production.yml`,
   zieht vor `compose down` ein Backup, gibt Commit/Tag aus, führt
@@ -41,6 +41,28 @@ zusammen (siehe `docs/review/projektreview-2026-09-19.md` für die Bewertung).
 - `worker`-Platzhalter (und ungenutztes `redis`) aus `docker-compose.yml`
   entfernt; Caddyfile mit Sicherheits-Headern, dokumentierter IP-Allowlist und
   optionalem Rate-Limit (`deploy/caddy/Dockerfile`).
+
+### Fachliche Korrektheit (Sprint 1, PR #147)
+
+- Abschlussbuchungen (Periode 13) in SuSa/GuV/Bilanz/UStVA/KSt standardmäßig
+  ausgeklammert (Schalter `include_closing_entries`), Jahresabschluss atomar mit
+  Saldovortrag ins Folgejahr; Netto-aus-Brutto mit Rundungscent auf der
+  Steuerzeile; Buchung und Fachoperation in einer Transaktion (AfA, Lohn,
+  Belegabgleich, Storno); `TaxCode.kind` (input/output) mit Validierung;
+  Buchungsnummern je Geschäftsjahr mit Sequenztabelle und Retry; Storno-Hooks
+  für Bankumsatz, AfA, Lohnlauf und offene Posten; Cent-Quantisierung,
+  Stornodatum ≥ Originaldatum, Prüfung überlappender Geschäftsjahre.
+
+### Sicherheit (Sprint 2, PR #148)
+
+- KI-Chat: nur lesende Tools sofort, schreibende mit Bestätigungsschritt,
+  sensible Tools gesperrt, Anhänge und Tool-Ergebnisse als „untrusted data“,
+  Secret-Redaktion vor Persistierung; `/api/v1/mcp/call` in-process mit
+  Aufruferkontext; `ProxyFix` (`TRUSTED_PROXY_COUNT`), Login-Rate-Limit in der
+  Tabelle `login_attempt`, Secure-Cookie/HSTS/Session-Laufzeit in Produktion,
+  Open-Redirect-Schutz, Admin-Check bei Mandantenanlage, MCP-HTTP-Body-Limit,
+  Audit-Events für Login/Token/Benutzer/Passwort, Passwort-ändern-Flow
+  (UI/API/MCP/CLI).
 
 ### Funktionsumfang zum Release
 

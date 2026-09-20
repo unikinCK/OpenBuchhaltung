@@ -298,7 +298,9 @@ def test_create_app_exposes_version_and_commit(tmp_path, monkeypatch):
 
 # --- ENV-Referenz: .env.example und README vollständig ---------------------------
 
-_CODE_ENV_PATTERN = re.compile(r"(?:environ\.get|environ|getenv)\(?\[?\s*\"([A-Z][A-Z0-9_]*)\"")
+_CODE_ENV_PATTERN = re.compile(
+    r"(?:environ\.get|environ|getenv|_env_flag|_env_int)\(?\[?\s*\"([A-Z][A-Z0-9_]*)\""
+)
 _COMPOSE_ENV_PATTERN = re.compile(r"\$\{([A-Z][A-Z0-9_]*)")
 _INTERNAL_VARIABLES = {"FLASK_RUN_FROM_CLI"}  # von Flask selbst gesetzt
 

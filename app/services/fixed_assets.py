@@ -487,7 +487,15 @@ def _book_depreciation(
     depreciation_date: date,
     note: str | None,
     changed_by: str,
+    commit: bool = True,
 ) -> DepreciationEntry:
+    """Bucht eine AfA-Zeile samt Journalbuchung.
+
+    Journalbuchung, ``DepreciationEntry`` und Statuswechsel werden in einer
+    Transaktion persistiert (``commit=False`` in ``create_journal_entry``),
+    damit ein Fehler nach der Buchung keine Waisenbuchung hinterlässt, die ein
+    erneuter Versuch doppelt buchen würde.
+    """
     book_value_before = current_book_value(session=session, asset=asset)
     book_value_after = (book_value_before - amount).quantize(CENT)
 
@@ -517,6 +525,7 @@ def _book_depreciation(
                 ),
             ],
         ),
+        commit=False,
     )
 
     depreciation_entry = DepreciationEntry(
@@ -554,8 +563,11 @@ def _book_depreciation(
             "profit_center_id": asset.profit_center_id,
         },
     )
-    session.commit()
-    session.refresh(depreciation_entry)
+    if commit:
+        session.commit()
+        session.refresh(depreciation_entry)
+    else:
+        session.flush()
     return depreciation_entry
 
 
@@ -685,6 +697,7 @@ def dispose_fixed_asset(
     year = fiscal_year or disposal_date.year
     book_value = current_book_value(session=session, asset=asset)
     if book_value > Decimal("0.00") and not _existing_kind(session, asset.id, year, "abgang"):
+        # Restbuchwert-Buchung und Abgangsstatus in einer Transaktion.
         _book_depreciation(
             session=session,
             asset=asset,
@@ -694,8 +707,8 @@ def dispose_fixed_asset(
             depreciation_date=disposal_date,
             note="Restbuchwert Anlagenabgang",
             changed_by=changed_by,
+            commit=False,
         )
-        session.refresh(asset)
 
     asset.status = "disposed"
     asset.disposal_date = disposal_date

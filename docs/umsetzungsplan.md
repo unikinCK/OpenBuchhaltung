@@ -514,17 +514,41 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
 Grundlage: `docs/review/projektreview-2026-09-19.md` (Befund-Nummern F/S/A/T/U/O
 und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
 
-- [ ] **Sprint 1 – Fachliche Korrektheit**: Abschlussbuchungen in GuV/Bilanz/
-      UStVA/KSt ausklammern + Saldovortrag (F1, F7); Netto-aus-Brutto mit
-      Rundungszeile (F2); `commit=False` in AfA/Lohn/Belegabgleich/Storno
-      (A1, F11); `TaxCode.kind` input/output (F5); Buchungsnummer je WJ mit
-      Sequenz und Retry (F6); Storno-Hooks für Bank/AfA/OPOS/Lohn (F4);
-      Cent-Quantisierung, Storno-Datum, WJ-Überlappung (F12, F13).
-- [ ] **Sprint 2 – Sicherheit**: Chat-Tool-Allowlist + Human-in-the-Loop für
-      schreibende Tools (S1); Secret-Redaktion im Chat-Verlauf (S2);
-      `/mcp/call` entfernen oder in-process (S3); ProxyFix + Rate-Limit in DB
-      (S4); Open Redirect, Cookie/HSTS, Admin-Check, MCP-Body-Limit,
-      Einzeiler (S6–S10); Login-/Admin-Audit-Events; Passwort ändern.
+- [x] **Sprint 1 – Fachliche Korrektheit** *(umgesetzt 2026-09-19)*:
+      Abschlussbuchungen (Periode 13) in SuSa/GuV/Bilanz/UStVA/KSt standardmäßig
+      ausgeklammert, Schalter `include_closing_entries` in Service/API/MCP/UI;
+      Ergebnisvortrag (`source=year_end_close`) zählt in GuV/UStVA/KSt nie mit,
+      Bilanz je Stichtags-WJ mit Jahresergebnis als eigener Position (F1).
+      Jahresabschluss atomar mit Vorjahresprüfung und Saldovortrag der
+      Bestandskonten ins Folgejahr (`source=carryforward`, EB-Werte in der SuSa
+      ab Startdatum), Vortragsbuchungen nicht stornierbar (F7). Netto-aus-Brutto
+      mit Rundungscent auf expliziter Steuerzeile (F2). `commit=False` in AfA
+      (inkl. Abgang), Lohn, Belegabgleich und Storno; Lohnaufwand am Monatsende
+      des Lohnmonats (A1, F11). `TaxCode.kind` input/output mit Migration 0037,
+      Validierung gegen Kontoart und Soll-/Haben-Seite, UStVA-Richtung aus
+      `kind` (F5). Nummernkreis je WJ (`posting_number_sequence`, Migration
+      0038, `FOR UPDATE`, Präfix = WJ-Label, Retry bei Kollision) (F6).
+      Storno-Hooks: Bankumsatz → open, AfA-Satz zurück, Lohnlauf → draft, OPOS
+      per `settlement_journal_entry_id`/`settlement_amount` (Migration 0039)
+      wieder offen (F4). `parse_decimal` quantisiert auf Cent und lehnt mehr als
+      zwei Nachkommastellen ab (Sätze/Mengen mit `places=None`), Validator prüft
+      Zeilen; Stornodatum ≥ Originaldatum; automatisches WJ prüft Überlappung,
+      mehrdeutige Zuordnung ist ein Fehler (F12, F13).
+- [x] **Sprint 2 – Sicherheit** (2026-09-19): Chat-Tool-Allowlist (nur lesende
+      Tools sofort) + Human-in-the-Loop für schreibende Tools mit
+      Bestätigungsschritt in UI/API/MCP, Benutzer-/Token-/Passwort-/ELSTER-/
+      SEPA-/FinTS-Tools im Chat gesperrt, Anhänge und Tool-Ergebnisse als
+      „untrusted data“ gekennzeichnet (S1); Secret-Redaktion (pin/tan/password/
+      api_token) vor Persistierung (S2); `/mcp/call` in-process mit
+      Aufruferkontext (S3); ProxyFix in Produktion, Rate-Limit in Tabelle
+      `login_attempt`, Admin-Entsperrung (S4); Open Redirect via `urlsplit`/
+      Backslash (S6); Secure-Cookie/HSTS/Session-Laufzeit in Produktion (S7);
+      Admin-Check bei Mandantenanlage (S8); MCP-HTTP-Body-Limit (S9);
+      `compare_digest` auf Bytes, generische Upstream-Fehlertexte, CLI-Passwort
+      per Prompt, `seed-demo` in Produktion verweigert, Session-Rotation beim
+      Login, Dummy-Hash gegen Timing-Enumeration, Mindestlänge 8 (S10);
+      Audit-Events für Login/Fehlversuche/Token/Benutzeranlage/Passwort;
+      Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) offen.
 - [x] **Sprint 3 – Betrieb** *(umgesetzt 2026-09-20)*: `redeploy.sh` auf Prod-Compose (O1);
       `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
       + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,

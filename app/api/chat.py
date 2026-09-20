@@ -19,6 +19,7 @@ from app.auth import api_has_global_access, current_api_tenant_id, current_api_u
 from app.services.chat import (
     ChatError,
     accessible_conversation,
+    resolve_chat_action,
     run_chat_message,
     serialize_message,
 )
@@ -168,3 +169,39 @@ def send_chat_message():
             "assistant_message": exchange.assistant_message,
         }
     )
+
+
+def _resolve_action(message_id: int, *, approve: bool):
+    if not api_can_write():
+        return forbidden()
+    try:
+        result = resolve_chat_action(
+            session_factory=get_session_factory(),
+            message_id=message_id,
+            approve=approve,
+            api_user=current_api_user(),
+            global_access=api_has_global_access(),
+        )
+    except ChatError as exc:
+        return validation_error(str(exc))
+    except ChatLLMError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(
+        {
+            "conversation_id": result.conversation_id,
+            "updated_message": result.updated_message,
+            "assistant_message": result.assistant_message,
+        }
+    )
+
+
+@api_bp.post("/chat/actions/<int:message_id>/confirm")
+def confirm_chat_action(message_id: int):
+    """Führt die wartende schreibende Aktion einer Assistenten-Nachricht aus."""
+    return _resolve_action(message_id, approve=True)
+
+
+@api_bp.post("/chat/actions/<int:message_id>/reject")
+def reject_chat_action(message_id: int):
+    """Lehnt die wartende schreibende Aktion einer Assistenten-Nachricht ab."""
+    return _resolve_action(message_id, approve=False)

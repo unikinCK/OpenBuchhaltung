@@ -290,7 +290,13 @@ Vor Produktivstart sollten folgende Punkte bestaetigt sein:
 
 - produktive Authentisierung aktiv
 - starker, installationsspezifischer `SECRET_KEY` gesetzt; Start ohne Secret schlägt fehl
-- Demo-Benutzer geloescht oder Passwoerter geaendert
+- `APP_ENV=production`: Secure-Cookie, HSTS und `ProxyFix` (ein vertrauenswuerdiger
+  Reverse-Proxy) sind dann Vorgabe; `TRUSTED_PROXY_COUNT` passt zur Proxy-Kette,
+  `SESSION_COOKIE_SECURE=0` nur bewusst bei reinem HTTP im geschuetzten Netz
+- Demo-Benutzer geloescht oder Passwoerter geaendert (`seed-demo` ist in Produktion gesperrt)
+- KI-Chat: schreibende Tools nur nach Bestaetigung, Benutzer-/Token-/ELSTER-/SEPA-/
+  FinTS-Tools im Chat gesperrt; Sicherheitsereignisse (Login, Fehlversuche, Token,
+  Passwort) im Audit-Log bzw. Logger `openbuchhaltung.security` pruefbar
 - API und MCP mit getrennten Tokens abgesichert; MCP nicht ungeschützt öffentlich gebunden
 - Datenbank produktionsgeeignet
 - Belegablage persistent und gesichert

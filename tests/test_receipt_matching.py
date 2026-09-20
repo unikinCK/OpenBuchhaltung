@@ -8,6 +8,7 @@ from urllib.error import URLError
 
 import pytest
 from document_files import MIN_DOCUMENT_BYTES
+from sqlalchemy import select
 
 from app import create_app
 from app.auth import hash_api_token, hash_password
@@ -139,6 +140,7 @@ def _seed_company_with_accounts(
             tenant_id=tenant.id,
             company_id=company.id,
             code="VSt19",
+            kind="input",
             rate=Decimal("19.00"),
             vat_account_id=vat.id,
         )
@@ -830,3 +832,51 @@ def test_missing_file_yields_clear_error(tmp_path):
                 document_id=document_id,
                 changed_by="test",
             )
+
+
+def test_new_booking_approval_is_atomic(tmp_path, monkeypatch):
+    from app.services import receipt_matching as receipt_matching_module
+
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+    suggestion = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+
+    original_audit = receipt_matching_module.log_audit_event
+
+    def failing_audit(**kwargs):
+        if kwargs.get("action") == "booked":
+            raise RuntimeError("Audit-Log nicht erreichbar")
+        return original_audit(**kwargs)
+
+    monkeypatch.setattr(receipt_matching_module, "log_audit_event", failing_audit)
+    payload = {
+        "company_id": company_id,
+        "expense_account_id": _account_id(app, company_id, "6300"),
+        "creditor_account_id": _account_id(app, company_id, "1600"),
+        "tax_code_id": _tax_code_id(app, company_id),
+        "entry_date": "2026-07-08",
+        "net_amount": "200.00",
+        "tax_amount": "38.00",
+    }
+    with pytest.raises(RuntimeError):
+        client.post(
+            f"/api/v1/receipt-matching/suggestions/{suggestion['id']}/approve", json=payload
+        )
+
+    with app.extensions["db_session_factory"]() as session:
+        # Keine Buchung ohne Belegverknüpfung zurückgeblieben.
+        assert session.execute(select(JournalEntry.id)).first() is None
+        assert session.get(Document, document_id).journal_entry_id is None
+
+    monkeypatch.undo()
+    approved = client.post(
+        f"/api/v1/receipt-matching/suggestions/{suggestion['id']}/approve", json=payload
+    )
+    assert approved.status_code == 200
+    with app.extensions["db_session_factory"]() as session:
+        assert len(session.execute(select(JournalEntry.id)).all()) == 1

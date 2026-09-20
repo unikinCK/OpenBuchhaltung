@@ -39,6 +39,10 @@ def _open_item_dict(item: OpenItem) -> dict[str, object]:
         "account_code": item.account.code if item.account else None,
         "account_name": item.account.name if item.account else None,
         "journal_entry_id": item.journal_entry_id,
+        "settlement_journal_entry_id": item.settlement_journal_entry_id,
+        "settlement_amount": (
+            str(item.settlement_amount) if item.settlement_amount is not None else None
+        ),
         "bank_transaction_id": item.bank_transaction_id,
         "item_type": item.item_type,
         "reference": item.reference,

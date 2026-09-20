@@ -319,7 +319,10 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `SECRET_KEY` | – | Session-Secret (`openssl rand -hex 32`); Pflicht außerhalb von `development`. |
 | `DATABASE_URL` | SQLite `instance/openbuchhaltung.db` | SQLAlchemy-URL; der Produktions-Stack setzt PostgreSQL aus `POSTGRES_PASSWORD` zusammen. Wird auch von `alembic` gelesen. |
 | `DB_AUTO_MIGRATE` | `1` | `0`: keine Migration beim Start; Start scheitert bei leerem/veraltetem Schema (Produktion). |
-| `SESSION_COOKIE_SECURE` | `0` | `1` hinter HTTPS. |
+| `SESSION_COOKIE_SECURE` | Produktion `1`, sonst `0` | Secure-Flag der Session-Cookies; `0` in Produktion wird protokolliert. |
+| `SESSION_LIFETIME_SECONDS` | `28800` | Idle-Timeout der Browser-Session (8 h). |
+| `TRUSTED_PROXY_COUNT` | Produktion `1`, sonst `0` | Vertrauenswürdige Reverse-Proxies für `X-Forwarded-For/-Proto` (werkzeug `ProxyFix`); Details unter [Sicherheit](#sicherheit--upload-härtung). |
+| `HSTS_ENABLED`, `HSTS_MAX_AGE` | Produktion `1`, sonst `0`; `31536000` | `Strict-Transport-Security` auf HTTPS-Antworten. |
 | `PORT` | `8000` | Port des Entwicklungsservers (`python run.py`). |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 | `LOG_FORMAT` | `text` | `json` für eine JSON-Zeile je Log-Eintrag (mit `request_id`). |
@@ -375,7 +378,7 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `MCP_HTTP_HOST`, `MCP_HTTP_PORT`, `MCP_HTTP_PATH` | `127.0.0.1`, `8080`, `/mcp` | Streamable-HTTP-Transport (Compose: `0.0.0.0`, `8090`). |
 | `MCP_HTTP_AUTH_TOKEN` | – | Eingangstoken (Pflicht bei Nicht-Loopback-Bindung). |
 | `MCP_HTTP_ALLOWED_ORIGINS` | – | Erlaubte Browser-Origins (kommagetrennt, `*` = alle). |
-| `MCP_SERVER_URL` | – | Externer MCP-Server für `POST /api/v1/mcp/call`. |
+| `MCP_HTTP_MAX_BODY_BYTES` | `16777216` | Maximale Request-Größe des MCP-HTTP-Endpunkts (größer → 413). |
 
 **Docker Compose und Skripte**
 
@@ -400,22 +403,53 @@ Alle UI-Seiten erfordern eine Anmeldung. `seed-demo` legt folgende Benutzer an:
 | `pruefer`    | `pruefer123`     | Prüfer     | nur lesen |
 | `support`    | `support123`     | Support    | alle Mandanten, nur lesen |
 
-Weitere Benutzer per CLI:
+Weitere Benutzer per CLI (das Passwort wird interaktiv abgefragt, damit es nicht
+in der Shell-History landet; mindestens 8 Zeichen):
 ```bash
-flask --app run.py create-user --username maria --password geheim --role Buchhalter --tenant-id 1
+flask --app run.py create-user --username maria --role Buchhalter --tenant-id 1
 ```
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
+
+**Passwort ändern:** Jeder angemeldete Benutzer kann sein Passwort über
+**Passwort** in der Kopfzeile (`/auth/password`, aktuelles Passwort erforderlich)
+ändern; per API über `POST /api/v1/users/me/password` mit `current_password` und
+`new_password` (Benutzer-Token) bzw. MCP-Tool `change_own_password`.
+Administratoren setzen Passwörter anderer Benutzer in der Verwaltung, per
+`POST /api/v1/users/<id>/password` (`new_password`), MCP-Tool `set_user_password`
+oder per CLI `flask --app run.py set-password --username maria`.
+
+**Login-Sperre aufheben:** Nach zu vielen Fehlversuchen (siehe Rate-Limit unten)
+kann ein Administrator die Sperre in der Verwaltung („Entsperren“), per
+`POST /api/v1/users/<id>/unlock` oder MCP-Tool `unlock_user_login` aufheben.
+
+**Audit:** Logins, Fehlversuche, Token-Rotation, Benutzeranlage, (De-)Aktivierung,
+Entsperrung und Passwortänderungen werden als Sicherheitsereignisse protokolliert
+(Logger `openbuchhaltung.security`) und für mandantengebundene Benutzer zusätzlich
+in die Audit-Hashkette des Mandanten geschrieben (`entity_type=user`); Tokens und
+Passwörter erscheinen dort nie, nur die letzten vier Zeichen eines Tokens.
 
 ## Sicherheit & Upload-Härtung
 
 Die App setzt Security-Header (`X-Content-Type-Options`, `Referrer-Policy`,
 `Content-Security-Policy`) und nutzt gehärtete Session-Cookie-Defaults
-(`HttpOnly`, `SameSite=Lax`). In HTTPS-Deployments sollte zusätzlich gesetzt werden:
+(`HttpOnly`, `SameSite=Lax`). In Produktion (`APP_ENV` weder `development` noch
+Test) gelten zusätzlich folgende Vorgaben, die sich per Umgebungsvariable
+überschreiben lassen:
 
-```bash
-export SESSION_COOKIE_SECURE=1
-```
+| Variable | Produktion | Entwicklung | Bedeutung |
+|---|---|---|---|
+| `SESSION_COOKIE_SECURE` | `1` | `0` | Session-Cookie nur über HTTPS; `0` in Produktion wird mit Warnung protokolliert |
+| `HSTS_ENABLED` / `HSTS_MAX_AGE` | `1` / 1 Jahr | `0` | `Strict-Transport-Security` auf HTTPS-Antworten |
+| `TRUSTED_PROXY_COUNT` | `1` | `0` | Anzahl vertrauenswürdiger Reverse-Proxies (`X-Forwarded-For/-Proto`, werkzeug `ProxyFix`); hinter Caddy/Tailscale Serve nötig, damit Rate-Limit und HSTS die echte Client-Adresse bzw. das Protokoll sehen |
+| `SESSION_LIFETIME_SECONDS` | 28800 (8 h) | 28800 | Idle-Timeout der Browser-Session (`PERMANENT_SESSION_LIFETIME`) |
+
+Der Login legt eine neue Session an (Session-Fixation-Schutz, CSRF-Token wird
+rotiert) und vergleicht Passwörter auch bei unbekanntem Benutzernamen mit einem
+Dummy-Hash (kein Timing-Leck). Fehlgeschlagene Logins werden in der Tabelle
+`login_attempt` gezählt — das Rate-Limit gilt damit prozessübergreifend (mehrere
+gunicorn-Worker) und je Client-Adresse hinter dem Proxy. Der Befehl `seed-demo`
+verweigert in Produktion die Anlage der Demo-Benutzer mit bekannten Passwörtern.
 
 Beleguploads sind auf PDF/JPG/PNG begrenzt. Belege werden unverändert
 gespeichert (keine serverseitige Komprimierung). Damit zu stark komprimierte,
@@ -478,7 +512,9 @@ Offene Umsätze können entweder einer **vorhandenen Buchung zugeordnet** werden
 (Vorschläge per Betrags-Matching auf dem Bankkonto; eine Buchung ist höchstens
 mit einem Umsatz verknüpfbar — Teilzahlungen laufen über OPOS) oder **direkt
 verbucht** werden: Gegenkonto wählen, optional Steuercode, Kostenstelle und
-Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt.
+Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerlegt
+(Netto = gerundet Brutto/(1+Satz), Steuer = Brutto − Netto als eigene Zeile; ein
+Rundungscent liegt auf der Steuerzeile, sodass jeder Bruttobetrag aufgeht).
 Die Dimensionen liegen auf Gegenkonto und automatisch erzeugter Steuerzeile,
 nicht auf dem Bankkonto. Umsätze in Fremdwährung werden nicht automatisch
 verbucht. Die Umsatzliste ist paginiert und nach Status, Suchbegriff
@@ -510,7 +546,8 @@ sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
 Unter **OPOS** lassen sich debitorische und kreditorische offene Posten erfassen,
 optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ein
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
-werden; die Aktion wird im Audit-Log protokolliert.
+werden; die Aktion wird im Audit-Log protokolliert. Wird die verknüpfte
+Ausgleichsbuchung storniert, lebt der Posten um den Ausgleichsbetrag wieder auf.
 
 ## Buchungsvorlagen (wiederkehrende Buchungen)
 
@@ -591,11 +628,44 @@ REST: `POST/GET /api/v1/fixed-assets`,
 ## Perioden & Jahresabschluss
 
 Unter **Perioden** in der Navigation lassen sich Buchungsperioden sperren
-(Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin)
-bucht zunächst den **Ergebnisvortrag** (die GuV-Konten werden gegen das
-Gewinnvortragskonto glattgestellt — SKR03 `0860`, SKR04 `2970`) und sperrt dann
-alle Perioden des Geschäftsjahres; in abgeschlossene Jahre kann nicht mehr
-gebucht werden. Alle Aktionen werden im Audit-Log protokolliert.
+(Schreibrollen) und entsperren (nur Admin). Der **Jahresabschluss** (nur Admin,
+Vorjahre müssen abgeschlossen sein) läuft in einer Transaktion:
+
+1. **Ergebnisvortrag** (`source=year_end_close`, Abschlussperiode 13): die
+   GuV-Konten werden gegen das Gewinnvortragskonto glattgestellt (SKR03 `0860`,
+   SKR04 `2970`).
+2. **Saldovortrag** (`source=carryforward`): die Salden der Bestandskonten
+   werden als EB-Werte am ersten Tag des Folgejahres gebucht (Periode 1); das
+   Folgejahr wird bei Bedarf regulär angelegt.
+3. Alle Perioden werden gesperrt; in abgeschlossene Jahre kann nicht mehr
+   gebucht werden. Vortragsbuchungen sind nicht stornierbar.
+
+**Abschlussbuchungen in Auswertungen:** SuSa, GuV, Bilanz, UStVA und
+KSt/GewSt klammern Buchungen der Abschlussperiode (13, z. B. AfA)
+standardmäßig aus und zeigen den Stand vor dem Jahresabschluss. Der Schalter
+**inkl. Abschlussbuchungen** (UI-Checkbox, API/MCP-Parameter
+`include_closing_entries`) zieht sie ein. Der Ergebnisvortrag zählt in GuV,
+UStVA und Ertragsteuern nie mit — die GuV eines abgeschlossenen Jahres bleibt
+aussagekräftig. Die Bilanz kumuliert bis zum Stichtag ohne Saldovorträge; für
+das Geschäftsjahr des Stichtags gilt der Schalter, das Jahresergebnis
+erscheint als eigene Position, Vorjahresergebnisse stehen im Gewinnvortrag.
+Saldovorträge (EB-Werte) erscheinen in der SuSa nur bei Auswertung ab einem
+Startdatum (`date_from`).
+
+**Buchungsnummern** zählen je Geschäftsjahr in einem eigenen Nummernkreis
+(Sequenztabelle, `FOR UPDATE`): Präfix ist das WJ-Label (`2026-0001`,
+`2026/2027-0001`), Nachbuchungen ins Vorjahr zählen dort weiter; bereits
+vergebene Nummern werden übersprungen.
+
+## Storno & Nebenbücher
+
+Ein Storno (`reverse_journal_entry`, UI-Button, `POST /journal-entries/<id>/reverse`)
+erzeugt die festgeschriebene Gegenbuchung und zieht die Nebenbücher in
+derselben Transaktion mit: ein aus der Buchung verbuchter Bankumsatz wird wieder
+„open“, ein AfA-/Abgangssatz wird zurückgenommen (Buchwert und Anlagenstatus
+folgen dem Hauptbuch), ein gebuchter Lohnlauf wird wieder Entwurf und ein mit
+der Buchung ausgeglichener offener Posten lebt um den Ausgleichsbetrag wieder
+auf. Das Stornodatum darf nicht vor dem Buchungsdatum des Originals liegen.
 
 ## E-Rechnung importieren (XRechnung / ZUGFeRD)
 
@@ -641,6 +711,16 @@ bereits als eigene Buchungszeile geführt wird.
 ## Steuercodes (USt/VSt)
 
 `seed-demo` legt Standard-Steuercodes je Gesellschaft an: `USt19`, `USt7`, `VSt19`, `VSt7`, `frei`.
+Jeder Steuercode hat eine **Richtung** (`kind`): `output` = Umsatzsteuer
+(Bemessungsgrundlage auf Erlös-/Ertragskonten oder erhaltenen Anzahlungen),
+`input` = Vorsteuer (Aufwands- und Anlagenkonten). Beim Buchen wird die Richtung
+gegen die Kontoart geprüft (ein Vorsteuercode auf einer Erlöszeile wird
+abgewiesen), explizite Steuerzeilen müssen auf derselben Soll-/Haben-Seite wie
+ihre Bemessungsgrundlage stehen; 0-%-Codes bleiben frei verwendbar. Die UStVA
+leitet Umsatz-/Vorsteuer aus `kind` ab. Über die API (`POST /tax-codes`, Feld
+`kind`) wird die Richtung ohne Angabe aus dem Steuerkonto bzw. Kürzel abgeleitet
+und gegen die Kontoart des Steuerkontos geprüft (Vorsteuer = asset,
+Umsatzsteuer = liability).
 In der Buchungsmaske wird der Betrag einer Zeile mit Steuercode als **Netto** interpretiert;
 die Steuerzeile (z. B. auf 1776 Umsatzsteuer 19 %) wird automatisch ergänzt.
 
@@ -670,6 +750,8 @@ export API_AUTH_TOKEN="mein-geheimer-token"
 Fehlgeschlagene UI-Logins sind rate-limitiert (Default: 5 Versuche je
 Benutzername/IP in 15 Minuten, konfigurierbar über `LOGIN_RATE_LIMIT_ATTEMPTS`
 und `LOGIN_RATE_LIMIT_WINDOW_SECONDS`; Abschalten mit `LOGIN_RATE_LIMIT=0`).
+Die Fehlversuche liegen in der Datenbank; ein Administrator hebt eine Sperre
+per Verwaltung, `POST /api/v1/users/<id>/unlock` oder MCP-Tool `unlock_user_login` auf.
 
 Benutzer-Token erzeugen/rotieren:
 ```bash
@@ -861,10 +943,11 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), RES
 Unter **KI-Chat** steht ein LibreChat-angelehnter Chat direkt in der Oberfläche zur
 Verfügung: Sidebar mit Unterhaltungen, Verlauf mit Nachrichten-Bubbles, Anhänge und
 einsehbare Tool-Aufrufe. Der Assistent spricht den konfigurierten
-OpenAI-`/responses`-kompatiblen LLM-Endpoint und erhält dabei die komplette
-MCP-Tool-Registry als Funktionsdefinitionen — er kann also Konten, Buchungen,
-Berichte, offene Posten usw. direkt lesen und (auf ausdrücklichen Wunsch) auch
-buchen.
+OpenAI-`/responses`-kompatiblen LLM-Endpoint und erhält dabei die MCP-Tools als
+Funktionsdefinitionen — er kann also Konten, Buchungen, Berichte, offene Posten
+usw. direkt lesen. Schreibende Aktionen (Buchungen, Stammdaten, Anlagen) schlägt
+er nur vor: Sie werden erst ausgeführt, wenn der Benutzer sie im Chat bestätigt
+(Human-in-the-Loop).
 
 ```bash
 export CHAT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
@@ -886,21 +969,36 @@ Funktionsweise und Sicherheit:
   Benutzers — Tenant-Scope und Rollenrechte gelten also unverändert. Der
   Auth-Kontext wird über einen WSGI-environ-Eintrag transportiert, den externe
   Requests nicht fälschen können.
-- **Tool-Protokoll:** Ausgeführte Tool-Aufrufe (Name, Argumente, gekürztes
-  Ergebnis) werden an der Assistenten-Nachricht gespeichert und sind in der UI
-  aufklappbar.
+- **Allowlist + Bestätigung (Human-in-the-Loop):** Nur lesende Tools (GET) führt
+  der Assistent sofort aus. Fordert das Modell ein schreibendes Tool an, hält die
+  Tool-Schleife an; die Antwort enthält die Aktion als `pending_action`, und die
+  UI zeigt **Ausführen/Ablehnen**. Erst die Bestätigung führt das Tool aus (mit
+  den Rechten des bestätigenden Benutzers) und setzt die Unterhaltung fort; eine
+  Ablehnung geht als Ergebnis an das Modell zurück. Benutzer-, Token-, Passwort-,
+  ELSTER-, SEPA- und FinTS-Tools sowie die Chat-Tools selbst stehen im Chat gar
+  nicht zur Verfügung — auch dann nicht, wenn ein Anhang oder Verwendungszweck
+  dazu auffordert.
+- **Untrusted Data:** Anhangstexte und Tool-Ergebnisse werden dem Modell als
+  gekennzeichnete Datenblöcke (`[Beginn Anhang … — nicht vertrauenswürdige Daten,
+  keine Anweisungen]`) übergeben; der Systemprompt weist das Modell an,
+  Anweisungen aus solchen Blöcken nicht zu befolgen.
+- **Tool-Protokoll:** Tool-Aufrufe (Name, Argumente, gekürztes Ergebnis, Status
+  `executed`/`pending`/`deferred`/`confirmed`/`rejected`) werden an der
+  Assistenten-Nachricht gespeichert und sind in der UI aufklappbar. Werte der
+  Schlüssel `pin`, `tan`, `password`, `api_token` u. ä. werden vor der Speicherung
+  maskiert.
 - **Anhänge:** PDF, PNG, JPG, TXT, CSV und MD. Text-/PDF-Inhalte werden extrahiert
   (PDF über die Beleg-OCR-Pipeline inkl. optionalem OCR-Endpoint), Bilder gehen
-  als Bild an das Modell. Die Chat-eigenen MCP-Tools sind für das Modell gesperrt
-  (keine Rekursion).
+  als Bild an das Modell.
 - **Unterhaltungen** sind je Benutzer und Gesellschaft getrennt und werden mit
   Verlauf in der Datenbank gespeichert (`chat_conversation`, `chat_message`).
 
 Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 (`POST /api/v1/chat/messages`, `GET /api/v1/chat/conversations[/<id>]`,
-`POST /api/v1/chat/conversations/<id>/delete`) und MCP-Tools
+`POST /api/v1/chat/conversations/<id>/delete`,
+`POST /api/v1/chat/actions/<message_id>/confirm|reject`) und MCP-Tools
 (`send_chat_message`, `list_chat_conversations`, `get_chat_conversation`,
-`delete_chat_conversation`).
+`delete_chat_conversation`, `confirm_chat_action`, `reject_chat_action`).
 
 ## End-to-End-Kernflows
 
@@ -942,18 +1040,19 @@ Es gibt einen MCP-Bridge-Endpunkt:
 
 - `POST /api/v1/mcp/call`
 
-Die App leitet JSON-RPC-Aufrufe an einen konfigurierten MCP-Server weiter.
-
-Konfiguration:
-```bash
-export MCP_SERVER_URL="http://localhost:8080/mcp"
-```
+Die Bridge führt MCP-JSON-RPC-Nachrichten (`initialize`, `tools/list`,
+`tools/call`) **in-process** aus: Jeder Tool-Aufruf landet über den internen
+API-Client in der eigenen REST-API — mit dem Auth-Kontext des Aufrufers. Ein
+Benutzer-Token sieht und ändert damit genau das, was es auch per REST dürfte
+(Tenant-Scoping und Rollen bleiben wirksam); eine Schreibrolle ist Voraussetzung.
+Ein externer MCP-Server (`MCP_SERVER_URL`) wird nicht mehr benötigt.
 
 Beispiel:
 ```bash
 curl -X POST http://localhost:8000/api/v1/mcp/call \
+  -H "Authorization: Bearer obk_..." \
   -H "Content-Type: application/json" \
-  -d '{"id":"1","method":"tools/list","params":{}}'
+  -d '{"id":"1","method":"tools/call","params":{"name":"list_companies","arguments":{}}}'
 ```
 
 ## MCP-Server (API als Tools)
@@ -989,6 +1088,7 @@ antwortet er mit `application/json` oder als `text/event-stream` (SSE):
 export MCP_HTTP_HOST=127.0.0.1     # Standard 127.0.0.1
 export MCP_HTTP_PORT=8080          # Standard 8080
 export MCP_HTTP_PATH=/mcp          # Standard /mcp
+export MCP_HTTP_MAX_BODY_BYTES=16777216   # Standard 16 MiB; größere Bodies -> 413
 # Pflicht bei Bindung an Nicht-Loopback-Adressen:
 export MCP_HTTP_AUTH_TOKEN="ein-langes-zufaelliges-token"
 python -m app.services.mcp_http

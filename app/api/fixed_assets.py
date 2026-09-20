@@ -82,12 +82,12 @@ def create_fixed_asset_via_api():
             method=(payload.get("method") or "").strip(),
             useful_life_months=int(useful_life) if useful_life is not None else None,
             degressive_rate=(
-                parse_decimal(str(payload["degressive_rate"]))
+                parse_decimal(str(payload["degressive_rate"]), places=None)
                 if payload.get("degressive_rate") is not None
                 else None
             ),
             total_units=(
-                parse_decimal(str(payload["total_units"]))
+                parse_decimal(str(payload["total_units"]), places=None)
                 if payload.get("total_units") is not None
                 else None
             ),
@@ -200,7 +200,7 @@ def post_fixed_asset_depreciation_via_api(asset_id: int):
                 session=session,
                 fixed_asset_id=asset_id,
                 fiscal_year=int(fiscal_year),
-                units=parse_decimal(str(units)) if units is not None else None,
+                units=parse_decimal(str(units), places=None) if units is not None else None,
                 changed_by=(current_api_user() or {}).get("username", "api"),
             )
         except FixedAssetError as exc:
@@ -331,12 +331,12 @@ def update_fixed_asset_via_api(asset_id: int):
             else None
         )
         degressive_rate = (
-            parse_decimal(str(payload["degressive_rate"]))
+            parse_decimal(str(payload["degressive_rate"]), places=None)
             if payload.get("degressive_rate") is not None
             else None
         )
         total_units = (
-            parse_decimal(str(payload["total_units"]))
+            parse_decimal(str(payload["total_units"]), places=None)
             if payload.get("total_units") is not None
             else None
         )

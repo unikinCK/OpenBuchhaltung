@@ -56,6 +56,11 @@ def _selected_period_label() -> str:
     return f"{today.year}-{today.month - 1:02d}"
 
 
+def _include_closing_entries(source) -> bool:
+    raw = (source.get("include_closing_entries") or "").strip().lower()
+    return raw in {"1", "true", "on", "yes", "ja"}
+
+
 def _selected_elster_filters() -> dict[str, str | None]:
     return {
         "status": (request.args.get("elster_status") or "").strip() or None,
@@ -73,6 +78,7 @@ def vat_returns_page():
         rows = []
         saved_returns = []
         period_label = _selected_period_label()
+        include_closing_entries = _include_closing_entries(request.args)
         period_error = None
         elster_filter_error = None
         elster_filters = _selected_elster_filters()
@@ -86,6 +92,7 @@ def vat_returns_page():
                     company_id=selected_company_id,
                     date_from=date_from,
                     date_to=date_to,
+                    include_closing_entries=include_closing_entries,
                 )
             except VatReturnError as exc:
                 period_error = str(exc)
@@ -137,6 +144,7 @@ def vat_returns_page():
         companies=companies,
         selected_company_id=selected_company_id,
         period_label=period_label,
+        include_closing_entries=include_closing_entries,
         declaration_display_name=vat_return_display_name(period_label),
         period_error=period_error,
         date_from=date_from,
@@ -169,6 +177,7 @@ def save_vat_return_action():
                 company_id=company_id,
                 period_label=period_label,
                 changed_by=changed_by(),
+                include_closing_entries=_include_closing_entries(request.form),
             )
         except VatReturnError as exc:
             flash(str(exc), "error")

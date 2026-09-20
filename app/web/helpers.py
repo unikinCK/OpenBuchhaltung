@@ -192,14 +192,15 @@ def document_upload_error(uploaded_file, file_name: str) -> str | None:
     return None
 
 
-def optional_decimal(raw: str) -> Decimal | None:
+def optional_decimal(raw: str, *, places: int | None = 2) -> Decimal | None:
+    """Optionaler Dezimalwert; ``places=None`` für Sätze/Mengen ohne Cent-Prüfung."""
     raw = (raw or "").strip()
-    return parse_decimal(raw) if raw else None
+    return parse_decimal(raw, places=places) if raw else None
 
 
-def safe_optional_decimal(raw: str) -> Decimal | None:
+def safe_optional_decimal(raw: str, *, places: int | None = 2) -> Decimal | None:
     """Wie ``optional_decimal``, liefert bei ungültiger Eingabe aber ``None``."""
     try:
-        return optional_decimal(raw)
+        return optional_decimal(raw, places=places)
     except ValueError:
         return None

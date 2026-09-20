@@ -160,6 +160,35 @@ class Period(Base):
     )
 
 
+class PostingNumberSequence(Base):
+    """Nummernkreis für Buchungsnummern je Geschäftsjahr.
+
+    Die Zeile wird beim Ziehen einer Nummer mit ``FOR UPDATE`` gesperrt, damit
+    parallele Buchungen keine gleichen Nummern erhalten; ``last_number`` ist
+    die zuletzt vergebene laufende Nummer.
+    """
+
+    __tablename__ = "posting_number_sequence"
+    __table_args__ = (
+        UniqueConstraint("fiscal_year_id", name="uq_posting_sequence_fiscal_year"),
+        CheckConstraint("last_number >= 0", name="ck_posting_sequence_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="CASCADE"), nullable=False
+    )
+    last_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+
 class PeriodLock(Base):
     __tablename__ = "period_lock"
 
@@ -289,11 +318,19 @@ class ControllingUnit(Base):
     )
 
 
+# Richtung eines Steuercodes: Vorsteuer (Eingangsleistungen, Kz 66) oder
+# Umsatzsteuer (Ausgangsumsätze, Kz 81/86/48).
+TAX_KIND_INPUT = "input"
+TAX_KIND_OUTPUT = "output"
+TAX_CODE_KINDS = (TAX_KIND_INPUT, TAX_KIND_OUTPUT)
+
+
 class TaxCode(Base):
     __tablename__ = "tax_code"
     __table_args__ = (
         UniqueConstraint("company_id", "code", name="uq_tax_code_company_code"),
         CheckConstraint("rate >= 0", name="ck_tax_code_rate_non_negative"),
+        CheckConstraint("kind IN ('input', 'output')", name="ck_tax_code_kind_known"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -305,6 +342,11 @@ class TaxCode(Base):
     )
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # "input" = Vorsteuer (Bemessungsgrundlage auf Aufwand/Anlagen),
+    # "output" = Umsatzsteuer (Bemessungsgrundlage auf Erlösen).
+    kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=TAX_KIND_OUTPUT, server_default=TAX_KIND_OUTPUT
+    )
     description: Mapped[str | None] = mapped_column(String(255))
     vat_account_id: Mapped[int | None] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT")
@@ -694,6 +736,12 @@ class OpenItem(Base):
     bank_transaction_id: Mapped[int | None] = mapped_column(
         ForeignKey("bank_transaction.id", ondelete="SET NULL")
     )
+    # Letzte Ausgleichsbuchung samt Betrag: wird diese Buchung storniert, lebt
+    # der Posten mit dem Betrag wieder auf (Storno-Hook).
+    settlement_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    settlement_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     reference: Mapped[str] = mapped_column(String(120), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
@@ -716,7 +764,10 @@ class OpenItem(Base):
     settled_by: Mapped[str | None] = mapped_column(String(120))
 
     account: Mapped[Account] = relationship()
-    journal_entry: Mapped[JournalEntry | None] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship(foreign_keys=[journal_entry_id])
+    settlement_journal_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[settlement_journal_entry_id]
+    )
     bank_transaction: Mapped[BankTransaction | None] = relationship()
 
 
@@ -1197,6 +1248,28 @@ class User(Base):
     )
 
     tenant: Mapped[Tenant | None] = relationship()
+
+
+class LoginAttempt(Base):
+    """Fehlgeschlagener UI-Login (Rate-Limit über alle Prozesse/Worker hinweg).
+
+    Pro (Benutzername, Client-Adresse) zählt das Login die Fehlversuche im
+    konfigurierten Zeitfenster; erfolgreiche Logins und die Admin-Entsperrung
+    löschen die Einträge.
+    """
+
+    __tablename__ = "login_attempt"
+    __table_args__ = (
+        Index("ix_login_attempt_username_addr", "username", "remote_addr"),
+        Index("ix_login_attempt_attempted_at", "attempted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
+    remote_addr: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class AuditLog(Base):

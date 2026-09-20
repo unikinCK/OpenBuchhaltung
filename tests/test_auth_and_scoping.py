@@ -660,6 +660,18 @@ def test_csrf_protection_blocks_posts_without_token(tmp_path):
     )
     assert ok.status_code == 302
 
+    # Der Login rotiert die Session samt CSRF-Token (Session-Fixation-Schutz):
+    # der alte Token ist danach ungültig, die nächste Seite liefert einen neuen.
+    stale_write = client.post(
+        "/tenants",
+        data={"tenant_name": "T", "company_name": "C GmbH", "_csrf_token": token},
+    )
+    assert stale_write.status_code == 400
+    client.get("/")
+    with client.session_transaction() as flask_session:
+        new_token = flask_session["_csrf_token"]
+    assert new_token != token
+
     # Schreibende UI-Requests ohne Token werden ebenfalls abgelehnt
     blocked_write = client.post(
         "/tenants", data={"tenant_name": "T", "company_name": "C GmbH"}
@@ -668,7 +680,7 @@ def test_csrf_protection_blocks_posts_without_token(tmp_path):
 
     ok_write = client.post(
         "/tenants",
-        data={"tenant_name": "T", "company_name": "C GmbH", "_csrf_token": token},
+        data={"tenant_name": "T", "company_name": "C GmbH", "_csrf_token": new_token},
     )
     assert ok_write.status_code == 302
 

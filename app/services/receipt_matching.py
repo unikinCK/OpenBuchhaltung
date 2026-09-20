@@ -22,6 +22,7 @@ Entscheidung, der Grund vermerkt das.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -56,6 +57,8 @@ from domain.models import (
     ReceiptMatchSuggestion,
     TaxCode,
 )
+
+logger = logging.getLogger(__name__)
 
 _CENT = Decimal("0.01")
 
@@ -224,10 +227,9 @@ def choose_match_llm(
         with urlopen(request, timeout=30) as response:
             body = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise ReceiptLLMError(
-            f"Abgleich-LLM antwortete mit HTTP {exc.code}: {detail}"
-        ) from exc
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        logger.warning("Abgleich-LLM antwortete mit HTTP %s: %s", exc.code, detail)
+        raise ReceiptLLMError(f"Abgleich-LLM antwortete mit HTTP {exc.code}.") from exc
     except URLError as exc:
         raise ReceiptLLMError("Abgleich-LLM ist nicht erreichbar.") from exc
     except json.JSONDecodeError as exc:
@@ -574,6 +576,9 @@ def book_new_booking_suggestion(
         )
     )
 
+    # commit=False: Buchung, Belegverknüpfung und Vorschlagsstatus werden
+    # gemeinsam persistiert — sonst bliebe bei einem Fehler eine Buchung ohne
+    # Beleg zurück und der Vorschlag könnte erneut gebucht werden.
     entry = create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -584,6 +589,7 @@ def book_new_booking_suggestion(
             changed_by=changed_by,
             lines=lines,
         ),
+        commit=False,
     )
 
     document.journal_entry_id = entry.id
