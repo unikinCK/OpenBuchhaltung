@@ -12,25 +12,55 @@
 #
 # Start: docker compose --profile proxy up -d caddy
 # Connector-URL in Claude Desktop: https://<MCP_DOMAIN>/mcp
+# Konfiguration neu laden (ohne Neustart):
+#   docker compose --profile proxy exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+# Globale Optionen. Für das optionale Rate-Limit (siehe unten) zusätzlich die
+# Direktiven-Reihenfolge festlegen:
+# {
+# 	order rate_limit before reverse_proxy
+# }
 
 {$MCP_DOMAIN} {
+	# Sicherheits-Header (der Endpunkt liefert nur JSON/SSE).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# ---------------------------------------------------------------------------
+	# IP-Allowlist — empfohlen für öffentliche Installationen.
+	# Der MCP-Endpunkt prüft zwar MCP_HTTP_AUTH_TOKEN (Bearer, wird unverändert
+	# durchgereicht), der Zugriff sollte aber zusätzlich auf bekannte Client-IPs
+	# oder ein VPN/Tailnet begrenzt sein. Aktivieren: die zwei Zeilen entkommentieren,
+	# IPs/CIDRs anpassen, Konfiguration neu laden (Befehl oben). Alle Anfragen von
+	# anderen Adressen enden mit 403, bevor sie den MCP-Server erreichen.
+	#
+	# @fremd not remote_ip 203.0.113.7 198.51.100.0/24
+	# respond @fremd "Forbidden" 403
+	# ---------------------------------------------------------------------------
+
+	# ---------------------------------------------------------------------------
+	# Rate-Limit — optional; benötigt das Modul github.com/mholt/caddy-ratelimit
+	# (Image aus deploy/caddy/Dockerfile bauen, siehe Kommentar dort) und die
+	# `order`-Zeile in den globalen Optionen. Beispiel: 60 Anfragen je Minute und
+	# Client-IP, darüber 429.
+	#
+	# rate_limit {
+	# 	zone mcp {
+	# 		key    {remote_host}
+	# 		events 60
+	# 		window 1m
+	# 	}
+	# }
+	# ---------------------------------------------------------------------------
+
 	reverse_proxy mcp:8090 {
 		# Der MCP-Server prüft den Origin-Header (DNS-Rebinding-Schutz, gedacht für
 		# direkten Browserzugriff). Hinter diesem vertrauenswürdigen Proxy entfernen
 		# wir den Header, damit der Connector zuverlässig zugelassen wird.
 		header_up -Origin
 	}
-
-	# Der MCP-Endpunkt prüft zusätzlich MCP_HTTP_AUTH_TOKEN. Der Proxy reicht den
-	# Authorization-Header unverändert durch. Für öffentliche Installationen sollte
-	# der Zugriff darüber hinaus auf bekannte Client-IPs oder ein VPN begrenzt werden.
-	# Zum Aktivieren die folgenden Zeilen entkommentieren und IPs anpassen:
-	#
-	# @erlaubt remote_ip 203.0.113.7 198.51.100.0/24
-	# handle @erlaubt {
-	# 	reverse_proxy mcp:8090 {
-	# 		header_up -Origin
-	# 	}
-	# }
-	# respond "Forbidden" 403
 }

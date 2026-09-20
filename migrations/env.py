@@ -21,7 +21,9 @@ if env_database_url:
     config.set_main_option("sqlalchemy.url", env_database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: sonst verstummen bereits erzeugte app.*-Logger
+    # für den Rest des Prozesses, wenn die App eine Migration in-process ausführt.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

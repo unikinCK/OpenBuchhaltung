@@ -549,7 +549,7 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       Login, Dummy-Hash gegen Timing-Enumeration, Mindestlänge 8 (S10);
       Audit-Events für Login/Fehlversuche/Token/Benutzeranlage/Passwort;
       Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) offen.
-- [ ] **Sprint 3 – Betrieb**: `redeploy.sh` auf Prod-Compose (O1);
+- [x] **Sprint 3 – Betrieb** *(umgesetzt 2026-09-20)*: `redeploy.sh` auf Prod-Compose (O1);
       `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
       + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,
       Logging-Konfiguration, Health mit DB-Check (O3, O7); Tags, CHANGELOG,

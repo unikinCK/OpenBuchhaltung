@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenBuchhaltung: tägliches Backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

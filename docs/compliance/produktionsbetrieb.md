@@ -60,6 +60,14 @@ Produktive Installationen muessen dokumentieren:
 - Backupziel
 - Log- und Monitoringziel
 
+Softwareversion, Commit und Migrationsstand liefert die Anwendung selbst:
+`GET /api/v1/health` gibt `version` (aus `pyproject.toml`, Release-Tag
+`v<Version>`), `commit`, die Alembic-Revision der Datenbank und den erwarteten
+Head aus; das Pruefermanifest enthaelt den Commit als `commit_sha`. `redeploy.sh`
+protokolliert Commit und Tag jedes Ausrollens, `backup.sh` legt sie in
+`meta.txt` jeder Sicherung ab. Die Aenderungen je Version stehen in
+`CHANGELOG.md`.
+
 ## 5. Benutzer und Berechtigungen
 
 Mindestanforderungen:
@@ -93,6 +101,86 @@ Empfehlungen:
 - regelmaessige Restore-Tests
 - Restore-Test mindestens jaehrlich und nach wesentlichen Infrastrukturwechseln
 
+### 6.1 Backup mit `backup.sh`
+
+`backup.sh` (Repo-Root) sichert den laufenden Produktions-Stack
+(`docker-compose.production.yml`) in ein Verzeichnis
+`BACKUP_DIR/openbuchhaltung-<JJJJMMTT-HHMMSS>/` (Default `./backups`):
+
+| Datei | Inhalt |
+|---|---|
+| `db.dump` | `pg_dump --format=custom` der Datenbank (Buchungen, Belegmetadaten, Audit-Log, Migrationsstand) |
+| `instance.tar.gz` | `/app/instance` aus dem Volume `app_data` (Belegdateien und -versionen) |
+| `meta.txt` | Zeitpunkt, Host, Git-Commit/-Tag, Alembic-Revision, PostgreSQL-Version, Image |
+| `SHA256SUMS` | Pruefsummen der drei Dateien |
+
+`BACKUP_KEEP` (Default 14) begrenzt die Anzahl aufbewahrter Sicherungen.
+`redeploy.sh` ruft `backup.sh` vor jedem `compose down` auf. Die Konfiguration
+(`.env`) wird nicht mitgesichert, weil sie Secrets enthaelt; sie ist getrennt
+(Secret Store) zu sichern. Das Backup-Verzeichnis gehoert verschluesselt (z. B.
+`age`/`gpg` oder verschluesseltes Volume) und getrennt vom Produktivsystem
+abgelegt; die Uebertragung erfolgt z. B. per `rsync`/`restic`.
+
+Taegliche Ausfuehrung: systemd-Timer `deploy/systemd/openbuchhaltung-backup.timer`
+(Installation siehe `deploy/systemd/README.md`), alternativ ein Cron-Eintrag
+`30 2 * * * cd /opt/openbuchhaltung && BACKUP_DIR=/var/backups/openbuchhaltung ./backup.sh`.
+Das Backup-Log (`journalctl -u openbuchhaltung-backup.service`) dient als Nachweis.
+
+### 6.2 Restore-Runbook
+
+Voraussetzung: ein Backup-Verzeichnis `B` mit gueltigen Pruefsummen
+(`cd B && sha256sum -c SHA256SUMS`) und der in `meta.txt` genannte Codestand.
+Alle Befehle im Repo-Root; `C` steht fuer
+`docker compose -f docker-compose.production.yml`.
+
+1. **Anlass dokumentieren** (Restore-Protokoll: Zeitpunkt, Grund, verwendetes
+   Backup, ausfuehrende Person).
+2. **Codestand herstellen:** `git checkout <git_commit oder Tag aus meta.txt>`;
+   danach `C build`. Wird ein aelteres Backup in einen neueren Codestand
+   eingespielt, uebernimmt Schritt 6 die Nachmigration.
+3. **Anwendung stoppen, Datenbank starten:** `C stop app` und `C up -d db`.
+4. **Datenbank zuruecksetzen und einspielen** (`openbuchhaltung` ist der
+   Superuser des mitgelieferten Images):
+   ```bash
+   C exec -T db psql -U openbuchhaltung -d postgres \
+     -c 'DROP DATABASE IF EXISTS openbuchhaltung;' \
+     -c 'CREATE DATABASE openbuchhaltung OWNER openbuchhaltung;'
+   C exec -T db pg_restore -U openbuchhaltung -d openbuchhaltung \
+     --no-owner --exit-on-error < B/db.dump
+   C exec -T db psql -U openbuchhaltung -d openbuchhaltung -Atc \
+     'SELECT version_num FROM alembic_version'   # muss alembic_revision aus meta.txt sein
+   ```
+5. **Belegablage einspielen** (ersetzt den Inhalt des Volumes `app_data`):
+   ```bash
+   C run --rm --no-deps -T --user root app sh -c \
+     'rm -rf /app/instance/* && tar -xzf - -C /app && chown -R app:app /app/instance' \
+     < B/instance.tar.gz
+   ```
+6. **Schema auf den Codestand bringen:** `C run --rm app alembic upgrade head`
+   (ohne Aenderung, wenn Backup und Code zusammenpassen).
+7. **Starten und pruefen:** `C up -d`, dann
+   `curl -s http://127.0.0.1:8000/api/v1/health` (erwartet `"status": "ok"`,
+   `schema.up_to_date: true`) und die Integritaetspruefung
+   `C exec app flask --app run.py verify-integrity` (Buchungshashes, Belegdateien,
+   Audit-Hashkette). Anschliessend fachlicher Smoke-Test (Anmeldung, Journal,
+   Belegansicht, Bericht).
+8. **Protokoll abschliessen** (Ergebnis, Abweichungen, Dauer). Bei
+   Restore-**Tests** anschliessend die Testinstanz wieder entfernen
+   (`C down -v` nur auf der Testinstanz!).
+
+Fuer einen Restore-Test ohne Eingriff in die Produktion denselben Ablauf mit einem
+eigenen Compose-Projekt ausfuehren (`COMPOSE_PROJECT_NAME=obk-restoretest`,
+`APP_PORT=18000`); Volumes und Container bleiben dadurch getrennt.
+
+### 6.3 Automatisierte Integritaetspruefung
+
+`deploy/systemd/openbuchhaltung-verify-integrity.timer` fuehrt taeglich
+`flask --app run.py verify-integrity` im laufenden `app`-Container aus. Der Lauf
+migriert nichts (`DB_AUTO_MIGRATE=0`) und endet bei Abweichungen mit Fehlerstatus,
+sodass die Unit als `failed` sichtbar wird (`systemctl --failed`,
+`journalctl -u openbuchhaltung-verify-integrity.service`). Das Journal ist das
+Pruefprotokoll im Sinne von Abschnitt 3.
+
 ## 7. Updates und Migrationen
 
 Vor jedem Update:
@@ -107,6 +195,23 @@ Vor jedem Update:
 8. Updateprotokoll ablegen.
 
 Migrationen muessen fail-fast abbrechen, wenn ein nicht erwarteter Datenbankzustand erkannt wird.
+
+Referenzablauf mit `redeploy.sh` (nur `docker-compose.production.yml`):
+
+1. `git pull --ff-only`; Commit und Release-Tag werden ausgegeben und gehoeren ins
+   Updateprotokoll.
+2. Backup der laufenden Instanz ueber `backup.sh` (vor dem Stoppen).
+3. `compose down`, `compose build` (Commit als Build-Arg), Eigentuemer der
+   Belegablage im Volume korrigieren.
+4. `alembic upgrade head` als eigener, einmaliger Schritt. Der `app`-Service laeuft
+   mit `DB_AUTO_MIGRATE=0`, migriert also nie selbst und startet nicht, wenn das
+   Schema nicht auf dem erwarteten Head steht (fail-fast statt Schemafehler im
+   Betrieb; kein Rennen zwischen mehreren Workern).
+5. `compose up -d` und Warten auf den Health-Check (`/api/v1/health`).
+6. Nachtest: `verify-integrity` (siehe 6.3) und fachlicher Smoke-Test.
+
+Schlaegt die Migration fehl, bleibt die Anwendung gestoppt; Rueckweg ist das
+Restore aus Schritt 2 (Abschnitt 6.2) mit dem vorherigen Codestand.
 
 ## 8. Direkte Datenbankeingriffe
 
@@ -139,8 +244,14 @@ flask --app run.py verify-integrity
 
 Der Befehl kontrolliert festgeschriebene Buchungen, Belegdateien und
 Audit-Hashketten. Er beendet sich bei erkannten Abweichungen mit einem
-Fehlerstatus und eignet sich damit fuer Monitoring. Die engere Pruefung
+Fehlerstatus und eignet sich damit fuer Monitoring; die taegliche Ausfuehrung
+uebernimmt der systemd-Timer aus Abschnitt 6.3. Die engere Pruefung
 `verify-audit-log` bleibt fuer gezielte Audit-Diagnosen verfuegbar.
+
+Anwendungslogs tragen je Eintrag die Request-ID (`X-Request-ID`, vom
+Reverse-Proxy uebernommen oder erzeugt und in der Antwort zurueckgegeben); mit
+`LOG_FORMAT=json` lassen sie sich strukturiert in eine zentrale Protokollablage
+uebernehmen. Der gunicorn-Access-Log enthaelt Dauer und Request-ID jedes Aufrufs.
 
 ## 10. Export und Weitergabe an Dritte
 
