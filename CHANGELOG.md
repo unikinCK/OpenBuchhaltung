@@ -8,6 +8,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Betrieb
+
+- Overlay `docker-compose.nginx.yml`: nginx-Reverse-Proxy mit Let's-Encrypt-Zertifikat
+  (certbot, HTTP-01) für eine öffentlich erreichbare Instanz — Web-UI, REST-API und
+  `/mcp` unter einer Domain (`PUBLIC_DOMAIN`), Login-Drossel, Platzhalter-Zertifikat
+  bis zur ersten Ausstellung, automatische Erneuerung und nginx-Reload.
+- `redeploy.sh`/`backup.sh` lesen `COMPOSE_FILE` auch aus der `.env` und akzeptieren
+  mehrere Compose-Dateien (`:`-getrennt); Host-Port des MCP-Servers per `MCP_PORT`.
+
 ## [0.1.0] – 2026-09-20
 
 Erstes versioniertes Release. Fasst den bis dahin auf `main` erreichten Stand
