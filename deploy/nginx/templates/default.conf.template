@@ -57,9 +57,7 @@ server {
 
     client_max_body_size ${NGINX_CLIENT_MAX_BODY_SIZE};
 
-    # HSTS, Cookie-Secure-Flag & Co. setzt die App selbst (APP_ENV=production).
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "same-origin" always;
+    # Sicherheits-Header (HSTS, nosniff, Referrer-Policy, CSP) setzt die App selbst.
 
     proxy_http_version 1.1;
     proxy_set_header Connection "";
