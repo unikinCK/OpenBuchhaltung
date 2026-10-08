@@ -136,6 +136,7 @@ Jeder Testfall sollte dokumentieren:
 | T-CTL-003 | Inaktive oder ungültige Einheit kontieren | Buchung wird abgewiesen | automatisiert | hoch |
 | T-CTL-004 | Buchung festschreiben und stornieren | Dimensionen sind gehasht und werden gespiegelt | automatisiert | hoch |
 | T-CTL-005 | Controlling-Berichte | Erlöse, Aufwand und Ergebnis stimmen je Einheit | automatisiert | hoch |
+| T-CTL-006 | Controlling-Berichte mit SKR03/SKR04 | Erlöskonten vom Typ `income` zählen in UI, API und CSV als Erlös | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 
