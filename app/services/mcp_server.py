@@ -506,10 +506,15 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="check_account_chart",
         description=(
-            "Prüft den Kontenplan einer Gesellschaft, ohne etwas zu ändern: meldet "
-            "Altkonten aus dem bis Oktober 2026 fehlerhaften SKR04-Import (SKR03-Nummern "
-            "wie 1000 Kasse, 1200 Bank, 8000 Erlöse) mit richtiger SKR04-Nummer, "
-            "Buchungsanzahl und Saldo sowie Konten mit unbekannter Kontoart."
+            "Prüft den Kontenplan einer Gesellschaft, ohne etwas zu ändern. Nach dem bis "
+            "Oktober 2026 fehlerhaften SKR04-Import (SKR04-Steuerkonten neben SKR03-Nummern "
+            "wie 1000 Kasse, 1200 Bank, 8000 Erlöse) bestimmt sie den vorherrschenden "
+            "Kontenrahmen (dominant_chart, chart_evidence) und meldet je Konto Gegenkonto, "
+            "Buchungsanzahl und Saldo: bei SKR04 die SKR03-nummerierten Altkonten "
+            "(legacy_skr04_accounts), bei SKR03 die SKR04-nummerierten Fremdkonten "
+            "(foreign_skr04_accounts, mit verweisenden Steuercodes) und als Hinweis "
+            "Nicht-Standardnummern wie 6200/8000 (nonstandard_skr03_accounts). Dazu Konten "
+            "mit unbekannter Kontoart."
         ),
         input_schema={
             "type": "object",

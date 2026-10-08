@@ -1440,18 +1440,32 @@ Kontenrahmen (`app/services/standard_accounts.py`).
 
 Bis Oktober 2026 war `data/kontenrahmen/skr04.csv` fehlerhaft: Neben echten
 SKR04-Konten (Vorsteuer 1406/1401, Umsatzsteuer 3806/3801, Privat 2100/2180,
-Gewinnvortrag 2970) legte der Import Kasse, Bank, Geldtransit, Forderungen,
-Verbindlichkeiten, Aufwendungen und Erlöse unter SKR03-Nummern an (z. B. 1000
-Kasse, 1200 Bank, 1600 Verbindlichkeiten, 8000 Umsatzerlöse) und machte aus
-„Gas, Strom, Wasser“ das Konto 4240 „Gas“ mit der Kontoart „Strom“.
+Gewinnvortrag 2970, Technische Anlagen 0420) legte der Import Kasse, Bank,
+Geldtransit, Forderungen, Verbindlichkeiten, Aufwendungen und Erlöse unter
+SKR03-Nummern an (z. B. 1000 Kasse, 1200 Bank, 1600 Verbindlichkeiten, 8000
+Umsatzerlöse) und machte aus „Gas, Strom, Wasser“ das Konto 4240 „Gas“ mit der
+Kontoart „Strom“.
 
 Betroffene Gesellschaften werden **nicht automatisch umgebaut** — Kontonummern
 sind unveränderlich (GoBD, Kontenhistorie). Die **Kontenrahmen-Prüfung** (Seite
 **Konten**, `GET /api/v1/account-chart/check?company_id=…`, MCP-Tool
-`check_account_chart`) erkennt eine SKR04-Gesellschaft an ihren
-SKR04-Steuerkonten und listet je Altkonto die richtige SKR04-Nummer, die
-Buchungsanzahl, den Saldo und welches Konto die SKR04-Nummer derzeit belegt;
-zusätzlich Konten mit unbekannter Kontoart. Vorgehen:
+`check_account_chart`) ändert nichts. Sie erkennt einen SKR04-Import an den
+SKR04-Steuerkonten und bestimmt dann den **vorherrschenden Kontenrahmen**
+(`dominant_chart`, Begründung in `chart_evidence`). Dafür zählen die Konten
+außerhalb des alten Imports, deren Nummernbereich nur in einem Kontenrahmen zur
+Kontoart passt, samt ihren Buchungszeilen: im SKR03 etwa Kapital und
+Rückstellungen in 0xxx, Verbindlichkeiten in 16xx–17xx, Aufwendungen in
+3xxx–4xxx und Erlöse in 8xxx; im SKR04 Eigenkapital in 2xxx, Fremdkapital in
+3xxx, Erträge in 4xxx und Aufwendungen in 5xxx–7xxx. Die Konten des alten
+Imports zählen nicht, sie stehen in beiden Fällen im Kontenplan. Ohne eigene
+Konten gilt der importierte SKR04. Zusätzlich meldet die Prüfung Konten mit
+unbekannter Kontoart.
+
+#### SKR04 vorherrschend: Altkonten unter SKR03-Nummern
+
+`legacy_skr04_accounts` listet je Altkonto die richtige SKR04-Nummer, die
+Buchungsanzahl, den Saldo und welches Konto die SKR04-Nummer derzeit belegt.
+Vorgehen:
 
 1. Fehlende SKR04-Konten anlegen, am einfachsten per erneutem Import von SKR04
    (vorhandene Nummern werden übersprungen).
@@ -1465,17 +1479,73 @@ zusätzlich Konten mit unbekannter Kontoart. Vorgehen:
    Buchungen lässt sich alternativ umbenennen, wenn die Kontoart passt
    (1200 „Bank“ → „Forderungen aus Lieferungen und Leistungen“, beide `asset`).
 
-Deaktivierte Altkonten ohne Saldo gelten als erledigt und verschwinden aus der
-Prüfung.
+#### SKR03 vorherrschend: SKR04-Fremdkonten
 
-Zwei Ergänzungen zum Vorgehen:
+Bucht die Gesellschaft nach dem Import faktisch SKR03, sind umgekehrt die
+SKR04-Nummern falsch. `foreign_skr04_accounts` nennt je Fremdkonto das
+SKR03-Gegenkonto, die Bedeutung der Nummer im SKR03, Buchungsanzahl, Saldo, die
+Belegung der SKR03-Nummer und die Steuercodes, die auf das Konto verweisen
+(Nummern laut DATEV-Kontenrahmen SKR03 2026, Art.-Nr. 11174):
 
+| Fremdkonto (SKR04) | Nummer im SKR03 | SKR03-Gegenkonto |
+| --- | --- | --- |
+| 0420 Technische Anlagen und Maschinen | Büroeinrichtung | 0200 Technische Anlagen und Maschinen |
+| 1401 / 1406 Abziehbare Vorsteuer 7 % / 19 % | reserviert | 1571 / 1576 Abziehbare Vorsteuer 7 % / 19 % |
+| 2100 Privatentnahmen | Zinsen und ähnliche Aufwendungen | 1800 Privatentnahmen allgemein |
+| 2180 Privateinlagen | nicht vergeben | 1890 Privateinlagen |
+| 2970 Gewinnvortrag vor Verwendung | nicht vergeben | 0860 Gewinnvortrag vor Verwendung |
+| 3801 / 3806 Umsatzsteuer 7 % / 19 % | nicht vergeben | 1771 / 1776 Umsatzsteuer 7 % / 19 % |
+
+Vorgehen:
+
+1. Fehlende SKR03-Konten einzeln anlegen (**Konten** → „Konto anlegen“,
+   `POST /api/v1/accounts`, MCP `create_account`), mit der Kontoart des
+   Fremdkontos. Ein Import des ganzen SKR03 legte weitere Konten an.
+2. Fremdkonten ohne Buchungen deaktivieren.
+3. Salden zum Stichtag per Umbuchung auf das SKR03-Konto übertragen, danach das
+   Fremdkonto deaktivieren. Den Gewinnvortrag vor dem nächsten Jahresabschluss
+   umbuchen: Solange 2970 aktiv ist, bucht der Abschluss das Ergebnis dorthin,
+   danach auf 0860.
+4. **Steuerkonten, auf die ein Steuercode verweist** (`tax_codes`), nicht
+   umbuchen: Die UStVA erkennt Umsatz- und Vorsteuerzeilen über die Steuerkonten
+   der Steuercodes — eine Umbuchung von 1406 auf 1576 minderte die Vorsteuer des
+   Umbuchungszeitraums. Steuercodes lassen sich derzeit nicht auf ein anderes
+   Steuerkonto umstellen; bis dahin bleiben diese Konten in Gebrauch. Gibt es noch
+   keine Steuercodes, zuerst die SKR03-Steuerkonten anlegen —
+   `POST /api/v1/tax-codes/defaults` (MCP `ensure_default_tax_codes`) verknüpft
+   dann 1776/1771/1576/1571.
+
+Als **Hinweis** (`nonstandard_skr03_accounts`, ohne Einfluss auf `ok`) nennt die
+Prüfung außerdem SKR03-Nummern der alten Datei, die laut DATEV ein anderes Konto
+bezeichnen oder kein Einzelkonto sind:
+
+| Konto (alter Import) | Nummer im SKR03 | SKR03-Standardkonto |
+| --- | --- | --- |
+| 0400 Immaterielle Vermögensgegenstände | Betriebsausstattung | 0010 Entgeltlich erworbene Konzessionen, gewerbliche Schutzrechte … |
+| 3400 Fremdleistungen | Wareneingang 19 % Vorsteuer (Automatikkonto) | 3100 Fremdleistungen |
+| 4800 Instandhaltung betrieblicher Räume | Reparaturen und Instandhaltungen von technischen Anlagen und Maschinen | 4260 Instandhaltung betrieblicher Räume |
+| 6200 Abschreibungen auf Sachanlagen | kein Einzelkonto (Bereich 6000–6999 „Sonstige betriebliche Aufwendungen“) | 4830 Abschreibungen auf Sachanlagen (ohne AfA auf Fahrzeuge und Gebäude) |
+| 8000 Umsatzerlöse 19 % USt | kein Einzelkonto (Bereich 8000–8099 „Umsatzerlöse (zur freien Verfügung)“) | 8400 Erlöse 19 % USt |
+
+Konten ohne Buchungen deaktivieren oder in die DATEV-Bezeichnung ihrer Nummer
+umbenennen (0400, 3400, 4800); bei Konten mit Buchungen den Saldo auf das
+Standardkonto umbuchen und das Konto deaktivieren.
+
+#### Für beide Richtungen
+
+- Deaktivierte Konten ohne Saldo gelten als erledigt und verschwinden aus der
+  Prüfung.
+- Inaktive Konten lassen sich nicht bebuchen: Konten, die Anlagen (Anlage- oder
+  AfA-Konto), Bankregeln oder Buchungsvorlagen noch verwenden, erst deaktivieren,
+  wenn sie dort nicht mehr gebraucht werden.
 - **Konto 4240 „Gas“ mit Kontoart „Strom“** zuerst unter **Konten** auf die
   Kontoart `expense` (und die Bezeichnung „Gas, Strom, Wasser“) korrigieren. Dann
-  zählen die bisherigen Buchungen in der GuV ihrer jeweiligen Periode, und die
-  anschließende Umbuchung auf 6325 ist erfolgsneutral.
-- **Sammelkonten für Geschäftspartner** auf den SKR04-Konten kennzeichnen
-  (Forderungen aLuL `1200` bzw. die gewählte Ersatznummer, Verbindlichkeiten aLuL
-  `3300`). Das Kennzeichen eines Altkontos lässt sich nicht mehr entfernen,
-  sobald darauf Buchungszeilen mit Partner stehen; es bleibt dann einfach
-  bestehen, bis das Altkonto ausgeglichen und deaktiviert ist.
+  zählen die bisherigen Buchungen in der GuV ihrer jeweiligen Periode. Im SKR04
+  ist die anschließende Umbuchung auf 6325 erfolgsneutral, im SKR03 ist 4240
+  bereits das richtige Konto.
+- **Sammelkonten für Geschäftspartner** auf den Forderungs- und
+  Verbindlichkeitskonten des vorherrschenden Kontenrahmens kennzeichnen (SKR04:
+  `1200` bzw. die gewählte Ersatznummer und `3300`; SKR03: `1400` und `1600`).
+  Das Kennzeichen eines Altkontos lässt sich nicht mehr entfernen, sobald darauf
+  Buchungszeilen mit Partner stehen; es bleibt dann einfach bestehen, bis das
+  Altkonto ausgeglichen und deaktiviert ist.
