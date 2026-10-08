@@ -19,7 +19,10 @@ Ein Konto zählt deshalb über seine Bezeichnung oder nur dann über die Nummer,
 wenn die Kontoart die Verwechslung ausschließt. Unter mehreren Treffern gewinnt
 die Standardnummer, SKR04 vor SKR03: Die SKR04-Nummern tragen im SKR03 nie diese
 Bedeutung, beide Varianten stehen nur nach dem fehlerhaften SKR04-Import (siehe
-``account_chart_check``) nebeneinander — dann ist die SKR04-Nummer die richtige.
+``account_chart_check``) nebeneinander. Folgt die Gesellschaft dem SKR04, ist die
+SKR04-Nummer die richtige; folgt sie dem SKR03, greift die SKR03-Nummer, sobald
+das SKR04-Konto nach der Umbuchung deaktiviert ist (etwa 0860 statt 2970 beim
+Jahresabschluss).
 """
 
 from __future__ import annotations

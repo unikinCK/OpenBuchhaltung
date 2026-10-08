@@ -1,5 +1,6 @@
 """SKR04-Kontenrahmen: gebündelte CSV, kontenrahmensichere Funktionskonten und
-Kontenrahmen-Prüfung für Altbestände des fehlerhaften SKR04-Imports."""
+Kontenrahmen-Prüfung für Altbestände des fehlerhaften SKR04-Imports — bei
+SKR04- wie bei SKR03-Buchhaltung."""
 
 from __future__ import annotations
 
@@ -15,7 +16,11 @@ from sqlalchemy.orm import Session
 
 from app import create_app
 from app.auth import hash_password
-from app.services.account_chart_check import LEGACY_SKR04_ACCOUNTS, check_account_chart
+from app.services.account_chart_check import (
+    FOREIGN_SKR04_ACCOUNTS,
+    LEGACY_SKR04_ACCOUNTS,
+    check_account_chart,
+)
 from app.services.account_chart_import import (
     BUNDLED_ACCOUNT_CHART_FILES,
     import_bundled_account_chart,
@@ -107,6 +112,56 @@ LEGACY_SKR04_IMPORT = (
     ("2970", "Gewinnvortrag vor Verwendung", "equity"),
 )
 
+# Gesellschaft, die nach dem fehlerhaften Import faktisch SKR03 bucht (Muster: unikin
+# GmbH, Oktober 2026): 4240 bereits repariert, alle eigenen Konten mit SKR03-Nummern.
+SKR03_AFTER_LEGACY_IMPORT = tuple(
+    ("4240", "Gas, Strom, Wasser", "expense") if code == "4240" else (code, name, account_type)
+    for code, name, account_type in LEGACY_SKR04_IMPORT
+) + (
+    ("0410", "Büro- und Geschäftsausstattung", "asset"),
+    ("0800", "Gezeichnetes Kapital", "equity"),
+    ("0840", "Kapitalrücklage", "equity"),
+    ("0956", "Gewerbesteuerrückstellung", "liability"),
+    ("0963", "Körperschaftsteuerrückstellung", "liability"),
+    ("0970", "Sonstige Rückstellungen", "liability"),
+    ("1210", "ING Girokonto", "asset"),
+    ("1545", "Umsatzsteuerforderungen", "asset"),
+    ("1574", "Abziehbare Vorsteuer aus innergemeinschaftlichem Erwerb 19 %", "asset"),
+    ("1774", "Umsatzsteuer aus innergemeinschaftlichem Erwerb 19 %", "liability"),
+    ("1790", "Umsatzsteuer Vorjahr", "liability"),
+    ("2650", "Sonstige Zinsen und ähnliche Erträge", "income"),
+    ("4380", "Beiträge (Kammern, Verbände)", "expense"),
+    ("4650", "Bewirtungskosten (abziehbar 70 %)", "expense"),
+    ("4660", "Reisekosten Arbeitnehmer", "expense"),
+    ("4806", "EDV-Kosten (Software, Cloud- und KI-Dienste)", "expense"),
+    ("4930", "Bürobedarf", "expense"),
+    ("4950", "Rechts- und Beratungskosten", "expense"),
+    ("4985", "Werkzeuge und Kleingeräte", "expense"),
+    ("8125", "Steuerfreie innergemeinschaftliche Lieferungen § 4 Nr. 1b UStG", "income"),
+    ("8336", "Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen", "income"),
+)
+
+# Buchungen (Soll, Haben, Betrag) wie bei der unikin GmbH: eigene SKR03-Konten, aber
+# auch Vorsteuer, Umsatzsteuer, Gewinnvortrag, AfA und Erlöse aus dem alten Import.
+SKR03_BOOKINGS = (
+    ("1200", "0800", "25000.00"),
+    ("1200", "0840", "759.90"),
+    ("4950", "0970", "1000.00"),
+    ("1200", "2970", "1335.83"),
+    ("4806", "1200", "500.00"),
+    ("4806", "1200", "250.00"),
+    ("4806", "1200", "156.69"),
+    ("1406", "1200", "172.16"),
+    ("1401", "1200", "1.92"),
+    ("4985", "1200", "2315.44"),
+    ("1400", "8336", "20000.00"),
+    ("1400", "8336", "20761.67"),
+    ("1400", "8000", "6315.13"),
+    ("1400", "3806", "1199.87"),
+    ("6200", "0410", "3978.78"),
+    ("1210", "2650", "158.25"),
+)
+
 
 @pytest.fixture()
 def session() -> Session:
@@ -149,7 +204,14 @@ def _accounts_by_code(session: Session, company: Company) -> dict[str, Account]:
     }
 
 
-def _book(session: Session, company: Company, entry_date: date, debit: Account, credit: Account):
+def _book(
+    session: Session,
+    company: Company,
+    entry_date: date,
+    debit: Account,
+    credit: Account,
+    amount: str = "100.00",
+):
     return create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -158,8 +220,8 @@ def _book(session: Session, company: Company, entry_date: date, debit: Account, 
             description="Testbuchung",
             status="posted",
             lines=[
-                JournalLineInput(debit.id, Decimal("100.00"), Decimal("0.00")),
-                JournalLineInput(credit.id, Decimal("0.00"), Decimal("100.00")),
+                JournalLineInput(debit.id, Decimal(amount), Decimal("0.00")),
+                JournalLineInput(credit.id, Decimal("0.00"), Decimal(amount)),
             ],
         ),
     )
@@ -384,6 +446,14 @@ def test_check_reports_legacy_skr04_accounts(session: Session) -> None:
 
     assert result["ok"] is False
     assert result["skr04_markers"] == ["1401", "1406", "3801", "3806", "2970"]
+    # Nur der alte Import, keine eigenen Konten: Es gilt der importierte SKR04.
+    assert result["dominant_chart"] == "skr04"
+    assert result["chart_evidence"] == {
+        "skr03": {"accounts": 0, "posting_count": 0},
+        "skr04": {"accounts": 0, "posting_count": 0},
+    }
+    assert result["foreign_skr04_accounts"] == []
+    assert result["nonstandard_skr03_accounts"] == []
     rows = {row["code"]: row for row in result["legacy_skr04_accounts"]}
     assert set(rows) == {legacy.code for legacy in LEGACY_SKR04_ACCOUNTS}
     # 0420 „Technische Anlagen und Maschinen“ liegt im SKR04 richtig (0400er-Gruppe).
@@ -426,12 +496,10 @@ def test_check_marks_skr04_accounts_added_by_reimport(session: Session) -> None:
     # Belegte Nummern (u. a. 1200 Bank, 1600 Verbindlichkeiten) werden übersprungen.
     assert (report.imported_rows, report.duplicate_rows) == (21, 9)
 
-    rows = {
-        row["code"]: row
-        for row in check_account_chart(session=session, company_id=company.id)[
-            "legacy_skr04_accounts"
-        ]
-    }
+    result = check_account_chart(session=session, company_id=company.id)
+    assert result["dominant_chart"] == "skr04"
+    assert result["chart_evidence"]["skr04"] == {"accounts": 18, "posting_count": 0}
+    rows = {row["code"]: row for row in result["legacy_skr04_accounts"]}
     assert (rows["1200"]["skr04_status"], rows["1200"]["skr04_account"]["name"]) == (
         "present",
         "Bank",
@@ -457,9 +525,179 @@ def test_check_accepts_bundled_charts(session: Session, chart: str) -> None:
 
     assert result["ok"] is True
     assert result["legacy_skr04_accounts"] == []
+    assert result["foreign_skr04_accounts"] == []
+    assert result["nonstandard_skr03_accounts"] == []
     assert result["unknown_account_types"] == []
     # SKR03 enthält 1000 Kasse/1200 Bank regulär — ohne SKR04-Merkmale kein Befund.
     assert bool(result["skr04_markers"]) is (chart == "skr04")
+    assert result["dominant_chart"] == ("skr04" if chart == "skr04" else None)
+
+
+# --- Kontenrahmen-Prüfung: SKR03-Buchhaltung nach dem alten SKR04-Import --------
+
+
+def _skr03_company(
+    session: Session, name: str = "SKR03 nach Altimport GmbH"
+) -> tuple[Company, dict[str, Account]]:
+    company = _company(session, name)
+    accounts = _add_accounts(session, company, SKR03_AFTER_LEGACY_IMPORT)
+    for debit, credit, amount in SKR03_BOOKINGS:
+        _book(session, company, date(2026, 6, 30), accounts[debit], accounts[credit], amount)
+    return company, accounts
+
+
+def test_check_detects_skr03_and_reports_foreign_skr04_accounts(session: Session) -> None:
+    company, _ = _skr03_company(session)
+
+    result = check_account_chart(session=session, company_id=company.id)
+
+    assert result["ok"] is False
+    assert result["dominant_chart"] == "skr03"
+    # Es zählen nur eigene Konten mit eindeutigem Bereich: 0800–0970, 1774/1790, 2650,
+    # 4xxx und 8xxx. Bank-, Forderungs- und Steuerkonten der Klassen 0/1 sowie die
+    # Konten des alten Imports bleiben außen vor.
+    assert result["chart_evidence"] == {
+        "skr03": {"accounts": 17, "posting_count": 11},
+        "skr04": {"accounts": 0, "posting_count": 0},
+    }
+    # Die SKR03-Nummern des alten Imports sind hier richtig: keine Altkonten.
+    assert result["legacy_skr04_accounts"] == []
+    rows = {row["code"]: row for row in result["foreign_skr04_accounts"]}
+    assert {code: row["skr03_code"] for code, row in rows.items()} == {
+        "0420": "0200",
+        "1401": "1571",
+        "1406": "1576",
+        "2100": "1800",
+        "2180": "1890",
+        "2970": "0860",
+        "3801": "1771",
+        "3806": "1776",
+    }
+    assert {
+        code: (row["posting_count"], row["balance"])
+        for code, row in rows.items()
+        if row["posting_count"]
+    } == {
+        "1401": (1, "1.92"),
+        "1406": (1, "172.16"),
+        "2970": (1, "-1335.83"),
+        "3806": (1, "-1199.87"),
+    }
+    assert (rows["2970"]["skr03_name"], rows["2970"]["skr03_status"]) == (
+        "Gewinnvortrag vor Verwendung",
+        "missing",
+    )
+    assert rows["2970"]["skr03_account"] is None
+    # Was die SKR04-Nummer im SKR03 bedeutet (DATEV-Kontenrahmen SKR03 2026).
+    assert rows["2100"]["skr03_meaning"] == "Zinsen und ähnliche Aufwendungen"
+    assert rows["1406"]["skr03_meaning"] == "reserviert"
+    assert rows["0420"]["skr03_meaning"] == "Büroeinrichtung"
+    assert rows["3806"]["skr03_meaning"] is None
+    assert all(row["tax_codes"] == [] for row in rows.values())
+
+    hints = {row["code"]: row for row in result["nonstandard_skr03_accounts"]}
+    assert {code: row["skr03_code"] for code, row in hints.items()} == {
+        "0400": "0010",
+        "3400": "3100",
+        "4800": "4260",
+        "6200": "4830",
+        "8000": "8400",
+    }
+    assert (hints["6200"]["posting_count"], hints["6200"]["balance"]) == (1, "3978.78")
+    assert (hints["8000"]["posting_count"], hints["8000"]["balance"]) == (1, "-6315.13")
+    assert hints["8000"]["skr03_name"] == "Erlöse 19 % USt"
+    assert hints["3400"]["skr03_meaning"].startswith("Wareneingang 19 % Vorsteuer")
+    assert len(result["warnings"]) == 2
+
+
+def test_check_follows_skr03_cleanup(session: Session) -> None:
+    company, accounts = _skr03_company(session)
+    added = _add_accounts(
+        session,
+        company,
+        [
+            ("0860", "Gewinnvortrag vor Verwendung", "equity"),
+            ("1576", "Abziehbare Vorsteuer 19 %", "asset"),
+            ("4830", "Abschreibungen auf Sachanlagen", "expense"),
+        ],
+    )
+    # Solange 2970 aktiv ist, bucht der Jahresabschluss dorthin.
+    assert _find_retained_earnings_account(session, company.id).code == "2970"
+    _book(session, company, date(2026, 7, 1), accounts["2970"], added["0860"], "1335.83")
+    for code in ("0420", "2100", "2180", "2970", "3801", "3400"):
+        accounts[code].is_active = False
+    accounts["4800"].name = "Reparaturen und Instandhaltungen von technischen Anlagen und Maschinen"
+    session.commit()
+
+    result = check_account_chart(session=session, company_id=company.id)
+
+    assert result["dominant_chart"] == "skr03"
+    rows = {row["code"]: row for row in result["foreign_skr04_accounts"]}
+    # Deaktiviert und ausgeglichen gilt als erledigt — auch der umgebuchte Gewinnvortrag.
+    assert set(rows) == {"1401", "1406", "3806"}
+    assert (rows["1406"]["skr03_status"], rows["1406"]["skr03_account"]["code"]) == (
+        "present",
+        "1576",
+    )
+    assert rows["1401"]["skr03_status"] == "missing"
+    hints = {row["code"]: row for row in result["nonstandard_skr03_accounts"]}
+    # 3400 ohne Buchungen deaktiviert, 4800 in die DATEV-Bezeichnung umbenannt.
+    assert set(hints) == {"0400", "6200", "8000"}
+    assert hints["6200"]["skr03_status"] == "present"
+    assert _find_retained_earnings_account(session, company.id).code == "0860"
+
+
+def test_check_stays_skr03_after_skr04_reimport(session: Session) -> None:
+    # Wer der früheren Empfehlung folgte und den korrigierten SKR04 nachimportierte,
+    # bucht weiter SKR03: Unbebuchte SKR04-Konten überstimmen das nicht.
+    company, _ = _skr03_company(session)
+    report = import_bundled_account_chart(session=session, company_id=company.id, chart="skr04")
+    assert report.imported_rows == 21
+
+    result = check_account_chart(session=session, company_id=company.id)
+
+    assert result["dominant_chart"] == "skr03"
+    assert result["chart_evidence"]["skr04"] == {"accounts": 18, "posting_count": 0}
+    assert result["legacy_skr04_accounts"] == []
+    rows = {row["code"]: row for row in result["foreign_skr04_accounts"]}
+    # SKR04 1800 „Bank“ belegt die SKR03-Nummer der Privatentnahmen …
+    assert rows["2100"]["skr03_status"] == "occupied"
+    assert rows["2100"]["skr03_account"]["name"] == "Bank"
+    # … und SKR04 4830 „Sonstige betriebliche Erträge“ die SKR03-AfA auf Sachanlagen.
+    hints = {row["code"]: row for row in result["nonstandard_skr03_accounts"]}
+    assert hints["6200"]["skr03_status"] == "occupied"
+
+
+def test_check_keeps_skr04_despite_single_skr03_account(session: Session) -> None:
+    # Ein versehentlich mit SKR03-Nummer angelegtes Konto kippt keinen SKR04-Kontenplan.
+    company = _company(session)
+    import_bundled_account_chart(session=session, company_id=company.id, chart="skr04")
+    bank = _accounts_by_code(session, company)["1800"]
+    capital = _add_accounts(session, company, [("0800", "Gezeichnetes Kapital", "equity")])
+    _book(session, company, date(2026, 1, 2), bank, capital["0800"], "25000.00")
+
+    result = check_account_chart(session=session, company_id=company.id)
+
+    assert result["dominant_chart"] == "skr04"
+    assert result["chart_evidence"]["skr03"] == {"accounts": 1, "posting_count": 1}
+    assert result["ok"] is True
+    assert result["foreign_skr04_accounts"] == []
+
+
+def test_check_warns_about_tax_codes_on_foreign_tax_accounts(session: Session) -> None:
+    company, _ = _skr03_company(session)
+    # Ohne SKR03-Steuerkonten verknüpfen die Standard-Steuercodes die SKR04-Nummern.
+    ensure_default_tax_codes(session=session, company=company)
+    session.commit()
+
+    result = check_account_chart(session=session, company_id=company.id)
+
+    assert {
+        row["code"]: row["tax_codes"]
+        for row in result["foreign_skr04_accounts"]
+        if row["tax_codes"]
+    } == {"1401": ["VSt7"], "1406": ["VSt19"], "3801": ["USt7"], "3806": ["USt19"]}
+    assert any(warning.startswith("Steuerkonten mit Steuercode") for warning in result["warnings"])
 
 
 # --- API, MCP-Pfad und UI -----------------------------------------------------
@@ -502,7 +740,18 @@ def test_check_api_endpoint(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is False
+    assert payload["dominant_chart"] == "skr04"
     assert {"1000", "1200", "8000"} <= {row["code"] for row in payload["legacy_skr04_accounts"]}
+
+    with app.extensions["db_session_factory"]() as db_session:
+        skr03_id = _skr03_company(db_session)[0].id
+    payload = client.get(
+        "/api/v1/account-chart/check", query_string={"company_id": skr03_id}
+    ).get_json()
+    assert payload["dominant_chart"] == "skr03"
+    assert payload["legacy_skr04_accounts"] == []
+    assert {"1406", "2970", "3806"} <= {row["code"] for row in payload["foreign_skr04_accounts"]}
+    assert {"6200", "8000"} <= {row["code"] for row in payload["nonstandard_skr03_accounts"]}
 
     assert client.get("/api/v1/account-chart/check").status_code == 400
     missing = client.get("/api/v1/account-chart/check", query_string={"company_id": 999})
@@ -525,6 +774,37 @@ def test_accounts_page_shows_check_only_with_findings(tmp_path: Path) -> None:
 
     clean_page = client.get("/konten", query_string={"company_id": clean_id}).data.decode()
     assert "Kontenrahmen-Prüfung" not in clean_page
+
+
+def test_accounts_page_shows_skr03_findings_and_hints(tmp_path: Path) -> None:
+    app = _create_app(tmp_path)
+    with app.extensions["db_session_factory"]() as db_session:
+        skr03_id = _skr03_company(db_session)[0].id
+        # Nur Hinweise: Fremdkonten erledigt (ohne Buchungen, deaktiviert), 6200/8000 offen.
+        hints_company = _company(db_session, "Hinweis GmbH")
+        hints_accounts = _add_accounts(db_session, hints_company, SKR03_AFTER_LEGACY_IMPORT)
+        for foreign in FOREIGN_SKR04_ACCOUNTS:
+            hints_accounts[foreign.code].is_active = False
+        db_session.commit()
+        hints_id = hints_company.id
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+
+    page = client.get("/konten", query_string={"company_id": skr03_id}).data.decode()
+    assert "Vorherrschender Kontenrahmen: <strong>SKR03</strong>" in page
+    assert "1406 – Abziehbare Vorsteuer 19 %" in page
+    assert "1576 – Abziehbare Vorsteuer 19 %" in page
+    assert "im SKR03: Zinsen und ähnliche Aufwendungen" in page
+    assert "0860 – Gewinnvortrag vor Verwendung" in page
+    assert "8400 – Erlöse 19 % USt" in page
+
+    with app.extensions["db_session_factory"]() as db_session:
+        hints_only = check_account_chart(session=db_session, company_id=hints_id)
+    assert hints_only["ok"] is True
+    assert hints_only["foreign_skr04_accounts"] == []
+    hints_page = client.get("/konten", query_string={"company_id": hints_id}).data.decode()
+    assert "Kontenrahmen-Prüfung" in hints_page
+    assert "4830 – Abschreibungen auf Sachanlagen" in hints_page
 
 
 def _selected_option(page: str, select_id: str) -> str:

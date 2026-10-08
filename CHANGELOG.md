@@ -93,6 +93,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ### Behoben
 
+- Kontenrahmen-Prüfung erkennt SKR03-Buchhaltung nach dem fehlerhaften SKR04-Import.
+  Bisher galt jede Gesellschaft mit SKR04-Steuerkonten als SKR04-Gesellschaft; bucht
+  sie faktisch SKR03, meldete die Prüfung ihre richtigen SKR03-Konten als Altkonten
+  und empfahl die Umbuchung in die falsche Richtung. Jetzt bestimmt sie den
+  vorherrschenden Kontenrahmen (`dominant_chart`, `chart_evidence`) an den Konten
+  außerhalb des alten Imports, deren Nummernbereich nur in einem Kontenrahmen zur
+  Kontoart passt, samt Buchungszeilen. Bei SKR03 meldet sie die SKR04-Fremdkonten
+  0420, 1401/1406, 2100/2180, 2970 und 3801/3806 mit SKR03-Gegenkonto (0200,
+  1571/1576, 1800/1890, 0860, 1771/1776 laut DATEV-Kontenrahmen SKR03 2026),
+  Bedeutung der Nummer im SKR03, Buchungsanzahl, Saldo, Belegung der SKR03-Nummer
+  und verweisenden Steuercodes (`foreign_skr04_accounts`; Steuerkonten mit
+  Steuercode nicht umbuchen, weil die UStVA Steuerzeilen darüber erkennt). Als
+  Hinweis ohne Einfluss auf `ok` kommen die Nummern der alten Datei hinzu, die im
+  SKR03 ein anderes Konto bezeichnen oder kein Einzelkonto sind: 0400, 3400, 4800,
+  6200 und 8000 mit Standardkonto 0010, 3100, 4260, 4830 bzw. 8400
+  (`nonstandard_skr03_accounts`). Gilt für die Seite **Konten**,
+  `GET /api/v1/account-chart/check` und das MCP-Tool `check_account_chart`; die
+  Prüfung bleibt lesend, Vorgehen im README unter „Kontenrahmen-Prüfung und
+  Altbestände“.
 - Kostenstellen- und Profitcenter-Bericht zählen Erlöskonten vom Typ `income` als
   Erlös (Filter, Vorzeichen, `total_revenue`) — wie die GuV über
   `REVENUE_ACCOUNT_TYPES`. Bisher fehlten bei SKR03/SKR04-Kontenrahmen und bei in

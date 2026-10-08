@@ -5,9 +5,32 @@
 {% block content %}
   <h1 class="page-title">Konten</h1>
 
-  {% if chart_check and not chart_check.ok %}
+  {% macro skr03_target(row) -%}
+    {% if row.skr03_status == "occupied" %}
+      belegt durch {{ row.skr03_account.code }} – {{ row.skr03_account.name }}
+    {% elif row.skr03_status == "present" %}
+      vorhanden{% if row.skr03_account.name != row.skr03_name %} ({{ row.skr03_account.name }}){% endif %}
+    {% else %}
+      fehlt
+    {% endif %}
+  {%- endmacro %}
+
+  {% if chart_check and (not chart_check.ok or chart_check.nonstandard_skr03_accounts) %}
     <section class="card">
       <h2>Kontenrahmen-Prüfung</h2>
+      {% if chart_check.dominant_chart %}
+        {% set evidence = chart_check.chart_evidence %}
+        <p>
+          Vorherrschender Kontenrahmen: <strong>{{ chart_check.dominant_chart|upper }}</strong>
+          {% if evidence.skr03.accounts or evidence.skr04.accounts %}
+            – eigene Konten außerhalb des alten SKR04-Imports:
+            {{ evidence.skr03.accounts }} SKR03-typische mit {{ evidence.skr03.posting_count }} Buchungszeilen,
+            {{ evidence.skr04.accounts }} SKR04-typische mit {{ evidence.skr04.posting_count }} Buchungszeilen.
+          {% else %}
+            – ohne eigene Konten außerhalb des alten Imports gilt der importierte SKR04.
+          {% endif %}
+        </p>
+      {% endif %}
       {% for warning in chart_check.warnings %}
         <p>{{ warning }}</p>
       {% endfor %}
@@ -52,6 +75,85 @@
           SKR04-Konto übertragen und das Altkonto danach deaktivieren. Belegt ein Altkonto die
           SKR04-Nummer (1200, 1600), eine freie Nummer wählen, z. B. 1210 „Forderungen aus
           Lieferungen und Leistungen ohne Kontokorrent“ oder 1610 „Nebenkasse 1“.
+        </p>
+      {% endif %}
+      {% if chart_check.foreign_skr04_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>SKR04-Konto</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>Richtig im SKR03</th>
+              <th>SKR03-Konto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.foreign_skr04_accounts %}
+              <tr>
+                <td>
+                  {{ row.code }} – {{ row.name }}
+                  <br /><span class="muted">im SKR03: {{ row.skr03_meaning or "nicht vergeben" }}</span>
+                  {% if row.tax_codes %}<br /><strong class="negative">Steuerkonto der Steuercodes {{ row.tax_codes|join(", ") }}</strong>{% endif %}
+                </td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
+                <td>{{ skr03_target(row) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Fehlende SKR03-Konten oben unter „Konto anlegen“ mit Nummer, Bezeichnung und der Kontoart
+          des SKR04-Kontos ergänzen – einzeln, ein Import des ganzen SKR03 legte weitere Konten an.
+          SKR04-Konten ohne Buchungen einfach deaktivieren; Salden zum Stichtag per Umbuchung auf
+          das SKR03-Konto übertragen und das SKR04-Konto danach deaktivieren. Den Gewinnvortrag vor
+          dem nächsten Jahresabschluss umbuchen: Solange 2970 aktiv ist, bucht der Abschluss das
+          Ergebnis dorthin. Steuerkonten, auf die ein Steuercode verweist, nicht umbuchen – die UStVA
+          erkennt Steuerzeilen über die Steuercodes.
+        </p>
+      {% endif %}
+      {% if chart_check.nonstandard_skr03_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>Konto (Hinweis)</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>SKR03-Standardkonto</th>
+              <th>Standardkonto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.nonstandard_skr03_accounts %}
+              <tr>
+                <td>
+                  {{ row.code }} – {{ row.name }}
+                  <br /><span class="muted">im SKR03: {{ row.skr03_meaning }}</span>
+                </td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
+                <td>{{ skr03_target(row) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Konten ohne Buchungen deaktivieren oder, wenn die Nummer im SKR03 ein Einzelkonto
+          bezeichnet, in dessen DATEV-Bezeichnung umbenennen. Mit Buchungen: Saldo auf das
+          SKR03-Standardkonto umbuchen und das Konto deaktivieren. Konten, die Anlagen (Anlage- oder
+          AfA-Konto), Bankregeln oder Buchungsvorlagen noch verwenden, aktiv lassen – inaktive Konten
+          lassen sich nicht bebuchen.
         </p>
       {% endif %}
       {% if chart_check.unknown_account_types %}

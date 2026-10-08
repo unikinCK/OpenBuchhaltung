@@ -132,6 +132,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-016 | Kontenrahmen-CSV mit unmaskiertem Komma oder unbekannter Kontoart | Zeile wird als Fehler gemeldet und nicht angelegt | automatisiert | mittel |
 | T-EXP-017 | Kontenrahmen-Pruefung bei Altbestand des fehlerhaften SKR04-Imports | Altkonten mit SKR04-Nummer, Buchungen und Saldo gemeldet (UI, API, MCP); SKR03 und korrekter SKR04 ohne Befund; nichts wird geaendert | automatisiert | hoch |
 | T-EXP-018 | Geschaeftspartner exportieren | Partnerstamm, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+| T-EXP-019 | Kontenrahmen-Pruefung bei SKR03-Buchhaltung nach fehlerhaftem SKR04-Import | Vorherrschender Kontenrahmen SKR03 erkannt; SKR04-Fremdkonten mit DATEV-SKR03-Gegenkonto, Buchungen, Saldo und Steuercodes gemeldet, 0400/3400/4800/6200/8000 als Hinweis; nachimportierter SKR04 oder ein einzelnes SKR03-Konto kippt die Erkennung nicht; nichts wird geaendert (UI, API, MCP) | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 
