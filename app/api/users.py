@@ -14,6 +14,7 @@ from app.auth import (
     ROLE_BUCHHALTER,
     ROLE_PRUEFER,
     ROLE_SUPPORT,
+    api_has_global_access,
     current_api_tenant_id,
     current_api_user,
     generate_api_token,
@@ -253,6 +254,25 @@ def set_user_password_via_api(user_id: int):
         record_security_event(session, user=user, action="password_reset", actor=_actor())
         session.commit()
         return jsonify(_user_dict(user)), 200
+
+
+@api_bp.get("/users/me")
+def get_current_api_identity():
+    """Identität des Aufrufers: Benutzer (Token oder Session) bzw. globaler API-Token."""
+    api_user = current_api_user()
+    if api_user is not None:
+        auth = "user"
+    elif api_has_global_access():
+        auth = "api_token"
+    else:
+        auth = "anonymous"
+    return jsonify(
+        {
+            "auth": auth,
+            "user": dict(api_user) if api_user is not None else None,
+            "global_access": api_has_global_access(),
+        }
+    ), 200
 
 
 @api_bp.post("/users/me/password")

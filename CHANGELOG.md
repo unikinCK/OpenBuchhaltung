@@ -8,6 +8,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### MCP
+
+- MCP-HTTP-Endpunkt akzeptiert Benutzer-API-Tokens (`MCP_HTTP_ALLOW_USER_TOKENS`,
+  Default an): Prüfung über `GET /api/v1/users/me`, Weitergabe pro Request an die
+  REST-API — Tools laufen mit Rolle, Mandant und Audit-Akteur des Benutzers.
+- Neuer Endpunkt `GET /api/v1/users/me` und MCP-Tool `get_current_user`.
+
 ## [0.1.0] – 2026-09-20
 
 Erstes versioniertes Release. Fasst den bis dahin auf `main` erreichten Stand

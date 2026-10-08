@@ -17,6 +17,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -27,6 +30,26 @@ PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "openbuchhaltung"
 SERVER_VERSION = "1.0.0"
 DEFAULT_API_URL = "http://localhost:5000/api/v1"
+
+# API-Token für den laufenden Request (Thread/Kontext): der HTTP-Transport setzt hier
+# den Benutzer-Token des MCP-Clients; ohne Wert gilt OPENBUCHHALTUNG_API_TOKEN.
+_REQUEST_API_TOKEN: ContextVar[str | None] = ContextVar(
+    "openbuchhaltung_mcp_request_api_token", default=None
+)
+
+
+@contextmanager
+def api_token_override(token: str | None) -> Iterator[None]:
+    """Ruft die REST-API im aktuellen Kontext mit ``token`` statt des Server-Tokens auf."""
+    reset_token = _REQUEST_API_TOKEN.set(token)
+    try:
+        yield
+    finally:
+        _REQUEST_API_TOKEN.reset(reset_token)
+
+
+def current_api_token_override() -> str | None:
+    return _REQUEST_API_TOKEN.get()
 
 
 class MCPTransportError(Exception):
@@ -185,6 +208,17 @@ TOOLS: list[ToolSpec] = [
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         http_method="GET",
         path="/users",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="get_current_user",
+        description=(
+            "Zeigt, als wer der MCP-Zugriff arbeitet: Benutzer (Rolle, Mandant) bei "
+            "Benutzer-Token, sonst globaler API-Token."
+        ),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/users/me",
         arg_location="none",
     ),
     ToolSpec(
@@ -3378,8 +3412,9 @@ class HttpApiClient:
             url = f"{url}?{urlencode(params)}"
 
         headers = {"Accept": "application/json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+        token = current_api_token_override() or self.token
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         data = None
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")

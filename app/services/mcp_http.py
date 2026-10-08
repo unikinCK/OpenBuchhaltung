@@ -12,18 +12,32 @@ Start (die OpenBuchhaltung-App muss unter OPENBUCHHALTUNG_API_URL erreichbar sei
     OPENBUCHHALTUNG_API_TOKEN=obk_... \\
     MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=8080 \\
     python -m app.services.mcp_http
+
+Authentifizierung: ``MCP_HTTP_AUTH_TOKEN`` öffnet den Endpunkt; die Tools laufen dann
+mit dem Server-Token ``OPENBUCHHALTUNG_API_TOKEN``. Zusätzlich (``MCP_HTTP_ALLOW_USER_TOKENS``,
+Default an) akzeptiert der Endpunkt Benutzer-API-Tokens: Sie werden gegen
+``GET /users/me`` geprüft und pro Request an die REST-API durchgereicht, sodass Rolle,
+Mandanten-Scope und Protokoll des jeweiligen Benutzers gelten.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
+import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from app.services.mcp_server import MCPServer, build_server_from_env
+from app.services.mcp_server import (
+    MCPServer,
+    MCPTransportError,
+    api_token_override,
+    build_server_from_env,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
@@ -32,6 +46,11 @@ DEFAULT_PATH = "/mcp"
 # per MCP sind Base64 und bleiben mit 16 MiB deutlich unter dem Upload-Limit.
 DEFAULT_MAX_BODY_BYTES = 16 * 1024 * 1024
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# Wie lange ein geprüfter Benutzer-Token ohne erneute API-Prüfung gilt. Die REST-API
+# prüft den durchgereichten Token ohnehin bei jedem Tool-Aufruf; der Cache spart nur
+# die Vorab-Prüfung (gesperrte Benutzer scheitern also sofort am API-Aufruf).
+DEFAULT_USER_TOKEN_CACHE_SECONDS = 60.0
+_USER_TOKEN_CACHE_MAX_ENTRIES = 1024
 
 
 @dataclass(slots=True)
@@ -141,12 +160,73 @@ def authorization_allowed(authorization: str | None, auth_token: str | None) -> 
     )
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    return authorization.removeprefix("Bearer ").strip() or None
+
+
+class UserTokenValidator:
+    """Prüft Benutzer-API-Tokens gegen ``GET /users/me`` (mit kurzem Positiv-Cache)."""
+
+    def __init__(
+        self, server: MCPServer, cache_seconds: float = DEFAULT_USER_TOKEN_CACHE_SECONDS
+    ) -> None:
+        self._server = server
+        self._cache_seconds = cache_seconds
+        self._valid_until: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def is_valid(self, token: str) -> bool:
+        key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = time.monotonic()
+        with self._lock:
+            if self._valid_until.get(key, 0.0) > now:
+                return True
+        try:
+            with api_token_override(token):
+                response = self._server.http.call("GET", "/users/me")
+        except MCPTransportError:
+            return False
+        with self._lock:
+            if response.status != 200:
+                self._valid_until.pop(key, None)
+                return False
+            if len(self._valid_until) >= _USER_TOKEN_CACHE_MAX_ENTRIES:
+                self._valid_until = {k: v for k, v in self._valid_until.items() if v > now}
+            self._valid_until[key] = now + self._cache_seconds
+        return True
+
+
+def resolve_authorization(
+    authorization: str | None,
+    auth_token: str | None,
+    user_tokens: UserTokenValidator | None,
+) -> tuple[bool, str | None]:
+    """Entscheidet über den Zugang und liefert ggf. den durchzureichenden API-Token.
+
+    Rückgabe ``(erlaubt, api_token)``: ``api_token`` ist ``None`` beim
+    ``MCP_HTTP_AUTH_TOKEN`` (Server-Token gilt) und der Benutzer-Token, wenn der
+    Client sich mit einem gültigen Benutzer-API-Token ausweist.
+    """
+    if authorization_allowed(authorization, auth_token) and auth_token:
+        return True, None
+    supplied = _bearer_token(authorization)
+    if supplied and user_tokens is not None and user_tokens.is_valid(supplied):
+        return True, supplied
+    if not auth_token:
+        # Ohne Eingangstoken (nur Loopback zulässig) bleibt der Endpunkt offen.
+        return True, None
+    return False, None
+
+
 def _make_handler(
     server: MCPServer,
     path: str,
     allowed_origins: frozenset[str],
     auth_token: str | None,
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+    user_tokens: UserTokenValidator | None = None,
 ):
     class MCPRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -175,7 +255,10 @@ def _make_handler(
             if self.path.split("?", 1)[0] != path:
                 self._reject(404, "Not found.")
                 return
-            if not authorization_allowed(self.headers.get("Authorization"), auth_token):
+            allowed, api_token = resolve_authorization(
+                self.headers.get("Authorization"), auth_token, user_tokens
+            )
+            if not allowed:
                 self._reject(401, "Unauthorized.")
                 return
             if not origin_allowed(self.headers.get("Origin"), allowed_origins):
@@ -197,7 +280,8 @@ def _make_handler(
                 self._reject(413, "Request body too large.")
                 return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
-            result = process_post(server, raw_body, self.headers.get("Accept"))
+            with api_token_override(api_token):
+                result = process_post(server, raw_body, self.headers.get("Accept"))
             self._send(result)
 
         def do_GET(self) -> None:  # noqa: N802
@@ -224,12 +308,16 @@ def make_server(
     allowed_origins: frozenset[str] = frozenset(),
     auth_token: str | None = None,
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+    allow_user_tokens: bool = True,
 ) -> ThreadingHTTPServer:
     if host not in LOOPBACK_HOSTS and not auth_token:
         raise RuntimeError(
             "MCP_HTTP_AUTH_TOKEN muss gesetzt sein, wenn MCP_HTTP_HOST nicht auf Loopback bindet."
         )
-    handler = _make_handler(server, path, allowed_origins, auth_token, max_body_bytes)
+    user_tokens = UserTokenValidator(server) if allow_user_tokens else None
+    handler = _make_handler(
+        server, path, allowed_origins, auth_token, max_body_bytes, user_tokens
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
@@ -247,8 +335,19 @@ def main() -> None:
     allowed_origins = _allowed_origins_from_env(os.environ.get("MCP_HTTP_ALLOWED_ORIGINS"))
     auth_token = (os.environ.get("MCP_HTTP_AUTH_TOKEN") or "").strip() or None
     max_body_bytes = int(os.environ.get("MCP_HTTP_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES)))
+    allow_user_tokens_raw = os.environ.get("MCP_HTTP_ALLOW_USER_TOKENS") or "1"
+    allow_user_tokens = allow_user_tokens_raw.strip().lower() not in {"0", "false", "no", "off"}
 
-    httpd = make_server(server, host, port, path, allowed_origins, auth_token, max_body_bytes)
+    httpd = make_server(
+        server,
+        host,
+        port,
+        path,
+        allowed_origins,
+        auth_token,
+        max_body_bytes,
+        allow_user_tokens=allow_user_tokens,
+    )
     print(f"OpenBuchhaltung MCP-Server (Streamable HTTP) läuft auf http://{host}:{port}{path}")
     try:
         httpd.serve_forever()
