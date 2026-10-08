@@ -22,6 +22,7 @@ from domain.models import (
     Account,
     AuditLog,
     BankTransaction,
+    BusinessPartner,
     Company,
     ControllingUnit,
     DepreciationEntry,
@@ -86,6 +87,7 @@ EXPORT_TABLE_MODELS = {
     "company": Company,
     "accounts": Account,
     "controlling_units": ControllingUnit,
+    "business_partners": BusinessPartner,
     "tax_codes": TaxCode,
     "fiscal_years": FiscalYear,
     "periods": Period,
@@ -105,6 +107,7 @@ EXPORT_TABLE_MODELS = {
     "audit_log": AuditLog,
     "account_history": AuditLog,
     "controlling_unit_history": AuditLog,
+    "business_partner_history": AuditLog,
     "documents": Document,
     "users": User,
 }
@@ -114,6 +117,10 @@ TABLE_DESCRIPTIONS = {
     "company": "Gesellschaftsstammdaten des Exportumfangs.",
     "accounts": "Kontenstamm der Gesellschaft.",
     "controlling_units": "Kostenstellen- und Profitcenter-Stammdaten der Gesellschaft.",
+    "business_partners": (
+        "Geschäftspartner (Kunden/Debitoren, Lieferanten/Kreditoren) mit "
+        "Personenkontonummern, Anschrift, Steuer- und Bankdaten."
+    ),
     "tax_codes": "Steuerschlüssel der Gesellschaft.",
     "fiscal_years": "Geschäftsjahre der Gesellschaft.",
     "periods": "Buchungsperioden der exportierten Geschäftsjahre.",
@@ -137,6 +144,10 @@ TABLE_DESCRIPTIONS = {
     "controlling_unit_history": (
         "Änderungshistorie der Kostenstellen und Profitcenter mit Vorher-/Nachher-Werten."
     ),
+    "business_partner_history": (
+        "Änderungshistorie der Geschäftspartner einschließlich Bankdatenänderungen "
+        "mit Vorher-/Nachher-Werten."
+    ),
     "documents": "Belegindex, Versionen und Prüfsummen der Originaldateien.",
     "users": "Mandantenbezogene Benutzer und Rollen ohne Authentisierungsgeheimnisse.",
 }
@@ -152,7 +163,16 @@ FIELD_DESCRIPTIONS = {
     "finalized_at": "Zeitpunkt der Festschreibung.",
     "finalized_by": "Benutzer oder Prozess der Festschreibung.",
     "content_hash": "SHA-256-Inhaltshash der festgeschriebenen Buchung.",
-    "content_hash_version": "Version des Verfahrens für den Buchungsinhaltshash.",
+    "content_hash_version": (
+        "Version des Verfahrens für den Buchungsinhaltshash (3 = inklusive Geschäftspartner "
+        "je Zeile; ältere Siegel behalten Version 2)."
+    ),
+    "subledger": (
+        "Sammelkonto-Kennzeichen: debtor (Debitoren) bzw. creditor (Kreditoren); nur dort "
+        "sind Geschäftspartner an Buchungszeilen zulässig."
+    ),
+    "debtor_number": "Debitorennummer (Personenkonto des Kunden, 10000–69999).",
+    "creditor_number": "Kreditorennummer (Personenkonto des Lieferanten, 70000–99999).",
     "file_sha256": "Beim Eingang gespeicherter SHA-256-Hash der Originaldatei.",
     "file_size_bytes": "Beim Eingang gespeicherte Dateigröße in Bytes.",
     "document_date": "Fachliches Datum des Belegs, getrennt vom Erfassungszeitpunkt.",
@@ -269,6 +289,15 @@ def build_audit_export_package(
                 ControllingUnit,
                 ControllingUnit.company_id == company.id,
                 order_by=(ControllingUnit.unit_type, ControllingUnit.code),
+            )
+        ],
+        "business_partners": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                BusinessPartner,
+                BusinessPartner.company_id == company.id,
+                order_by=(BusinessPartner.name, BusinessPartner.id),
             )
         ],
         "tax_codes": [
@@ -407,6 +436,16 @@ def build_audit_export_package(
                 AuditLog,
                 AuditLog.company_id == company.id,
                 AuditLog.entity_type == "controlling_unit",
+                order_by=(AuditLog.changed_at, AuditLog.id),
+            )
+        ],
+        "business_partner_history": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                AuditLog,
+                AuditLog.company_id == company.id,
+                AuditLog.entity_type == "business_partner",
                 order_by=(AuditLog.changed_at, AuditLog.id),
             )
         ],

@@ -18,6 +18,8 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/account_history.json` | Verkettete Kontenstamm-Historie mit Vorher-/Nachher-Snapshots |
 | `data/controlling_units.json` | Kostenstellen- und Profitcenter-Stammdaten |
 | `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
+| `data/business_partners.json` | Geschäftspartner (Debitoren/Kreditoren) mit Personenkontonummern |
+| `data/business_partner_history.json` | Verkettete Vorher-/Nachher-Historie der Geschäftspartner inklusive Bankdatenänderungen |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -49,6 +51,15 @@ optionalen Schlüssel `cost_center_id` und `profit_center_id`; Stammdatenänderu
 stehen zusätzlich mit Audit-Hashes in `controlling_unit_history.json`. Bei
 festgeschriebenen Buchungen sind die Zuordnungen Bestandteil des versionierten
 Buchungsinhaltshashs.
+
+Geschäftspartner werden mit Debitoren- bzw. Kreditorennummer, Art, Anschrift,
+USt-IdNr, Steuernummer, Kontakt, Bankverbindung, Zahlungsziel und Aktivstatus
+exportiert. Journalzeilen auf Sammelkonten (Kennzeichen `subledger` im Kontenstamm)
+tragen den optionalen Schlüssel `partner_id`. Festgeschriebene Buchungen ab
+Inhaltshash-Version 3 versiegeln diese Zuordnung; Buchungen, die vor Einführung des
+Nebenbuchs festgeschrieben wurden, behalten ihr Siegel der Version 2. Anlage,
+Änderungen und Bankdatenänderungen (`bank_details_changed`) stehen mit
+Audit-Hashes in `business_partner_history.json`.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,

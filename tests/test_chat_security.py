@@ -75,9 +75,10 @@ EXPECTED_BLOCKED_TOOLS = {
     "preflight_vat_return_elster",
     "submit_vat_annual_return_elster",
     "preflight_vat_annual_return_elster",
-    # SEPA
+    # SEPA / Bankdaten von Zahlungsempfängern
     "create_sepa_payment_run",
     "set_company_bank_details",
+    "set_partner_bank_details",
 }
 
 

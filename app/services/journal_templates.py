@@ -21,7 +21,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
-from domain.models import Account, Company, JournalEntry, JournalTemplate
+from domain.models import Account, BusinessPartner, Company, JournalEntry, JournalTemplate
 
 INTERVALS = ("on_demand", "monthly", "quarterly", "yearly")
 _INTERVAL_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
@@ -72,10 +72,18 @@ def _normalized_lines(session: Session, company: Company, raw_lines: list) -> li
             "debit": str(debit),
             "credit": str(credit),
         }
-        for optional in ("tax_code_id", "cost_center_id", "profit_center_id"):
+        for optional in ("tax_code_id", "cost_center_id", "profit_center_id", "partner_id"):
             value = raw.get(optional)
             if value not in (None, "", 0):
                 line[optional] = int(value)
+        if "partner_id" in line:
+            partner = session.get(BusinessPartner, line["partner_id"])
+            if partner is None or partner.company_id != company.id:
+                raise JournalTemplateError(f"Zeile {index}: Geschäftspartner nicht gefunden.")
+            if account.subledger is None:
+                raise JournalTemplateError(
+                    f"Zeile {index}: Ein Geschäftspartner ist nur auf Sammelkonten zulässig."
+                )
         if raw.get("description"):
             line["description"] = str(raw["description"])[:255]
         lines.append(line)
@@ -210,6 +218,7 @@ def book_template(
             tax_code_id=line.get("tax_code_id"),
             cost_center_id=line.get("cost_center_id"),
             profit_center_id=line.get("profit_center_id"),
+            partner_id=line.get("partner_id"),
             description=line.get("description"),
         )
         for line in template.lines

@@ -188,7 +188,8 @@ def list_bank_accounts_via_api():
             return jsonify({"error": "Company not found."}), 404
 
         stmt = scoped_select(Account, company_id=company.id).where(
-            Account.account_type == "asset"
+            Account.account_type == "asset",
+            Account.subledger.is_(None),
         )
         if not include_inactive:
             stmt = stmt.where(Account.is_active.is_(True))

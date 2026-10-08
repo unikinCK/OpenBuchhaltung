@@ -91,7 +91,7 @@ def _seed_performance_dataset(session: Session) -> dict[str, int]:
             company_id=company.id,
             code="1400",
             name="Forderungen",
-            account_type="receivable",
+            account_type="asset",
         ),
         "equity": Account(
             tenant_id=tenant.id,

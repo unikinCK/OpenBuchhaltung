@@ -155,7 +155,7 @@ def test_controlling_master_data_history_booking_report_and_export(tmp_path: Pat
     assert finalized.status_code == 200
     with app.extensions["db_session_factory"]() as session:
         entry = session.get(JournalEntry, entry_id)
-        assert entry.content_hash_version == 2
+        assert entry.content_hash_version == 3
         stored_hash = entry.content_hash
         original_dimensions = [
             (line.cost_center_id, line.profit_center_id)

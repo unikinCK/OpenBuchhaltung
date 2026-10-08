@@ -21,7 +21,13 @@ from app.services.audit_export import build_audit_export_package
 from app.services.controlling import ControllingError, controlling_result_report
 from app.services.datev_export import DatevExportOptions, build_datev_export
 from app.services.reports import trial_balance_for_company
-from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine
+from domain.models import (
+    Account,
+    BusinessPartner,
+    ControllingUnit,
+    JournalEntry,
+    JournalEntryLine,
+)
 
 
 @api_bp.get("/exports/trial-balance.csv")
@@ -99,11 +105,16 @@ def export_journal_csv():
                 JournalEntryLine.credit_amount,
                 cost_unit.code.label("cost_center_code"),
                 profit_unit.code.label("profit_center_code"),
+                Account.subledger,
+                BusinessPartner.debtor_number,
+                BusinessPartner.creditor_number,
+                BusinessPartner.name.label("partner_name"),
             )
             .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
             .join(Account, Account.id == JournalEntryLine.account_id)
             .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
             .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
+            .outerjoin(BusinessPartner, BusinessPartner.id == JournalEntryLine.partner_id)
             .filter(JournalEntry.company_id == company_id)
             .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
             .all()
@@ -123,9 +134,14 @@ def export_journal_csv():
             "credit_amount",
             "cost_center_code",
             "profit_center_code",
+            "partner_number",
+            "partner_name",
         ]
     )
     for row in journal_rows:
+        partner_number = (
+            row.creditor_number if row.subledger == "creditor" else row.debtor_number
+        ) or row.debtor_number or row.creditor_number
         writer.writerow(
             [
                 row.posting_number,
@@ -138,6 +154,8 @@ def export_journal_csv():
                 row.credit_amount,
                 row.cost_center_code,
                 row.profit_center_code,
+                partner_number,
+                row.partner_name,
             ]
         )
 

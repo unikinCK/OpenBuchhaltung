@@ -21,12 +21,17 @@
         <label for="account_type">Kontotyp</label>
         <select id="account_type" name="account_type" required>
           <option value="asset">Aktiva (asset)</option>
-          <option value="receivable">Debitoren (receivable)</option>
           <option value="liability">Passiva (liability)</option>
-          <option value="payable">Kreditoren (payable)</option>
           <option value="equity">Eigenkapital (equity)</option>
           <option value="income">Ertrag (income)</option>
           <option value="expense">Aufwand (expense)</option>
+        </select>
+
+        <label for="subledger">Sammelkonto (Nebenbuch)</label>
+        <select id="subledger" name="subledger">
+          <option value="">Kein Sammelkonto</option>
+          <option value="debtor">Debitoren-Sammelkonto (nur Aktiva)</option>
+          <option value="creditor">Kreditoren-Sammelkonto (nur Passiva)</option>
         </select>
 
         <button type="submit">Konto speichern</button>
@@ -70,6 +75,7 @@
             <th>Nummer</th>
             <th>Bezeichnung</th>
             <th>Typ</th>
+            <th>Sammelkonto</th>
             <th>Ebene</th>
             <th>Status</th>
             <th>Ändern</th>
@@ -80,7 +86,11 @@
             <tr>
               <td>{{ account.code }}</td>
               <td>{{ account.name }}</td>
-              <td><span class="badge">{{ account.account_type }}</span></td>
+              <td>
+                <span class="badge">{{ account.account_type }}</span>
+                {% if account.account_type not in valid_account_types %}<br /><strong class="negative">ungültig – fällt aus allen Berichten</strong>{% endif %}
+              </td>
+              <td>{{ {"debtor": "Debitoren", "creditor": "Kreditoren"}.get(account.subledger, "–") }}</td>
               <td>{{ account.hierarchy_level }}</td>
               <td>{{ "aktiv" if account.is_active else "inaktiv" }}</td>
               <td>
@@ -91,6 +101,19 @@
                     <option value="true" {% if account.is_active %}selected{% endif %}>aktiv</option>
                     <option value="false" {% if not account.is_active %}selected{% endif %}>inaktiv</option>
                   </select>
+                  {% if account.account_type in ("asset", "liability") %}
+                    <select name="subledger" aria-label="Sammelkonto {{ account.code }}">
+                      <option value="">kein Sammelkonto</option>
+                      {% if account.account_type == "asset" %}<option value="debtor" {% if account.subledger == "debtor" %}selected{% endif %}>Debitoren</option>{% endif %}
+                      {% if account.account_type == "liability" %}<option value="creditor" {% if account.subledger == "creditor" %}selected{% endif %}>Kreditoren</option>{% endif %}
+                    </select>
+                  {% endif %}
+                  {% if account.account_type not in valid_account_types %}
+                    <select name="account_type" aria-label="Kontotyp reparieren {{ account.code }}">
+                      <option value="">Kontotyp korrigieren …</option>
+                      {% for account_type in valid_account_types %}<option value="{{ account_type }}">{{ account_type }}</option>{% endfor %}
+                    </select>
+                  {% endif %}
                   <button type="submit">Speichern</button>
                 </form>
               </td>

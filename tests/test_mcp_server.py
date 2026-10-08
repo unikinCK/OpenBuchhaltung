@@ -36,6 +36,12 @@ EXPECTED_TOOL_NAMES = {
     "get_controlling_unit_history",
     "get_controlling_report",
     "export_controlling_csv",
+    "list_partners",
+    "get_partner",
+    "create_partner",
+    "update_partner",
+    "set_partner_bank_details",
+    "get_partner_history",
     "create_journal_entry",
     "list_journal_entries",
     "finalize_journal_entry",
@@ -1779,14 +1785,20 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     assert created["isError"] is False
     company_id = json.loads(created["content"][0]["text"])["company"]["id"]
 
-    for code, name, account_type in [
-        ("1200", "Bank", "asset"),
-        ("1400", "Forderungen", "receivable"),
-        ("8400", "Erlöse", "income"),
+    for code, name, account_type, subledger in [
+        ("1200", "Bank", "asset", None),
+        ("1400", "Forderungen", "asset", "debtor"),
+        ("8400", "Erlöse", "income", None),
     ]:
         result = call_tool(
             "create_account",
-            {"company_id": company_id, "code": code, "name": name, "account_type": account_type},
+            {
+                "company_id": company_id,
+                "code": code,
+                "name": name,
+                "account_type": account_type,
+                "subledger": subledger,
+            },
         )
         assert result["isError"] is False
 

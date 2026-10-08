@@ -50,7 +50,7 @@ def _seed_company(session: Session) -> tuple[Company, Account, Account, Account]
         company_id=company.id,
         code="1400",
         name="Forderungen",
-        account_type="receivable",
+        account_type="asset",
     )
     revenue = Account(
         tenant_id=tenant.id,
@@ -219,7 +219,7 @@ def test_open_items_ui_create_and_settle(tmp_path: Path) -> None:
             "company_id": "1",
             "code": "1400",
             "name": "Forderungen",
-            "account_type": "receivable",
+            "account_type": "asset",
         },
     )
 
@@ -273,7 +273,7 @@ def test_open_items_api_create_list_and_settle(tmp_path: Path) -> None:
             "company_id": 1,
             "code": "1400",
             "name": "Forderungen",
-            "account_type": "receivable",
+            "account_type": "asset",
         },
     )
 

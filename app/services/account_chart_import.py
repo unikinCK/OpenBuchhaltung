@@ -10,7 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.account_hierarchy import resolve_parent_account_id
-from app.services.accounts import log_account_created
+from app.services.accounts import (
+    AccountUpdateError,
+    default_subledger_for,
+    log_account_created,
+    normalize_subledger,
+    validate_account_type,
+)
 from domain.models import Account, Company
 
 logger = logging.getLogger(__name__)
@@ -25,6 +31,9 @@ CSV_FIELD_ALIASES = {
     "code": ("code", "konto", "kontonummer", "konto_nr", "account_code"),
     "name": ("name", "bezeichnung", "kontobezeichnung", "account_name"),
     "account_type": ("account_type", "kontoart", "typ", "type"),
+    # Optional: Sammelkonto-Kennzeichen (debtor/creditor). Fehlt die Spalte,
+    # werden Forderungen/Verbindlichkeiten aLuL an der Bezeichnung erkannt.
+    "subledger": ("subledger", "sammelkonto", "nebenbuch"),
 }
 
 
@@ -75,6 +84,14 @@ def import_account_chart_csv(
             canonical: (raw_row.get(source) or "").strip()
             for canonical, source in header_mapping.items()
         }
+        if raw_row.get(None):
+            # Mehr Felder als Spalten, z. B. eine ungequotete Bezeichnung mit Komma.
+            _record_error(
+                report,
+                line_number,
+                "Zu viele Felder – Bezeichnungen mit Komma müssen in Anführungszeichen stehen.",
+            )
+            continue
 
         missing = [field for field in REQUIRED_FIELDS if not row[field]]
         if missing:
@@ -89,13 +106,24 @@ def import_account_chart_csv(
             report.duplicate_rows += 1
             continue
 
+        try:
+            account_type = validate_account_type(row["account_type"])
+            if "subledger" in header_mapping:
+                subledger = normalize_subledger(row["subledger"], account_type=account_type)
+            else:
+                subledger = default_subledger_for(name=row["name"], account_type=account_type)
+        except AccountUpdateError as exc:
+            _record_error(report, line_number, str(exc))
+            continue
+
         session.flush()
         account = Account(
             tenant_id=company.tenant_id,
             company_id=company.id,
             code=row["code"],
             name=row["name"],
-            account_type=row["account_type"],
+            account_type=account_type,
+            subledger=subledger,
             parent_account_id=resolve_parent_account_id(
                 session=session, company_id=company.id, code=row["code"]
             ),

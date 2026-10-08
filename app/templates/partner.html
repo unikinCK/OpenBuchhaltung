@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
+
+{% block title %}Geschäftspartner – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Geschäftspartner</h1>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <h2>Partner anlegen</h2>
+      <p class="muted">Kunden erhalten eine Debitorennummer (10000–69999), Lieferanten eine Kreditorennummer (70000–99999).
+        Ohne Eingabe wird die nächste freie Nummer vergeben. Gebucht wird weiter auf das Sammelkonto (z. B. 1400/1600);
+        der Partner hängt als Nebenbuch an der Buchungszeile.</p>
+      <form method="post" action="{{ url_for('main.create_partner_from_form') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="name">Name / Firma</label>
+        <input id="name" name="name" required maxlength="255" />
+
+        <label for="partner_kind">Art</label>
+        <select id="partner_kind" name="partner_kind">
+          <option value="organization">Unternehmen</option>
+          <option value="person">Natürliche Person</option>
+        </select>
+
+        <fieldset>
+          <legend>Rolle</legend>
+          <label class="inline"><input type="checkbox" name="is_customer" value="1" checked /> Kunde (Debitor)</label>
+          <label class="inline"><input type="checkbox" name="is_supplier" value="1" /> Lieferant (Kreditor)</label>
+        </fieldset>
+
+        <details>
+          <summary>Personenkontonummern selbst festlegen</summary>
+          <label for="debtor_number">Debitorennummer</label>
+          <input id="debtor_number" name="debtor_number" inputmode="numeric" placeholder="automatisch" />
+          <label for="creditor_number">Kreditorennummer</label>
+          <input id="creditor_number" name="creditor_number" inputmode="numeric" placeholder="automatisch" />
+        </details>
+
+        <details>
+          <summary>Anschrift, Steuer, Kontakt, Zahlung</summary>
+          <label for="street">Straße und Hausnummer</label>
+          <input id="street" name="street" maxlength="255" />
+          <label for="postal_code">PLZ</label>
+          <input id="postal_code" name="postal_code" maxlength="20" />
+          <label for="city">Ort</label>
+          <input id="city" name="city" maxlength="120" />
+          <label for="country_code">Land (ISO-Code)</label>
+          <input id="country_code" name="country_code" value="DE" maxlength="2" />
+          <label for="vat_id">USt-IdNr</label>
+          <input id="vat_id" name="vat_id" placeholder="z. B. DE123456789" />
+          <label for="tax_number">Steuernummer</label>
+          <input id="tax_number" name="tax_number" maxlength="30" />
+          <label for="contact_person">Ansprechpartner</label>
+          <input id="contact_person" name="contact_person" maxlength="255" />
+          <label for="email">E-Mail</label>
+          <input id="email" name="email" type="email" maxlength="255" />
+          <label for="phone">Telefon</label>
+          <input id="phone" name="phone" maxlength="50" />
+          <label for="payment_term_days">Zahlungsziel (Tage)</label>
+          <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" />
+          <label for="iban">IBAN</label>
+          <input id="iban" name="iban" />
+          <label for="bic">BIC</label>
+          <input id="bic" name="bic" />
+          <label for="notes">Notizen</label>
+          <textarea id="notes" name="notes" rows="2"></textarea>
+        </details>
+
+        <button type="submit">Partner speichern</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Partner <span class="badge"><strong>Anzahl:</strong> {{ total }}</span></h2>
+      <form method="get" action="{{ url_for('main.partners_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <select name="role" aria-label="Rolle">
+          <option value="">Kunden und Lieferanten</option>
+          <option value="debtor" {% if role == "debtor" %}selected{% endif %}>nur Kunden (Debitoren)</option>
+          <option value="creditor" {% if role == "creditor" %}selected{% endif %}>nur Lieferanten (Kreditoren)</option>
+        </select>
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Name, Nummer, USt-IdNr, Ort" aria-label="Suchbegriff" />
+        <label class="inline"><input type="checkbox" name="include_inactive" value="1" {% if include_inactive %}checked{% endif %} /> inaktive zeigen</label>
+        <button type="submit" class="secondary">Filtern</button>
+        {% if filter_args %}<a href="{{ url_for('main.partners_page', company_id=selected_company_id) }}">Zurücksetzen</a>{% endif %}
+      </form>
+      {% if partners %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Debitor</th>
+                <th>Kreditor</th>
+                <th>Name</th>
+                <th>Ort</th>
+                <th>USt-IdNr</th>
+                <th class="num">Zahlungsziel</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for partner in partners %}
+                <tr>
+                  <td>{{ partner.debtor_number or "–" }}</td>
+                  <td>{{ partner.creditor_number or "–" }}</td>
+                  <td><a href="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}">{{ partner.name }}</a></td>
+                  <td>{{ [partner.postal_code, partner.city] | select | join(" ") or "–" }}</td>
+                  <td>{{ partner.vat_id or "–" }}</td>
+                  <td class="num">{{ partner.payment_term_days ~ " Tage" if partner.payment_term_days is not none else "–" }}</td>
+                  <td>{{ "aktiv" if partner.is_active else "inaktiv" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {{ pagination('main.partners_page', total, limit, offset, selected_company_id, extra=filter_args) }}
+      {% else %}
+        <p class="muted">Keine Geschäftspartner gefunden.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

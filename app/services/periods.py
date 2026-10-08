@@ -359,10 +359,13 @@ def _create_opening_balance_entry(
     am ersten Tag des Folgejahres (Periode 1); das Folgejahr wird bei Bedarf
     regulär angelegt.
     """
+    # Sammelkonten werden je Geschäftspartner vorgetragen, damit die
+    # Nebenbuchsalden (Debitoren/Kreditoren) im Folgejahr erhalten bleiben.
     rows = session.execute(
         select(
             Account.id,
             Account.code,
+            JournalEntryLine.partner_id,
             func.coalesce(func.sum(JournalEntryLine.debit_amount), 0),
             func.coalesce(func.sum(JournalEntryLine.credit_amount), 0),
         )
@@ -374,14 +377,14 @@ def _create_opening_balance_entry(
             JournalEntry.source != SOURCE_CARRYFORWARD,
             Account.account_type.in_(BALANCE_SHEET_ACCOUNT_TYPES),
         )
-        .group_by(Account.id, Account.code)
-        .order_by(Account.code)
+        .group_by(Account.id, Account.code, JournalEntryLine.partner_id)
+        .order_by(Account.code, JournalEntryLine.partner_id)
     ).all()
 
     zero = Decimal("0.00")
     lines: list[JournalLineInput] = []
     total = zero
-    for account_id, _code, debit_total, credit_total in rows:
+    for account_id, _code, partner_id, debit_total, credit_total in rows:
         saldo = (Decimal(debit_total) - Decimal(credit_total)).quantize(zero)
         if saldo == zero:
             continue
@@ -391,6 +394,7 @@ def _create_opening_balance_entry(
                 debit_amount=saldo if saldo > zero else zero,
                 credit_amount=-saldo if saldo < zero else zero,
                 description=f"Saldovortrag {fiscal_year.label}",
+                partner_id=partner_id,
             )
         )
         total += saldo

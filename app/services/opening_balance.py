@@ -19,6 +19,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.partners import find_partner_by_number
 from domain.models import Account, Company, JournalEntry
 
 CARRYFORWARD_CODES = ("9000", "9008", "9009")
@@ -57,7 +58,10 @@ def book_opening_balance(
     description: str = "Eröffnungsbilanz / Saldenübernahme",
 ) -> JournalEntry:
     """Bucht die Saldenübernahme; ``balances`` sind Dicts mit ``account_id``
-    oder ``account_code`` plus ``debit``/``credit`` (eine Seite > 0)."""
+    oder ``account_code`` plus ``debit``/``credit`` (eine Seite > 0). Auf
+    Sammelkonten kann je Saldo ein Geschäftspartner (``partner_id`` oder
+    ``partner_number``) angegeben werden – so werden offene Salden je Kunde
+    bzw. Lieferant übernommen."""
     company = session.get(Company, company_id)
     if company is None:
         raise OpeningBalanceError("Gesellschaft nicht gefunden.")
@@ -94,10 +98,30 @@ def book_opening_balance(
                 f"Zeile {index}: genau eine Seite (Soll oder Haben) muss größer 0 sein."
             )
 
+        partner_id = None
+        partner_number = str(raw.get("partner_number") or "").strip()
+        if partner_number:
+            partner = find_partner_by_number(
+                session=session, company_id=company.id, number=partner_number
+            )
+            if partner is None:
+                raise OpeningBalanceError(
+                    f"Zeile {index}: Geschäftspartner {partner_number} nicht gefunden."
+                )
+            partner_id = partner.id
+        elif raw.get("partner_id"):
+            try:
+                partner_id = int(raw["partner_id"])
+            except (TypeError, ValueError) as exc:
+                raise OpeningBalanceError(f"Zeile {index}: ungültige partner_id.") from exc
+
         total += debit - credit
         lines.append(
             JournalLineInput(
-                account_id=account.id, debit_amount=debit, credit_amount=credit
+                account_id=account.id,
+                debit_amount=debit,
+                credit_amount=credit,
+                partner_id=partner_id,
             )
         )
 
@@ -134,8 +158,9 @@ def book_opening_balance(
 
 
 def parse_balance_csv(text: str) -> list[dict]:
-    """Parst „Konto;Soll;Haben“-Zeilen (Kopfzeile optional, deutsches oder
-    englisches Zahlenformat über den Bank-Import-Betragsparser)."""
+    """Parst „Konto;Soll;Haben[;Partner]“-Zeilen (Kopfzeile optional, deutsches
+    oder englisches Zahlenformat über den Bank-Import-Betragsparser). Die
+    optionale vierte Spalte enthält die Debitoren-/Kreditorennummer."""
     from app.services.bank_import import BankImportError, parse_amount
 
     def amount(raw: str, line_number: int) -> str:
@@ -159,13 +184,14 @@ def parse_balance_csv(text: str) -> list[dict]:
             raise OpeningBalanceError(
                 f"Zeile {line_number}: erwartet „Konto;Soll;Haben“."
             )
-        while len(parts) < 3:
+        while len(parts) < 4:
             parts.append("")
-        balances.append(
-            {
-                "account_code": parts[0],
-                "debit": amount(parts[1], line_number),
-                "credit": amount(parts[2], line_number),
-            }
-        )
+        balance = {
+            "account_code": parts[0],
+            "debit": amount(parts[1], line_number),
+            "credit": amount(parts[2], line_number),
+        }
+        if parts[3]:
+            balance["partner_number"] = parts[3]
+        balances.append(balance)
     return balances

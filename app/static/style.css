@@ -322,6 +322,11 @@ button.secondary {
   width: 100%;
 }
 
+/* Partnerauswahl ohne Sammelkonto: sichtbar, aber zurückgenommen. */
+.journal-line select.is-muted {
+  opacity: 0.55;
+}
+
 .journal-line label {
   display: block;
   font-size: 0.8rem;
@@ -495,6 +500,29 @@ a.task-card:hover {
 
 .muted {
   color: var(--text-muted);
+}
+
+.negative {
+  color: var(--error-text);
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: normal;
+  margin-right: 1rem;
+}
+
+label.inline input {
+  width: auto;
+}
+
+fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
 }
 
 .badge {

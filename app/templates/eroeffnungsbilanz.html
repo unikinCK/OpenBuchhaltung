@@ -11,7 +11,9 @@
     <section class="card">
       <h2>Kontensalden aus dem Altsystem übernehmen</h2>
       <p class="muted">Eine Zeile je Konto im Format <code>Kontonummer;Soll;Haben</code>
-        (deutsches oder englisches Dezimalformat). Die Salden werden als eine
+        (deutsches oder englisches Dezimalformat). Offene Salden auf Sammelkonten lassen
+        sich je Kunde bzw. Lieferant übernehmen: <code>1400;1190,00;;10001</code> (vierte
+        Spalte = Debitoren-/Kreditorennummer). Die Salden werden als eine
         Eröffnungsbuchung erfasst; eine Differenz wird automatisch auf das
         Saldenvortragskonto gebucht
         {% if carryforward_account %}
@@ -31,7 +33,7 @@
         <label for="entry_date">Buchungsdatum (Beginn des Wirtschaftsjahres)</label>
         <input id="entry_date" name="entry_date" type="date" value="{{ today }}" required />
 
-        <label for="balances">Kontensalden (Konto;Soll;Haben)</label>
+        <label for="balances">Kontensalden (Konto;Soll;Haben[;Partnernummer])</label>
         <textarea id="balances" name="balances" rows="12" required
                   placeholder="1200;25000,00;&#10;1400;1190,00;&#10;1600;;595,00"></textarea>
 

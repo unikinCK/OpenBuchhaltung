@@ -38,7 +38,14 @@ from app.web.helpers import (
     require_company_access,
     search_args,
 )
-from domain.models import Account, ControllingUnit, JournalEntry, JournalEntryLine, TaxCode
+from domain.models import (
+    Account,
+    BusinessPartner,
+    ControllingUnit,
+    JournalEntry,
+    JournalEntryLine,
+    TaxCode,
+)
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -54,6 +61,7 @@ def journal_page():
         tax_codes = []
         cost_centers = []
         profit_centers = []
+        partners = []
         journal_entries = []
         journal_entries_total = 0
         templates = []
@@ -96,6 +104,15 @@ def journal_page():
                         ControllingUnit.is_active.is_(True),
                     )
                     .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            partners = (
+                session.execute(
+                    scoped_select(BusinessPartner, company_id=selected_company_id)
+                    .where(BusinessPartner.is_active.is_(True))
+                    .order_by(BusinessPartner.name)
                 )
                 .scalars()
                 .all()
@@ -145,11 +162,16 @@ def journal_page():
                     JournalEntryLine.description,
                     cost_unit.code.label("cost_center_code"),
                     profit_unit.code.label("profit_center_code"),
+                    Account.subledger,
+                    BusinessPartner.debtor_number,
+                    BusinessPartner.creditor_number,
+                    BusinessPartner.name.label("partner_name"),
                 )
                 .join(Account, Account.id == JournalEntryLine.account_id)
                 .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
                 .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
                 .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
+                .outerjoin(BusinessPartner, BusinessPartner.id == JournalEntryLine.partner_id)
                 .where(
                     JournalEntry.company_id == selected_company_id,
                     JournalEntryLine.journal_entry_id.in_(
@@ -169,6 +191,12 @@ def journal_page():
                         "description": row.description,
                         "cost_center_code": row.cost_center_code,
                         "profit_center_code": row.profit_center_code,
+                        "partner_number": (
+                            row.creditor_number
+                            if row.subledger == "creditor"
+                            else row.debtor_number
+                        ),
+                        "partner_name": row.partner_name,
                     }
                 )
 
@@ -205,6 +233,7 @@ def journal_page():
         tax_codes=tax_codes,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
+        partners=partners,
         journal_entries=journal_entries,
         journal_entries_total=journal_entries_total,
         templates=templates,
@@ -298,6 +327,7 @@ def create_journal_entry_from_form():
         line_tax_code_ids = request.form.getlist("line_tax_code_id")
         line_cost_center_ids = request.form.getlist("line_cost_center_id")
         line_profit_center_ids = request.form.getlist("line_profit_center_id")
+        line_partner_ids = request.form.getlist("line_partner_id")
 
         # Backward-compatible fallback (legacy single amount + Soll/Haben Felder)
         if not line_account_ids:
@@ -338,6 +368,9 @@ def create_journal_entry_from_form():
                 profit_center_raw = (
                     line_profit_center_ids[idx] if idx < len(line_profit_center_ids) else ""
                 ).strip()
+                partner_raw = (
+                    line_partner_ids[idx] if idx < len(line_partner_ids) else ""
+                ).strip()
                 if not account_raw and not amount_raw and not side_raw:
                     continue
                 if not account_raw or not amount_raw or side_raw not in {"debit", "credit"}:
@@ -356,6 +389,7 @@ def create_journal_entry_from_form():
                         tax_code_id=int(tax_code_raw) if tax_code_raw else None,
                         cost_center_id=(int(cost_center_raw) if cost_center_raw else None),
                         profit_center_id=(int(profit_center_raw) if profit_center_raw else None),
+                        partner_id=int(partner_raw) if partner_raw else None,
                     )
                 )
 
@@ -394,6 +428,7 @@ def create_journal_entry_from_form():
                                 "tax_code_id": line.tax_code_id,
                                 "cost_center_id": line.cost_center_id,
                                 "profit_center_id": line.profit_center_id,
+                                "partner_id": line.partner_id,
                                 "description": line.description,
                             }
                             for line in line_inputs

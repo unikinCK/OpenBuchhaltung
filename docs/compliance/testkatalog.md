@@ -95,6 +95,7 @@ Jeder Testfall sollte dokumentieren:
 | T-AUD-010 | Kontobezeichnung oder Status aendern | Genau ein Ereignis enthaelt vollstaendige Vorher-/Nachher-Werte | automatisiert | hoch |
 | T-AUD-011 | Kontonummer oder Kontotyp aendern | Strukturelle Aenderung wird abgewiesen | automatisiert | hoch |
 | T-AUD-012 | Kostenstelle oder Profitcenter aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert | automatisiert | hoch |
+| T-AUD-013 | Geschaeftspartner oder dessen Bankdaten aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert, Bankdaten als eigene Aktion | automatisiert | hoch |
 
 ## 7. Rollen, Mandanten und API/MCP
 
@@ -126,6 +127,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
 | T-EXP-013 | Kontenaenderungshistorie exportieren | Anlage und Aenderungen sind mit Snapshots und Hashkette enthalten | automatisiert | hoch |
 | T-EXP-014 | Controlling-Daten exportieren | Einheiten, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+| T-EXP-015 | Geschaeftspartner exportieren | Partnerstamm, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 
@@ -136,6 +138,17 @@ Jeder Testfall sollte dokumentieren:
 | T-CTL-003 | Inaktive oder ungültige Einheit kontieren | Buchung wird abgewiesen | automatisiert | hoch |
 | T-CTL-004 | Buchung festschreiben und stornieren | Dimensionen sind gehasht und werden gespiegelt | automatisiert | hoch |
 | T-CTL-005 | Controlling-Berichte | Erlöse, Aufwand und Ergebnis stimmen je Einheit | automatisiert | hoch |
+
+## 8.2 Geschäftspartner und Nebenbuch
+
+| ID | Testfall | Erwartung | Typ | Prioritaet |
+|---|---|---|---|---|
+| T-PAR-001 | Partner anlegen | Debitoren-/Kreditorennummer wird im Bereich vergeben, Dubletten werden gemeldet | automatisiert | hoch |
+| T-PAR-002 | Partner auf Buchungszeile | Nur auf Sammelkonto mit passender Rolle, mandantensicher, nicht inaktiv | automatisiert | hoch |
+| T-PAR-003 | Buchung festschreiben und stornieren | Partner ist im Hash (Version 3) und wird gespiegelt; Version-2-Siegel bleiben gültig | automatisiert | hoch |
+| T-PAR-004 | Rolle oder Nummer nach Verwendung aendern | Aenderung wird abgewiesen | automatisiert | hoch |
+| T-PAR-005 | Jahresabschluss | Sammelkonten werden je Partner vorgetragen | automatisiert | hoch |
+| T-PAR-006 | Migration rueckwaerts und vorwaerts | Siegel bleiben gueltig, Trigger bleiben aktiv | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 

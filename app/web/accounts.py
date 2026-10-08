@@ -12,10 +12,10 @@ from app.services.account_chart_import import (
     import_account_chart_csv,
     import_bundled_account_chart,
 )
-from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.accounts import (
+    VALID_ACCOUNT_TYPES,
     AccountUpdateError,
-    log_account_created,
+    create_account_with_audit,
     update_account_master_data,
 )
 from app.services.audit_log import list_audit_log_entries
@@ -62,6 +62,7 @@ def accounts_page():
         accounts=accounts,
         account_events=account_events,
         bundled_charts=sorted(BUNDLED_ACCOUNT_CHART_FILES),
+        valid_account_types=VALID_ACCOUNT_TYPES,
     )
 
 
@@ -79,26 +80,21 @@ def create_account():
     session_factory = get_session_factory()
     with session_factory() as session:
         company = require_company_access(session, company_id)
-
-        account = Account(
-            tenant_id=company.tenant_id,
-            company_id=company.id,
-            code=code,
-            name=name,
-            account_type=account_type,
-            parent_account_id=resolve_parent_account_id(
-                session=session, company_id=company.id, code=code
-            ),
-        )
-        session.add(account)
         try:
-            session.flush()
-            log_account_created(
+            create_account_with_audit(
                 session=session,
-                account=account,
+                company=company,
+                code=code,
+                name=name,
+                account_type=account_type,
+                subledger=request.form.get("subledger") or None,
                 changed_by=changed_by(),
             )
             session.commit()
+        except AccountUpdateError as exc:
+            session.rollback()
+            flash(str(exc), "error")
+            return redirect(url_for("main.accounts_page", company_id=company_id))
         except IntegrityError:
             session.rollback()
             flash("Konto mit dieser Nummer existiert bereits.", "error")
@@ -122,6 +118,11 @@ def update_account(account_id: int):
         if account is None:
             abort(404)
         require_company_access(session, account.company_id)
+        extra_changes = {}
+        if "subledger" in request.form:
+            extra_changes["subledger"] = request.form.get("subledger") or None
+        if request.form.get("account_type"):
+            extra_changes["account_type"] = request.form["account_type"]
         try:
             changed = update_account_master_data(
                 session=session,
@@ -129,6 +130,7 @@ def update_account(account_id: int):
                 changed_by=changed_by(),
                 name=name,
                 is_active=active_raw == "true",
+                **extra_changes,
             )
         except AccountUpdateError as exc:
             flash(str(exc), "error")

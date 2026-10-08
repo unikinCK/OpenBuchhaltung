@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.audit_log import log_audit_event
 from app.services.compliance_integrity import seal_journal_entry
 from app.services.controlling import ControllingError, validate_controlling_assignment
+from app.services.partners import (
+    PartnerError,
+    find_partner_by_number,
+    validate_partner_assignment,
+)
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
@@ -54,6 +59,10 @@ class JournalLineInput:
     account_code: str | None = None
     cost_center_id: int | None = None
     profit_center_id: int | None = None
+    # Geschäftspartner (Nebenbuch) nur auf Sammelkonten: per ID oder
+    # Personenkontonummer (Debitor/Kreditor); die Nummer wird zur ID aufgelöst.
+    partner_id: int | None = None
+    partner_number: str | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +100,8 @@ SOURCE_CARRYFORWARD = "carryforward"
 # Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
+# Quellen, die bestehende Partnerzuordnungen nur übernehmen (auch inaktive Partner).
+PARTNER_MIRROR_SOURCES = (SOURCE_STORNO, SOURCE_CARRYFORWARD)
 # Versuche, eine Buchung mit neuer Nummer anzulegen, wenn die gezogene Nummer
 # bereits vergeben ist (Altbestand mit gesellschaftsweitem Zähler, Wettlauf).
 POSTING_NUMBER_ATTEMPTS = 5
@@ -180,6 +191,7 @@ def create_journal_entry(
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
     lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
+    lines = _resolve_partner_numbers(session=session, company=company, lines=lines)
     tax_codes = _load_tax_codes(session=session, company=company, lines=lines)
     if payload.expand_tax_lines:
         lines = _expand_tax_lines(lines=lines, tax_codes=tax_codes)
@@ -232,6 +244,18 @@ def create_journal_entry(
                 expected_type="profit_center",
             )
         except ControllingError as exc:
+            raise JournalEntryCreationError(str(exc)) from exc
+        try:
+            validate_partner_assignment(
+                session=session,
+                company_id=company.id,
+                partner_id=line.partner_id,
+                account=account,
+                # Storno und Saldovortrag spiegeln Bestehendes – auch bei
+                # inzwischen deaktivierten Partnern.
+                allow_inactive=payload.source in PARTNER_MIRROR_SOURCES,
+            )
+        except PartnerError as exc:
             raise JournalEntryCreationError(str(exc)) from exc
 
     _validate_tax_code_usage(lines=lines, accounts=accounts, tax_codes=tax_codes)
@@ -290,6 +314,7 @@ def create_journal_entry(
             "tax_code_id": line.tax_code_id,
             "cost_center_id": line.cost_center_id,
             "profit_center_id": line.profit_center_id,
+            "partner_id": line.partner_id,
         }
         if line.debit_amount > Decimal("0.00"):
             line_payload["debit_amount"] = line.debit_amount
@@ -448,6 +473,32 @@ def _validate_tax_code_usage(
                 f"Die Steuerzeile zu {tax_code.code} muss auf derselben Seite (Soll/Haben) "
                 "stehen wie ihre Bemessungsgrundlage."
             )
+
+
+def _resolve_partner_numbers(
+    *,
+    session: Session,
+    company: Company,
+    lines: list[JournalLineInput],
+) -> list[JournalLineInput]:
+    """Ersetzt Personenkontonummern (``partner_number``) durch die Partner-ID."""
+    resolved: list[JournalLineInput] = []
+    for line in lines:
+        number = (line.partner_number or "").strip()
+        if not number:
+            resolved.append(line)
+            continue
+        partner = find_partner_by_number(session=session, company_id=company.id, number=number)
+        if partner is None:
+            raise JournalEntryCreationError(
+                f"Geschäftspartner mit Nummer {number} in dieser Gesellschaft nicht gefunden."
+            )
+        if line.partner_id is not None and line.partner_id != partner.id:
+            raise JournalEntryCreationError(
+                f"partner_id und partner_number {number} bezeichnen verschiedene Partner."
+            )
+        resolved.append(replace(line, partner_id=partner.id, partner_number=number))
+    return resolved
 
 
 def _expand_tax_lines(
@@ -1034,6 +1085,7 @@ def reverse_journal_entry(
             tax_code_id=line.tax_code_id,
             cost_center_id=line.cost_center_id,
             profit_center_id=line.profit_center_id,
+            partner_id=line.partner_id,
         )
         for line in sorted(original.lines, key=lambda line: line.line_number)
     ]
