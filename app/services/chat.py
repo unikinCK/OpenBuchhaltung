@@ -67,7 +67,15 @@ CHAT_TOOL_NAMES = {
 # Tool-Familien, die im Chat grundsätzlich nicht verfügbar sind: Benutzer-/
 # Token-/Passwortverwaltung, ELSTER-Übermittlung, SEPA-Zahlläufe, FinTS
 # (PIN/TAN). Sie sind entweder zu privilegiert oder verarbeiten Geheimnisse.
-CHAT_BLOCKED_TOOL_KEYWORDS = ("user", "token", "password", "fints", "elster", "sepa")
+CHAT_BLOCKED_TOOL_KEYWORDS = (
+    "user",
+    "token",
+    "password",
+    "oauth",
+    "fints",
+    "elster",
+    "sepa",
+)
 CHAT_BLOCKED_TOOL_NAMES = {"set_company_bank_details"}
 
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.

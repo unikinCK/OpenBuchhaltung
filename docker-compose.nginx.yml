@@ -48,6 +48,11 @@ services:
       timeout: 5s
       retries: 3
 
+  mcp:
+    environment:
+      # Öffentliche URL für den OAuth-Hinweis (WWW-Authenticate) im 401.
+      MCP_PUBLIC_URL: https://${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set}
+
   certbot:
     image: certbot/certbot:latest
     restart: unless-stopped

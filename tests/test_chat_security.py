@@ -56,6 +56,8 @@ EXPECTED_BLOCKED_TOOLS = {
     "unlock_user_login",
     "set_user_password",
     "change_own_password",
+    "list_oauth_grants",
+    "revoke_oauth_grant",
     # FinTS (PIN/TAN)
     "list_fints_connections",
     "create_fints_connection",

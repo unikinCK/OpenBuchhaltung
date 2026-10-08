@@ -1272,6 +1272,76 @@ class LoginAttempt(Base):
     )
 
 
+class OAuthClient(Base):
+    """Per Dynamic Client Registration (RFC 7591) angemeldeter OAuth-Client (z. B. ChatGPT)."""
+
+    __tablename__ = "oauth_client"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    client_secret_hash: Mapped[str | None] = mapped_column(String(64))
+    client_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    token_endpoint_auth_method: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="none"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class OAuthAuthorizationCode(Base):
+    """Einmal-Code des Authorization-Code-Flows (PKCE S256, kurzlebig)."""
+
+    __tablename__ = "oauth_authorization_code"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("oauth_client.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    code_challenge: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str | None] = mapped_column(String(200))
+    resource: Mapped[str | None] = mapped_column(String(500))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthGrant(Base):
+    """Zugriff eines OAuth-Clients im Namen eines Benutzers (Access- und Refresh-Token).
+
+    Tokens liegen nur als SHA-256 vor. Der Refresh rotiert beide Tokens; ein Widerruf
+    setzt ``revoked_at`` und beendet den Zugriff sofort.
+    """
+
+    __tablename__ = "oauth_grant"
+    __table_args__ = (Index("ix_oauth_grant_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("oauth_client.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    access_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    access_token_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scope: Mapped[str | None] = mapped_column(String(200))
+    resource: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    client: Mapped[OAuthClient] = relationship()
+    user: Mapped[User] = relationship()
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (

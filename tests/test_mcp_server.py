@@ -145,6 +145,8 @@ EXPECTED_TOOL_NAMES = {
     "unlock_user_login",
     "set_user_password",
     "change_own_password",
+    "list_oauth_grants",
+    "revoke_oauth_grant",
 }
 
 

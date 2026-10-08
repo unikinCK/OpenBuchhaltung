@@ -8,6 +8,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### OAuth für MCP-Connectoren
+
+- OAuth-2.1-Server nach MCP-Autorisierungsspezifikation, damit ChatGPT- und
+  claude.ai-Connectoren sich anmelden können (beide senden keine festen Bearer-Tokens):
+  Discovery (RFC 9728/8414), Dynamic Client Registration (RFC 7591),
+  Authorization-Code-Flow mit PKCE S256, Login und Zustimmungsseite, Refresh-Token-Rotation,
+  Widerruf (RFC 7009). Access-Tokens wirken wie Benutzer-Tokens (Rolle, Mandant, Audit).
+- MCP-HTTP antwortet bei 401 mit `WWW-Authenticate: Bearer resource_metadata=…`.
+- Verbundene Apps: UI-Seite **Apps**, API `GET /api/v1/oauth/grants`,
+  `POST /api/v1/oauth/grants/<id>/revoke`, MCP-Tools `list_oauth_grants`,
+  `revoke_oauth_grant`. Migration `20261008_0041`.
+
 ### MCP
 
 - MCP-HTTP-Endpunkt akzeptiert Benutzer-API-Tokens (`MCP_HTTP_ALLOW_USER_TOKENS`,

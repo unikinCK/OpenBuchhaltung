@@ -22,6 +22,7 @@ from app.api import (  # noqa: F401
     journal,
     journal_templates,
     mcp,
+    oauth_grants,
     open_items,
     payment_runs,
     payroll,

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Zugriff erlauben – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="login-wrapper">
+    <div class="login-card">
+      <h2>Zugriff erlauben?</h2>
+      <p><strong>{{ client_name }}</strong> möchte über den MCP-Zugang im Namen von
+        <strong>{{ user['username'] }}</strong> ({{ user['role'] }}) auf OpenBuchhaltung zugreifen.</p>
+      <p class="muted">Die Anwendung erhält dieselben Rechte wie Ihr Benutzerkonto (Rolle und
+        Mandant) und kann damit Daten lesen{% if user['role'] in ('Admin', 'Buchhalter') %} und
+        ändern{% endif %}. Nach der Zustimmung geht es weiter zu <strong>{{ redirect_host }}</strong>.
+        Den Zugriff können Sie jederzeit unter „Apps“ widerrufen.</p>
+      <form method="post" action="{{ url_for('oauth.authorize_decision') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        {% for key, value in params.items() %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}" />
+        {% endfor %}
+        <button type="submit" name="decision" value="allow">Erlauben</button>
+        <button type="submit" name="decision" value="deny" class="secondary">Ablehnen</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}
