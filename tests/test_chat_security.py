@@ -49,6 +49,7 @@ EXPECTED_BLOCKED_TOOLS = {
     "reject_chat_action",
     # Benutzer / Token / Passwort
     "list_users",
+    "get_current_user",
     "create_user",
     "rotate_user_api_token",
     "set_user_active",

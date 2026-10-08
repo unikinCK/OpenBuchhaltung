@@ -379,6 +379,7 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `MCP_HTTP_AUTH_TOKEN` | – | Eingangstoken (Pflicht bei Nicht-Loopback-Bindung). |
 | `MCP_HTTP_ALLOWED_ORIGINS` | – | Erlaubte Browser-Origins (kommagetrennt, `*` = alle). |
 | `MCP_HTTP_MAX_BODY_BYTES` | `16777216` | Maximale Request-Größe des MCP-HTTP-Endpunkts (größer → 413). |
+| `MCP_HTTP_ALLOW_USER_TOKENS` | `1` | Benutzer-API-Tokens am MCP-HTTP-Endpunkt annehmen und durchreichen (`0` = nur `MCP_HTTP_AUTH_TOKEN`). |
 
 **Docker Compose und Skripte**
 
@@ -769,6 +770,8 @@ Lesezugriff.
 
 Basis-Endpunkte:
 
+- `GET /api/v1/users/me` — Identität des Aufrufers: `auth` (`user`/`api_token`),
+  `user` (ID, Name, Rolle, Mandant) und `global_access`; MCP-Tool `get_current_user`
 - `GET /api/v1/health` — `status` (`ok`/`unhealthy`, HTTP 503 bei Störung), `version`,
   `commit`, `database` (`SELECT 1`, Dialekt) und `schema` (Alembic-Revision, Head,
   `up_to_date`); Basis für Docker-HEALTHCHECK und Monitoring
@@ -1185,6 +1188,17 @@ gegenüber MCP-Clients (z. B. Claude Desktop); `OPENBUCHHALTUNG_API_TOKEN` ist d
 Backend-Token, mit dem der MCP-Server selbst die REST-API aufruft, und wird nur
 bei aktiver API-Authentifizierung (`API_REQUIRE_AUTH=1`) benötigt. Beide sollten
 unterschiedliche Werte haben.
+
+**Benutzer-Tokens am MCP-Endpunkt.** Statt `MCP_HTTP_AUTH_TOKEN` kann ein MCP-Client
+auch den **API-Token eines Benutzers** als `Authorization: Bearer <token>` senden
+(Token in der Verwaltung, per `set-api-token` oder MCP-Tool `rotate_user_api_token`
+erzeugen). Der Server prüft ihn gegen `GET /api/v1/users/me` (Ergebnis 60 s gecacht)
+und reicht ihn pro Request an die REST-API durch. Die Tools laufen dann mit Rolle und
+Mandanten-Scope dieses Benutzers, das Audit-Protokoll nennt ihn als Akteur, und ein
+gesperrter Benutzer oder rotierter Token verliert den Zugriff sofort. Mit
+`MCP_HTTP_AUTH_TOKEN` gilt weiterhin das Backend-Token `OPENBUCHHALTUNG_API_TOKEN`.
+Abschalten: `MCP_HTTP_ALLOW_USER_TOKENS=0`. Das MCP-Tool `get_current_user` zeigt, als
+wer ein Client arbeitet.
 
 ### HTTPS-Zugang für Claude-Desktop-Custom-Connectoren
 

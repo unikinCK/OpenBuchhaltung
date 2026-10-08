@@ -21,6 +21,7 @@ EXPECTED_TOOL_NAMES = {
     "list_companies",
     "create_tenant_with_company",
     "list_users",
+    "get_current_user",
     "create_user",
     "rotate_user_api_token",
     "set_user_active",
