@@ -11,6 +11,20 @@ from app.services.account_hierarchy import resolve_parent_account_id
 from app.services.audit_log import log_audit_event, serialize_audit_log_entry
 from domain.models import Account, AuditLog, Company
 
+# Kontoarten der Erfassungsmaske plus „revenue“ (API-Alias für income).
+# Bilanz und Jahresabschluss werten asset/liability/equity aus, GuV
+# income/revenue/expense.
+ACCOUNT_TYPES = (
+    "asset",
+    "receivable",
+    "liability",
+    "payable",
+    "equity",
+    "income",
+    "revenue",
+    "expense",
+)
+
 
 class AccountUpdateError(ValueError):
     """Ungültige oder leere Änderung am Kontenstamm."""

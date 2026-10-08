@@ -40,7 +40,7 @@
     {% if not selected_company_id %}
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
     {% elif not accounts %}
-      <p class="muted">Bitte zuerst ein Anlagekonto (z. B. 0400 Maschinen) und ein Abschreibungskonto (z. B. 4830) anlegen.</p>
+      <p class="muted">Bitte zuerst ein Anlagekonto (z. B. Betriebsausstattung: SKR03 0400, SKR04 0630) und ein Abschreibungskonto (Abschreibungen auf Sachanlagen: SKR03 4830, SKR04 6220) anlegen.</p>
     {% else %}
       <form method="post" action="{{ url_for('main.create_fixed_asset_action') }}" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />

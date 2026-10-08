@@ -1,4 +1,4 @@
-"""Kontenrahmen-Import über die API."""
+"""Kontenrahmen-Import und -Prüfung über die API."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from app.api.helpers import (
     get_session_factory,
 )
 from app.auth import current_api_user
+from app.services.account_chart_check import check_account_chart
 from app.services.account_chart_import import (
     BUNDLED_ACCOUNT_CHART_FILES,
     AccountChartImportReport,
@@ -164,3 +165,16 @@ def import_account_chart_via_api():
         ),
         201,
     )
+
+
+@api_bp.get("/account-chart/check")
+def check_account_chart_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        return jsonify(check_account_chart(session=session, company_id=company_id)), 200
