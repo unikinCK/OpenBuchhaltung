@@ -594,6 +594,38 @@ def test_chart_import_detects_collective_accounts_and_rejects_bad_rows(session: 
     assert flags["1600"] == "creditor"
     assert {code for code, flag in flags.items() if flag} == {"1400", "1600"}
 
+    # SKR04-Nummern und vollständige DATEV-Bezeichnungen: erkannt wird die
+    # exakte Bezeichnung, nicht die Kontonummer und kein Präfix.
+    skr04_company = Company(tenant=tenant, name="SKR04 GmbH", currency_code="EUR")
+    session.add(skr04_company)
+    session.commit()
+    report = import_account_chart_csv(
+        session=session,
+        company_id=skr04_company.id,
+        csv_stream=io.StringIO(
+            "code,name,account_type\n"
+            "1200,Forderungen aus Lieferungen und Leistungen,asset\n"
+            "1210,Forderungen aus Lieferungen und Leistungen ohne Kontokorrent,asset\n"
+            "1260,Forderungen aus Lieferungen und Leistungen gegen verbundene Unternehmen,asset\n"
+            "1800,Bank,asset\n"
+            "3300,Verbindlichkeiten aus Lieferungen und Leistungen,liability\n"
+            "3310,Verbindlichkeiten aus Lieferungen und Leistungen ohne Kontokorrent,liability\n"
+            "3301,Verbindlichkeiten aLuL,liability\n"
+        ),
+    )
+    assert report.error_rows == 0
+    skr04_flags = {
+        account.code: account.subledger
+        for account in session.execute(
+            select(Account).where(Account.company_id == skr04_company.id)
+        ).scalars()
+    }
+    assert {code: flag for code, flag in skr04_flags.items() if flag} == {
+        "1200": "debtor",
+        "3300": "creditor",
+        "3301": "creditor",
+    }
+
     report = import_account_chart_csv(
         session=session,
         company_id=company.id,

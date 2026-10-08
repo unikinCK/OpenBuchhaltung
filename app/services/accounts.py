@@ -26,10 +26,30 @@ VALID_ACCOUNT_TYPES = ("asset", "liability", "equity", "income", "revenue", "exp
 # Sammelkonten liegen auf der Bilanzseite ihrer Nebenbuchsalden.
 SUBLEDGER_ACCOUNT_TYPES = {SUBLEDGER_DEBTOR: "asset", SUBLEDGER_CREDITOR: "liability"}
 
-# Bezeichnungen, an denen der Kontenrahmen-Import die Sammelkonten erkennt.
-_SUBLEDGER_NAME_PREFIXES = {
-    SUBLEDGER_DEBTOR: "forderungen aus lieferungen und leistungen",
-    SUBLEDGER_CREDITOR: "verbindlichkeiten aus lieferungen und leistungen",
+# Bezeichnungen, an denen der Kontenrahmen-Import die Sammelkonten erkennt –
+# nur exakt (nach Normalisierung), unabhängig von der Kontonummer (SKR03
+# 1400/1600, SKR04 1200/3300). Konten wie „… ohne Kontokorrent“ oder „… gegen
+# verbundene Unternehmen“ bleiben unmarkiert und werden bei Bedarf manuell
+# gekennzeichnet.
+_SUBLEDGER_ACCOUNT_NAMES = {
+    SUBLEDGER_DEBTOR: frozenset(
+        {
+            "forderungen aus lieferungen und leistungen",
+            "forderungen alul",
+            "forderungen a. lul",
+            "forderungen aus lul",
+            "forderungen aus l+l",
+        }
+    ),
+    SUBLEDGER_CREDITOR: frozenset(
+        {
+            "verbindlichkeiten aus lieferungen und leistungen",
+            "verbindlichkeiten alul",
+            "verbindlichkeiten a. lul",
+            "verbindlichkeiten aus lul",
+            "verbindlichkeiten aus l+l",
+        }
+    ),
 }
 
 _UNSET: Any = object()
@@ -87,11 +107,8 @@ def normalize_subledger(value: str | None, *, account_type: str) -> str | None:
 def default_subledger_for(*, name: str, account_type: str) -> str | None:
     """Erkennt Forderungen/Verbindlichkeiten aLuL als Sammelkonto (Kontenrahmen-Import)."""
     normalized_name = " ".join((name or "").lower().split())
-    for subledger, prefix in _SUBLEDGER_NAME_PREFIXES.items():
-        if (
-            normalized_name.startswith(prefix)
-            and account_type == SUBLEDGER_ACCOUNT_TYPES[subledger]
-        ):
+    for subledger, names in _SUBLEDGER_ACCOUNT_NAMES.items():
+        if normalized_name in names and account_type == SUBLEDGER_ACCOUNT_TYPES[subledger]:
             return subledger
     return None
 

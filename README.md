@@ -576,8 +576,10 @@ oder gleicher Name) werden als Hinweis gemeldet.
 **Nebenbuch statt Personenkonten** (siehe `docs/adr/ADR-002-geschaeftspartner-nebenbuch.md`):
 Gebucht wird weiter auf die Sammelkonten. Konten tragen dafür das Kennzeichen
 `subledger` (`debtor` auf Aktivkonten, `creditor` auf Passivkonten), gepflegt unter
-**Konten**; der Kontenrahmen-Import erkennt Forderungen/Verbindlichkeiten aLuL
-automatisch. Nur Zeilen auf Sammelkonten dürfen einen Geschäftspartner tragen,
+**Konten**. Maßgeblich ist das Kennzeichen, nicht die Kontonummer: SKR03 nutzt
+1400/1600, SKR04 1200/3300, und je Seite sind mehrere Sammelkonten möglich (etwa
+für verbundene Unternehmen). Der Kontenrahmen-Import erkennt Forderungen und
+Verbindlichkeiten aLuL an der exakten Bezeichnung. Nur Zeilen auf Sammelkonten dürfen einen Geschäftspartner tragen,
 und dessen Rolle muss zur Seite passen. Festgeschriebene Buchungen versiegeln den
 Partner (Inhaltshash Version 3, ältere Siegel bleiben Version 2), Storno spiegelt
 ihn, der Saldovortrag trägt Sammelkonten je Partner ins Folgejahr. Sammelkonten
@@ -1404,8 +1406,10 @@ Unterstuetzte Kopfzeilen (Alias):
 - `name` oder `Bezeichnung`
 - `account_type` oder `Kontoart` (`asset`, `liability`, `equity`, `income`/`revenue`, `expense`)
 - optional `subledger` oder `Sammelkonto` (`debtor`/`creditor`); ohne die Spalte werden
-  „Forderungen aus Lieferungen und Leistungen“ und „Verbindlichkeiten aus Lieferungen
-  und Leistungen“ automatisch als Sammelkonten gekennzeichnet
+  Konten mit der exakten Bezeichnung „Forderungen aus Lieferungen und Leistungen“ bzw.
+  „Verbindlichkeiten aus Lieferungen und Leistungen“ (auch Kurzform „aLuL“) als
+  Sammelkonten gekennzeichnet, unabhängig von der Kontonummer; Konten wie
+  „… ohne Kontokorrent“ bleiben unmarkiert
 
 Fehlerhafte Zeilen (unbekannte Kontoart, zu viele Felder – Bezeichnungen mit Komma
 gehören in Anführungszeichen) werden protokolliert und brechen den Gesamtimport
