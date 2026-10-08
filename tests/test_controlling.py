@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import json
 import zipfile
@@ -258,3 +259,99 @@ def test_controlling_assignment_validity_type_and_ui(tmp_path: Path) -> None:
     journal_page = client.get(f"/buchungen?company_id={company_id}")
     assert journal_page.status_code == 200
     assert "Profitcenter".encode() in journal_page.data
+
+
+def test_controlling_report_counts_skr03_income_accounts_as_revenue(tmp_path: Path) -> None:
+    """SKR-Importe legen Erlöskonten als ``income`` an — sie zählen als Erlös."""
+    _, client = _app_and_client(tmp_path)
+    tenant = client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "SKR03", "company_name": "SKR03 GmbH"},
+    )
+    assert tenant.status_code == 201
+    company_id = tenant.get_json()["company"]["id"]
+    imported = client.post(
+        "/api/v1/account-chart/import",
+        json={"company_id": company_id, "chart": "skr03"},
+    )
+    assert imported.status_code == 201
+    accounts = client.get(f"/api/v1/accounts?company_id={company_id}").get_json()["accounts"]
+    account_ids = {account["code"]: account["id"] for account in accounts}
+    account_types = {account["code"]: account["account_type"] for account in accounts}
+    assert account_types["8400"] == account_types["2600"] == "income"
+
+    cost_center = _create_unit(client, company_id, "cost_center", "K100", "Vertrieb")
+    profit_center = _create_unit(client, company_id, "profit_center", "P100", "Produkte")
+    dimensions = {
+        "cost_center_id": cost_center["id"],
+        "profit_center_id": profit_center["id"],
+    }
+    for description, lines in (
+        (
+            "Umsatz Vertrieb",
+            [
+                {"account_id": account_ids["1200"], "debit_amount": "1000.00"},
+                {"account_id": account_ids["8400"], "credit_amount": "1000.00", **dimensions},
+            ],
+        ),
+        (
+            "Versicherung Vertrieb",
+            [
+                {"account_id": account_ids["4400"], "debit_amount": "300.00", **dimensions},
+                {"account_id": account_ids["1200"], "credit_amount": "300.00"},
+            ],
+        ),
+        (
+            "Sonstiger Ertrag ohne Kontierung",
+            [
+                {"account_id": account_ids["1200"], "debit_amount": "50.00"},
+                {"account_id": account_ids["2600"], "credit_amount": "50.00"},
+            ],
+        ),
+    ):
+        booking = client.post(
+            "/api/v1/journal-entries",
+            json={
+                "company_id": company_id,
+                "entry_date": "2026-07-14",
+                "description": description,
+                "lines": lines,
+            },
+        )
+        assert booking.status_code == 201
+
+    for unit_type in ("cost_center", "profit_center"):
+        report = client.get(
+            f"/api/v1/controlling-report?company_id={company_id}&unit_type={unit_type}"
+        ).get_json()
+        unit = report["units"][0]
+        assert unit["total_revenue"] == "1000.00"
+        assert unit["total_expense"] == "300.00"
+        assert unit["net_income"] == "700.00"
+        assert [
+            (account["code"], account["account_type"], account["amount"])
+            for account in unit["accounts"]
+        ] == [("4400", "expense", "300.00"), ("8400", "income", "1000.00")]
+        assert report["unassigned"]["total_revenue"] == "50.00"
+        assert report["unassigned"]["net_income"] == "50.00"
+
+    controlling_csv = client.get(
+        f"/api/v1/exports/controlling.csv?company_id={company_id}&unit_type=cost_center"
+    )
+    assert controlling_csv.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(controlling_csv.get_data(as_text=True))))
+    revenue_row = next(row for row in rows if row["account_code"] == "8400")
+    assert revenue_row["unit_code"] == "K100"
+    assert revenue_row["account_type"] == "income"
+    assert revenue_row["amount"] == "1000.00"
+    assert revenue_row["total_revenue"] == "1000.00"
+    assert revenue_row["net_income"] == "700.00"
+    unassigned_row = next(row for row in rows if row["account_code"] == "2600")
+    assert unassigned_row["unit_name"] == "Nicht zugeordnet"
+    assert unassigned_row["total_revenue"] == "50.00"
+
+    page = client.get(f"/controlling?company_id={company_id}")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    # Ergebnis 700.00 je einmal in Kostenstellenrechnung und Profitcenter-GuV
+    assert html.count("<strong>700.00</strong>") == 2

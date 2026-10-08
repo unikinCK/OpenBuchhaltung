@@ -247,6 +247,9 @@ def controlling_result_report(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> dict[str, Any]:
+    # Lokal importiert: reports → journal_entries → controlling wäre sonst zirkulär.
+    from app.services.reports import REVENUE_ACCOUNT_TYPES
+
     normalized_type = _normalize_unit_type(unit_type)
     units = (
         session.execute(
@@ -281,7 +284,7 @@ def controlling_result_report(
         .outerjoin(unit_alias, unit_alias.id == dimension_column)
         .where(
             JournalEntry.company_id == company_id,
-            Account.account_type.in_(["revenue", "expense"]),
+            Account.account_type.in_([*sorted(REVENUE_ACCOUNT_TYPES), "expense"]),
         )
         .group_by(
             dimension_column,
@@ -327,7 +330,8 @@ def controlling_result_report(
         )
         debit = Decimal(row.debit_total)
         credit = Decimal(row.credit_total)
-        amount = credit - debit if row.account_type == "revenue" else debit - credit
+        is_revenue = row.account_type in REVENUE_ACCOUNT_TYPES
+        amount = credit - debit if is_revenue else debit - credit
         bucket["accounts"].append(
             {
                 "account_id": row.account_id,
@@ -337,7 +341,7 @@ def controlling_result_report(
                 "amount": amount,
             }
         )
-        if row.account_type == "revenue":
+        if is_revenue:
             bucket["total_revenue"] += amount
         else:
             bucket["total_expense"] += amount
