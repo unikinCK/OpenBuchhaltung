@@ -19,9 +19,11 @@ from domain.models import (
     JournalEntryLine,
 )
 
-# Kontoarten, die Berichte, Jahresabschluss und UStVA auswerten. SKR-Importe
-# verwenden "income", manuell angelegte Konten häufig "revenue".
-VALID_ACCOUNT_TYPES = ("asset", "liability", "equity", "income", "revenue", "expense")
+# Kontoarten, die Bilanz und Jahresabschluss (asset/liability/equity) sowie GuV
+# (income/revenue/expense) auswerten; „revenue“ ist der API-Alias für income.
+# Die früheren Formularwerte „receivable“/„payable“ werten die Berichte nicht aus –
+# Debitoren-/Kreditoren-Sammelkonten tragen stattdessen das Kennzeichen subledger.
+ACCOUNT_TYPES = ("asset", "liability", "equity", "income", "revenue", "expense")
 
 # Sammelkonten liegen auf der Bilanzseite ihrer Nebenbuchsalden.
 SUBLEDGER_ACCOUNT_TYPES = {SUBLEDGER_DEBTOR: "asset", SUBLEDGER_CREDITOR: "liability"}
@@ -79,11 +81,11 @@ def serialize_account(account: Account) -> dict[str, Any]:
 
 
 def validate_account_type(account_type: str) -> str:
-    normalized = (account_type or "").strip()
-    if normalized not in VALID_ACCOUNT_TYPES:
+    raw = (account_type or "").strip()
+    normalized = raw.lower()
+    if normalized not in ACCOUNT_TYPES:
         raise AccountUpdateError(
-            f"Unbekannter Kontotyp „{normalized}“; erlaubt sind "
-            f"{', '.join(VALID_ACCOUNT_TYPES)}."
+            f"Unbekannte Kontoart „{raw}“ (erlaubt: {', '.join(ACCOUNT_TYPES)})"
         )
     return normalized
 
@@ -209,7 +211,7 @@ def update_account_master_data(
             raise AccountUpdateError("account_type must be a string.")
         requested_type = validate_account_type(account_type)
         if requested_type != account.account_type:
-            if account.account_type in VALID_ACCOUNT_TYPES:
+            if account.account_type in ACCOUNT_TYPES:
                 raise AccountUpdateError(
                     "Die Kontoart ist nach der Anlage unveränderbar; nur ungültige "
                     "Altwerte dürfen korrigiert werden."

@@ -30,6 +30,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.standard_accounts import GELDTRANSIT, find_standard_account
 from domain.models import (
     Account,
     BankTransaction,
@@ -459,30 +460,17 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
     ]
 
 
-# Übliche Geldtransit-Konten: SKR03 1360, SKR04 1460 (das mitgelieferte
-# SKR04-Chart führt Geldtransit ebenfalls unter 1360).
-GELDTRANSIT_CODES = ("1360", "1460")
 TRANSFER_DATE_TOLERANCE_DAYS = 2
 
 
 def find_geldtransit_account(*, session: Session, company_id: int) -> Account | None:
-    """Findet das Geldtransit-Konto der Gesellschaft (per Kontonummer oder Name)."""
-    return (
-        session.execute(
-            select(Account)
-            .where(
-                Account.company_id == company_id,
-                Account.is_active.is_(True),
-                or_(
-                    Account.code.in_(GELDTRANSIT_CODES),
-                    Account.name.ilike("%geldtransit%"),
-                ),
-            )
-            .order_by(Account.code)
-        )
-        .scalars()
-        .first()
-    )
+    """Findet das Geldtransit-Konto der Gesellschaft (SKR03 1360, SKR04 1460).
+
+    Maßgeblich ist die Bezeichnung „Geldtransit“; die Nummer allein genügt
+    nicht, weil 1360 im SKR04 „Darlehen“ und 1460 im SKR03 „Zweifelhafte
+    Forderungen“ ist.
+    """
+    return find_standard_account(session=session, company_id=company_id, standard=GELDTRANSIT)
 
 
 def detect_transfer_counterparts(

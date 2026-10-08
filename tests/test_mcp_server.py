@@ -28,6 +28,7 @@ EXPECTED_TOOL_NAMES = {
     "create_account",
     "update_account",
     "import_account_chart",
+    "check_account_chart",
     "list_accounts",
     "get_account_history",
     "create_controlling_unit",
@@ -299,6 +300,16 @@ def test_account_chart_tool_forwards_arguments() -> None:
         None,
         {"company_id": 7, "chart": "skr03"},
     )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {"name": "check_account_chart", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/account-chart/check", {"company_id": 7}, None)
 
 
 def test_account_update_and_history_tools_forward_arguments() -> None:

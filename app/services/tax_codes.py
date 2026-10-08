@@ -33,7 +33,10 @@ class DefaultTaxCode:
     kind: str = TAX_KIND_OUTPUT
 
 
-# Kontonummern für die gebündelten Kontenrahmen (SKR03, SKR04).
+# Steuerkonten je Kontenrahmen: SKR03 1776/1771 (USt) und 1576/1571 (VSt),
+# SKR04 3806/3801 (USt) und 1406/1401 (VSt). Die Suche nach der Nummer allein
+# ist hier eindeutig: Laut DATEV-Kontenrahmen 2026 sind die SKR03-Nummern im
+# SKR04 nicht belegt und umgekehrt (SKR03 1401–1406 sind reserviert).
 DEFAULT_TAX_CODES: tuple[DefaultTaxCode, ...] = (
     DefaultTaxCode("USt19", Decimal("19.00"), "Umsatzsteuer 19 %", ("1776", "3806")),
     DefaultTaxCode("USt7", Decimal("7.00"), "Umsatzsteuer 7 %", ("1771", "3801")),

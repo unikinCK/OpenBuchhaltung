@@ -475,6 +475,45 @@ def test_collective_flag_and_type_repair_rules(session: Session) -> None:
     assert event.payload["after"]["account_type"] == "expense"
 
 
+def test_chart_check_reports_invalid_types_until_repaired(session: Session) -> None:
+    from app.services.account_chart_check import check_account_chart
+
+    company, _ = _seed(session)
+    legacy_type = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="4240",
+        name="Gas",
+        account_type="Strom",
+    )
+    old_form_value = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1410",
+        name="Debitoren alt",
+        account_type="receivable",
+    )
+    session.add_all([legacy_type, old_form_value])
+    session.commit()
+
+    before = check_account_chart(session=session, company_id=company.id)
+    assert [row["code"] for row in before["unknown_account_types"]] == ["1410", "4240"]
+    assert "korrigieren" in before["warnings"][-1]
+
+    for account, account_type in ((legacy_type, "expense"), (old_form_value, "asset")):
+        assert update_account_master_data(
+            session=session, account=account, changed_by="t", account_type=account_type
+        )
+    assert update_account_master_data(
+        session=session, account=old_form_value, changed_by="t", subledger="debtor"
+    )
+    session.commit()
+
+    after = check_account_chart(session=session, company_id=company.id)
+    assert after["unknown_account_types"] == []
+    assert old_form_value.subledger == "debtor"
+
+
 def test_year_end_carryforward_keeps_partner_balances(session: Session) -> None:
     company, accounts = _seed(session)
     first = create_partner(
@@ -641,7 +680,7 @@ def test_chart_import_detects_collective_accounts_and_rejects_bad_rows(session: 
     assert report.error_rows == 3
     messages = " ".join(error.message for error in report.errors)
     assert "Anführungszeichen" in messages
-    assert "Unbekannter Kontotyp" in messages
+    assert "Unbekannte Kontoart" in messages
     assert "Kontoart asset" in messages
 
 

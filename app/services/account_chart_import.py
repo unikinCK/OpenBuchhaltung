@@ -84,12 +84,14 @@ def import_account_chart_csv(
             canonical: (raw_row.get(source) or "").strip()
             for canonical, source in header_mapping.items()
         }
-        if raw_row.get(None):
-            # Mehr Felder als Spalten, z. B. eine ungequotete Bezeichnung mit Komma.
+        # Überzählige Spalten entstehen z. B. durch ein unmaskiertes Komma in der
+        # Bezeichnung („Gas, Strom, Wasser“) — dann stünde Unsinn in der Kontoart.
+        if any(value.strip() for value in raw_row.get(None) or []):
             _record_error(
                 report,
                 line_number,
-                "Zu viele Felder – Bezeichnungen mit Komma müssen in Anführungszeichen stehen.",
+                "Mehr Spalten als in der Kopfzeile — Bezeichnungen mit Komma "
+                "in Anführungszeichen setzen.",
             )
             continue
 
@@ -102,10 +104,6 @@ def import_account_chart_csv(
             )
             continue
 
-        if row["code"] in seen_codes:
-            report.duplicate_rows += 1
-            continue
-
         try:
             account_type = validate_account_type(row["account_type"])
             if "subledger" in header_mapping:
@@ -114,6 +112,10 @@ def import_account_chart_csv(
                 subledger = default_subledger_for(name=row["name"], account_type=account_type)
         except AccountUpdateError as exc:
             _record_error(report, line_number, str(exc))
+            continue
+
+        if row["code"] in seen_codes:
+            report.duplicate_rows += 1
             continue
 
         session.flush()

@@ -139,3 +139,44 @@ def test_account_chart_ui_imports_bundled_chart(tmp_path):
             select(func.count(Account.id)).where(Account.company_id == 1)
         )
     assert account_count > 0
+
+
+def test_import_rejects_unquoted_comma_and_unknown_account_type(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _create_company(app)
+
+    from app.services.account_chart_import import import_account_chart_csv
+
+    csv_content = (
+        "code,name,account_type\n"
+        "6325,Gas, Strom, Wasser,expense\n"
+        '6326,"Gas, Strom, Wasser",expense\n'
+        "6400,Versicherungen,Aufwand\n"
+        "6600,Werbekosten,Expense\n"
+        "6610,Geschenke,expense,\n"
+    )
+    with app.extensions["db_session_factory"]() as session:
+        report = import_account_chart_csv(
+            session=session,
+            company_id=company_id,
+            csv_stream=StringIO(csv_content),
+        )
+        accounts = {
+            account.code: (account.name, account.account_type)
+            for account in session.execute(
+                select(Account).where(Account.company_id == company_id)
+            ).scalars()
+        }
+
+    assert report.imported_rows == 3
+    assert report.error_rows == 2
+    assert [error.line_number for error in report.errors] == [2, 4]
+    assert "Mehr Spalten als in der Kopfzeile" in report.errors[0].message
+    assert "Unbekannte Kontoart „Aufwand“" in report.errors[1].message
+    # Kontoart wird kleingeschrieben übernommen; eine leere Zusatzspalte ist harmlos.
+    assert accounts == {
+        "6326": ("Gas, Strom, Wasser", "expense"),
+        "6600": ("Werbekosten", "expense"),
+        "6610": ("Geschenke", "expense"),
+    }
+

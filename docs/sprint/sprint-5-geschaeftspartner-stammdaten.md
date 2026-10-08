@@ -438,10 +438,11 @@ Sprint 5) abgehakt.
 - **SQLite-Migration:** Wegen der Immutability-Trigger kein Tabellen-Rebuild.
 - **Parallele Sprints:** Konflikte bei der Migrationsnummer und im
   Umsetzungsplan.
-- **SKR04-Kontenrahmen:** Die mitgelieferte `skr04.csv` nutzt überwiegend
-  SKR03-Nummern, z. B. Forderungen 1400 statt 1200. Bei SKR04-Gesellschaften
-  ist das Sammelkonto-Kennzeichen erst nach der Korrektur verlässlich. Das ist
-  eine separate Aufgabe.
+- **SKR04-Kontenrahmen:** Mit #155 korrigiert (Forderungen aLuL 1200,
+  Verbindlichkeiten aLuL 3300); der Import kennzeichnet beide als Sammelkonten.
+  Gesellschaften mit Altbestand aus dem fehlerhaften Import (u. a. die
+  unikin GmbH) meldet die Kontenrahmen-Prüfung; dort die Sammelkonten auf den
+  tatsächlich genutzten Forderungs-/Verbindlichkeitskonten kennzeichnen.
 - **DATEV-Formatdetails** (Kategorie 16) sind ohne offizielle Prüfung nur
   „kompatibel“, nicht zertifiziert.
 - **Umgeleitete Zahlungen:** `create_open_item` kann im Chat (nach Bestätigung)

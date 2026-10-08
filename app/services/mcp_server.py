@@ -504,6 +504,26 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="check_account_chart",
+        description=(
+            "Prüft den Kontenplan einer Gesellschaft, ohne etwas zu ändern: meldet "
+            "Altkonten aus dem bis Oktober 2026 fehlerhaften SKR04-Import (SKR03-Nummern "
+            "wie 1000 Kasse, 1200 Bank, 8000 Erlöse) mit richtiger SKR04-Nummer, "
+            "Buchungsanzahl und Saldo sowie Konten mit unbekannter Kontoart."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/account-chart/check",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="list_accounts",
         description=(
             "Listet die Sachkonten einer Gesellschaft mit interner ID, Kontonummer (code), "
@@ -1673,14 +1693,18 @@ TOOLS: list[ToolSpec] = [
         name="create_bank_account",
         description=(
             "Legt ein Bankkonto als Sachkonto mit Kontoart asset an (z. B. Kontonummer "
-            "1210 für ein weiteres Girokonto). Die zurückgegebene id wird als "
-            "bank_account_id beim Import von Bankumsätzen verwendet."
+            "1210 im SKR03 bzw. 1810 im SKR04 für ein weiteres Girokonto). Die "
+            "zurückgegebene id wird als bank_account_id beim Import von Bankumsätzen "
+            "verwendet."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
-                "code": {"type": "string", "description": "Kontonummer (z. B. 1210)."},
+                "code": {
+                    "type": "string",
+                    "description": "Kontonummer (z. B. 1210 im SKR03, 1810 im SKR04).",
+                },
                 "name": {
                     "type": "string",
                     "description": "Kontobezeichnung, z. B. Bankname und Kontoart.",
@@ -3178,7 +3202,8 @@ TOOLS: list[ToolSpec] = [
             "≤ 800 €), 'sammelposten' (Poolabschreibung über 5 Jahre), 'digital' "
             "(digitale Wirtschaftsgüter lt. BMF v. 22.02.2022: Nutzungsdauer 1 Jahr, "
             "volle AfA im Zugangsjahr, ohne Betragsgrenze) oder 'manuell'. "
-            "Anlage- und Abschreibungskonto per interner ID oder Kontonummer (z. B. '0400'/'4830')."
+            "Anlage- und Abschreibungskonto per interner ID oder Kontonummer "
+            "(z. B. SKR03 '0400'/'4830', SKR04 '0630'/'6220')."
         ),
         input_schema={
             "type": "object",
@@ -3236,11 +3261,13 @@ TOOLS: list[ToolSpec] = [
                 },
                 "asset_account_code": {
                     "type": "string",
-                    "description": "Kontonummer des Anlagekontos, z. B. '0400'.",
+                    "description": "Kontonummer des Anlagekontos, z. B. '0400' (SKR04: '0630').",
                 },
                 "depreciation_account_code": {
                     "type": "string",
-                    "description": "Kontonummer des Abschreibungskontos, z. B. '4830'.",
+                    "description": (
+                        "Kontonummer des Abschreibungskontos, z. B. '4830' (SKR04: '6220')."
+                    ),
                 },
                 "cost_center_id": {
                     "type": "integer",

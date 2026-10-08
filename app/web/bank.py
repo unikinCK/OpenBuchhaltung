@@ -40,6 +40,7 @@ from app.services.fints_sync import (
 )
 from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
+from app.services.standard_accounts import BANK, standard_account_id
 from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
@@ -73,6 +74,7 @@ def bank_page():
         companies, selected_company_id = company_context(session)
 
         bank_accounts = []
+        default_bank_account_id = None
         contra_accounts = []
         tax_codes = []
         transactions = []
@@ -103,6 +105,7 @@ def bank_page():
                 for account in accounts
                 if account.account_type == "asset" and account.subledger is None
             ]
+            default_bank_account_id = standard_account_id(bank_accounts, BANK)
             contra_accounts = accounts
             tax_codes = (
                 session.execute(
@@ -180,6 +183,7 @@ def bank_page():
         companies=companies,
         selected_company_id=selected_company_id,
         bank_accounts=bank_accounts,
+        default_bank_account_id=default_bank_account_id,
         bank_accounts_by_id={account.id: account for account in bank_accounts},
         contra_accounts=contra_accounts,
         tax_codes=tax_codes,

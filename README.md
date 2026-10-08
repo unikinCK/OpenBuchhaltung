@@ -523,8 +523,9 @@ mitgezogen, atomar mit dem Umzug (abwählbar per Checkbox bzw.
 
 **Geldtransit:** Übertrage zwischen eigenen Bankkonten erkennt die Bank-Seite
 automatisch (gegenläufiger Betrag auf einem anderen Bankkonto, max. 2 Tage
-Abstand) und schlägt das Geldtransit-Konto (Kontonummer 1360/1460 oder Name
-„Geldtransit“) als Gegenkonto vor — beide Seiten gegen Geldtransit buchen,
+Abstand) und schlägt das Geldtransit-Konto (Bezeichnung „Geldtransit“,
+bevorzugt SKR04 1460 bzw. SKR03 1360 — die Nummer allein genügt nicht, im SKR04
+ist 1360 „Darlehen“) als Gegenkonto vor — beide Seiten gegen Geldtransit buchen,
 nie direkt gegen das andere Bankkonto, dann geht das Konto auf null. Die API
 liefert die Erkennung über `include_suggestions`
 (`transfer_counterpart_id`, `geldtransit_account_id`).
@@ -686,7 +687,8 @@ Vorjahre müssen abgeschlossen sein) läuft in einer Transaktion:
 
 1. **Ergebnisvortrag** (`source=year_end_close`, Abschlussperiode 13): die
    GuV-Konten werden gegen das Gewinnvortragskonto glattgestellt (SKR03 `0860`,
-   SKR04 `2970`).
+   SKR04 `2970`, jeweils Kontoart `equity`, oder Bezeichnung „Gewinnvortrag“;
+   SKR04 `0860` ist das Aktivkonto „Beteiligungen an Personengesellschaften“).
 2. **Saldovortrag** (`source=carryforward`): die Salden der Bestandskonten
    werden als EB-Werte am ersten Tag des Folgejahres gebucht (Periode 1); das
    Folgejahr wird bei Bedarf regulär angelegt.
@@ -775,7 +777,7 @@ leitet Umsatz-/Vorsteuer aus `kind` ab. Über die API (`POST /tax-codes`, Feld
 und gegen die Kontoart des Steuerkontos geprüft (Vorsteuer = asset,
 Umsatzsteuer = liability).
 In der Buchungsmaske wird der Betrag einer Zeile mit Steuercode als **Netto** interpretiert;
-die Steuerzeile (z. B. auf 1776 Umsatzsteuer 19 %) wird automatisch ergänzt.
+die Steuerzeile (z. B. auf 1776 bzw. im SKR04 3806 Umsatzsteuer 19 %) wird automatisch ergänzt.
 
 Beispiel Ausgangsrechnung: Forderungen 1.190 € (Soll) an Erlöse 1.000 € (Haben, `USt19`)
 → System bucht zusätzlich 190 € Umsatzsteuer (Haben).
@@ -831,6 +833,10 @@ Basis-Endpunkte:
 - `PATCH /api/v1/accounts/<id>` — Bezeichnung, Status, Sammelkonto-Kennzeichen; die Kontoart
   nur zur Reparatur eines ungültigen Altwerts
 - `GET /api/v1/accounts` — Konten einer Gesellschaft (`company_id`; optional `include_inactive=true`)
+- `POST /api/v1/account-chart/import` — Kontenrahmen importieren (`chart` = `skr03`/`skr04`
+  oder eigene CSV per `content_base64`); MCP-Tool `import_account_chart`
+- `GET /api/v1/account-chart/check` — Kontenrahmen-Prüfung (`company_id`, siehe
+  [Kontenrahmenimport](#kontenrahmenimport-skr03skr04)); MCP-Tool `check_account_chart`
 - `GET/POST /api/v1/partners`, `GET/PATCH /api/v1/partners/<id>`,
   `POST /api/v1/partners/<id>/bank-details`, `GET /api/v1/partners/<id>/history` —
   Geschäftspartner (Debitoren/Kreditoren)
@@ -1411,7 +1417,65 @@ Unterstuetzte Kopfzeilen (Alias):
   Sammelkonten gekennzeichnet, unabhängig von der Kontonummer; Konten wie
   „… ohne Kontokorrent“ bleiben unmarkiert
 
-Fehlerhafte Zeilen (unbekannte Kontoart, zu viele Felder – Bezeichnungen mit Komma
-gehören in Anführungszeichen) werden protokolliert und brechen den Gesamtimport
-nicht ab. Ein bereits importiertes Konto mit ungültiger Kontoart lässt sich unter
-**Konten** bzw. per `PATCH /api/v1/accounts/<id>` mit `account_type` reparieren.
+Fehlerhafte Zeilen werden protokolliert und brechen den Gesamtimport nicht ab.
+Als fehlerhaft gelten fehlende Pflichtfelder, mehr Spalten als in der Kopfzeile
+(Bezeichnungen mit Komma in Anführungszeichen setzen: `"Gas, Strom, Wasser"`) und
+unbekannte Kontoarten; erlaubt sind `asset`, `liability`, `equity`, `income`,
+`revenue`, `expense` (Groß-/Kleinschreibung egal). Die früheren Werte `receivable`/
+`payable` werten Bilanz und Jahresabschluss nicht aus; Debitoren-/Kreditoren-
+Sammelkonten tragen stattdessen das Kennzeichen `subledger`. Ein bereits
+angelegtes Konto mit ungültiger Kontoart lässt sich unter **Konten** bzw. per
+`PATCH /api/v1/accounts/<id>` mit `account_type` reparieren – nur dann ist die
+Kontoart änderbar.
+
+Die mitgelieferten Kontenrahmen enthalten die gängigen Sachkonten einer kleinen
+Gesellschaft. `skr04.csv` folgt dem DATEV-Kontenrahmen SKR04 2026 (Art.-Nr. 11175):
+u. a. Kasse `1600`, Bank `1800`, Geldtransit `1460`, Forderungen aLuL `1200`,
+Verbindlichkeiten aLuL `3300`, Erlöse 19 %/7 % `4400`/`4300`, Gewinnvortrag `2970`.
+Automatiken finden ihre Funktionskonten (Geldtransit, Gewinnvortrag,
+Saldenvortrag, Vorauswahl von Bank- und Kreditorenkonto) in beiden
+Kontenrahmen (`app/services/standard_accounts.py`).
+
+### Kontenrahmen-Prüfung und Altbestände aus dem SKR04-Import
+
+Bis Oktober 2026 war `data/kontenrahmen/skr04.csv` fehlerhaft: Neben echten
+SKR04-Konten (Vorsteuer 1406/1401, Umsatzsteuer 3806/3801, Privat 2100/2180,
+Gewinnvortrag 2970) legte der Import Kasse, Bank, Geldtransit, Forderungen,
+Verbindlichkeiten, Aufwendungen und Erlöse unter SKR03-Nummern an (z. B. 1000
+Kasse, 1200 Bank, 1600 Verbindlichkeiten, 8000 Umsatzerlöse) und machte aus
+„Gas, Strom, Wasser“ das Konto 4240 „Gas“ mit der Kontoart „Strom“.
+
+Betroffene Gesellschaften werden **nicht automatisch umgebaut** — Kontonummern
+sind unveränderlich (GoBD, Kontenhistorie). Die **Kontenrahmen-Prüfung** (Seite
+**Konten**, `GET /api/v1/account-chart/check?company_id=…`, MCP-Tool
+`check_account_chart`) erkennt eine SKR04-Gesellschaft an ihren
+SKR04-Steuerkonten und listet je Altkonto die richtige SKR04-Nummer, die
+Buchungsanzahl, den Saldo und welches Konto die SKR04-Nummer derzeit belegt;
+zusätzlich Konten mit unbekannter Kontoart. Vorgehen:
+
+1. Fehlende SKR04-Konten anlegen, am einfachsten per erneutem Import von SKR04
+   (vorhandene Nummern werden übersprungen).
+2. Altkonten ohne Buchungen deaktivieren.
+3. Salden von Altkonten mit Buchungen zum Stichtag per Umbuchung auf das
+   SKR04-Konto übertragen, danach das Altkonto deaktivieren. Gebuchte und
+   festgeschriebene Buchungen bleiben unverändert.
+4. Belegt ein Altkonto die SKR04-Nummer (1200 „Bank“, 1600 „Verbindlichkeiten“),
+   eine freie SKR04-Nummer wählen, z. B. 1210 „Forderungen aus Lieferungen und
+   Leistungen ohne Kontokorrent“ bzw. 1610 „Nebenkasse 1“. Ein Altkonto ohne
+   Buchungen lässt sich alternativ umbenennen, wenn die Kontoart passt
+   (1200 „Bank“ → „Forderungen aus Lieferungen und Leistungen“, beide `asset`).
+
+Deaktivierte Altkonten ohne Saldo gelten als erledigt und verschwinden aus der
+Prüfung.
+
+Zwei Ergänzungen zum Vorgehen:
+
+- **Konto 4240 „Gas“ mit Kontoart „Strom“** zuerst unter **Konten** auf die
+  Kontoart `expense` (und die Bezeichnung „Gas, Strom, Wasser“) korrigieren. Dann
+  zählen die bisherigen Buchungen in der GuV ihrer jeweiligen Periode, und die
+  anschließende Umbuchung auf 6325 ist erfolgsneutral.
+- **Sammelkonten für Geschäftspartner** auf den SKR04-Konten kennzeichnen
+  (Forderungen aLuL `1200` bzw. die gewählte Ersatznummer, Verbindlichkeiten aLuL
+  `3300`). Das Kennzeichen eines Altkontos lässt sich nicht mehr entfernen,
+  sobald darauf Buchungszeilen mit Partner stehen; es bleibt dann einfach
+  bestehen, bis das Altkonto ausgeglichen und deaktiviert ist.

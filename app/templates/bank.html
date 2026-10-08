@@ -22,7 +22,7 @@
         <label for="bank_account_id">Bankkonto</label>
         <select id="bank_account_id" name="bank_account_id" required>
           {% for account in bank_accounts %}
-            <option value="{{ account.id }}" {% if account.code == '1200' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+            <option value="{{ account.id }}" {% if account.id == default_bank_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
           {% endfor %}
         </select>
 
@@ -173,7 +173,7 @@
             <label for="fints_bank_account">Bank-Sachkonto</label>
             <select id="fints_bank_account" name="bank_account_id" required>
               {% for account in bank_accounts %}
-                <option value="{{ account.id }}" {% if account.code == '1200' %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                <option value="{{ account.id }}" {% if account.id == default_bank_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
               {% endfor %}
             </select>
             <p class="muted">PIN und TAN werden nie gespeichert — die PIN wird bei jedem Abruf eingegeben.</p>
@@ -375,7 +375,7 @@
                       {% if geldtransit_account %}
                         — Geldtransit ({{ geldtransit_account.code }}) vorausgewählt.
                       {% else %}
-                        — kein Geldtransit-Konto (1360) vorhanden, bitte unter Konten anlegen.
+                        — kein Geldtransit-Konto (SKR03 1360, SKR04 1460) vorhanden, bitte unter Konten anlegen.
                       {% endif %}
                     </p>
                   {% endif %}
