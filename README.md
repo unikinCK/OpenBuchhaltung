@@ -21,6 +21,10 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Kernbuchhaltung:** Mandanten, Gesellschaften, Konten mit verketteter
   Änderungshistorie, Steuercodes, mehrzeilige Journalbuchungen, Storno und
   Festschreibung.
+- **Geschäftspartner:** Kunden-/Lieferantenstamm mit Debitoren- und
+  Kreditorennummern (DATEV-Bereiche), Anschrift, USt-IdNr, Zahlungsziel und
+  Bankverbindung; Partner hängen als Nebenbuch an Buchungszeilen auf
+  Sammelkonten (z. B. 1400/1600), mit verketteter Änderungshistorie.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
   Kostenstellenrechnung und Profitcenter-GuV. Bank-, OCR- und E-Rechnungsbuchungen
@@ -559,6 +563,36 @@ Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so
 sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
 `get_bank_reconciliation`).
 
+## Geschäftspartner (Debitoren/Kreditoren)
+
+Unter **Partner** (Nav-Gruppe Buchen) werden Kunden und Lieferanten gepflegt.
+Kunden erhalten eine Debitorennummer (10000–69999), Lieferanten eine
+Kreditorennummer (70000–99999); ein Partner kann beides sein. Ohne Eingabe wird
+die nächste freie Nummer vergeben; nach der ersten Verwendung in einer Buchung
+sind Nummer und Rolle fest. Partner werden nicht gelöscht, sondern deaktiviert.
+Anlage, Änderungen und Bankdatenänderungen landen mit Vorher-/Nachher-Snapshot
+in der verketteten Audit-Historie; mögliche Dubletten (gleiche USt-IdNr, IBAN
+oder gleicher Name) werden als Hinweis gemeldet.
+
+**Nebenbuch statt Personenkonten** (siehe `docs/adr/ADR-002-geschaeftspartner-nebenbuch.md`):
+Gebucht wird weiter auf die Sammelkonten. Konten tragen dafür das Kennzeichen
+`subledger` (`debtor` auf Aktivkonten, `creditor` auf Passivkonten), gepflegt unter
+**Konten**. Maßgeblich ist das Kennzeichen, nicht die Kontonummer: SKR03 nutzt
+1400/1600, SKR04 1200/3300, und je Seite sind mehrere Sammelkonten möglich (etwa
+für verbundene Unternehmen). Der Kontenrahmen-Import erkennt Forderungen und
+Verbindlichkeiten aLuL an der exakten Bezeichnung. Nur Zeilen auf Sammelkonten dürfen einen Geschäftspartner tragen,
+und dessen Rolle muss zur Seite passen. Festgeschriebene Buchungen versiegeln den
+Partner (Inhaltshash Version 3, ältere Siegel bleiben Version 2), Storno spiegelt
+ihn, der Saldovortrag trägt Sammelkonten je Partner ins Folgejahr. Sammelkonten
+erscheinen nicht als Bankkonten.
+
+API: `GET/POST /api/v1/partners` (Filter `role=debtor|creditor`, `q`,
+`include_inactive`, `limit`/`offset`), `GET/PATCH /api/v1/partners/<id>`,
+`POST /api/v1/partners/<id>/bank-details`, `GET /api/v1/partners/<id>/history`;
+Buchungszeilen nehmen `partner_id` oder `partner_number` an. MCP: `list_partners`,
+`get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
+`get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
+
 ## Offene Posten (OPOS)
 
 Unter **OPOS** lassen sich debitorische und kreditorische offene Posten erfassen,
@@ -584,7 +618,9 @@ und `/active`; MCP: `list/create_journal_template`,
 Unter **Eröffnungsbilanz** (Nav-Gruppe Buchen) werden Kontensalden aus einem
 Altsystem als eine Eröffnungsbuchung übernommen: Zeilen im Format
 `Konto;Soll;Haben` einfügen (deutsches oder englisches Zahlenformat),
-Buchungsdatum = Beginn des Wirtschaftsjahres. Eine Differenz wird automatisch
+Buchungsdatum = Beginn des Wirtschaftsjahres. Eine optionale vierte Spalte mit
+der Debitoren-/Kreditorennummer übernimmt offene Salden je Kunde bzw. Lieferant
+auf Sammelkonten (`1400;1190,00;;10001`). Eine Differenz wird automatisch
 auf das Saldenvortragskonto gebucht (Kontonummer 9000 oder Name
 „Saldenvortrag“; fehlt es, müssen die Salden exakt aufgehen). API:
 `POST /api/v1/opening-balance`; MCP: `book_opening_balance`.
@@ -792,12 +828,18 @@ Basis-Endpunkte:
   `up_to_date`); Basis für Docker-HEALTHCHECK und Monitoring
 - `POST /api/v1/tenants` (legt Mandant + Gesellschaft an)
 - `GET /api/v1/companies`
-- `POST /api/v1/accounts`
+- `POST /api/v1/accounts` — Kontoart aus `asset`, `liability`, `equity`, `income`/`revenue`,
+  `expense`; optional `subledger` (`debtor`/`creditor`) für Sammelkonten
+- `PATCH /api/v1/accounts/<id>` — Bezeichnung, Status, Sammelkonto-Kennzeichen; die Kontoart
+  nur zur Reparatur eines ungültigen Altwerts
 - `GET /api/v1/accounts` — Konten einer Gesellschaft (`company_id`; optional `include_inactive=true`)
 - `POST /api/v1/account-chart/import` — Kontenrahmen importieren (`chart` = `skr03`/`skr04`
   oder eigene CSV per `content_base64`); MCP-Tool `import_account_chart`
 - `GET /api/v1/account-chart/check` — Kontenrahmen-Prüfung (`company_id`, siehe
   [Kontenrahmenimport](#kontenrahmenimport-skr03skr04)); MCP-Tool `check_account_chart`
+- `GET/POST /api/v1/partners`, `GET/PATCH /api/v1/partners/<id>`,
+  `POST /api/v1/partners/<id>/bank-details`, `GET /api/v1/partners/<id>/history` —
+  Geschäftspartner (Debitoren/Kreditoren)
 - `POST /api/v1/journal-entries` (mehrzeilige Buchung, Validierung mit 422-Details)
 - `GET /api/v1/trial-balance` — optional `date_from`/`date_to` (JJJJ-MM-TT)
 - `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
@@ -1368,13 +1410,23 @@ Hinweis: Genau eine Quelle muss angegeben werden (`--chart` oder `--csv-path`).
 Unterstuetzte Kopfzeilen (Alias):
 - `code` oder `Kontonummer`
 - `name` oder `Bezeichnung`
-- `account_type` oder `Kontoart`
+- `account_type` oder `Kontoart` (`asset`, `liability`, `equity`, `income`/`revenue`, `expense`)
+- optional `subledger` oder `Sammelkonto` (`debtor`/`creditor`); ohne die Spalte werden
+  Konten mit der exakten Bezeichnung „Forderungen aus Lieferungen und Leistungen“ bzw.
+  „Verbindlichkeiten aus Lieferungen und Leistungen“ (auch Kurzform „aLuL“) als
+  Sammelkonten gekennzeichnet, unabhängig von der Kontonummer; Konten wie
+  „… ohne Kontokorrent“ bleiben unmarkiert
 
 Fehlerhafte Zeilen werden protokolliert und brechen den Gesamtimport nicht ab.
 Als fehlerhaft gelten fehlende Pflichtfelder, mehr Spalten als in der Kopfzeile
 (Bezeichnungen mit Komma in Anführungszeichen setzen: `"Gas, Strom, Wasser"`) und
-unbekannte Kontoarten; erlaubt sind `asset`, `receivable`, `liability`, `payable`,
-`equity`, `income`, `revenue`, `expense` (Groß-/Kleinschreibung egal).
+unbekannte Kontoarten; erlaubt sind `asset`, `liability`, `equity`, `income`,
+`revenue`, `expense` (Groß-/Kleinschreibung egal). Die früheren Werte `receivable`/
+`payable` werten Bilanz und Jahresabschluss nicht aus; Debitoren-/Kreditoren-
+Sammelkonten tragen stattdessen das Kennzeichen `subledger`. Ein bereits
+angelegtes Konto mit ungültiger Kontoart lässt sich unter **Konten** bzw. per
+`PATCH /api/v1/accounts/<id>` mit `account_type` reparieren – nur dann ist die
+Kontoart änderbar.
 
 Die mitgelieferten Kontenrahmen enthalten die gängigen Sachkonten einer kleinen
 Gesellschaft. `skr04.csv` folgt dem DATEV-Kontenrahmen SKR04 2026 (Art.-Nr. 11175):
@@ -1415,3 +1467,15 @@ zusätzlich Konten mit unbekannter Kontoart. Vorgehen:
 
 Deaktivierte Altkonten ohne Saldo gelten als erledigt und verschwinden aus der
 Prüfung.
+
+Zwei Ergänzungen zum Vorgehen:
+
+- **Konto 4240 „Gas“ mit Kontoart „Strom“** zuerst unter **Konten** auf die
+  Kontoart `expense` (und die Bezeichnung „Gas, Strom, Wasser“) korrigieren. Dann
+  zählen die bisherigen Buchungen in der GuV ihrer jeweiligen Periode, und die
+  anschließende Umbuchung auf 6325 ist erfolgsneutral.
+- **Sammelkonten für Geschäftspartner** auf den SKR04-Konten kennzeichnen
+  (Forderungen aLuL `1200` bzw. die gewählte Ersatznummer, Verbindlichkeiten aLuL
+  `3300`). Das Kennzeichen eines Altkontos lässt sich nicht mehr entfernen,
+  sobald darauf Buchungszeilen mit Partner stehen; es bleibt dann einfach
+  bestehen, bis das Altkonto ausgeglichen und deaktiviert ist.

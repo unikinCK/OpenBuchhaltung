@@ -163,6 +163,51 @@ def _chat_action_schema() -> dict[str, Any]:
     }
 
 
+# Gemeinsame Stammdatenfelder für create_partner/update_partner.
+_PARTNER_FIELD_SCHEMA: dict[str, Any] = {
+    "partner_kind": {
+        "type": "string",
+        "enum": ["organization", "person"],
+        "description": "Unternehmen (Standard) oder natürliche Person.",
+    },
+    "name": {"type": "string", "description": "Name bzw. Firma."},
+    "is_customer": {
+        "type": "boolean",
+        "description": "Kunde (Debitor); vergibt eine Debitorennummer.",
+    },
+    "is_supplier": {
+        "type": "boolean",
+        "description": "Lieferant (Kreditor); vergibt eine Kreditorennummer.",
+    },
+    "debtor_number": {
+        "type": ["string", "null"],
+        "description": "Optional: Debitorennummer 10000–69999 (sonst automatisch).",
+    },
+    "creditor_number": {
+        "type": ["string", "null"],
+        "description": "Optional: Kreditorennummer 70000–99999 (sonst automatisch).",
+    },
+    "street": {"type": ["string", "null"]},
+    "postal_code": {"type": ["string", "null"]},
+    "city": {"type": ["string", "null"]},
+    "country_code": {
+        "type": ["string", "null"],
+        "description": "ISO-Ländercode, Standard DE.",
+    },
+    "vat_id": {"type": ["string", "null"], "description": "USt-IdNr."},
+    "tax_number": {"type": ["string", "null"], "description": "Steuernummer."},
+    "email": {"type": ["string", "null"]},
+    "phone": {"type": ["string", "null"]},
+    "contact_person": {"type": ["string", "null"]},
+    "payment_term_days": {
+        "type": ["integer", "null"],
+        "description": "Zahlungsziel in Tagen.",
+    },
+    "notes": {"type": ["string", "null"]},
+    "is_active": {"type": "boolean"},
+}
+
+
 # Ein Tool je REST-Endpunkt unter /api/v1 (ohne die rekursive /mcp/call-Bridge).
 TOOLS: list[ToolSpec] = [
     ToolSpec(
@@ -382,7 +427,16 @@ TOOLS: list[ToolSpec] = [
                 "name": {"type": "string", "description": "Kontobezeichnung."},
                 "account_type": {
                     "type": "string",
-                    "description": "Kontoart, z. B. asset, income, expense, equity, liability.",
+                    "enum": ["asset", "liability", "equity", "income", "revenue", "expense"],
+                    "description": "Kontoart: asset, liability, equity, income/revenue, expense.",
+                },
+                "subledger": {
+                    "type": ["string", "null"],
+                    "enum": ["debtor", "creditor", None],
+                    "description": (
+                        "Optional: Sammelkonto für Debitoren (debtor, Kontoart asset) oder "
+                        "Kreditoren (creditor, Kontoart liability)."
+                    ),
                 },
             },
             "required": ["company_id", "code", "name", "account_type"],
@@ -395,8 +449,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="update_account",
         description=(
-            "Ändert die Bezeichnung oder den Aktivstatus eines Kontos. Kontonummer und "
-            "Kontotyp bleiben unveränderbar; die Änderung wird mit Vorher-/Nachher-Werten "
+            "Ändert Bezeichnung, Aktivstatus oder Sammelkonto-Kennzeichen (subledger) eines "
+            "Kontos. Die Kontonummer bleibt unveränderbar, die Kontoart ebenfalls – außer zur "
+            "Reparatur eines ungültigen Altwerts. Änderungen werden mit Vorher-/Nachher-Werten "
             "protokolliert."
         ),
         input_schema={
@@ -405,6 +460,19 @@ TOOLS: list[ToolSpec] = [
                 "account_id": {"type": "integer", "description": "ID des Kontos."},
                 "name": {"type": "string", "description": "Neue Kontobezeichnung."},
                 "is_active": {"type": "boolean", "description": "Neuer Aktivstatus."},
+                "subledger": {
+                    "type": ["string", "null"],
+                    "enum": ["debtor", "creditor", None],
+                    "description": (
+                        "Sammelkonto für Debitoren (debtor) bzw. Kreditoren (creditor); "
+                        "null entfernt das Kennzeichen (nur ohne Partnerbuchungen)."
+                    ),
+                },
+                "account_type": {
+                    "type": "string",
+                    "enum": ["asset", "liability", "equity", "income", "revenue", "expense"],
+                    "description": "Nur zur Reparatur einer ungültigen Kontoart.",
+                },
             },
             "required": ["account_id"],
             "additionalProperties": False,
@@ -628,6 +696,121 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="list_partners",
+        description=(
+            "Listet Geschäftspartner (Kunden/Debitoren, Lieferanten/Kreditoren) einer "
+            "Gesellschaft; optional nach Rolle (debtor/creditor) und Suchtext (Name, "
+            "Nummer, USt-IdNr, Ort) gefiltert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "role": {"type": "string", "enum": ["debtor", "creditor"]},
+                "q": {"type": "string", "description": "Suchtext."},
+                "include_inactive": {"type": "boolean", "default": False},
+                "limit": {"type": "integer", "default": 100},
+                "offset": {"type": "integer", "default": 0},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/partners",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_partner",
+        description="Liefert die Stammdaten eines Geschäftspartners.",
+        input_schema={
+            "type": "object",
+            "properties": {"partner_id": {"type": "integer"}},
+            "required": ["partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/partners/{partner_id}",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="create_partner",
+        description=(
+            "Legt einen Geschäftspartner an (Kunde und/oder Lieferant). Debitoren- "
+            "(10000–69999) und Kreditorennummern (70000–99999) werden ohne Angabe "
+            "automatisch vergeben. Bankdaten nur über set_partner_bank_details."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                **_PARTNER_FIELD_SCHEMA,
+            },
+            "required": ["company_id", "name"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/partners",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_partner",
+        description=(
+            "Ändert Stammdaten eines Geschäftspartners (ohne Bankdaten); Rollen und "
+            "Nummern sind nach Verwendung in Buchungen fest. Änderungen werden mit "
+            "Vorher-/Nachher-Werten protokolliert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "partner_id": {"type": "integer"},
+                **_PARTNER_FIELD_SCHEMA,
+            },
+            "required": ["partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/partners/{partner_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_partner_bank_details",
+        description=(
+            "Hinterlegt die Bankverbindung (IBAN, optional BIC) eines Geschäftspartners; "
+            "leere Werte löschen sie. Eigene Audit-Aktion bank_details_changed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "partner_id": {"type": "integer"},
+                "iban": {"type": ["string", "null"]},
+                "bic": {"type": ["string", "null"]},
+            },
+            "required": ["partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/partners/{partner_id}/bank-details",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_partner_history",
+        description=(
+            "Liefert die verkettete Vorher-/Nachher-Historie eines Geschäftspartners."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "partner_id": {"type": "integer"},
+                "limit": {"type": "integer", "default": 100},
+            },
+            "required": ["partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/partners/{partner_id}/history",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="create_journal_entry",
         description=(
             "Erfasst eine Buchung mit mindestens zwei Zeilen. Soll- und Haben-Summe "
@@ -685,6 +868,20 @@ TOOLS: list[ToolSpec] = [
                             "profit_center_id": {
                                 "type": "integer",
                                 "description": "Optionale Profitcenter-ID.",
+                            },
+                            "partner_id": {
+                                "type": "integer",
+                                "description": (
+                                    "Optionaler Geschäftspartner (nur auf Debitoren-/"
+                                    "Kreditoren-Sammelkonten)."
+                                ),
+                            },
+                            "partner_number": {
+                                "type": "string",
+                                "description": (
+                                    "Alternativ zu partner_id: Debitoren-/Kreditorennummer "
+                                    "(z. B. '10001' oder '70001')."
+                                ),
                             },
                         },
                         "anyOf": [

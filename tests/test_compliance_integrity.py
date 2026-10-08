@@ -87,7 +87,7 @@ def test_finalization_seals_content_and_all_interfaces_verify_it(tmp_path: Path)
             journal_entry_id=entry.id,
             changed_by="pytest",
         )
-        assert finalized.content_hash_version == 2
+        assert finalized.content_hash_version == 3
         assert len(finalized.content_hash or "") == 64
         assert finalized.content_hash == calculate_journal_entry_content_hash(finalized)
 
@@ -117,7 +117,7 @@ def test_finalization_seals_content_and_all_interfaces_verify_it(tmp_path: Path)
         "/api/v1/journal-entries", query_string={"company_id": company.id}
     )
     payload = journal_response.get_json()["entries"][0]
-    assert payload["content_hash_version"] == 2
+    assert payload["content_hash_version"] == 3
     assert len(payload["content_hash"]) == 64
 
     cli_result = app.test_cli_runner().invoke(

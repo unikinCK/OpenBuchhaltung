@@ -16,7 +16,10 @@ from app.services.audit_log import AuditIntegrityResult, verify_audit_log_integr
 from app.services.documents import verify_document_file
 from domain.models import Company, Document, JournalEntry
 
-JOURNAL_CONTENT_HASH_VERSION = 2
+# Version 3 nimmt den Geschäftspartner je Zeile auf. Siegel der Version 2
+# (vor Einführung des Nebenbuchs) bleiben unverändert gültig und prüfbar.
+JOURNAL_CONTENT_HASH_VERSION = 3
+SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS = (2, 3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,12 +76,32 @@ def _amount(value: Decimal) -> str:
 def calculate_journal_entry_content_hash(entry: JournalEntry) -> str:
     if not entry.is_finalized or entry.finalized_at is None or not entry.finalized_by:
         raise ValueError("Only completely finalized journal entries can be hashed.")
-    if entry.content_hash_version != JOURNAL_CONTENT_HASH_VERSION:
-        raise ValueError(f"Unsupported journal content hash version: {entry.content_hash_version}")
+    version = entry.content_hash_version
+    if version not in SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS:
+        raise ValueError(f"Unsupported journal content hash version: {version}")
+
+    canonical_lines = []
+    for line in sorted(entry.lines, key=lambda item: (item.line_number, item.id)):
+        canonical_line = {
+            "account_id": line.account_id,
+            "credit_amount": _amount(line.credit_amount),
+            "cost_center_id": line.cost_center_id,
+            "currency_code": line.currency_code,
+            "debit_amount": _amount(line.debit_amount),
+            "description": line.description,
+            "id": line.id,
+            "line_number": line.line_number,
+            "profit_center_id": line.profit_center_id,
+            "tax_code_id": line.tax_code_id,
+            "tenant_id": line.tenant_id,
+        }
+        if version >= 3:
+            canonical_line["partner_id"] = line.partner_id
+        canonical_lines.append(canonical_line)
 
     canonical = {
         "company_id": entry.company_id,
-        "content_hash_version": JOURNAL_CONTENT_HASH_VERSION,
+        "content_hash_version": version,
         "created_at": _canonical_timestamp(entry.created_at),
         "description": entry.description,
         "entry_date": entry.entry_date.isoformat(),
@@ -86,22 +109,7 @@ def calculate_journal_entry_content_hash(entry: JournalEntry) -> str:
         "finalized_by": entry.finalized_by,
         "fiscal_year_id": entry.fiscal_year_id,
         "id": entry.id,
-        "lines": [
-            {
-                "account_id": line.account_id,
-                "credit_amount": _amount(line.credit_amount),
-                "cost_center_id": line.cost_center_id,
-                "currency_code": line.currency_code,
-                "debit_amount": _amount(line.debit_amount),
-                "description": line.description,
-                "id": line.id,
-                "line_number": line.line_number,
-                "profit_center_id": line.profit_center_id,
-                "tax_code_id": line.tax_code_id,
-                "tenant_id": line.tenant_id,
-            }
-            for line in sorted(entry.lines, key=lambda item: (item.line_number, item.id))
-        ],
+        "lines": canonical_lines,
         "period_id": entry.period_id,
         "posting_number": entry.posting_number,
         "reversal_of_id": entry.reversal_of_id,

@@ -89,7 +89,8 @@ um Wechsel zwischen Engines zu vereinfachen.
 - `Tenant` (Mandant)
 - `Company` (Gesellschaftsdaten, Rechtsform, Geschäftsjahr)
 - `FiscalYear`, `Period`, `PeriodLock`
-- `Account` (inkl. Kontenklasse, SKR-Mapping)
+- `Account` (inkl. Kontenklasse, SKR-Mapping, Sammelkonto-Kennzeichen)
+- `BusinessPartner` (Kunden/Debitoren, Lieferanten/Kreditoren; Nebenbuch an Sammelkonten)
 - `TaxCode` (Steuerlogik)
 - `JournalEntry`, `JournalEntryLine`
 - `Document` (Belegmetadaten + Datei)
@@ -563,6 +564,17 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       Kunden-/Lieferantenstamm (#1); Eingangsrechnung → OPOS (#5); Skonto
       (#11); Zahllauf markiert Posten (F8); § 13b / ig. Erwerb / ZM (#4, F10);
       BWA + Vorjahresvergleich (#8); Steuercode-UI, Gesellschaft bearbeiten.
+  - [x] Kunden-/Lieferantenstamm, PR 1 *(2026-10-08, Detailplan
+        `docs/sprint/sprint-5-geschaeftspartner-stammdaten.md`, ADR-002):
+        `business_partner` mit Debitoren-/Kreditorennummern, Historie und
+        separatem Bankdaten-Endpunkt; Sammelkonto-Kennzeichen `subledger`;
+        `partner_id` an Buchungszeilen (Hashversion 3, Storno, Vorlagen,
+        Eröffnungsbilanz, Saldovortrag je Partner, Journal-CSV, Prüferexport);
+        Kontoarten validiert, ungültige Altwerte reparierbar; UI/API/MCP
+        (Migration `20261008_0042`).)*
+  - [ ] Kunden-/Lieferantenstamm, PR 2–4: OPOS/Zahllauf/Mahnwesen am Partner,
+        Partnerkonto und Saldenliste, Partnererkennung in automatischen
+        Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.
 - [ ] **Sprint 6 – UX**: deutsches Betrags-/Datumsformat (U2);
       Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
       Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit

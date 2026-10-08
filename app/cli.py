@@ -27,9 +27,18 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.partners import create_partner
 from app.services.security_events import record_security_event
 from app.services.tax_codes import ensure_default_tax_codes
-from domain.models import Account, Company, JournalEntry, TaxCode, Tenant, User
+from domain.models import (
+    Account,
+    BusinessPartner,
+    Company,
+    JournalEntry,
+    TaxCode,
+    Tenant,
+    User,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_CHART_FILES = {
@@ -45,6 +54,15 @@ DEMO_USERS = (
     ("buchhalter", "buchhalter123", ROLE_BUCHHALTER, True),
     ("pruefer", "pruefer123", ROLE_PRUEFER, True),
     ("support", "support123", ROLE_SUPPORT, False),
+)
+# Demo-Geschäftspartner: (Name, Kunde, Lieferant, Ort, Zahlungsziel in Tagen)
+DEMO_PARTNERS = (
+    ("Beratungskunde Nord GmbH", True, False, "Hamburg", 14),
+    ("Handelshaus Süd AG", True, False, "München", 30),
+    ("Agentur West UG", True, True, "Köln", 14),
+    ("Büro & Raum Vermietung KG", False, True, "Berlin", 0),
+    ("IT-Service Ost GmbH", False, True, "Leipzig", 14),
+    ("Stadtwerke Musterstadt", False, True, "Musterstadt", 14),
 )
 CLI_ACTOR = "cli"
 
@@ -317,6 +335,27 @@ def register_cli_commands(app: Flask) -> None:
             session.commit()
             click.echo(f"Steuercodes: {created_tax_codes} neu angelegt.")
 
+            has_partners = (
+                session.execute(
+                    select(BusinessPartner.id).where(BusinessPartner.company_id == company.id)
+                ).first()
+                is not None
+            )
+            if not has_partners:
+                for name, is_customer, is_supplier, city, term in DEMO_PARTNERS:
+                    create_partner(
+                        session=session,
+                        company=company,
+                        changed_by="seed-demo",
+                        name=name,
+                        is_customer=is_customer,
+                        is_supplier=is_supplier,
+                        city=city,
+                        payment_term_days=term,
+                    )
+                session.commit()
+                click.echo(f"Geschäftspartner: {len(DEMO_PARTNERS)} angelegt.")
+
             for username, password, role, tenant_bound in DEMO_USERS:
                 existing = session.execute(
                     select(User).where(User.username == username)
@@ -350,6 +389,13 @@ def register_cli_commands(app: Flask) -> None:
                 ).scalar_one()
                 return account.id
 
+            def partner_id(name: str) -> int:
+                return session.execute(
+                    select(BusinessPartner.id).where(
+                        BusinessPartner.company_id == company.id, BusinessPartner.name == name
+                    )
+                ).scalar_one()
+
             def tax_code_id(code: str) -> int:
                 tax_code = session.execute(
                     select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == code)
@@ -377,7 +423,12 @@ def register_cli_commands(app: Flask) -> None:
                     status="posted",
                     changed_by="seed-demo",
                     lines=[
-                        JournalLineInput(account_id("1400"), Decimal("1190.00"), zero),
+                        JournalLineInput(
+                            account_id("1400"),
+                            Decimal("1190.00"),
+                            zero,
+                            partner_id=partner_id("Beratungskunde Nord GmbH"),
+                        ),
                         JournalLineInput(
                             account_id("8400"),
                             zero,
@@ -399,7 +450,12 @@ def register_cli_commands(app: Flask) -> None:
                             zero,
                             tax_code_id=tax_code_id("VSt19"),
                         ),
-                        JournalLineInput(account_id("1600"), zero, Decimal("595.00")),
+                        JournalLineInput(
+                            account_id("1600"),
+                            zero,
+                            Decimal("595.00"),
+                            partner_id=partner_id("Büro & Raum Vermietung KG"),
+                        ),
                     ],
                 ),
                 JournalEntryInput(
@@ -410,7 +466,12 @@ def register_cli_commands(app: Flask) -> None:
                     changed_by="seed-demo",
                     lines=[
                         JournalLineInput(account_id("1200"), Decimal("1190.00"), zero),
-                        JournalLineInput(account_id("1400"), zero, Decimal("1190.00")),
+                        JournalLineInput(
+                            account_id("1400"),
+                            zero,
+                            Decimal("1190.00"),
+                            partner_id=partner_id("Beratungskunde Nord GmbH"),
+                        ),
                     ],
                 ),
             ]

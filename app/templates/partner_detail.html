@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ partner.name }} – Geschäftspartner – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <p><a href="{{ url_for('main.partners_page', company_id=partner.company_id) }}">‹ Alle Geschäftspartner</a></p>
+  <h1 class="page-title">{{ partner.name }}</h1>
+  <p>
+    {% if partner.debtor_number %}<span class="badge">Kunde · Debitor {{ partner.debtor_number }}</span>{% endif %}
+    {% if partner.creditor_number %}<span class="badge">Lieferant · Kreditor {{ partner.creditor_number }}</span>{% endif %}
+    {% if not partner.is_active %}<span class="badge">inaktiv</span>{% endif %}
+  </p>
+
+  <section class="card">
+    <h2>Stammdaten</h2>
+    <form method="post" action="{{ url_for('main.update_partner_from_form', partner_id=partner.id) }}" class="stacked">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+      <label for="name">Name / Firma</label>
+      <input id="name" name="name" value="{{ partner.name }}" required maxlength="255" />
+
+      <label for="partner_kind">Art</label>
+      <select id="partner_kind" name="partner_kind">
+        <option value="organization" {% if partner.partner_kind == "organization" %}selected{% endif %}>Unternehmen</option>
+        <option value="person" {% if partner.partner_kind == "person" %}selected{% endif %}>Natürliche Person</option>
+      </select>
+
+      <fieldset>
+        <legend>Rolle und Personenkonten</legend>
+        <label class="inline"><input type="checkbox" name="is_customer" value="1" {% if partner.debtor_number %}checked{% endif %} /> Kunde (Debitor)</label>
+        <label for="debtor_number">Debitorennummer</label>
+        <input id="debtor_number" name="debtor_number" value="{{ partner.debtor_number or '' }}" inputmode="numeric" placeholder="automatisch" />
+        <label class="inline"><input type="checkbox" name="is_supplier" value="1" {% if partner.creditor_number %}checked{% endif %} /> Lieferant (Kreditor)</label>
+        <label for="creditor_number">Kreditorennummer</label>
+        <input id="creditor_number" name="creditor_number" value="{{ partner.creditor_number or '' }}" inputmode="numeric" placeholder="automatisch" />
+        <p class="muted">Nummern und Rollen sind fest, sobald sie in Buchungen verwendet werden.</p>
+      </fieldset>
+
+      <label for="street">Straße und Hausnummer</label>
+      <input id="street" name="street" value="{{ partner.street or '' }}" maxlength="255" />
+      <label for="postal_code">PLZ</label>
+      <input id="postal_code" name="postal_code" value="{{ partner.postal_code or '' }}" maxlength="20" />
+      <label for="city">Ort</label>
+      <input id="city" name="city" value="{{ partner.city or '' }}" maxlength="120" />
+      <label for="country_code">Land (ISO-Code)</label>
+      <input id="country_code" name="country_code" value="{{ partner.country_code }}" maxlength="2" />
+      <label for="vat_id">USt-IdNr</label>
+      <input id="vat_id" name="vat_id" value="{{ partner.vat_id or '' }}" />
+      <label for="tax_number">Steuernummer</label>
+      <input id="tax_number" name="tax_number" value="{{ partner.tax_number or '' }}" maxlength="30" />
+      <label for="contact_person">Ansprechpartner</label>
+      <input id="contact_person" name="contact_person" value="{{ partner.contact_person or '' }}" maxlength="255" />
+      <label for="email">E-Mail</label>
+      <input id="email" name="email" type="email" value="{{ partner.email or '' }}" maxlength="255" />
+      <label for="phone">Telefon</label>
+      <input id="phone" name="phone" value="{{ partner.phone or '' }}" maxlength="50" />
+      <label for="payment_term_days">Zahlungsziel (Tage)</label>
+      <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" value="{{ partner.payment_term_days if partner.payment_term_days is not none else '' }}" />
+      <label for="notes">Notizen</label>
+      <textarea id="notes" name="notes" rows="3">{{ partner.notes or '' }}</textarea>
+      <label for="is_active">Status</label>
+      <select id="is_active" name="is_active">
+        <option value="true" {% if partner.is_active %}selected{% endif %}>aktiv</option>
+        <option value="false" {% if not partner.is_active %}selected{% endif %}>inaktiv (für neue Buchungen gesperrt)</option>
+      </select>
+
+      <button type="submit">Stammdaten speichern</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Bankverbindung</h2>
+    <p class="muted">Bankdaten werden getrennt gespeichert und protokolliert; leere Felder löschen sie.</p>
+    <form method="post" action="{{ url_for('main.set_partner_bank_details_from_form', partner_id=partner.id) }}" class="stacked">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <label for="iban">IBAN</label>
+      <input id="iban" name="iban" value="{{ partner.iban or '' }}" />
+      <label for="bic">BIC</label>
+      <input id="bic" name="bic" value="{{ partner.bic or '' }}" />
+      <button type="submit">Bankverbindung speichern</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Änderungshistorie</h2>
+    {% if history %}
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th><th>Vorher</th><th>Nachher</th></tr></thead>
+          <tbody>
+            {% for event in history %}
+              <tr>
+                <td>{{ event.changed_at }}</td>
+                <td><span class="badge">{{ event.action }}</span></td>
+                <td>{{ event.changed_by }}</td>
+                <td><code>{{ event.payload.before if event.payload else '–' }}</code></td>
+                <td><code>{{ event.payload.after if event.payload else '–' }}</code></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Noch keine protokollierten Änderungen.</p>
+    {% endif %}
+  </section>
+{% endblock %}

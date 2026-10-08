@@ -99,7 +99,12 @@ def bank_page():
                 .scalars()
                 .all()
             )
-            bank_accounts = [account for account in accounts if account.account_type == "asset"]
+            # Bankkonten: Aktivkonten ohne Debitoren-Sammelkonto-Kennzeichen.
+            bank_accounts = [
+                account
+                for account in accounts
+                if account.account_type == "asset" and account.subledger is None
+            ]
             default_bank_account_id = standard_account_id(bank_accounts, BANK)
             contra_accounts = accounts
             tax_codes = (

@@ -41,6 +41,9 @@ def create_account():
 
     if not company_id or not code or not name or not account_type:
         return jsonify({"error": "company_id, code, name and account_type are required."}), 400
+    subledger = payload.get("subledger")
+    if subledger is not None and not isinstance(subledger, str):
+        return jsonify({"error": "subledger must be debtor, creditor or null."}), 400
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -55,9 +58,13 @@ def create_account():
                 code=code,
                 name=name,
                 account_type=account_type,
+                subledger=subledger,
                 changed_by=_api_changed_by(),
             )
             session.commit()
+        except AccountUpdateError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 400
         except IntegrityError:
             session.rollback()
             return jsonify({"error": "Account code already exists for this company."}), 409
@@ -74,17 +81,20 @@ def update_account(account_id: int):
         return forbidden()
 
     payload = request.get_json(silent=True) or {}
-    unsupported_fields = set(payload) - {"name", "is_active"}
+    unsupported_fields = set(payload) - {"name", "is_active", "subledger", "account_type"}
     if unsupported_fields:
         return (
             jsonify(
                 {
-                    "error": "Only name and is_active may be changed; "
-                    "code and account_type are immutable."
+                    "error": "Only name, is_active and subledger may be changed; "
+                    "code is immutable and account_type may only repair invalid values."
                 }
             ),
             400,
         )
+    extra_changes = {
+        field: payload[field] for field in ("subledger", "account_type") if field in payload
+    }
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -98,6 +108,7 @@ def update_account(account_id: int):
                 changed_by=_api_changed_by(),
                 name=payload.get("name") if "name" in payload else None,
                 is_active=payload.get("is_active") if "is_active" in payload else None,
+                **extra_changes,
             )
         except AccountUpdateError as exc:
             return jsonify({"error": str(exc)}), 400

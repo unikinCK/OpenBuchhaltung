@@ -30,6 +30,7 @@ from app.services.journal_entries import (
     parse_decimal,
     reverse_journal_entry,
 )
+from app.services.partners import partner_display_number
 from domain.models import JournalEntry, JournalEntryLine
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
@@ -66,6 +67,13 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
                 "cost_center_code": line.cost_center.code if line.cost_center else None,
                 "profit_center_id": line.profit_center_id,
                 "profit_center_code": line.profit_center.code if line.profit_center else None,
+                "partner_id": line.partner_id,
+                "partner_number": (
+                    partner_display_number(line.partner, line.account.subledger)
+                    if line.partner
+                    else None
+                ),
+                "partner_name": line.partner.name if line.partner else None,
                 "description": line.description,
                 "debit_amount": str(line.debit_amount),
                 "credit_amount": str(line.credit_amount),
@@ -114,6 +122,7 @@ def list_journal_entries_via_api():
                 selectinload(JournalEntry.lines).selectinload(JournalEntryLine.tax_code),
                 selectinload(JournalEntry.lines).selectinload(JournalEntryLine.cost_center),
                 selectinload(JournalEntry.lines).selectinload(JournalEntryLine.profit_center),
+                selectinload(JournalEntry.lines).selectinload(JournalEntryLine.partner),
             )
             .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
             .limit(max(1, min(limit, 500)))
@@ -206,6 +215,8 @@ def create_journal_entry_via_api():
                 raw_tax_code_id = line.get("tax_code_id")
                 raw_cost_center_id = line.get("cost_center_id")
                 raw_profit_center_id = line.get("profit_center_id")
+                raw_partner_id = line.get("partner_id")
+                raw_partner_number = line.get("partner_number")
                 lines.append(
                     JournalLineInput(
                         account_id=int(raw_account_id) if raw_account_id is not None else None,
@@ -219,6 +230,12 @@ def create_journal_entry_via_api():
                         ),
                         profit_center_id=(
                             int(raw_profit_center_id) if raw_profit_center_id is not None else None
+                        ),
+                        partner_id=int(raw_partner_id) if raw_partner_id is not None else None,
+                        partner_number=(
+                            str(raw_partner_number).strip()
+                            if raw_partner_number is not None
+                            else None
                         ),
                     )
                 )

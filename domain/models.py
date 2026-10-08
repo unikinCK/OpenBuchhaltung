@@ -98,6 +98,9 @@ class Company(Base):
     controlling_units: Mapped[list[ControllingUnit]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
+    business_partners: Mapped[list[BusinessPartner]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
 
 
 class FiscalYear(Base):
@@ -208,6 +211,14 @@ class PeriodLock(Base):
     period: Mapped[Period] = relationship(back_populates="locks")
 
 
+# Sammelkonto-Kennzeichen (Nebenbuch): Auf Debitoren- bzw. Kreditoren-
+# Sammelkonten (z. B. 1400/1600) dürfen Buchungszeilen einen Geschäftspartner
+# tragen; dessen Personenkontonummer erscheint erst im DATEV-Export.
+SUBLEDGER_DEBTOR = "debtor"
+SUBLEDGER_CREDITOR = "creditor"
+SUBLEDGER_TYPES = (SUBLEDGER_DEBTOR, SUBLEDGER_CREDITOR)
+
+
 class Account(Base):
     __tablename__ = "account"
     __table_args__ = (
@@ -225,6 +236,8 @@ class Account(Base):
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    # ``debtor``/``creditor`` für Sammelkonten, sonst leer (siehe SUBLEDGER_TYPES).
+    subledger: Mapped[str | None] = mapped_column(String(10))
     hierarchy_level: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     level_1: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
     level_2: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
@@ -318,6 +331,79 @@ class ControllingUnit(Base):
     )
 
 
+PARTNER_KIND_ORGANIZATION = "organization"
+PARTNER_KIND_PERSON = "person"
+PARTNER_KINDS = (PARTNER_KIND_ORGANIZATION, PARTNER_KIND_PERSON)
+
+
+class BusinessPartner(Base):
+    """Geschäftspartner (Kunde und/oder Lieferant) einer Gesellschaft.
+
+    Die Rolle ergibt sich aus den Personenkontonummern: Kunde = Debitorennummer,
+    Lieferant = Kreditorennummer; ein Partner kann beides sein. Partner werden
+    nicht gelöscht, sondern deaktiviert.
+    """
+
+    __tablename__ = "business_partner"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "debtor_number", name="uq_business_partner_company_debtor"
+        ),
+        UniqueConstraint(
+            "company_id", "creditor_number", name="uq_business_partner_company_creditor"
+        ),
+        CheckConstraint(
+            "debtor_number IS NOT NULL OR creditor_number IS NOT NULL",
+            name="ck_business_partner_role",
+        ),
+        CheckConstraint(
+            "payment_term_days IS NULL OR payment_term_days >= 0",
+            name="ck_business_partner_payment_term",
+        ),
+        CheckConstraint(
+            "partner_kind IN ('organization', 'person')",
+            name="ck_business_partner_kind",
+        ),
+        Index("ix_business_partner_company_active_name", "company_id", "is_active", "name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    debtor_number: Mapped[str | None] = mapped_column(String(20))
+    creditor_number: Mapped[str | None] = mapped_column(String(20))
+    partner_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=PARTNER_KIND_ORGANIZATION
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    street: Mapped[str | None] = mapped_column(String(255))
+    postal_code: Mapped[str | None] = mapped_column(String(20))
+    city: Mapped[str | None] = mapped_column(String(120))
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, default="DE")
+    vat_id: Mapped[str | None] = mapped_column(String(20))
+    tax_number: Mapped[str | None] = mapped_column(String(30))
+    email: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    contact_person: Mapped[str | None] = mapped_column(String(255))
+    # Bankverbindung nur über den eigenen Bankdaten-Endpunkt änderbar.
+    iban: Mapped[str | None] = mapped_column(String(34))
+    bic: Mapped[str | None] = mapped_column(String(11))
+    # Zahlungsziel in Tagen: Vorbelegung der Fälligkeit offener Posten.
+    payment_term_days: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="business_partners")
+    journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="partner")
+
+
 # Richtung eines Steuercodes: Vorsteuer (Eingangsleistungen, Kz 66) oder
 # Umsatzsteuer (Ausgangsumsätze, Kz 81/86/48).
 TAX_KIND_INPUT = "input"
@@ -369,7 +455,7 @@ class JournalEntry(Base):
             "AND content_hash_version IS NULL) OR "
             "(is_finalized = true AND content_hash IS NOT NULL "
             "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
-            "AND content_hash_version = 2))",
+            "AND content_hash_version IN (2, 3)))",
             name="ck_journal_entry_finalized_content_hash",
         ),
     )
@@ -452,6 +538,10 @@ class JournalEntryLine(Base):
     profit_center_id: Mapped[int | None] = mapped_column(
         ForeignKey("controlling_unit.id", ondelete="RESTRICT")
     )
+    # Nebenbuch: Geschäftspartner auf Zeilen eines Debitoren-/Kreditoren-Sammelkontos.
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT")
+    )
     description: Mapped[str | None] = mapped_column(String(255))
     debit_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0.00")
@@ -470,6 +560,7 @@ class JournalEntryLine(Base):
     profit_center: Mapped[ControllingUnit | None] = relationship(
         foreign_keys=[profit_center_id], back_populates="profit_center_lines"
     )
+    partner: Mapped[BusinessPartner | None] = relationship(back_populates="journal_lines")
 
     @validates("debit_amount", "credit_amount")
     def validate_debit_credit(self, key: str, value: Decimal) -> Decimal:

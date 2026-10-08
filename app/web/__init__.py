@@ -21,6 +21,7 @@ from app.web import (  # noqa: F401
     journal,
     open_items,
     opening_balance,
+    partners,
     payment_run,
     payroll,
     periods,

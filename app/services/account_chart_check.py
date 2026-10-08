@@ -214,7 +214,8 @@ def check_account_chart(*, session: Session, company_id: int) -> dict[str, objec
     if unknown_rows:
         warnings.append(
             f"Konten mit unbekannter Kontoart ({len(unknown_rows)}): Bilanz, GuV und "
-            "Jahresabschluss werten sie nicht aus."
+            "Jahresabschluss werten sie nicht aus. Die Kontoart lässt sich in der "
+            "Kontenliste (bzw. per update_account mit account_type) korrigieren."
         )
     return {
         "company_id": company_id,

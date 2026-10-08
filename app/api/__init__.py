@@ -24,6 +24,7 @@ from app.api import (  # noqa: F401
     mcp,
     oauth_grants,
     open_items,
+    partners,
     payment_runs,
     payroll,
     periods,

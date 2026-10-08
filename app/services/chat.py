@@ -76,7 +76,9 @@ CHAT_BLOCKED_TOOL_KEYWORDS = (
     "elster",
     "sepa",
 )
-CHAT_BLOCKED_TOOL_NAMES = {"set_company_bank_details"}
+# Bankdaten (Zahlungsempfänger) nie per Chat ändern: eine präparierte Rechnung
+# könnte sonst eine Lieferanten-IBAN umbiegen.
+CHAT_BLOCKED_TOOL_NAMES = {"set_company_bank_details", "set_partner_bank_details"}
 
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.
 CHAT_READ_ONLY_POST_TOOLS = {"preview_income_tax_return"}

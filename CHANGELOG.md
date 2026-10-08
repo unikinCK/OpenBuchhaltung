@@ -8,6 +8,37 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Geschäftspartner (Debitoren/Kreditoren), PR 1
+
+- Neuer Kunden-/Lieferantenstamm `business_partner`: Debitoren- (10000–69999) und
+  Kreditorennummern (70000–99999) mit automatischer Vergabe, Art, Anschrift,
+  USt-IdNr, Steuernummer, Kontakt, Zahlungsziel, Notizen, Aktivstatus. Nummern und
+  Rollen sind nach der ersten Verwendung fest; kein Löschen, nur Deaktivieren;
+  Dublettenhinweise (USt-IdNr, IBAN, Name). Vorher-/Nachher-Historie, Bankdaten
+  nur über eigenen Endpunkt (`bank_details_changed`), im KI-Chat gesperrt.
+- Nebenbuch statt Personenkonten (ADR-002): Kontenkennzeichen `subledger`
+  (`debtor`/`creditor`), `partner_id` an Buchungszeilen nur auf passenden
+  Sammelkonten. Festschreibungs-Hash Version 3 inkl. Partner; Version-2-Siegel
+  bleiben unverändert gültig. Storno, Buchungsvorlagen, Eröffnungsbilanz
+  (vierte Spalte Partnernummer) und Saldovortrag (je Partner) übernehmen den
+  Partner; Journal-API und Journal-CSV zeigen Partnernummer und -name.
+- UI: Seite **Partner** (Liste, Anlage, Detail mit Bankdaten und Historie),
+  Partnerauswahl je Buchungszeile, Sammelkonto-Spalte unter **Konten**.
+  API: `/api/v1/partners` (+ `/<id>`, `/<id>/bank-details`, `/<id>/history`);
+  MCP: `list_partners`, `get_partner`, `create_partner`, `update_partner`,
+  `set_partner_bank_details`, `get_partner_history`. Prüferexport:
+  `business_partners.json`, `business_partner_history.json`.
+- Kontoarten werden auch bei der Kontoanlage (UI/API/MCP) geprüft; `receivable`/
+  `payable` sind keine gültigen Kontoarten mehr (Bilanz und Saldovortrag werten
+  sie nicht aus) und erscheinen in der Kontenrahmen-Prüfung als unbekannte
+  Kontoart. Ungültige Altwerte (z. B. 4240 „Strom“ aus dem alten SKR04-Import)
+  lassen sich per UI/API/MCP reparieren. Der Kontenrahmen-Import kennzeichnet
+  Forderungen/Verbindlichkeiten aLuL an der exakten Bezeichnung als Sammelkonto
+  oder nimmt eine optionale Spalte `subledger`.
+- Sammelkonten erscheinen nicht mehr in der Bankkontenauswahl.
+- Migration `20261008_0042` (keine Datenänderung an Bestandskonten:
+  Sammelkonten bitte unter **Konten** kennzeichnen).
+
 ### Kontenrahmen SKR04
 
 - `data/kontenrahmen/skr04.csv` neu aufgestellt nach DATEV-Kontenrahmen SKR04 2026

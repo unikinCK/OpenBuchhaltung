@@ -847,6 +847,8 @@ def _resolve_bank_account(
         raise BankImportError("Bankkonto nicht gefunden.")
     if account.account_type != "asset":
         raise BankImportError("Als Bankkonto sind nur Sachkonten der Kontoart asset zulässig.")
+    if account.subledger is not None:
+        raise BankImportError("Ein Debitoren-Sammelkonto ist kein Bankkonto.")
     return account
 
 

@@ -96,6 +96,7 @@ Jeder Testfall sollte dokumentieren:
 | T-AUD-010 | Kontobezeichnung oder Status aendern | Genau ein Ereignis enthaelt vollstaendige Vorher-/Nachher-Werte | automatisiert | hoch |
 | T-AUD-011 | Kontonummer oder Kontotyp aendern | Strukturelle Aenderung wird abgewiesen | automatisiert | hoch |
 | T-AUD-012 | Kostenstelle oder Profitcenter aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert | automatisiert | hoch |
+| T-AUD-013 | Geschaeftspartner oder dessen Bankdaten aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert, Bankdaten als eigene Aktion | automatisiert | hoch |
 
 ## 7. Rollen, Mandanten und API/MCP
 
@@ -130,6 +131,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-015 | Kontenrahmen SKR04 importieren | Alle Konten mit DATEV-SKR04-Nummer und Kontoart ohne Fehlerzeile; Geldtransit, Gewinnvortrag, Steuer-, Bank- und Verbindlichkeitskonto werden in SKR03 und SKR04 gefunden | automatisiert | hoch |
 | T-EXP-016 | Kontenrahmen-CSV mit unmaskiertem Komma oder unbekannter Kontoart | Zeile wird als Fehler gemeldet und nicht angelegt | automatisiert | mittel |
 | T-EXP-017 | Kontenrahmen-Pruefung bei Altbestand des fehlerhaften SKR04-Imports | Altkonten mit SKR04-Nummer, Buchungen und Saldo gemeldet (UI, API, MCP); SKR03 und korrekter SKR04 ohne Befund; nichts wird geaendert | automatisiert | hoch |
+| T-EXP-018 | Geschaeftspartner exportieren | Partnerstamm, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 
@@ -141,6 +143,17 @@ Jeder Testfall sollte dokumentieren:
 | T-CTL-004 | Buchung festschreiben und stornieren | Dimensionen sind gehasht und werden gespiegelt | automatisiert | hoch |
 | T-CTL-005 | Controlling-Berichte | Erlöse, Aufwand und Ergebnis stimmen je Einheit | automatisiert | hoch |
 | T-CTL-006 | Controlling-Berichte mit SKR03/SKR04 | Erlöskonten vom Typ `income` zählen in UI, API und CSV als Erlös | automatisiert | hoch |
+
+## 8.2 Geschäftspartner und Nebenbuch
+
+| ID | Testfall | Erwartung | Typ | Prioritaet |
+|---|---|---|---|---|
+| T-PAR-001 | Partner anlegen | Debitoren-/Kreditorennummer wird im Bereich vergeben, Dubletten werden gemeldet | automatisiert | hoch |
+| T-PAR-002 | Partner auf Buchungszeile | Nur auf Sammelkonto mit passender Rolle, mandantensicher, nicht inaktiv | automatisiert | hoch |
+| T-PAR-003 | Buchung festschreiben und stornieren | Partner ist im Hash (Version 3) und wird gespiegelt; Version-2-Siegel bleiben gültig | automatisiert | hoch |
+| T-PAR-004 | Rolle oder Nummer nach Verwendung aendern | Aenderung wird abgewiesen | automatisiert | hoch |
+| T-PAR-005 | Jahresabschluss | Sammelkonten werden je Partner vorgetragen | automatisiert | hoch |
+| T-PAR-006 | Migration rueckwaerts und vorwaerts | Siegel bleiben gueltig, Trigger bleiben aktiv | automatisiert | hoch |
 
 ## 9. Umsatzsteuer und Meldungen
 
