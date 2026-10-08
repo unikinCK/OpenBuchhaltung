@@ -26,17 +26,28 @@ set -euo pipefail
 # Immer im Verzeichnis dieses Scripts (= Repo-Root) arbeiten.
 cd "$(dirname "$0")"
 
-COMPOSE_FILE_PATH="${COMPOSE_FILE:-docker-compose.production.yml}"
-if [[ ! -f "$COMPOSE_FILE_PATH" ]]; then
-  echo "Fehler: Compose-Datei '$COMPOSE_FILE_PATH' nicht gefunden." >&2
-  exit 1
+# COMPOSE_FILE aus der Umgebung oder der .env (wie docker compose selbst);
+# mehrere Dateien durch ':' getrennt, z. B. mit dem nginx-Overlay:
+# COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml
+if [[ -z "${COMPOSE_FILE:-}" && -f .env ]]; then
+  COMPOSE_FILE="$(sed -n 's/^COMPOSE_FILE=//p' .env | tail -n 1)"
 fi
+COMPOSE_FILE_PATH="${COMPOSE_FILE:-docker-compose.production.yml}"
+IFS=':' read -r -a COMPOSE_FILES <<< "$COMPOSE_FILE_PATH"
+COMPOSE_ARGS=()
+for f in "${COMPOSE_FILES[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "Fehler: Compose-Datei '$f' nicht gefunden." >&2
+    exit 1
+  fi
+  COMPOSE_ARGS+=(-f "$f")
+done
 
 # `docker compose` (v2) bevorzugen, sonst auf `docker-compose` (v1) zurückfallen.
 if docker compose version >/dev/null 2>&1; then
-  COMPOSE=(docker compose -f "$COMPOSE_FILE_PATH")
+  COMPOSE=(docker compose "${COMPOSE_ARGS[@]}")
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE=(docker-compose -f "$COMPOSE_FILE_PATH")
+  COMPOSE=(docker-compose "${COMPOSE_ARGS[@]}")
 else
   echo "Fehler: weder 'docker compose' noch 'docker-compose' gefunden." >&2
   exit 1

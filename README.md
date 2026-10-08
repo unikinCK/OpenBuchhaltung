@@ -391,7 +391,12 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `GUNICORN_WORKERS` | `2` | gunicorn-Worker im Produktions-Stack. |
 | `COMPOSE_PROFILES` | – | Dauerhaft aktive Profile (`mcp`, `proxy`, `dev-tools`). |
 | `MCP_DOMAIN` | – | Öffentliche Domain des Caddy-Proxys vor dem MCP-Server. |
-| `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`. |
+| `MCP_PORT` | `8090` | Host-Port des MCP-Servers im Produktions-Stack (an `127.0.0.1` gebunden). |
+| `PUBLIC_DOMAIN` | – | Öffentliche Domain des nginx-Overlays (`docker-compose.nginx.yml`). |
+| `NGINX_HTTP_BIND`, `NGINX_HTTPS_BIND` | `80`, `443` | Host-Bindung von nginx für HTTP (ACME-Challenge, Umleitung) und HTTPS, z. B. `8080` oder `192.168.0.10:443`. |
+| `NGINX_CLIENT_MAX_BODY_SIZE` | `20m` | Maximale Request-Größe an nginx (≥ `DOCUMENT_MAX_UPLOAD_BYTES`). |
+| `CERTBOT_EMAIL`, `CERTBOT_STAGING` | –, `0` | Kontakt für Let's Encrypt; `1` = Test-CA (keine Rate-Limits, nicht vertrauenswürdig). |
+| `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`; `COMPOSE_FILE` auch aus der `.env`, mehrere Dateien mit `:` getrennt. |
 
 ## Login & Benutzer
 
@@ -1237,6 +1242,43 @@ Caddy holt automatisch ein Let's-Encrypt-Zertifikat und proxyt auf `mcp:8090`; d
 > `MCP_HTTP_AUTH_TOKEN`. Dieses Eingangstoken ist vom Backend-Token
 > `OPENBUCHHALTUNG_API_TOKEN` zu trennen. Zusätzlich sollten öffentliche Deployments
 > auf Tailnet/VPN bzw. bekannte Client-IPs beschränkt bleiben.
+
+**Variante C — Öffentliche Instanz mit nginx + certbot (UI, REST-API und MCP).**
+Das Overlay `docker-compose.nginx.yml` stellt nginx als Reverse-Proxy und certbot
+(Let's Encrypt, HTTP-01 per Webroot) vor den Produktions-Stack. Unter einer Domain:
+`/` Web-UI und REST-API (`/api/v1`), `/mcp` MCP-Server (mit Profil `mcp`). nginx drosselt
+Logins (10/min je IP) und allgemeine Anfragen, weist unbekannte Hostnamen beim
+TLS-Handshake ab und überschreibt `X-Forwarded-For` (die App vertraut genau einem Proxy).
+
+```dotenv
+COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml
+COMPOSE_PROFILES=mcp
+PUBLIC_DOMAIN=buchhaltung.example.com
+CERTBOT_EMAIL=admin@example.com
+# Nur nötig, wenn 80/443 auf dem Host belegt sind (Router leitet dann z. B. 80 → 8080):
+NGINX_HTTP_BIND=8080
+NGINX_HTTPS_BIND=192.168.0.10:443
+# Weitere Instanz auf demselben Host: eigene lokale Ports
+APP_PORT=8100
+MCP_PORT=8190
+```
+
+Voraussetzungen: DNS-A-Record der Domain auf die öffentliche IP, Portweiterleitung
+TCP 80 und 443 auf den Host (bzw. auf `NGINX_HTTP_BIND`/`NGINX_HTTPS_BIND`). Start wie
+gewohnt mit `./redeploy.sh` (liest `COMPOSE_FILE` aus der `.env`). certbot legt beim
+ersten Start ein selbstsigniertes Platzhalter-Zertifikat an, damit nginx sofort läuft,
+und versucht stündlich, das echte Zertifikat zu holen — sobald DNS und Weiterleitung
+stehen, ohne weiteres Zutun; nginx lädt bei geändertem Zertifikat selbst neu.
+Erneuerung: certbot prüft alle 12 Stunden. Sofort versuchen bzw. Status prüfen:
+
+```bash
+docker compose exec certbot sh /opt/certbot.sh obtain
+docker compose exec certbot certbot certificates
+```
+
+Mehrere Instanzen auf einem Host brauchen getrennte Verzeichnisse (eigener Checkout,
+eigene `.env`) — der Compose-Projektname folgt dem Verzeichnisnamen, Volumes und
+Container sind damit getrennt.
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
 hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.
