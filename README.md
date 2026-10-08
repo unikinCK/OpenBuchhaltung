@@ -380,6 +380,17 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `MCP_HTTP_ALLOWED_ORIGINS` | – | Erlaubte Browser-Origins (kommagetrennt, `*` = alle). |
 | `MCP_HTTP_MAX_BODY_BYTES` | `16777216` | Maximale Request-Größe des MCP-HTTP-Endpunkts (größer → 413). |
 | `MCP_HTTP_ALLOW_USER_TOKENS` | `1` | Benutzer-API-Tokens am MCP-HTTP-Endpunkt annehmen und durchreichen (`0` = nur `MCP_HTTP_AUTH_TOKEN`). |
+| `MCP_PUBLIC_URL` | – | Öffentliche Basis-URL für den OAuth-Hinweis (`WWW-Authenticate`) im 401; leer = aus `X-Forwarded-Proto`/`Host`. |
+
+**OAuth für MCP-Connectoren**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `OAUTH_ENABLED` | `1` | OAuth-2.1-Server (Discovery, Client-Registrierung, Login-Flow) für ChatGPT-/Claude-Connectoren. |
+| `OAUTH_ISSUER` | – | Aussteller-URL; leer = aus der Anfrage (hinter dem Proxy `https://<Domain>`). |
+| `OAUTH_ACCESS_TOKEN_SECONDS` | `3600` | Laufzeit der Access-Tokens. |
+| `OAUTH_REFRESH_TOKEN_DAYS` | `30` | Laufzeit der Refresh-Tokens (rotieren bei jeder Erneuerung). |
+| `OAUTH_ALLOWED_REDIRECT_HOSTS` | – | Erlaubte Redirect-Hosts bei der Registrierung (z. B. `chatgpt.com,claude.ai`); leer = alle HTTPS-Hosts und localhost. |
 
 **Docker Compose und Skripte**
 
@@ -770,6 +781,8 @@ Lesezugriff.
 
 Basis-Endpunkte:
 
+- `GET /api/v1/oauth/grants` (`include_inactive`), `POST /api/v1/oauth/grants/<id>/revoke` —
+  per OAuth verbundene Apps; MCP-Tools `list_oauth_grants`, `revoke_oauth_grant`
 - `GET /api/v1/users/me` — Identität des Aufrufers: `auth` (`user`/`api_token`),
   `user` (ID, Name, Rolle, Mandant) und `global_access`; MCP-Tool `get_current_user`
 - `GET /api/v1/health` — `status` (`ok`/`unhealthy`, HTTP 503 bei Störung), `version`,
@@ -1199,6 +1212,30 @@ gesperrter Benutzer oder rotierter Token verliert den Zugriff sofort. Mit
 `MCP_HTTP_AUTH_TOKEN` gilt weiterhin das Backend-Token `OPENBUCHHALTUNG_API_TOKEN`.
 Abschalten: `MCP_HTTP_ALLOW_USER_TOKENS=0`. Das MCP-Tool `get_current_user` zeigt, als
 wer ein Client arbeitet.
+
+**OAuth-Login für ChatGPT- und Claude-Connectoren.** ChatGPT (*Einstellungen → Apps &
+Connectors → Developer Mode → Connector erstellen*) und claude.ai-Connectoren können keine
+festen Bearer-Tokens senden, sondern nur OAuth. Die App bringt dafür einen OAuth-2.1-Server
+nach MCP-Autorisierungsspezifikation mit (`OAUTH_ENABLED`, Default an):
+
+1. Connector mit der URL `https://<Domain>/mcp` und Authentifizierung **OAuth** anlegen.
+2. Der Client erhält vom MCP-Endpunkt ein 401 mit `WWW-Authenticate: Bearer
+   resource_metadata=…`, liest `/.well-known/oauth-protected-resource` und
+   `/.well-known/oauth-authorization-server` und registriert sich selbst
+   (`POST /oauth/register`, Dynamic Client Registration).
+3. Im Browser öffnet sich die Anmeldung von OpenBuchhaltung, danach eine
+   Zustimmungsseite (App-Name, Weiterleitungsziel, eigener Benutzer). Erst nach
+   **Erlauben** stellt `/oauth/token` Tokens aus (PKCE S256 Pflicht).
+4. Der Connector arbeitet mit Rolle und Mandant dieses Benutzers; Access-Tokens laufen nach
+   `OAUTH_ACCESS_TOKEN_SECONDS` ab und werden per Refresh-Token (rotierend) erneuert.
+
+Verbundene Apps sieht und widerruft jeder Benutzer unter **Apps** in der Kopfzeile
+(globale Admins: alle), per API `GET /api/v1/oauth/grants` bzw.
+`POST /api/v1/oauth/grants/<id>/revoke` und per MCP-Tool `list_oauth_grants` /
+`revoke_oauth_grant`. Deaktivierte Benutzer verlieren den Zugriff sofort. Mit
+`OAUTH_ALLOWED_REDIRECT_HOSTS=chatgpt.com,claude.ai` lässt sich die Registrierung auf
+bekannte Clients beschränken. Hinter dem nginx-Overlay ist nichts weiter zu konfigurieren:
+`/.well-known/*` und `/oauth/*` gehen an die App, `/mcp` an den MCP-Server.
 
 ### HTTPS-Zugang für Claude-Desktop-Custom-Connectoren
 

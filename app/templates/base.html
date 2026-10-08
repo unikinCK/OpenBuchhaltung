@@ -65,6 +65,7 @@
         <div class="user-area">
           <span>{{ session['user']['username'] }} <span class="badge">{{ session['user']['role'] }}</span></span>
           <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort</a>
+          <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Apps</a>
           <form method="post" action="{{ url_for('auth.logout') }}">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
             <button type="submit">Logout</button>

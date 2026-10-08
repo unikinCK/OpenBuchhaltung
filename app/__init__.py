@@ -14,6 +14,7 @@ from .auth import auth_bp, ensure_csrf_token
 from .cli import register_cli_commands
 from .db import auto_migrate_enabled, create_session_factory, running_from_cli
 from .logging_config import configure_logging, init_request_id
+from .oauth import oauth_bp
 from .version import get_commit, get_version
 from .web import main_bp
 
@@ -78,6 +79,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         HSTS_ENABLED=_env_flag("HSTS_ENABLED"),
         HSTS_MAX_AGE=int(os.environ.get("HSTS_MAX_AGE", str(DEFAULT_HSTS_MAX_AGE))),
         DATABASE_URL=os.environ.get("DATABASE_URL"),
+        # OAuth 2.1 für MCP-Connectoren (ChatGPT, Claude): Discovery, DCR, Login-Flow.
+        OAUTH_ENABLED=_env_flag("OAUTH_ENABLED") is not False,
+        OAUTH_ISSUER=os.environ.get("OAUTH_ISSUER"),
+        OAUTH_ACCESS_TOKEN_SECONDS=int(os.environ.get("OAUTH_ACCESS_TOKEN_SECONDS", "3600")),
+        OAUTH_REFRESH_TOKEN_DAYS=int(os.environ.get("OAUTH_REFRESH_TOKEN_DAYS", "30")),
+        OAUTH_ALLOWED_REDIRECT_HOSTS=os.environ.get("OAUTH_ALLOWED_REDIRECT_HOSTS", ""),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
         DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
         DOCUMENT_MIN_UPLOAD_BYTES=document_min_upload_bytes,
@@ -184,6 +191,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(oauth_bp)
     register_cli_commands(app)
     init_request_id(app)
 

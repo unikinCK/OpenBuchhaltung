@@ -17,7 +17,10 @@ Authentifizierung: ``MCP_HTTP_AUTH_TOKEN`` öffnet den Endpunkt; die Tools laufe
 mit dem Server-Token ``OPENBUCHHALTUNG_API_TOKEN``. Zusätzlich (``MCP_HTTP_ALLOW_USER_TOKENS``,
 Default an) akzeptiert der Endpunkt Benutzer-API-Tokens: Sie werden gegen
 ``GET /users/me`` geprüft und pro Request an die REST-API durchgereicht, sodass Rolle,
-Mandanten-Scope und Protokoll des jeweiligen Benutzers gelten.
+Mandanten-Scope und Protokoll des jeweiligen Benutzers gelten. Dazu zählen auch
+OAuth-Access-Tokens der App (ChatGPT-/Claude-Connectoren): Ein 401 trägt dann
+``WWW-Authenticate: Bearer resource_metadata=…`` (öffentliche Basis-URL aus
+``MCP_PUBLIC_URL`` bzw. X-Forwarded-Proto/Host), über das Clients den Login finden.
 """
 
 from __future__ import annotations
@@ -227,29 +230,54 @@ def _make_handler(
     auth_token: str | None,
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
     user_tokens: UserTokenValidator | None = None,
+    public_url: str | None = None,
 ):
     class MCPRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "OpenBuchhaltungMCP/1.0"
 
-        def _send(self, result: HttpResult) -> None:
+        def _send(self, result: HttpResult, extra_headers: dict[str, str] | None = None) -> None:
             self.send_response(result.status)
             if result.content_type:
                 self.send_header("Content-Type", result.content_type)
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             body = result.body_bytes
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if body:
                 self.wfile.write(body)
 
-        def _reject(self, status: int, message: str) -> None:
+        def _reject(
+            self, status: int, message: str, extra_headers: dict[str, str] | None = None
+        ) -> None:
             self._send(
                 HttpResult(
                     status=status,
                     content_type="application/json",
                     body=json.dumps({"error": message}),
-                )
+                ),
+                extra_headers,
             )
+
+        def _unauthorized(self) -> None:
+            # MCP-Autorisierung: Clients (ChatGPT, Claude) finden über resource_metadata
+            # den OAuth-Server der App und starten den Login-Flow.
+            headers = None
+            if user_tokens is not None:
+                challenge = f'Bearer resource_metadata="{self._resource_metadata_url()}"'
+                if _bearer_token(self.headers.get("Authorization")):
+                    challenge += ', error="invalid_token"'
+                headers = {"WWW-Authenticate": challenge}
+            self._reject(401, "Unauthorized.", headers)
+
+        def _resource_metadata_url(self) -> str:
+            base = public_url
+            if not base:
+                proto = (self.headers.get("X-Forwarded-Proto") or "http").split(",")[0].strip()
+                host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
+                base = f"{proto}://{host.split(',')[0].strip()}"
+            return f"{base.rstrip('/')}/.well-known/oauth-protected-resource{path}"
 
         def do_POST(self) -> None:  # noqa: N802 (stdlib-Namenskonvention)
             if self.path.split("?", 1)[0] != path:
@@ -259,7 +287,7 @@ def _make_handler(
                 self.headers.get("Authorization"), auth_token, user_tokens
             )
             if not allowed:
-                self._reject(401, "Unauthorized.")
+                self._unauthorized()
                 return
             if not origin_allowed(self.headers.get("Origin"), allowed_origins):
                 self._reject(403, "Origin not allowed.")
@@ -309,6 +337,7 @@ def make_server(
     auth_token: str | None = None,
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
     allow_user_tokens: bool = True,
+    public_url: str | None = None,
 ) -> ThreadingHTTPServer:
     if host not in LOOPBACK_HOSTS and not auth_token:
         raise RuntimeError(
@@ -316,7 +345,7 @@ def make_server(
         )
     user_tokens = UserTokenValidator(server) if allow_user_tokens else None
     handler = _make_handler(
-        server, path, allowed_origins, auth_token, max_body_bytes, user_tokens
+        server, path, allowed_origins, auth_token, max_body_bytes, user_tokens, public_url
     )
     return ThreadingHTTPServer((host, port), handler)
 
@@ -347,6 +376,7 @@ def main() -> None:
         auth_token,
         max_body_bytes,
         allow_user_tokens=allow_user_tokens,
+        public_url=(os.environ.get("MCP_PUBLIC_URL") or "").strip() or None,
     )
     print(f"OpenBuchhaltung MCP-Server (Streamable HTTP) läuft auf http://{host}:{port}{path}")
     try:

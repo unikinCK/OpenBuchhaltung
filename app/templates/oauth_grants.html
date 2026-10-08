@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Verbundene Apps – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Verbundene Apps</h1>
+
+  <section class="card">
+    <p class="muted">Anwendungen, denen per OAuth Zugriff erlaubt wurde (z. B. ChatGPT- oder
+      Claude-Connectoren über den MCP-Zugang). Sie arbeiten mit den Rechten des jeweiligen
+      Benutzers.{% if show_all %} Als Administrator sehen Sie die Zugriffe aller Benutzer.{% endif %}</p>
+    {% if grants %}
+      <table>
+        <thead>
+          <tr>
+            <th>App</th>
+            <th>Weiterleitung an</th>
+            {% if show_all %}<th>Benutzer</th>{% endif %}
+            <th>Erlaubt am</th>
+            <th>Zuletzt verwendet</th>
+            <th>Gültig bis</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for grant in grants %}
+            <tr>
+              <td>{{ grant.client_name }}</td>
+              <td>{{ grant.redirect_hosts | join(", ") }}</td>
+              {% if show_all %}<td>{{ grant.username }}</td>{% endif %}
+              <td>{{ grant.created_at[:16] | replace("T", " ") if grant.created_at }}</td>
+              <td>{{ grant.last_used_at[:16] | replace("T", " ") if grant.last_used_at else "–" }}</td>
+              <td>{{ grant.expires_at[:10] if grant.expires_at else "–" }}</td>
+              <td>
+                <form method="post" action="{{ url_for('auth.revoke_oauth_grant', grant_id=grant.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="secondary">Widerrufen</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Keine aktiven Verbindungen.</p>
+    {% endif %}
+  </section>
+{% endblock %}

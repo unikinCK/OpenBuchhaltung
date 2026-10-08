@@ -278,6 +278,41 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_oauth_grants",
+        description=(
+            "Listet per OAuth verbundene Apps (z. B. ChatGPT-Connector): eigene, als "
+            "globaler Admin alle. include_inactive zeigt auch widerrufene/abgelaufene."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch widerrufene/abgelaufene Zugriffe anzeigen.",
+                }
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/oauth/grants",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="revoke_oauth_grant",
+        description="Widerruft den OAuth-Zugriff einer verbundenen App sofort.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "grant_id": {"type": "integer", "description": "ID aus list_oauth_grants."}
+            },
+            "required": ["grant_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/oauth/grants/{grant_id}/revoke",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="unlock_user_login",
         description=(
             "Hebt die Login-Sperre eines Benutzers auf (Rate-Limit nach zu vielen "

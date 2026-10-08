@@ -223,13 +223,24 @@ def require_api_token():
         g.api_global_access = True
         return None
 
-    api_user = _lookup_user_by_api_token(token)
+    api_user = _lookup_user_by_api_token(token) or _lookup_user_by_oauth_token(token)
     if api_user is not None:
         g.api_user = api_user
         g.api_global_access = api_user["tenant_id"] is None
         return None
 
     return {"error": "Unauthorized."}, 401
+
+
+def _lookup_user_by_oauth_token(token: str) -> dict | None:
+    """Benutzer zu einem OAuth-Access-Token (MCP-Connectoren wie ChatGPT)."""
+    if not current_app.config.get("OAUTH_ENABLED", True):
+        return None
+    from app.oauth import lookup_user_by_access_token  # Zyklus auth <-> oauth vermeiden
+
+    with _get_session_factory()() as db_session:
+        user = lookup_user_by_access_token(db_session, token)
+        return _api_user_dict(user) if user is not None else None
 
 
 def _lookup_user_by_api_token(token: str) -> dict | None:
@@ -488,3 +499,45 @@ def change_password():
 
     flash("Passwort wurde geändert.", "success")
     return redirect(url_for("main.index"))
+
+
+# ---------------------------------------------------------------------------
+# Verbundene Apps (OAuth-Grants)
+# ---------------------------------------------------------------------------
+
+
+@auth_bp.get("/apps")
+@login_required
+def oauth_grants_page():
+    from app.oauth import list_grants
+
+    user = current_user()
+    show_all = user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
+    with _get_session_factory()() as db_session:
+        grants = list_grants(db_session, user_id=None if show_all else user["id"])
+    return render_template(
+        "oauth_grants.html",
+        grants=grants,
+        show_all=show_all,
+        companies=[],
+        selected_company_id=None,
+    )
+
+
+@auth_bp.post("/apps/<int:grant_id>/revoke")
+@login_required
+def revoke_oauth_grant(grant_id: int):
+    from app.oauth import revoke_grant
+    from domain.models import OAuthGrant
+
+    user = current_user()
+    may_revoke_all = user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
+    with _get_session_factory()() as db_session:
+        grant = db_session.get(OAuthGrant, grant_id)
+        if grant is None or (grant.user_id != user["id"] and not may_revoke_all):
+            abort(404)
+        if grant.revoked_at is None:
+            revoke_grant(db_session, grant, actor=user["username"])
+            db_session.commit()
+    flash("Zugriff wurde widerrufen.", "success")
+    return redirect(url_for("auth.oauth_grants_page"))
