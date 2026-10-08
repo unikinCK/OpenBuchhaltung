@@ -1,0 +1,66 @@
+# Overlay: nginx-Reverse-Proxy mit Let's-Encrypt-Zertifikat (certbot) vor dem
+# Produktions-Stack — für eine aus dem Internet erreichbare Instanz.
+#
+# Unter PUBLIC_DOMAIN liefert nginx per HTTPS aus:
+#   /      Web-UI und REST-API (/api/v1) → app:8000
+#   /mcp   MCP-Server (Streamable HTTP)  → mcp:8090 (nur mit Profil mcp)
+#
+# Einrichtung (Details im README, Abschnitt „Öffentliche Instanz mit nginx“):
+#   1. .env: COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml,
+#      PUBLIC_DOMAIN, CERTBOT_EMAIL, ggf. NGINX_HTTP_BIND/NGINX_HTTPS_BIND
+#   2. DNS-A-Record auf die öffentliche IP, Ports 80/443 dorthin weiterleiten
+#   3. ./redeploy.sh --no-pull
+#
+# Zertifikat: certbot legt beim ersten Start ein selbstsigniertes Platzhalter-
+# Zertifikat an (nginx startet damit sofort) und versucht stündlich, das echte
+# Let's-Encrypt-Zertifikat per HTTP-01 (Webroot) zu holen — sobald DNS und
+# Portweiterleitung stehen, klappt das ohne weiteres Zutun. Danach prüft certbot
+# alle 12 h auf Erneuerung; nginx lädt bei geändertem Zertifikat automatisch neu.
+# Sofort versuchen:  docker compose exec certbot sh /opt/certbot.sh obtain
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+      certbot:
+        condition: service_started
+    ports:
+      # Bind-Adresse frei wählbar, z. B. 8080 (Port 80 belegt, Router leitet 80 → 8080
+      # weiter) oder 192.168.0.10:443 (443 auf anderen Interfaces belegt).
+      - "${NGINX_HTTP_BIND:-80}:80"
+      - "${NGINX_HTTPS_BIND:-443}:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set}
+      # Upload-Grenze der App (DOCUMENT_MAX_UPLOAD_BYTES) plus Reserve.
+      NGINX_CLIENT_MAX_BODY_SIZE: ${NGINX_CLIENT_MAX_BODY_SIZE:-20m}
+      # Nur diese Variablen ersetzen — nginx-Variablen wie $host bleiben unberührt.
+      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|NGINX_CLIENT_MAX_BODY_SIZE)$$
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/nginx-cert-watch.sh:/docker-entrypoint.d/05-cert-watch.sh:ro
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+      CERTBOT_STAGING: ${CERTBOT_STAGING:-0}
+    volumes:
+      - ./deploy/nginx/certbot.sh:/opt/certbot.sh:ro
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: ["/bin/sh", "/opt/certbot.sh"]
+
+volumes:
+  certbot_conf:
+  certbot_www:

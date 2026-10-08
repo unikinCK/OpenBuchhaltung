@@ -11,6 +11,9 @@
 # Profile (opt-in, dauerhaft über COMPOSE_PROFILES in der .env):
 #   mcp    MCP-Server (Streamable HTTP) auf 127.0.0.1:8090 — verlangt MCP_HTTP_AUTH_TOKEN
 #   proxy  mcp + Caddy (HTTPS mit Let's Encrypt für MCP_DOMAIN)
+#
+# Öffentliche Instanz mit nginx + certbot (UI, REST-API und MCP unter einer Domain):
+#   COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml (siehe dort)
 services:
   app:
     build:
@@ -86,7 +89,7 @@ services:
     restart: unless-stopped
     ports:
       # Nur lokal; HTTPS davor per Tailscale Serve oder Profil proxy (Caddy).
-      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:${MCP_PORT:-8090}:8090"
     env_file:
       - path: .env
         required: false
