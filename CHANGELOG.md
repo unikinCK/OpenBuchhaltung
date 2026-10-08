@@ -36,6 +36,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - `redeploy.sh`/`backup.sh` lesen `COMPOSE_FILE` auch aus der `.env` und akzeptieren
   mehrere Compose-Dateien (`:`-getrennt); Host-Port des MCP-Servers per `MCP_PORT`.
 
+### Behoben
+
+- Kostenstellen- und Profitcenter-Bericht zählen Erlöskonten vom Typ `income` als
+  Erlös (Filter, Vorzeichen, `total_revenue`) — wie die GuV über
+  `REVENUE_ACCOUNT_TYPES`. Bisher fehlten bei SKR03/SKR04-Kontenrahmen und bei in
+  der UI angelegten Ertragskonten sämtliche Erlöse; betroffen waren UI,
+  `GET /api/v1/controlling-report`, `/api/v1/exports/controlling.csv` und die
+  MCP-Tools `get_controlling_report`/`export_controlling_csv`.
+
 ## [0.1.0] – 2026-09-20
 
 Erstes versioniertes Release. Fasst den bis dahin auf `main` erreichten Stand
