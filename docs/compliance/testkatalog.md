@@ -58,6 +58,7 @@ Jeder Testfall sollte dokumentieren:
 | T-PER-004 | Jahresabschluss durchfuehren | GuV-Konten werden abgeschlossen, Jahr wird gesperrt | automatisiert | hoch |
 | T-PER-005 | Nachbuchung in abgeschlossenes Jahr | Aktion wird verhindert | automatisiert | hoch |
 | T-PER-006 | Abschluss erneut ausfuehren | Doppelabschluss wird verhindert oder nachvollziehbar idempotent behandelt | automatisiert | hoch |
+| T-PER-007 | Jahresabschluss mit SKR04 | Ergebnisvortrag bucht auf 2970; das SKR04-Aktivkonto 0860 (Beteiligungen) wird nie als Gewinnvortrag verwendet | automatisiert | hoch |
 
 ## 5. Belege und Archiv
 
@@ -126,6 +127,9 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
 | T-EXP-013 | Kontenaenderungshistorie exportieren | Anlage und Aenderungen sind mit Snapshots und Hashkette enthalten | automatisiert | hoch |
 | T-EXP-014 | Controlling-Daten exportieren | Einheiten, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+| T-EXP-015 | Kontenrahmen SKR04 importieren | Alle Konten mit DATEV-SKR04-Nummer und Kontoart ohne Fehlerzeile; Geldtransit, Gewinnvortrag, Steuer-, Bank- und Verbindlichkeitskonto werden in SKR03 und SKR04 gefunden | automatisiert | hoch |
+| T-EXP-016 | Kontenrahmen-CSV mit unmaskiertem Komma oder unbekannter Kontoart | Zeile wird als Fehler gemeldet und nicht angelegt | automatisiert | mittel |
+| T-EXP-017 | Kontenrahmen-Pruefung bei Altbestand des fehlerhaften SKR04-Imports | Altkonten mit SKR04-Nummer, Buchungen und Saldo gemeldet (UI, API, MCP); SKR03 und korrekter SKR04 ohne Befund; nichts wird geaendert | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 
