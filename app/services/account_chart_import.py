@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.account_hierarchy import resolve_parent_account_id
-from app.services.accounts import log_account_created
+from app.services.accounts import ACCOUNT_TYPES, log_account_created
 from domain.models import Account, Company
 
 logger = logging.getLogger(__name__)
@@ -76,12 +76,33 @@ def import_account_chart_csv(
             for canonical, source in header_mapping.items()
         }
 
+        # Überzählige Spalten entstehen z. B. durch ein unmaskiertes Komma in der
+        # Bezeichnung („Gas, Strom, Wasser“) — dann stünde Unsinn in der Kontoart.
+        if any(value.strip() for value in raw_row.get(None) or []):
+            _record_error(
+                report,
+                line_number,
+                "Mehr Spalten als in der Kopfzeile — Bezeichnungen mit Komma "
+                "in Anführungszeichen setzen.",
+            )
+            continue
+
         missing = [field for field in REQUIRED_FIELDS if not row[field]]
         if missing:
             _record_error(
                 report,
                 line_number,
                 f"Pflichtfelder fehlen: {', '.join(missing)}",
+            )
+            continue
+
+        account_type = row["account_type"].lower()
+        if account_type not in ACCOUNT_TYPES:
+            _record_error(
+                report,
+                line_number,
+                f"Unbekannte Kontoart „{row['account_type']}“ "
+                f"(erlaubt: {', '.join(ACCOUNT_TYPES)})",
             )
             continue
 
@@ -95,7 +116,7 @@ def import_account_chart_csv(
             company_id=company.id,
             code=row["code"],
             name=row["name"],
-            account_type=row["account_type"],
+            account_type=account_type,
             parent_account_id=resolve_parent_account_id(
                 session=session, company_id=company.id, code=row["code"]
             ),

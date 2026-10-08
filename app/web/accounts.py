@@ -1,4 +1,4 @@
-"""Kontenverwaltung: Kontenliste und Konto anlegen."""
+"""Kontenverwaltung: Kontenliste, Konto anlegen und Kontenrahmen-Prüfung."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from io import StringIO
 from flask import abort, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
+from app.services.account_chart_check import check_account_chart
 from app.services.account_chart_import import (
     BUNDLED_ACCOUNT_CHART_FILES,
     import_account_chart_csv,
@@ -54,6 +55,11 @@ def accounts_page():
             if selected_company_id
             else []
         )
+        chart_check = (
+            check_account_chart(session=session, company_id=selected_company_id)
+            if selected_company_id
+            else None
+        )
 
     return render_template(
         "konten.html",
@@ -61,6 +67,7 @@ def accounts_page():
         selected_company_id=selected_company_id,
         accounts=accounts,
         account_events=account_events,
+        chart_check=chart_check,
         bundled_charts=sorted(BUNDLED_ACCOUNT_CHART_FILES),
     )
 

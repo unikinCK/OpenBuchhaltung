@@ -5,6 +5,82 @@
 {% block content %}
   <h1 class="page-title">Konten</h1>
 
+  {% if chart_check and not chart_check.ok %}
+    <section class="card">
+      <h2>Kontenrahmen-Prüfung</h2>
+      {% for warning in chart_check.warnings %}
+        <p>{{ warning }}</p>
+      {% endfor %}
+      {% if chart_check.legacy_skr04_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>Altkonto</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>Richtig im SKR04</th>
+              <th>SKR04-Konto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.legacy_skr04_accounts %}
+              <tr>
+                <td>{{ row.code }} – {{ row.name }}</td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr04_code }} – {{ row.skr04_name }}</td>
+                <td>
+                  {% if row.skr04_status == "occupied" %}
+                    belegt durch Altkonto {{ row.skr04_account.code }} – {{ row.skr04_account.name }}
+                  {% elif row.skr04_status == "present" %}
+                    vorhanden{% if row.skr04_account.name != row.skr04_name %} ({{ row.skr04_account.name }}){% endif %}
+                  {% else %}
+                    fehlt
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Altkonten ohne Buchungen einfach deaktivieren; fehlende SKR04-Konten ergänzt ein
+          erneuter Import des Kontenrahmens SKR04. Salden zum Stichtag per Umbuchung auf das
+          SKR04-Konto übertragen und das Altkonto danach deaktivieren. Belegt ein Altkonto die
+          SKR04-Nummer (1200, 1600), eine freie Nummer wählen, z. B. 1210 „Forderungen aus
+          Lieferungen und Leistungen ohne Kontokorrent“ oder 1610 „Nebenkasse 1“.
+        </p>
+      {% endif %}
+      {% if chart_check.unknown_account_types %}
+        <table>
+          <thead>
+            <tr>
+              <th>Konto mit unbekannter Kontoart</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.unknown_account_types %}
+              <tr>
+                <td>{{ row.code }} – {{ row.name }}</td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% endif %}
+
   <section class="card">
     <h2>Konto anlegen</h2>
     {% if selected_company_id %}

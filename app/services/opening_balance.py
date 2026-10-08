@@ -2,8 +2,9 @@
 
 Die übergebenen Kontensalden werden als eine Eröffnungsbuchung erfasst;
 eine verbleibende Differenz wird automatisch auf das Saldenvortragskonto
-gebucht (Konto 9000/9008/9009 oder Name „Saldenvortrag“), damit die
-Buchung aufgeht und der Vortrag nachvollziehbar bleibt.
+gebucht (Konto 9000/9008/9009 — in SKR03 und SKR04 gleich — oder Name
+„Saldenvortrag“), damit die Buchung aufgeht und der Vortrag nachvollziehbar
+bleibt.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.journal_entries import (
@@ -19,9 +20,8 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.standard_accounts import SALDENVORTRAG, find_standard_account
 from domain.models import Account, Company, JournalEntry
-
-CARRYFORWARD_CODES = ("9000", "9008", "9009")
 
 
 class OpeningBalanceError(ValueError):
@@ -29,21 +29,10 @@ class OpeningBalanceError(ValueError):
 
 
 def find_carryforward_account(*, session: Session, company_id: int) -> Account | None:
-    return (
-        session.execute(
-            select(Account)
-            .where(
-                Account.company_id == company_id,
-                Account.is_active.is_(True),
-                or_(
-                    Account.code.in_(CARRYFORWARD_CODES),
-                    Account.name.ilike("%saldenvortr%"),
-                ),
-            )
-            .order_by(Account.code)
-        )
-        .scalars()
-        .first()
+    """Saldenvortragskonto: bevorzugt 9000 (Sachkonten), dann 9008/9009 oder
+    ein Konto mit „Saldenvortrag“ in der Bezeichnung."""
+    return find_standard_account(
+        session=session, company_id=company_id, standard=SALDENVORTRAG
     )
 
 

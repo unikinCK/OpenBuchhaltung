@@ -8,6 +8,30 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Kontenrahmen SKR04
+
+- `data/kontenrahmen/skr04.csv` neu aufgestellt nach DATEV-Kontenrahmen SKR04 2026
+  (Art.-Nr. 11175), Umfang wie `skr03.csv` (30 Konten — „Aufwendungen für bezogene
+  Leistungen“ ist im SKR04 die GuV-Position von 5900 Fremdleistungen): u. a. Kasse 1600,
+  Bank 1800, Geldtransit 1460, Forderungen aLuL 1200, Verbindlichkeiten aLuL 3300,
+  Erlöse 19 %/7 % 4400/4300, Aufwendungen 5100–6930. Die alte Datei mischte SKR03-Nummern
+  (1000 Kasse, 1200 Bank, 1600 Verbindlichkeiten, 8000/8300 Erlöse …) mit
+  SKR04-Steuerkonten; „Gas, Strom, Wasser“ landete wegen eines unmaskierten Kommas als
+  Konto „Gas“ mit Kontoart „Strom“.
+- Funktionskonten kontenrahmensicher (`app/services/standard_accounts.py`): Geldtransit
+  nur über die Bezeichnung (SKR04 1360 = Darlehen, SKR03 1460 = Zweifelhafte
+  Forderungen), Gewinnvortrag 0860/2970 per Nummer nur mit Kontoart `equity` (SKR04 0860
+  = Beteiligungen an Personengesellschaften), Saldenvortrag bevorzugt 9000. Bank-,
+  Beleg-OCR-, Belegabgleich- und E-Rechnungsmaske wählen Bank- bzw. Kreditorenkonto
+  passend zum Kontenrahmen vor statt fest 1200/1600 (im SKR04 Forderungen bzw. Kasse).
+- Kontenrahmen-Import lehnt Zeilen mit mehr Spalten als die Kopfzeile und unbekannte
+  Kontoarten ab; die Kontoart wird kleingeschrieben übernommen.
+- Neu: Kontenrahmen-Prüfung — UI-Hinweis auf **Konten**, `GET /api/v1/account-chart/check`,
+  MCP-Tool `check_account_chart`. Meldet Altkonten aus dem fehlerhaften SKR04-Import mit
+  richtiger SKR04-Nummer, Buchungsanzahl und Saldo sowie Konten mit unbekannter Kontoart.
+  Bestehende Gesellschaften werden nicht automatisch umgebaut (Kontonummern bleiben
+  unveränderlich, GoBD); Vorgehen im README unter „Kontenrahmenimport“.
+
 ### OAuth für MCP-Connectoren
 
 - OAuth-2.1-Server nach MCP-Autorisierungsspezifikation, damit ChatGPT- und

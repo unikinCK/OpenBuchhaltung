@@ -18,6 +18,7 @@ from app.services.receipt_matching import (
     reject_suggestion,
 )
 from app.services.scoping import scoped_select
+from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
@@ -174,6 +175,9 @@ def receipt_matching_page():
             entry_gross_total=entry_gross_total,
             expense_accounts=expense_accounts,
             creditor_accounts=creditor_accounts,
+            default_creditor_account_id=standard_account_id(
+                creditor_accounts, VERBINDLICHKEITEN_LUL
+            ),
             tax_codes=tax_codes,
             cost_centers=cost_centers,
             profit_centers=profit_centers,

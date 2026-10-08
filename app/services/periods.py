@@ -19,6 +19,7 @@ from app.services.journal_entries import (
     get_or_create_fiscal_year,
 )
 from app.services.opening_balance import find_carryforward_account
+from app.services.standard_accounts import GEWINNVORTRAG, find_standard_account
 from domain.models import (
     Account,
     Company,
@@ -29,8 +30,6 @@ from domain.models import (
     PeriodLock,
 )
 
-# Gewinnvortrag vor Verwendung: SKR03 = 0860, SKR04 = 2970
-RETAINED_EARNINGS_CODES = ("0860", "2970")
 PROFIT_AND_LOSS_ACCOUNT_TYPES = ("income", "revenue", "expense")
 BALANCE_SHEET_ACCOUNT_TYPES = ("asset", "liability", "equity")
 
@@ -252,22 +251,15 @@ def create_fiscal_year(
 
 
 def _find_retained_earnings_account(session: Session, company_id: int) -> Account | None:
-    account = session.execute(
-        select(Account).where(
-            Account.company_id == company_id,
-            Account.code.in_(RETAINED_EARNINGS_CODES),
-            Account.is_active.is_(True),
-        )
-    ).scalars().first()
-    if account is not None:
-        return account
-    return session.execute(
-        select(Account).where(
-            Account.company_id == company_id,
-            Account.name.ilike("%gewinnvortrag%"),
-            Account.is_active.is_(True),
-        )
-    ).scalars().first()
+    """Gewinnvortrag vor Verwendung: SKR03 0860, SKR04 2970 (Kontoart equity)
+    oder ein Konto mit „Gewinnvortrag“ in der Bezeichnung.
+
+    Die Nummer 0860 allein genügt nicht — im SKR04 ist sie das Aktivkonto
+    „Beteiligungen an Personengesellschaften“.
+    """
+    return find_standard_account(
+        session=session, company_id=company_id, standard=GEWINNVORTRAG
+    )
 
 
 def _create_carryforward_entry(
@@ -497,8 +489,9 @@ def close_fiscal_year(
     retained_account = _find_retained_earnings_account(session, fiscal_year.company_id)
     if retained_account is None:
         raise PeriodActionError(
-            "Kein Gewinnvortragskonto gefunden (SKR03: 0860, SKR04: 2970). "
-            "Bitte zuerst ein Konto mit Bezeichnung 'Gewinnvortrag' anlegen."
+            "Kein Gewinnvortragskonto gefunden (SKR03: 0860, SKR04: 2970, "
+            "jeweils Kontoart equity). Bitte zuerst ein Konto mit Bezeichnung "
+            "'Gewinnvortrag' anlegen."
         )
 
     carryforward_entry = _create_carryforward_entry(

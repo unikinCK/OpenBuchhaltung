@@ -31,6 +31,7 @@ from app.services.einvoice_import import EInvoiceParseError, parse_einvoice
 from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
 from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
+from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
@@ -92,6 +93,9 @@ def einvoice_page():
         selected_company_id=selected_company_id,
         expense_accounts=expense_accounts,
         creditor_accounts=creditor_accounts,
+        default_creditor_account_id=standard_account_id(
+            creditor_accounts, VERBINDLICHKEITEN_LUL
+        ),
         tax_codes=tax_codes,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
