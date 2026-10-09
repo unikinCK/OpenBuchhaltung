@@ -39,16 +39,23 @@ Aufbau des Exports:
    keinen BU-Schlüssel; auf anderen Konten den Steuerschlüssel 101/102
    (Umsatzsteuer 19/7 %) bzw. 401/402 (Vorsteuer 19/7 %), sofern der
    Kontenrahmen dort Steuer dieser Art zulässt (Zusatzfunktion KU/V/M).
-3. Geht das nicht auf den Cent auf (abweichende Rundung der Rechnung, anderer
-   Steuersatz, Sonderfunktion wie innergemeinschaftlicher Erwerb, Aufteilung auf
-   mehrere Gegenkonten), bleiben Netto- und Steuerzeile getrennt; der Satz auf dem
-   Automatikkonto trägt dann den BU-Schlüssel 40. Ebenso Automatikkonten ohne
-   Steuerzeile (Abschluss-, Umbuchungen, Saldovorträge) – außer steuerfreien
+3. Weicht DATEVs Rechnung um wenige Cent ab (einzeln gerundete Rechnungs-
+   positionen, Aufteilung auf mehrere Gegenkonten: höchstens 5 Cent und 1 % der
+   Steuer), bleibt der Satz brutto und ein Korrektursatz „Steuer-Rundungsdifferenz“
+   zwischen Konto und DATEV-Steuerkonto gleicht die Differenz aus. Geht es auch so
+   nicht auf (anderer Steuersatz, Sonderfunktion wie innergemeinschaftlicher
+   Erwerb, größere Abweichung), bleiben Netto- und Steuerzeile getrennt; der Satz
+   auf dem Automatikkonto trägt dann den BU-Schlüssel 40. Ebenso Automatikkonten
+   ohne Steuerzeile (Abschluss-, Umbuchungen, Saldovorträge) – außer steuerfreien
    Automatikkonten, deren Funktion nur die UStVA-Kennzahl bestimmt.
 4. Mehrzeilige Buchungen werden in Buchungssätze mit Konto und Gegenkonto
    zerlegt und über das gemeinsame Belegfeld 1 (Buchungsnummer) gruppiert.
    Ein Buchungssatz mit Steuer führt das Sachkonto der Steuer als Gegenkonto
    (Konto des Steuerschlüssels, „BU Gegenkonto“ in DATEV).
+5. Steuerkonten des jeweils anderen Kontenrahmens (Altimport, z. B. SKR04 1406 in
+   einer SKR03-Buchhaltung) stehen im Stapel unter der Nummer des erkannten
+   Rahmens (1576); Sätze, die danach Konto und Gegenkonto gleich hätten (die
+   Umbuchung 1406 → 1576), entfallen.
 
 Welche Konten Automatikkonten sind, hängt vom Kontenrahmen ab (SKR04 4400 ist
 Erlöse 19 % USt, SKR03 4400 frei verfügbar). Der Export erkennt ihn wie die
@@ -66,7 +73,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from io import StringIO
 from pathlib import Path
@@ -76,7 +83,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.account_chart_check import detect_company_chart
-from app.services.tax_codes import TaxAccount, company_tax_accounts
+from app.services.tax_codes import DEFAULT_TAX_CODES, TaxAccount, company_tax_accounts
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
@@ -127,6 +134,36 @@ TAX_KEYS: dict[tuple[str, Decimal], str] = {
     (TAX_KIND_INPUT, Decimal("19")): "401",
     (TAX_KIND_INPUT, Decimal("7")): "402",
 }
+# Steuerkonten, auf die DATEV Steuer je Art und Satz bucht (Reihenfolge der
+# Standardkonten in DEFAULT_TAX_CODES: SKR03, SKR04).
+CHART_TAX_ACCOUNTS: dict[str, dict[tuple[str, Decimal], str]] = {
+    chart: {
+        (default.kind, default.rate): default.vat_account_codes[index]
+        for default in DEFAULT_TAX_CODES
+        if default.vat_account_codes
+    }
+    for index, chart in enumerate(("skr03", "skr04"))
+}
+# Steuerkonten des jeweils anderen Kontenrahmens (Altimporte wie SKR04 1406 in
+# einer SKR03-Buchhaltung) exportiert der Stapel unter der Nummer des erkannten
+# Rahmens – dort ist die fremde Nummer nicht oder anders vergeben.
+FOREIGN_TAX_ACCOUNT_CODES: dict[str, dict[str, str]] = {
+    "skr03": {
+        default.vat_account_codes[1]: default.vat_account_codes[0]
+        for default in DEFAULT_TAX_CODES
+        if default.vat_account_codes
+    },
+    "skr04": {
+        default.vat_account_codes[0]: default.vat_account_codes[1]
+        for default in DEFAULT_TAX_CODES
+        if default.vat_account_codes
+    },
+}
+# Weicht die gebuchte Steuer um wenige Cent von DATEVs Rechnung aus dem Brutto ab
+# (einzeln gerundete Rechnungspositionen), bleibt der Satz brutto und ein
+# Korrektursatz gleicht die Differenz aus: höchstens 5 Cent und 1 % der Steuer.
+MAX_ROUNDING_DIFFERENCE = Decimal("0.05")
+ROUNDING_TEXT = "Steuer-Rundungsdifferenz"
 
 
 @dataclass(slots=True)
@@ -299,6 +336,8 @@ class _Position:
     group: _TaxGroup | None = None
     tax: Decimal = ZERO
     tax_key: str = ""
+    # Gebuchte minus von DATEV aus dem Brutto errechnete Steuer (Korrektursatz).
+    correction: Decimal = ZERO
 
     @property
     def is_gross(self) -> bool:
@@ -312,6 +351,13 @@ class _Booking:
     debit: _Position
     credit: _Position
     amount: Decimal
+
+
+def _rounding_tolerance(chart: str | None, kind: str, rate: Decimal, tax: Decimal) -> Decimal:
+    """Rundungsdifferenz, die ein Korrektursatz ausgleichen darf (0 ohne DATEV-Steuerkonto)."""
+    if (kind, rate) not in CHART_TAX_ACCOUNTS.get(chart or "", {}):
+        return ZERO
+    return min(MAX_ROUNDING_DIFFERENCE, (abs(tax) / HUNDRED).quantize(CENT, rounding=ROUND_DOWN))
 
 
 def _line_amount(line) -> Decimal:
@@ -339,14 +385,17 @@ def _tax_of_line(
     return tax_account.kind, tax_account.rate
 
 
-def _tax_groups(lines, tax_codes: dict[int, TaxCode], tax_accounts) -> list[_TaxGroup]:
+def _tax_groups(
+    lines, tax_codes: dict[int, TaxCode], tax_accounts, chart: str | None
+) -> list[_TaxGroup]:
     """Ordnet die Steuerzeilen einer Buchung ihren Bemessungsgrundlagen zu.
 
     Passt eine einzelne Zeile derselben Seite (bei gleichem Steuercode
-    bevorzugt), deren Brutto DATEV auf genau diese Steuer zurückrechnet, gewinnt
-    die nächstgelegene davor. Sonst darf sich die Steuerzeile auf mehrere
-    Grundlagen verteilen, wenn deren einzeln gerundete Steuern sie genau ergeben.
-    Was nicht aufgeht, bleibt eigene Steuerzeile.
+    bevorzugt), deren Brutto DATEV auf diese Steuer zurückrechnet – exakt oder bis
+    auf eine Rundungsdifferenz, die ein Korrektursatz ausgleicht –, gewinnt die
+    mit der kleinsten Differenz, dann die nächstgelegene davor. Sonst darf sich
+    die Steuerzeile auf mehrere Grundlagen verteilen, wenn deren einzeln
+    gerundete Steuern sie genau ergeben. Was nicht aufgeht, bleibt eigene Steuerzeile.
     """
     taxes = {id(line): _tax_of_line(line, tax_codes, tax_accounts) for line in lines}
     paired: set[int] = set()
@@ -383,12 +432,17 @@ def _tax_groups(lines, tax_codes: dict[int, TaxCode], tax_accounts) -> list[_Tax
                 )
             ]
         group = _TaxGroup(tax_line=tax_line, rate=rate, kind=kind)
-        singles = [
-            line
+        differences = {
+            id(line): abs(
+                tax_amount - datev_tax_from_gross(_line_amount(line) + tax_amount, rate)
+            )
             for line in candidates
-            if datev_tax_from_gross(_line_amount(line) + tax_amount, rate) == tax_amount
-        ]
+        }
+        tolerance = _rounding_tolerance(chart, kind, rate, tax_amount)
+        singles = [line for line in candidates if differences[id(line)] <= tolerance]
         if singles:
+            smallest = min(differences[id(line)] for line in singles)
+            singles = [line for line in singles if differences[id(line)] == smallest]
             before = [line for line in singles if line.line_number < tax_line.line_number]
             base = (
                 max(before, key=lambda line: line.line_number)
@@ -424,7 +478,45 @@ def _gross_tax_key(function: DatevAccountFunction, kind: str, rate: Decimal) -> 
     return key if key is not None and function.allows_tax_key(kind) else None
 
 
-def _positions(entry, lines, groups: list[_TaxGroup], chart: str | None) -> list[_Position]:
+def _export_code(line, tax_accounts, chart: str | None) -> str:
+    """Kontonummer im Stapel: Steuerkonten des anderen Kontenrahmens unter der eigenen Nummer."""
+    if line.account_id in tax_accounts:
+        return FOREIGN_TAX_ACCOUNT_CODES.get(chart or "", {}).get(line.code, line.code)
+    return line.code
+
+
+def _net_same_accounts(positions: list[_Position]) -> list[_Position]:
+    """Verrechnet ein Konto, das auf Soll und Haben steht (z. B. die Umbuchung
+    1406 → 1576, die nach der Abbildung auf 1576 nichts mehr bewegt)."""
+    sides: dict[str, set[bool]] = {}
+    for position in positions:
+        if not position.is_gross:
+            sides.setdefault(position.code, set()).add(position.is_debit)
+    both = {code for code, flags in sides.items() if len(flags) == 2}
+    result: list[_Position] = []
+    netted: set[str] = set()
+    for position in positions:
+        if position.is_gross or position.code not in both:
+            result.append(position)
+            continue
+        if position.code in netted:
+            continue
+        netted.add(position.code)
+        balance = sum(
+            (other.amount if other.is_debit else -other.amount)
+            for other in positions
+            if not other.is_gross and other.code == position.code
+        )
+        if balance != ZERO:
+            position.is_debit = balance > ZERO
+            position.amount = abs(balance)
+            result.append(position)
+    return result
+
+
+def _positions(
+    entry, lines, groups: list[_TaxGroup], chart: str | None, tax_accounts
+) -> list[_Position]:
     tax_by_base: dict[int, tuple[_TaxGroup, Decimal]] = {}
     grouped_tax_lines = set()
     for group in groups:
@@ -436,9 +528,10 @@ def _positions(entry, lines, groups: list[_TaxGroup], chart: str | None) -> list
     for line in lines:
         if id(line) in grouped_tax_lines:
             continue
-        function = datev_account_function(chart, line.code)
+        code = _export_code(line, tax_accounts, chart)
+        function = datev_account_function(chart, code)
         position = _Position(
-            code=line.code,
+            code=code,
             is_debit=_is_debit(line),
             amount=_line_amount(line),
             text=line.description or entry.description,
@@ -451,16 +544,20 @@ def _positions(entry, lines, groups: list[_TaxGroup], chart: str | None) -> list
             position.tax = share
             position.tax_key = _gross_tax_key(function, group.kind, group.rate) or ""
         positions.append(position)
-    return positions
+    return _net_same_accounts(positions)
 
 
-def _match(positions: list[_Position]) -> tuple[list[_Booking], _Position | None]:
+def _match(
+    positions: list[_Position], chart: str | None
+) -> tuple[list[_Booking], _Position | None]:
     """Zerlegt eine Buchung in Buchungssätze mit Konto und Gegenkonto.
 
     Bruttopositionen werden zuerst gegen Positionen ohne Automatikfunktion
     verrechnet (ein Satz trägt nur einen BU-Schlüssel), danach alles Übrige in
-    Zeilenreihenfolge. Rechnet DATEV die Steuer einer auf mehrere Sätze
-    verteilten Bruttoposition anders, als gebucht, kommt sie als Fehlschlag zurück.
+    Zeilenreihenfolge. Weicht die Steuer, die DATEV aus den Sätzen einer
+    Bruttoposition errechnet, um mehr als eine Rundungsdifferenz von der
+    gebuchten ab, kommt die Position als Fehlschlag zurück; sonst merkt sie sich
+    die Differenz für den Korrektursatz.
     """
     debit = [position for position in positions if position.is_debit]
     credit = [position for position in positions if not position.is_debit]
@@ -503,26 +600,56 @@ def _match(positions: list[_Position]) -> tuple[list[_Booking], _Position | None
         raise ValueError("Buchung ist nicht ausgeglichen.")
 
     for position in gross:
-        parts = [
-            booking.amount
+        group = position.group
+        datev_tax = sum(
+            datev_tax_from_gross(booking.amount, group.rate)
             for booking in bookings
             if position in (booking.debit, booking.credit)
-        ]
-        if len(parts) > 1 and (
-            sum(datev_tax_from_gross(part, position.group.rate) for part in parts)
-            != position.tax
-        ):
+        )
+        difference = position.tax - datev_tax
+        if abs(difference) > _rounding_tolerance(chart, group.kind, group.rate, position.tax):
             return [], position
+        position.correction = difference
     return bookings, None
 
 
+def _correction_booking(position: _Position, chart: str | None, entry) -> _Booking:
+    """Gleicht die Rundungsdifferenz einer Bruttoposition zwischen Konto und Steuerkonto aus.
+
+    DATEV bucht aus dem Brutto ``tax − correction`` auf sein Steuerkonto; der Satz
+    verschiebt ``correction`` dorthin (positiv) bzw. zurück aufs Konto (negativ).
+    """
+    group = position.group
+    tax_code = CHART_TAX_ACCOUNTS[chart][(group.kind, group.rate)]
+    text = f"{ROUNDING_TEXT} {entry.description or ''}"
+    amount = abs(position.correction)
+    tax_position = _Position(
+        code=tax_code,
+        is_debit=position.is_debit == (position.correction > ZERO),
+        amount=amount,
+        text=text,
+        function=datev_account_function(chart, tax_code),
+    )
+    base_position = _Position(
+        code=position.code,
+        is_debit=not tax_position.is_debit,
+        amount=amount,
+        text=text,
+        function=position.function,
+    )
+    if tax_position.is_debit:
+        return _Booking(tax_position, base_position, amount)
+    return _Booking(base_position, tax_position, amount)
+
+
 def _entry_bookings(entry, lines, tax_codes, tax_accounts, chart) -> list[_Booking]:
-    """Buchungssätze einer Buchung; Steuer im Brutto, wo DATEV sie exakt nachrechnet."""
+    """Buchungssätze einer Buchung; Steuer im Brutto, wo DATEV sie (bis auf einen
+    Korrektursatz für Rundungscent) nachrechnet."""
     # Ohne passenden BU-Schlüssel (anderer Steuersatz, Sonderfunktion, KU-Konto)
     # bleibt eine Steuerzeile eigene Position.
     groups = [
         group
-        for group in _tax_groups(lines, tax_codes, tax_accounts)
+        for group in _tax_groups(lines, tax_codes, tax_accounts, chart)
         if all(
             _gross_tax_key(datev_account_function(chart, base.code), group.kind, group.rate)
             is not None
@@ -530,14 +657,22 @@ def _entry_bookings(entry, lines, tax_codes, tax_accounts, chart) -> list[_Booki
         )
     ]
     while True:
-        bookings, failed = _match(_positions(entry, lines, groups, chart))
+        positions = _positions(entry, lines, groups, chart, tax_accounts)
+        bookings, failed = _match(positions, chart)
         if failed is None:
-            return bookings
+            return bookings + [
+                _correction_booking(position, chart, entry)
+                for position in positions
+                if position.is_gross and position.correction != ZERO
+            ]
         groups = [group for group in groups if group is not failed.group]
 
 
-def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str:
-    """Ein Buchungssatz; das Soll-/Haben-Kennzeichen bezieht sich auf das Konto."""
+def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str | None:
+    """Ein Buchungssatz; das Soll-/Haben-Kennzeichen bezieht sich auf das Konto.
+
+    None für Sätze ohne Wirkung (Konto gleich Gegenkonto, ohne Steuer).
+    """
     gross = next(
         (position for position in (booking.debit, booking.credit) if position.is_gross), None
     )
@@ -560,6 +695,8 @@ def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str:
             else ""
         )
     account = booking.debit if contra is booking.credit else booking.credit
+    if account.code == contra.code and gross is None:
+        return None
     fields = [
         _fmt_amount(booking.amount),
         _quote("S" if account.is_debit else "H"),
@@ -657,7 +794,9 @@ def build_datev_export(
     for entry in entries:
         lines = lines_by_entry.get(entry.id, [])
         for booking in _entry_bookings(entry, lines, tax_codes, tax_accounts, chart):
-            buffer.write(_booking_row(booking, entry=entry))
-            buffer.write("\r\n")
+            row = _booking_row(booking, entry=entry)
+            if row is not None:
+                buffer.write(row)
+                buffer.write("\r\n")
 
     return buffer.getvalue()
