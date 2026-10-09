@@ -14,6 +14,7 @@ from app.services.audit_log import log_audit_event
 from app.services.documents import document_file_metadata
 from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
+from app.services.llm_settings import PURPOSE_RECEIPT, receipt_analysis_options
 from app.services.receipt_ocr import (
     ReceiptExtraction,
     ReceiptOCRError,
@@ -188,10 +189,7 @@ def receipt_ocr_suggest():
             file_bytes=file_bytes,
             mime_type=mime_type,
             file_name=original_file_name,
-            ocr_endpoint=current_app.config.get("RECEIPT_OCR_ENDPOINT_URL"),
-            ocr_model=current_app.config.get("RECEIPT_OCR_MODEL", "gpt-4.1-mini"),
-            llm_endpoint=current_app.config.get("RECEIPT_LLM_ENDPOINT_URL"),
-            llm_model=current_app.config.get("RECEIPT_LLM_MODEL", "gpt-4.1-mini"),
+            **receipt_analysis_options(llm_purpose=PURPOSE_RECEIPT),
         )
     except ReceiptOCRError as exc:
         flash(f"OCR nicht möglich: {exc}", "error")

@@ -116,13 +116,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             ),
         ),
         # KI-Chat: OpenAI-/responses-kompatibler Endpoint für den integrierten
-        # Chat mit Tool-Zugriff; Fallback auf den Beleg-LLM-Endpoint.
+        # Chat mit Tool-Zugriff; Fallback auf den Beleg-LLM-Endpoint. Die
+        # *_LLM_ENDPOINT_URL-Werte sind Instanz-Defaults ohne API-Key; API-Keys
+        # hinterlegt der Administrator je Benutzer (app.services.llm_settings).
         CHAT_LLM_ENDPOINT_URL=os.environ.get("CHAT_LLM_ENDPOINT_URL")
         or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
         CHAT_LLM_MODEL=os.environ.get(
             "CHAT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
         ),
-        CHAT_LLM_API_KEY=os.environ.get("CHAT_LLM_API_KEY"),
         CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),
         CHAT_LLM_TIMEOUT_SECONDS=float(os.environ.get("CHAT_LLM_TIMEOUT_SECONDS", "120")),
         # FinTS-Produktkennung (Registrierung der Deutschen Kreditwirtschaft),
@@ -178,6 +179,11 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     configure_logging(app)
     _configure_secret_key(app)
+    if os.environ.get("CHAT_LLM_API_KEY"):
+        logger.warning(
+            "CHAT_LLM_API_KEY wird nicht mehr ausgewertet. API-Keys hinterlegt der "
+            "Administrator je Benutzer (Verwaltung → KI-Zugang)."
+        )
     _configure_hardening(app)
 
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
