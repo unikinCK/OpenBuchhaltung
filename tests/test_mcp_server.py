@@ -1788,7 +1788,9 @@ class _TestClientHttp:
                 json=json_body or {},
                 headers=self.headers,
             )
-        body = response.get_data(as_text=True)
+        # Wie HttpApiClient: im Zeichensatz des Content-Type (DATEV: Windows-1252).
+        charset = response.mimetype_params.get("charset") or "utf-8"
+        body = response.get_data().decode(charset, errors="replace")
         content_type = response.headers.get("Content-Type", "")
         parsed = response.get_json(silent=True) if "application/json" in content_type else None
         return ApiResponse(
@@ -2075,3 +2077,77 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
     assert json.loads(annual_submit["content"][0]["text"])[
         "procedure"
     ] == "ust_jahreserklaerung"
+
+
+def test_export_datev_csv_tool_exports_one_fiscal_year(tmp_path: Path) -> None:
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_mcp_datev.db'}",
+            "API_AUTH_TOKEN": "global-token",
+        }
+    )
+    server = MCPServer(http=_TestClientHttp(app.test_client(), token="global-token"))
+
+    def call_tool(name: str, arguments: dict) -> dict:
+        return server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": name,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )["result"]
+
+    created = call_tool(
+        "create_tenant_with_company", {"tenant_name": "DATEV", "company_name": "DATEV GmbH"}
+    )
+    company_id = json.loads(created["content"][0]["text"])["company"]["id"]
+    account_ids = [
+        json.loads(
+            call_tool(
+                "create_account",
+                {"company_id": company_id, "code": code, "name": name, "account_type": kind},
+            )["content"][0]["text"]
+        )["id"]
+        for code, name, kind in (("1200", "Bank", "asset"), ("8400", "Erlöse", "income"))
+    ]
+    for entry_date in ("2025-11-20", "2026-05-04"):
+        entry = call_tool(
+            "create_journal_entry",
+            {
+                "company_id": company_id,
+                "entry_date": entry_date,
+                "description": "Umsatz",
+                "lines": [
+                    {"account_id": account_ids[0], "debit_amount": "100.00"},
+                    {"account_id": account_ids[1], "credit_amount": "100.00"},
+                ],
+            },
+        )
+        assert entry["isError"] is False
+
+    schema = next(tool for tool in TOOLS if tool.name == "export_datev_csv").input_schema
+    assert {"fiscal_year_id", "date_from", "date_to"} <= set(schema["properties"])
+
+    # Mehrere Wirtschaftsjahre mit Buchungen: Fehler mit der Auswahl.
+    ambiguous = call_tool("export_datev_csv", {"company_id": company_id})
+    assert ambiguous["isError"] is True
+    choices = json.loads(ambiguous["content"][0]["text"])["fiscal_years"]
+    assert [choice["label"] for choice in choices] == ["2026", "2025"]
+
+    exported = call_tool(
+        "export_datev_csv", {"company_id": company_id, "fiscal_year_id": choices[1]["id"]}
+    )
+    assert exported["isError"] is False
+    text = exported["content"][0]["text"]
+    assert text.split("\r\n")[0].split(";")[12:16] == ["20250101", "4", "20250101", "20251231"]
+    # Umlaute der Spaltenüberschrift kommen aus Windows-1252 korrekt an.
+    assert '"Gegenkonto (ohne BU-Schlüssel)"' in text
+
+    month = call_tool(
+        "export_datev_csv",
+        {"company_id": company_id, "date_from": "2026-05-01", "date_to": "2026-05-31"},
+    )
+    header = month["content"][0]["text"].split("\r\n")[0].split(";")
+    assert header[12:16] == ["20260101", "4", "20260501", "20260531"]

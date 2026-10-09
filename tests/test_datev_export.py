@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -13,19 +14,35 @@ from app import create_app
 from app.auth import hash_password
 from app.services.account_chart_check import detect_company_chart
 from app.services.datev_export import (
+    DatevExportError,
     DatevExportOptions,
+    DatevExportPeriod,
     build_datev_export,
     datev_account_function,
+    datev_export_file_name,
     datev_tax_from_gross,
+    resolve_datev_export_period,
 )
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    finalize_journal_entries_until,
     reverse_journal_entry,
 )
+from app.services.periods import create_fiscal_year
 from app.services.tax_codes import ensure_default_tax_codes
-from domain.models import Account, Base, Company, JournalEntryLine, TaxCode, Tenant, User
+from domain.models import (
+    Account,
+    Base,
+    Company,
+    FiscalYear,
+    JournalEntry,
+    JournalEntryLine,
+    TaxCode,
+    Tenant,
+    User,
+)
 
 GENERATED_AT = datetime(2026, 7, 6, 14, 30, 0, tzinfo=timezone.utc)
 
@@ -178,15 +195,74 @@ def _datev_balances(content: str, chart: str) -> dict[str, Decimal]:
     return {code: balance for code, balance in balances.items() if balance}
 
 
-def _ledger_balances(session: Session, company: Company) -> dict[str, Decimal]:
-    balances: dict[str, Decimal] = defaultdict(Decimal)
-    for code, debit, credit in session.execute(
+def _ledger_balances(
+    session: Session, company: Company, period: DatevExportPeriod | None = None
+) -> dict[str, Decimal]:
+    """Salden laut Journal, mit ``period`` nur der Buchungen dieses Stapels."""
+    query = (
         select(Account.code, JournalEntryLine.debit_amount, JournalEntryLine.credit_amount)
         .join(Account, Account.id == JournalEntryLine.account_id)
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
         .where(Account.company_id == company.id)
-    ):
+    )
+    if period is not None:
+        query = query.where(
+            JournalEntry.fiscal_year_id == period.fiscal_year_id,
+            JournalEntry.entry_date.between(period.date_from, period.date_to),
+        )
+    balances: dict[str, Decimal] = defaultdict(Decimal)
+    for code, debit, credit in session.execute(query):
         balances[code] += debit - credit
     return {code: balance for code, balance in balances.items() if balance}
+
+
+def _header(content: str) -> list[str]:
+    return content.split("\r\n")[0].split(";")
+
+
+def _datev_dates(content: str) -> list[date]:
+    """Belegdaten, wie DATEV sie liest: TTMM, das Jahr aus dem WJ-Beginn (Kopffeld 13).
+
+    Das Datum liegt im Wirtschaftsjahr ab Feld 13 (bei abweichendem WJ im
+    Folgejahr, wenn Tag/Monat vor dem WJ-Beginn liegen) und muss in den
+    Stapelzeitraum Datum von/bis (Felder 15/16) fallen.
+    """
+    header = _header(content)
+    fiscal_year_start = datetime.strptime(header[12], "%Y%m%d").date()
+    date_from = datetime.strptime(header[14], "%Y%m%d").date()
+    date_to = datetime.strptime(header[15], "%Y%m%d").date()
+    dates = []
+    for row in _rows(content):
+        day, month = int(row[9][:2]), int(row[9][2:])
+        year = fiscal_year_start.year
+        if (month, day) < (fiscal_year_start.month, fiscal_year_start.day):
+            year += 1
+        booked = date(year, month, day)
+        assert date_from <= booked <= date_to, f"{booked} außerhalb des Stapels"
+        dates.append(booked)
+    return dates
+
+
+def _two_years(session: Session, company: Company) -> dict[str, DatevExportPeriod]:
+    """Buchungen in den Wirtschaftsjahren 2025 und 2026 (Kalenderjahre)."""
+    _book(session, company, "Rechnung November", ("1400", "1190.00", "0"),
+          ("8400", "0", "1000.00"), ("1776", "0", "190.00"), day=date(2025, 11, 20))
+    _book(session, company, "Barverkauf Silvester", ("1000", "107.00", "0"),
+          ("8300", "0", "100.00"), ("1771", "0", "7.00"), day=date(2025, 12, 31))
+    _book(session, company, "Bürobedarf", ("4930", "100.00", "0"),
+          ("1576", "19.00", "0"), ("1200", "0", "119.00"), day=date(2026, 1, 15))
+    _book(session, company, "Zahlung Rechnung November", ("1200", "1190.00", "0"),
+          ("1400", "0", "1190.00"), day=date(2026, 3, 31))
+    _book(session, company, "Rechnung April", ("1400", "595.00", "0"),
+          ("8400", "0", "500.00"), ("1776", "0", "95.00"), day=date(2026, 4, 1))
+    return {
+        fiscal_year.label: resolve_datev_export_period(
+            session=session, company_id=company.id, fiscal_year_id=fiscal_year.id
+        )
+        for fiscal_year in session.execute(
+            select(FiscalYear).where(FiscalYear.company_id == company.id)
+        ).scalars()
+    }
 
 
 def test_header_and_simple_booking_row(session: Session) -> None:
@@ -206,8 +282,9 @@ def test_header_and_simple_booking_row(session: Session) -> None:
     assert header_fields[10] == "4711"  # Berater
     assert header_fields[11] == "815"  # Mandant
     assert header_fields[12] == "20260101"  # WJ-Beginn
-    assert header_fields[14] == "20260315"  # Datum von
-    assert header_fields[15] == "20260315"  # Datum bis
+    # Ohne Auswahl das einzige Wirtschaftsjahr mit Buchungen, ganz.
+    assert header_fields[14] == "20260101"  # Datum von
+    assert header_fields[15] == "20261231"  # Datum bis
     assert header_fields[26] == '"03"'  # Sachkontenrahmen SKR03
 
     # Spaltenüberschrift
@@ -616,6 +693,216 @@ def test_empty_company_produces_header_only(session: Session) -> None:
     assert lines[0].split(";")[26] == '""'
 
 
+def test_export_contains_one_fiscal_year(session: Session) -> None:
+    company = _seed(session)
+    periods = _two_years(session, company)
+
+    content = _export(session, company, period=periods["2025"])
+
+    # Kopf: WJ-Beginn und Stapelzeitraum des Wirtschaftsjahres 2025.
+    assert _header(content)[12:16] == ["20250101", "4", "20250101", "20251231"]
+    assert _row_summary(content) == [
+        ("1190,00", '"S"', "1400", "8400", '""'),
+        ("107,00", '"S"', "1000", "8300", '""'),
+    ]
+    # DATEV liest TTMM im Jahr ab WJ-Beginn: Belegdaten wie im Journal.
+    assert _datev_dates(content) == [date(2025, 11, 20), date(2025, 12, 31)]
+    assert _datev_balances(content, "skr03") == _ledger_balances(
+        session, company, periods["2025"]
+    )
+
+    content = _export(session, company, period=periods["2026"])
+
+    assert _header(content)[12:16] == ["20260101", "4", "20260101", "20261231"]
+    assert _datev_dates(content) == [date(2026, 1, 15), date(2026, 3, 31), date(2026, 4, 1)]
+    assert _datev_balances(content, "skr03") == _ledger_balances(
+        session, company, periods["2026"]
+    )
+
+
+def test_without_selection_several_fiscal_years_must_be_chosen(session: Session) -> None:
+    company = _seed(session)
+    _two_years(session, company)
+
+    with pytest.raises(DatevExportError, match="mehreren Wirtschaftsjahren") as excinfo:
+        resolve_datev_export_period(session=session, company_id=company.id)
+    # Zur Auswahl die Wirtschaftsjahre mit Buchungen, das jüngste zuerst.
+    assert [(year.label, year.entry_count) for year in excinfo.value.fiscal_years] == [
+        ("2026", 3),
+        ("2025", 2),
+    ]
+    with pytest.raises(DatevExportError):
+        _export(session, company)
+
+    # Ein Zeitraum bestimmt das Wirtschaftsjahr.
+    period = resolve_datev_export_period(
+        session=session, company_id=company.id, date_from=date(2025, 12, 1)
+    )
+    assert (period.label, period.date_from, period.date_to) == (
+        "2025",
+        date(2025, 12, 1),
+        date(2025, 12, 31),
+    )
+    period = resolve_datev_export_period(
+        session=session, company_id=company.id, date_to=date(2026, 2, 28)
+    )
+    assert (period.label, period.date_from, period.date_to) == (
+        "2026",
+        date(2026, 1, 1),
+        date(2026, 2, 28),
+    )
+
+
+def test_period_within_fiscal_year(session: Session) -> None:
+    company = _seed(session)
+    periods = _two_years(session, company)
+    fiscal_year_id = periods["2026"].fiscal_year_id
+
+    period = resolve_datev_export_period(
+        session=session,
+        company_id=company.id,
+        fiscal_year_id=fiscal_year_id,
+        date_from=date(2026, 1, 1),
+        date_to=date(2026, 3, 31),
+    )
+    content = _export(session, company, period=period)
+
+    # WJ-Beginn bleibt Feld 13, der Zeitraum steht in Datum von/bis.
+    assert _header(content)[12:16] == ["20260101", "4", "20260101", "20260331"]
+    assert _datev_dates(content) == [date(2026, 1, 15), date(2026, 3, 31)]
+    assert _datev_balances(content, "skr03") == _ledger_balances(session, company, period)
+
+
+@pytest.mark.parametrize(
+    ("selection", "message"),
+    [
+        # Über die Grenze des Wirtschaftsjahres: DATEV läse 2026er Belege als 2025.
+        (
+            {"date_from": date(2025, 12, 1), "date_to": date(2026, 1, 31)},
+            "nicht im Wirtschaftsjahr 2025",
+        ),
+        ({"year": "2025", "date_from": date(2026, 1, 1)}, "nicht im Wirtschaftsjahr 2025"),
+        ({"year": "2026", "date_to": date(2025, 12, 31)}, "nicht im Wirtschaftsjahr 2026"),
+        ({"date_from": date(2026, 3, 1), "date_to": date(2026, 2, 1)}, "liegt nach dem Datum bis"),
+        ({"date_from": date(2024, 6, 1)}, "kein Wirtschaftsjahr angelegt"),
+        ({"fiscal_year_id": 999}, "Wirtschaftsjahr nicht gefunden"),
+    ],
+)
+def test_invalid_selection_is_rejected(session: Session, selection, message) -> None:
+    company = _seed(session)
+    periods = _two_years(session, company)
+    if "year" in selection:
+        selection = dict(selection)
+        selection["fiscal_year_id"] = periods[selection.pop("year")].fiscal_year_id
+
+    with pytest.raises(DatevExportError, match=message):
+        resolve_datev_export_period(session=session, company_id=company.id, **selection)
+
+
+def test_fiscal_year_of_another_company_is_not_found(session: Session) -> None:
+    company = _seed(session)
+    periods = _two_years(session, company)
+    other = Company(tenant_id=company.tenant_id, name="Andere GmbH", currency_code="EUR")
+    session.add(other)
+    session.commit()
+
+    with pytest.raises(DatevExportError, match="Wirtschaftsjahr nicht gefunden"):
+        resolve_datev_export_period(
+            session=session, company_id=other.id, fiscal_year_id=periods["2025"].fiscal_year_id
+        )
+
+
+def test_deviating_fiscal_year_starts_header_at_its_begin(session: Session) -> None:
+    company = _seed(session)
+    company.fiscal_year_start_month = 7
+    session.commit()
+    _book(session, company, "Ende WJ 2025/2026", ("1200", "50.00", "0"),
+          ("8000", "0", "50.00"), day=date(2026, 6, 30))
+    _book(session, company, "Anfang WJ 2026/2027", ("1400", "1190.00", "0"),
+          ("8400", "0", "1000.00"), ("1776", "0", "190.00"), day=date(2026, 7, 1))
+    _book(session, company, "März im Folgejahr", ("1200", "1190.00", "0"),
+          ("1400", "0", "1190.00"), day=date(2027, 3, 15))
+    fiscal_year = session.execute(
+        select(FiscalYear).where(FiscalYear.label == "2026/2027")
+    ).scalar_one()
+
+    period = resolve_datev_export_period(
+        session=session, company_id=company.id, fiscal_year_id=fiscal_year.id
+    )
+    content = _export(session, company, period=period)
+
+    assert _header(content)[12:16] == ["20260701", "4", "20260701", "20270630"]
+    assert [row[9] for row in _rows(content)] == ["0107", "1503"]
+    # 15.03. liegt vor dem WJ-Beginn 01.07. und gehört damit ins Jahr 2027.
+    assert _datev_dates(content) == [date(2026, 7, 1), date(2027, 3, 15)]
+    assert _datev_balances(content, "skr03") == _ledger_balances(session, company, period)
+    assert (
+        datev_export_file_name(company.id, period)
+        == f"EXTF_Buchungsstapel_{company.id}_WJ2026-2027_20260701-20270630.csv"
+    )
+
+
+def test_short_fiscal_year_starts_header_at_its_begin(session: Session) -> None:
+    company = _seed(session)
+    create_fiscal_year(
+        session=session,
+        company_id=company.id,
+        label="2026 (Rumpf)",
+        start_date=date(2026, 4, 15),
+        end_date=date(2026, 12, 31),
+        changed_by="pytest",
+    )
+    _book(session, company, "Erste Rechnung", ("1400", "1190.00", "0"),
+          ("8400", "0", "1000.00"), ("1776", "0", "190.00"), day=date(2026, 4, 20))
+
+    period = resolve_datev_export_period(session=session, company_id=company.id)
+    content = _export(session, company, period=period)
+
+    assert _header(content)[12:16] == ["20260415", "4", "20260415", "20261231"]
+    assert _datev_dates(content) == [date(2026, 4, 20)]
+    assert (
+        datev_export_file_name(company.id, period)
+        == f"EXTF_Buchungsstapel_{company.id}_WJ2026-Rumpf_20260415-20261231.csv"
+    )
+
+
+def test_finalization_flag_counts_only_exported_entries(session: Session) -> None:
+    company = _seed(session)
+    periods = _two_years(session, company)
+    finalize_journal_entries_until(
+        session=session, company_id=company.id, up_to_date=date(2026, 1, 31), changed_by="pytest"
+    )
+    january = resolve_datev_export_period(
+        session=session,
+        company_id=company.id,
+        date_from=date(2026, 1, 1),
+        date_to=date(2026, 1, 31),
+    )
+
+    # Kopffeld 21: 1 schreibt den Stapel in DATEV fest (Dok.-Nr. 1080697) – nur,
+    # wenn alle Buchungen dieses Stapels festgeschrieben sind.
+    assert _header(_export(session, company, period=periods["2025"]))[20] == "1"
+    assert _header(_export(session, company, period=january))[20] == "1"
+    assert _header(_export(session, company, period=periods["2026"]))[20] == "0"
+
+
+def test_company_without_fiscal_year_exports_empty_regular_year(session: Session) -> None:
+    company = _seed(session)
+    company.fiscal_year_start_month = 7
+    session.commit()
+
+    period = resolve_datev_export_period(
+        session=session, company_id=company.id, today=date(2026, 3, 1)
+    )
+    content = _export(session, company, period=period)
+
+    # Reguläres Wirtschaftsjahr zum Stichtag, leerer Stapel ohne Festschreibung.
+    assert (period.fiscal_year_id, period.label) == (None, "2025/2026")
+    assert _header(content)[12:16] == ["20250701", "4", "20250701", "20260630"]
+    assert _header(content)[20] == "0"
+    assert _rows(content) == []
+
+
 def test_account_functions_follow_datev_chart_2026() -> None:
     # Automatikkonten laut DATEV-Kontenrahmen 2026 (Art.-Nr. 11174/11175).
     assert datev_account_function("skr03", "8400").automatic == "AM"
@@ -705,3 +992,110 @@ def test_datev_export_endpoint(tmp_path):
 
     missing = client.get("/api/v1/exports/datev.csv")
     assert missing.status_code == 400
+
+
+def test_datev_export_per_fiscal_year_in_api_and_ui(tmp_path):
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "M", "company_name": "M GmbH"})
+    for code, name, account_type in (("1200", "Bank", "asset"), ("8400", "Erlöse", "income")):
+        client.post(
+            "/accounts",
+            data={"company_id": "1", "code": code, "name": name, "account_type": account_type},
+        )
+    # Je eine Buchung in den Wirtschaftsjahren 2025 (ID 1) und 2026 (ID 2).
+    for entry_date, amount in (("2025-11-20", "100.00"), ("2026-05-04", "250.00")):
+        client.post(
+            "/journal-entries",
+            data={
+                "company_id": "1",
+                "entry_date": entry_date,
+                "description": "Umsatz",
+                "debit_account_id": "1",
+                "credit_account_id": "2",
+                "amount": amount,
+            },
+        )
+
+    def export(**params):
+        return client.get("/api/v1/exports/datev.csv", query_string={"company_id": 1, **params})
+
+    # Ohne Auswahl ist das Wirtschaftsjahr Pflicht; der Fehler nennt die Auswahl.
+    ambiguous = export()
+    assert ambiguous.status_code == 400
+    assert "mehreren Wirtschaftsjahren" in ambiguous.get_json()["error"]
+    assert ambiguous.get_json()["fiscal_years"] == [
+        {
+            "id": 2,
+            "label": "2026",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "entry_count": 1,
+        },
+        {
+            "id": 1,
+            "label": "2025",
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+            "entry_count": 1,
+        },
+    ]
+
+    response = export(fiscal_year_id=1)
+    assert response.status_code == 200
+    assert (
+        'filename="EXTF_Buchungsstapel_1_WJ2025_20250101-20251231.csv"'
+        in response.headers["Content-Disposition"]
+    )
+    body = response.get_data().decode("cp1252")
+    assert _header(body)[12:16] == ["20250101", "4", "20250101", "20251231"]
+    assert [row[0] for row in _rows(body)] == ["100,00"]
+
+    response = export(date_from="2026-05-01", date_to="2026-05-31")
+    assert response.status_code == 200
+    assert "WJ2026_20260501-20260531.csv" in response.headers["Content-Disposition"]
+    assert [row[0] for row in _rows(response.get_data().decode("cp1252"))] == ["250,00"]
+
+    across = export(date_from="2025-12-01", date_to="2026-01-31")
+    assert across.status_code == 400
+    assert "nicht im Wirtschaftsjahr 2025" in across.get_json()["error"]
+    assert export(fiscal_year_id=99).get_json()["error"] == "Wirtschaftsjahr nicht gefunden."
+    assert export(fiscal_year_id="abc").status_code == 400
+    assert export(fiscal_year_id="²").status_code == 400  # isdigit(), aber kein int
+    assert export(date_from="2026-13-01").status_code == 400
+
+    # Berichte-Seite: Auswahl der Wirtschaftsjahre, vorgewählt das jüngste mit
+    # Buchungen bzw. das des Auswertungszeitraums.
+    page = client.get("/berichte", query_string={"company_id": 1}).get_data(as_text=True)
+    assert 'id="datev_fiscal_year_id"' in page
+    assert "2025 (2025-01-01 – 2025-12-31, 1 Buchung)" in page
+    assert 'value="2" selected' in page
+    page = client.get("/berichte", query_string={"company_id": 1, "date_to": "2025-12-31"})
+    assert 'value="1" selected' in page.get_data(as_text=True)
+
+    # Das Formular prüft die Auswahl und lädt über die API herunter.
+    download = client.get("/reports/datev.csv", query_string={"company_id": 1, "fiscal_year_id": 1})
+    assert download.status_code == 302
+    location = urlsplit(download.headers["Location"])
+    assert location.path == "/api/v1/exports/datev.csv"
+    assert parse_qs(location.query) == {"company_id": ["1"], "fiscal_year_id": ["1"]}
+    download = client.get(
+        "/reports/datev.csv",
+        query_string={"company_id": 1, "date_from": "2026-05-01"},
+        follow_redirects=True,
+    )
+    assert "WJ2026_20260501-20261231.csv" in download.headers["Content-Disposition"]
+
+    # Ein Zeitraum außerhalb des Wirtschaftsjahres kommt als Hinweis zurück,
+    # die Eingaben bleiben stehen.
+    rejected = client.get(
+        "/reports/datev.csv",
+        query_string={"company_id": 1, "fiscal_year_id": 1, "date_from": "2026-01-01"},
+        follow_redirects=True,
+    )
+    page = rejected.get_data(as_text=True)
+    assert rejected.request.path == "/berichte"
+    assert "DATEV-Export: Der gewählte Zeitraum (ab 2026-01-01) liegt nicht im" in page
+    assert 'value="1" selected' in page
+    assert 'name="date_from" type="date" value="2026-01-01"' in page

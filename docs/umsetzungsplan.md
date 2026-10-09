@@ -562,8 +562,13 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       DATEV je WJ mit BU-Schlüsseln + Golden-Files (F3, T7).
   - [x] DATEV-Export nach Brutto-Prinzip *(2026-10-09, F3 teilweise)*: Steuer über
         Automatikkonto bzw. Steuerschlüssel 101/102/401/402, BU 40 als Rückfall,
-        Konto und Gegenkonto in jedem Satz, Kontenrahmen im Kopffeld 27. Offen:
-        Export je WJ, Golden-Files.
+        Konto und Gegenkonto in jedem Satz, Kontenrahmen im Kopffeld 27.
+  - [x] DATEV-Export je Wirtschaftsjahr *(2026-10-09, F3 Teil 1)*: ein Stapel je
+        WJ bzw. Zeitraum darin (`fiscal_year_id`, `date_from`/`date_to` in UI, API
+        und MCP), Kopffeld 13 = WJ-Beginn auch bei abweichendem/Rumpf-WJ, 15/16 =
+        Zeitraum, Festschreibekennzeichen nur über die exportierten Buchungen; ohne
+        Angabe bei mehreren WJ mit Buchungen 400 mit Auswahl. Offen bei F3: nur
+        noch Golden-Files (T7).
 - [ ] **Sprint 5 – Produkt-Basis**: Firmenstammdaten in DB (#3);
       Kunden-/Lieferantenstamm (#1); Eingangsrechnung → OPOS (#5); Skonto
       (#11); Zahllauf markiert Posten (F8); § 13b / ig. Erwerb / ZM (#4, F10);
