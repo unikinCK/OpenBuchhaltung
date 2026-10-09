@@ -12,7 +12,11 @@ SKR04 Art.-Nr. 11175, frei auf datev.de). Der DATEV-Export braucht daraus zweier
 Die Spalte ``steuer`` fasst zusammen, was DATEV auf einem Automatikkonto rechnet:
 ein Steuersatz (z. B. ``19``), ``frei`` (keine Steuer, nur Kennzahl-Zuordnung) oder
 ``sonder`` (zwei Steuern wie beim innergemeinschaftlichen Erwerb und § 13b UStG als
-Leistungsempfänger, Skontokonten ohne Steuersatz).
+Leistungsempfänger, Skontokonten ohne Steuersatz). Die Spalte ``kennzahl`` nennt die
+UStVA-Kennzahl der Bemessungsgrundlage, abgeleitet aus der Bezeichnung (z. B. 41 für
+steuerfreie innergemeinschaftliche Lieferungen, 21 für sonstige Leistungen nach
+§ 18b, 46 für § 13b-Leistungen eines EU-Unternehmers); leer, wo die Bezeichnung
+keine eindeutige Kennzahl ergibt.
 
 Aufruf mit beiden PDFs (pypdf ist Laufzeitabhängigkeit):
 
@@ -64,6 +68,16 @@ TAX_FREE = re.compile(
     r"steuerfrei|Steuerfrei|0 % USt|nicht steuerbar|Lieferungen des ersten Abnehmers"
 )
 RATE = re.compile(r"(\d+(?:,\d+)?) % (USt|Vorsteuer|VSt)")
+# Muster für die UStVA-Kennzahl steuerfreier Automatikkonten (kleingeschrieben).
+INTRA_EU_SUPPLY = re.compile(
+    r"innergemeinschaftliche\w* lieferung|§ 4 nr\. 1b|steuerfreien eu-lieferung"
+)
+TAX_FREE_WITH_INPUT_TAX = re.compile(
+    r"§ 4 nr\. 1a|§ 4 nr\. [2-7]\b|nr\. 2 bis 7|offshore|mit vorsteuerabzug"
+)
+TAX_FREE_WITHOUT_INPUT_TAX = re.compile(
+    r"§ 4 nr\. 8|§ 4 nr\. 12|ohne vorsteuerabzug|steuerfreie umsätze inland"
+)
 
 
 def _join_hyphenation(match: re.Match[str]) -> str:
@@ -103,21 +117,56 @@ def classify(function: str, name: str) -> str:
     return format(rate.normalize(), "f")
 
 
+def ustva_kennzahl(function: str, tax: str, name: str) -> str:
+    """UStVA-Kennzahl der Bemessungsgrundlage eines Automatikkontos ("" = keine eindeutige)."""
+    lower = name.casefold()
+    if function == "AM":
+        if tax not in ("frei", "sonder"):
+            return {"19": "81", "7": "86"}.get(tax, "35")
+        if "neufahrzeug" in lower:
+            return "44"
+        if "dreiecksgesch" in lower:
+            return "42"
+        if INTRA_EU_SUPPLY.search(lower):
+            return "41"
+        if "leistungsempfänger die umsatzsteuer" in lower:
+            return "21" if "eu-land" in lower else "60"
+        if "nicht steuerbar" in lower:
+            return "45"
+        if "0 % ust" in lower:
+            return "87"
+        if TAX_FREE_WITH_INPUT_TAX.search(lower):
+            return "43"
+        if TAX_FREE_WITHOUT_INPUT_TAX.search(lower):
+            return "48"
+        return ""
+    if "neufahrzeug" in lower or "steuerfreier" in lower:
+        return ""
+    if "innergemeinschaftlich" in lower and "erwerb" in lower:
+        rate = re.search(r"(\d+) % umsatzsteuer", lower)
+        return {"19": "89", "7": "93"}.get(rate.group(1), "") if rate else ""
+    if "im anderen eu-land ansässigen unternehmers" in lower:
+        return "46"
+    if re.search(r"im ausland ansässigen unternehmers|bauleistungen|§ 13b", lower):
+        return "84"
+    return ""
+
+
 def _text(pdf: Path) -> str:
     text = "\n".join(page.extract_text() or "" for page in PdfReader(pdf).pages)
     # „U A“ am Zeilenende + „M 8850 …“: die Funktion ist über zwei Zeilen verteilt.
     return re.sub(r"(\n\s*(?:[UGK]\s+)*)A\s*\n\s*([MV]\s+\d{4})", r"\1A\2", text)
 
 
-def parse(pdf: Path) -> list[tuple[str, str, str, str, str]]:
+def parse(pdf: Path) -> list[tuple[str, str, str, str, str, str]]:
     lines = _text(pdf).splitlines()
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str]] = []
     index = 0
     while index < len(lines):
         line = lines[index]
         if RESTRICTION_LINE.fullmatch(line):
             for function, start, end in RESTRICTION_TOKEN.findall(line):
-                rows.append((start, end or start, function, "", ""))
+                rows.append((start, end or start, function, "", "", ""))
             index += 1
             continue
         match = AUTOMATIC_LINE.match(line)
@@ -144,7 +193,8 @@ def parse(pdf: Path) -> list[tuple[str, str, str, str, str]]:
             parts.append(following)
             index += 1
         name = _clean_name(" ".join(parts))
-        rows.append((start, end, function, classify(function, name), name))
+        tax = classify(function, name)
+        rows.append((start, end, function, tax, ustva_kennzahl(function, tax, name), name))
     return rows
 
 
@@ -157,11 +207,13 @@ def main(argv: list[str] | None = None) -> int:
 
     with args.output.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(["kontenrahmen", "von", "bis", "funktion", "steuer", "bezeichnung"])
+        writer.writerow(
+            ["kontenrahmen", "von", "bis", "funktion", "steuer", "kennzahl", "bezeichnung"]
+        )
         for chart, pdf in (("skr03", args.skr03_pdf), ("skr04", args.skr04_pdf)):
             rows = sorted(set(parse(pdf)), key=lambda row: (row[0], row[2]))
-            for start, end, function, tax, name in rows:
-                writer.writerow([chart, start, end, function, tax, name])
+            for start, end, function, tax, kennzahl, name in rows:
+                writer.writerow([chart, start, end, function, tax, kennzahl, name])
             automatic = sum(1 for row in rows if row[2] in ("AM", "AV"))
             print(f"{chart}: {automatic} Automatikkonten, {len(rows) - automatic} Zusatzfunktionen")
     return 0

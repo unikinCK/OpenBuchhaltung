@@ -52,6 +52,7 @@ EXPECTED_TOOL_NAMES = {
     "finalize_journal_entries_until",
     "reverse_journal_entry",
     "get_vat_return",
+    "get_zm_report",
     "list_vat_returns",
     "create_vat_return",
     "get_vat_annual_return",

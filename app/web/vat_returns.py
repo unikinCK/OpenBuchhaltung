@@ -29,13 +29,14 @@ from app.services.elster import (
 )
 from app.services.vat_returns import (
     VatReturnError,
-    compute_vat_return,
+    compute_vat_return_details,
     list_vat_returns,
     period_bounds,
     save_vat_return,
     vat_return_display_name,
     vat_return_kind_from_label,
 )
+from app.services.zm import compute_zm
 from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
@@ -76,6 +77,9 @@ def vat_returns_page():
         companies, selected_company_id = company_context(session)
 
         rows = []
+        vat_warnings: list[str] = []
+        unassigned: list[dict] = []
+        zm = None
         saved_returns = []
         period_label = _selected_period_label()
         include_closing_entries = _include_closing_entries(request.args)
@@ -87,12 +91,21 @@ def vat_returns_page():
         if selected_company_id:
             try:
                 date_from, date_to, period_label = period_bounds(period_label)
-                rows = compute_vat_return(
+                details = compute_vat_return_details(
                     session=session,
                     company_id=selected_company_id,
                     date_from=date_from,
                     date_to=date_to,
                     include_closing_entries=include_closing_entries,
+                )
+                rows = details.rows
+                vat_warnings = details.warnings
+                unassigned = details.unassigned
+                zm = compute_zm(
+                    session=session,
+                    company_id=selected_company_id,
+                    date_from=date_from,
+                    date_to=date_to,
                 )
             except VatReturnError as exc:
                 period_error = str(exc)
@@ -150,6 +163,9 @@ def vat_returns_page():
         date_from=date_from,
         date_to=date_to,
         rows=rows,
+        vat_warnings=vat_warnings,
+        unassigned=unassigned,
+        zm=zm,
         saved_returns=saved_views,
         current_year=date.today().year,
         elster_readiness=elster_readiness(current_app.config),

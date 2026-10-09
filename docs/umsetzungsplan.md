@@ -581,6 +581,11 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Eröffnungsbilanz, Saldovortrag je Partner, Journal-CSV, Prüferexport);
         Kontoarten validiert, ungültige Altwerte reparierbar; UI/API/MCP
         (Migration `20261008_0042`).)*
+  - [x] UStVA-Kennzahlen für EU-Umsätze, § 13b und ig. Erwerb, Zusammenfassende
+        Meldung *(2026-10-09, #4/F10 teilweise)*: Kennzahlen über die DATEV-Kontenfunktion
+        und die Steuerkonten, Hinweis statt Kz-48-Pauschale, ZM je Kunden-USt-IdNr. in
+        UI/API/MCP. Offen: Steuercodes mit zwei Steuerkonten für Reverse Charge in den
+        Buchungsmasken, ZM-Übermittlung.
   - [ ] Kunden-/Lieferantenstamm, PR 2–4: OPOS/Zahllauf/Mahnwesen am Partner,
         Partnerkonto und Saldenliste, Partnererkennung in automatischen
         Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.
