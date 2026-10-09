@@ -32,6 +32,7 @@ from app.services.journal_entries import (
 from app.services.vat_returns import (
     VatReturnError,
     compute_vat_return,
+    compute_vat_return_details,
     list_vat_returns,
     period_bounds,
     save_vat_return,
@@ -1406,16 +1407,20 @@ def test_standard_tax_numbers_need_a_tax_account(session: Session) -> None:
         ("8000", "0", "500.00"),
     )
 
-    amounts = _amounts_by_kz(
-        compute_vat_return(
-            session=session,
-            company_id=company.id,
-            date_from=date(2026, 9, 1),
-            date_to=date(2026, 9, 30),
-        )
+    result = compute_vat_return_details(
+        session=session,
+        company_id=company.id,
+        date_from=date(2026, 9, 1),
+        date_to=date(2026, 9, 30),
     )
+    amounts = _amounts_by_kz(result.rows)
     assert amounts["66"] == Decimal("0.00")
-    assert amounts["48"] == Decimal("500")
+    # 8000 hat im SKR03 keine UStVA-Funktion: kein Kz 48 mehr, sondern ein Hinweis.
+    assert amounts["48"] == Decimal("0")
+    assert [(item["account_code"], item["amount"]) for item in result.unassigned] == [
+        ("8000", "500.00")
+    ]
+    assert result.warnings and result.warnings[0].startswith("Nicht in der UStVA")
 
 
 def test_year_end_close_does_not_distort_vat_return(session: Session) -> None:

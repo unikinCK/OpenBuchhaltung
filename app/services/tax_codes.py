@@ -62,6 +62,66 @@ _TAX_ACCOUNT_TYPES = {TAX_KIND_INPUT: "asset", TAX_KIND_OUTPUT: "liability"}
 _TAX_ACCOUNT_NAME_PARTS = ("steuer", "ust", "vst")
 
 
+# Steuerkonten für den innergemeinschaftlichen Erwerb ("ig_erwerb") und die
+# Steuer nach § 13b UStG als Leistungsempfänger ("reverse_charge") laut
+# DATEV-Kontenrahmen 2026 (SKR03 / SKR04). Konten ohne Satz in der Bezeichnung
+# (1572, 1578, 1772, 1785 …) führen DATEV-seitig die übrigen Steuersätze.
+SPECIAL_TAX_ACCOUNTS: dict[str, tuple[str, str, Decimal | None]] = {
+    # Vorsteuer
+    "1572": ("ig_erwerb", TAX_KIND_INPUT, None),
+    "1574": ("ig_erwerb", TAX_KIND_INPUT, Decimal("19")),
+    "1402": ("ig_erwerb", TAX_KIND_INPUT, None),
+    "1404": ("ig_erwerb", TAX_KIND_INPUT, Decimal("19")),
+    "1577": ("reverse_charge", TAX_KIND_INPUT, Decimal("19")),
+    "1578": ("reverse_charge", TAX_KIND_INPUT, None),
+    "1407": ("reverse_charge", TAX_KIND_INPUT, Decimal("19")),
+    "1408": ("reverse_charge", TAX_KIND_INPUT, None),
+    # Umsatzsteuer
+    "1772": ("ig_erwerb", TAX_KIND_OUTPUT, None),
+    "1774": ("ig_erwerb", TAX_KIND_OUTPUT, Decimal("19")),
+    "3802": ("ig_erwerb", TAX_KIND_OUTPUT, None),
+    "3804": ("ig_erwerb", TAX_KIND_OUTPUT, Decimal("19")),
+    "1785": ("reverse_charge", TAX_KIND_OUTPUT, None),
+    "1787": ("reverse_charge", TAX_KIND_OUTPUT, Decimal("19")),
+    "3835": ("reverse_charge", TAX_KIND_OUTPUT, None),
+    "3837": ("reverse_charge", TAX_KIND_OUTPUT, Decimal("19")),
+}
+
+
+@dataclass(slots=True, frozen=True)
+class SpecialTaxAccount:
+    """Steuerkonto für ig. Erwerb oder § 13b UStG (Leistungsempfänger)."""
+
+    category: str  # "ig_erwerb" | "reverse_charge"
+    kind: str
+    rate: Decimal | None
+
+
+def _is_tax_account(account: Account, kind: str) -> bool:
+    name = (account.name or "").casefold()
+    return account.account_type == _TAX_ACCOUNT_TYPES[kind] and any(
+        part in name for part in _TAX_ACCOUNT_NAME_PARTS
+    )
+
+
+def company_special_tax_accounts(
+    *, session: Session, company_id: int
+) -> dict[int, SpecialTaxAccount]:
+    """Steuerkonten für ig. Erwerb und § 13b UStG (Standardnummern, Kontoart und
+    Bezeichnung wie bei ``company_tax_accounts``); auch deaktivierte Konten."""
+    result: dict[int, SpecialTaxAccount] = {}
+    for account in session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code.in_(SPECIAL_TAX_ACCOUNTS),
+        )
+    ).scalars():
+        category, kind, rate = SPECIAL_TAX_ACCOUNTS[account.code]
+        if _is_tax_account(account, kind):
+            result[account.id] = SpecialTaxAccount(category=category, kind=kind, rate=rate)
+    return result
+
+
 @dataclass(slots=True, frozen=True)
 class TaxAccount:
     """Steuerkonto mit Richtung und Steuersatz (None, wenn Codes mehrerer Sätze darauf zeigen)."""
@@ -107,10 +167,7 @@ def company_tax_accounts(*, session: Session, company_id: int) -> dict[int, TaxA
         if account.id in result:
             continue
         kind, rate = STANDARD_TAX_ACCOUNTS[account.code]
-        name = (account.name or "").casefold()
-        if account.account_type == _TAX_ACCOUNT_TYPES[kind] and any(
-            part in name for part in _TAX_ACCOUNT_NAME_PARTS
-        ):
+        if _is_tax_account(account, kind):
             result[account.id] = TaxAccount(kind=kind, rate=rate)
     return result
 

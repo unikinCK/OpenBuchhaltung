@@ -78,20 +78,21 @@ zertifiziert).
 
 from __future__ import annotations
 
-import csv
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
-from functools import lru_cache
 from io import StringIO
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.services.account_chart_check import detect_company_chart
+from app.services.datev_account_functions import (
+    DatevAccountFunction,
+    datev_account_function,
+)
 from app.services.journal_entries import fiscal_year_bounds
 from app.services.tax_codes import DEFAULT_TAX_CODES, TaxAccount, company_tax_accounts
 from domain.models import (
@@ -127,9 +128,6 @@ DATA_COLUMNS = (
     "Buchungstext",
 )
 
-ACCOUNT_FUNCTIONS_CSV = (
-    Path(__file__).resolve().parents[2] / "data" / "kontenrahmen" / "datev_kontenfunktionen.csv"
-)
 # Kopffeld 27 "Sachkontenrahmen".
 CHART_HEADER_CODES = {"skr03": "03", "skr04": "04"}
 
@@ -184,68 +182,6 @@ class DatevExportOptions:
     client_number: int = 1  # Mandantennummer
     account_length: int = 4  # Sachkontennummernlänge
     description: str = "OpenBuchhaltung Buchungsstapel"
-
-
-@dataclass(frozen=True, slots=True)
-class DatevAccountFunction:
-    """Steuerfunktionen eines Sachkontos laut DATEV-Kontenrahmen."""
-
-    # Hauptfunktion "AM" (Umsatzsteuer-) bzw. "AV" (Vorsteuer-Automatik) oder None.
-    automatic: str | None = None
-    # Was die Automatik rechnet: Steuersatz ("19"), "frei" oder "sonder".
-    tax: str | None = None
-    # Zusatzfunktion der Kontenklasse: "KU" (keine Steuer), "V", "M" oder None.
-    restriction: str | None = None
-
-    @property
-    def computes_tax(self) -> bool:
-        """Bucht DATEV auf diesem Konto selbst Steuer (BU 40 hebt das auf)?"""
-        return self.automatic is not None and self.tax != "frei"
-
-    def automatic_rate(self, kind: str) -> Decimal | None:
-        """Steuersatz der Automatik, wenn sie Steuer der Art ``kind`` rechnet."""
-        expected = TAX_KIND_OUTPUT if self.automatic == "AM" else TAX_KIND_INPUT
-        if self.automatic is None or kind != expected or self.tax in (None, "frei", "sonder"):
-            return None
-        return Decimal(self.tax)
-
-    def allows_tax_key(self, kind: str) -> bool:
-        """Darf ein Steuerschlüssel der Art ``kind`` auf diesem Konto stehen?"""
-        if self.automatic is not None or self.restriction == "KU":
-            return False
-        if self.restriction == "V":
-            return kind == TAX_KIND_INPUT
-        if self.restriction == "M":
-            return kind == TAX_KIND_OUTPUT
-        return True
-
-
-@lru_cache(maxsize=1)
-def _account_function_table() -> dict[str, tuple[tuple[int, int, str, str], ...]]:
-    table: dict[str, list[tuple[int, int, str, str]]] = {}
-    with ACCOUNT_FUNCTIONS_CSV.open(encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            table.setdefault(row["kontenrahmen"], []).append(
-                (int(row["von"]), int(row["bis"]), row["funktion"], row["steuer"])
-            )
-    return {chart: tuple(rows) for chart, rows in table.items()}
-
-
-@lru_cache(maxsize=4096)
-def datev_account_function(chart: str | None, code: str) -> DatevAccountFunction:
-    """Kontenfunktion einer Sachkontonummer im SKR03/SKR04 (leer, wenn unbekannt)."""
-    if chart is None or len(code) != 4 or not (code.isascii() and code.isdigit()):
-        return DatevAccountFunction()
-    number = int(code)
-    automatic = tax = restriction = None
-    for start, end, function, tax_info in _account_function_table().get(chart, ()):
-        if not start <= number <= end:
-            continue
-        if function in ("AM", "AV"):
-            automatic, tax = function, tax_info
-        else:
-            restriction = function
-    return DatevAccountFunction(automatic=automatic, tax=tax, restriction=restriction)
 
 
 def datev_tax_from_gross(gross: Decimal, rate: Decimal) -> Decimal:

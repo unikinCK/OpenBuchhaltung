@@ -129,6 +129,33 @@
             {% endfor %}
           </tbody>
         </table>
+        {% if vat_warnings %}
+          <ul class="flash-list">
+            {% for warning in vat_warnings %}
+              <li class="warning">{{ warning }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if unassigned %}
+          <details>
+            <summary>Nicht in der UStVA: Erträge ohne Umsatzsteuer und ohne UStVA-Funktion ({{ unassigned|length }})</summary>
+            <table>
+              <thead>
+                <tr><th>Buchung</th><th>Datum</th><th>Konto</th><th class="num">Betrag</th></tr>
+              </thead>
+              <tbody>
+                {% for item in unassigned %}
+                  <tr>
+                    <td>{{ item.posting_number }}</td>
+                    <td>{{ item.entry_date }}</td>
+                    <td>{{ item.account_code }} – {{ item.account_name }}</td>
+                    <td class="num">{{ item.amount }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        {% endif %}
 
         <form method="post" action="{{ url_for('main.save_vat_return_action') }}" class="inline-form">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -140,6 +167,70 @@
       {% endif %}
     {% endif %}
   </section>
+
+  {% if selected_company_id and zm %}
+    <section class="card">
+      <h2>Zusammenfassende Meldung {{ period_label }}</h2>
+      <p class="muted">EU-Umsätze je Kunden-USt-IdNr. aus den Erlöskonten mit ZM-Funktion
+        (z. B. 8125/4125 ig. Lieferung „L“, 8336/4336 sonstige Leistung „S“); Kunde ist der
+        Geschäftspartner der Buchung. Centbeträge entfallen. Die Meldung an das BZSt erfolgt
+        über ELSTER außerhalb von OpenBuchhaltung.</p>
+      {% if zm.rows %}
+        <table>
+          <thead>
+            <tr>
+              <th>Land</th>
+              <th>USt-IdNr.</th>
+              <th>Kunde</th>
+              <th>Art</th>
+              <th class="num">Betrag</th>
+              <th class="num">Volle Euro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in zm.rows %}
+              <tr>
+                <td>{{ row.country_code }}</td>
+                <td>{{ row.vat_id }}</td>
+                <td>{{ row.partner_name }}</td>
+                <td>{{ row.kind }} – {{ row.kind_label }}</td>
+                <td class="num">{{ row.amount }}</td>
+                <td class="num">{{ row.amount_euro }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% elif not zm.missing %}
+        <p class="muted">Keine ZM-pflichtigen Umsätze im Zeitraum.</p>
+      {% endif %}
+      {% if zm.warnings %}
+        <ul class="flash-list">
+          {% for warning in zm.warnings %}
+            <li class="warning">{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if zm.missing %}
+        <table>
+          <thead>
+            <tr><th>Buchung</th><th>Datum</th><th>Konto</th><th>Art</th><th class="num">Betrag</th><th>Grund</th></tr>
+          </thead>
+          <tbody>
+            {% for item in zm.missing %}
+              <tr>
+                <td>{{ item.posting_number }}</td>
+                <td>{{ item.entry_date }}</td>
+                <td>{{ item.account_code }}</td>
+                <td>{{ item.kind }}</td>
+                <td class="num">{{ item.amount }}</td>
+                <td>{{ item.reason }}{% if item.partner_name %} ({{ item.partner_name }}){% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% endif %}
 
   {% if selected_company_id %}
     <section class="card">

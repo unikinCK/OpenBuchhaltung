@@ -169,6 +169,9 @@ Jeder Testfall sollte dokumentieren:
 | T-VAT-004 | Storno in UStVA | Storno neutralisiert urspruengliche Buchung | automatisiert | hoch |
 | T-VAT-005 | UStVA-Snapshot festhalten | Snapshot bleibt unveraendert trotz spaeterer Buchungen | automatisiert | hoch |
 | T-VAT-006 | UStVA ohne Steuercodes | Standard-Steuerkonten beider Kontenrahmen (1571/1576/1771/1776, 1401/1406/3801/3806) zaehlen bei passender Kontoart und Bezeichnung als Steuerkonten; Umbuchung zwischen Steuerkonten ist neutral; 1401 als Forderungskonto bleibt aussen vor | automatisiert | hoch |
+| T-VAT-007 | UStVA-Kennzahlen aus der Kontenfunktion | 8125 → Kz 41, 8336 → Kz 21, 8338 → Kz 45; Erträge ohne Steuer und ohne UStVA-Funktion (Zinsen) nicht in Kz 48, sondern als Hinweis | automatisiert | hoch |
+| T-VAT-008 | Ig. Erwerb und § 13b als Leistungsempfänger | Kz 89/61 aus 1574/1774; Kz 46/47 bei EU-Partner oder Konto 3123, sonst 84/85 mit Hinweis; Vorsteuer 67; Kz 83 = 0 bei voller Vorsteuer; Nachbuchung nur mit Steuerzeilen leitet die Bemessungsgrundlage ab, Storno neutralisiert | automatisiert | hoch |
+| T-VAT-009 | Zusammenfassende Meldung | Summen je Kunden-USt-IdNr. und Art (L/S), Gutschrift mindert, Centbeträge entfallen; Zeilen ohne Partner oder ohne USt-IdNr. als fehlend gemeldet; UI, API, MCP | automatisiert | hoch |
 
 ## 10. Anlagenbuchhaltung
 

@@ -2646,8 +2646,12 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "
             "Meldezeitraum aus den Journaldaten, ohne sie zu speichern. Kennziffern: "
-            "Kz 81/86 (Bemessungsgrundlagen 19 %/7 %, volle Euro), Kz 48 (steuerfrei), "
-            "Kz 66 (Vorsteuer), Kz 83 (Zahllast/Überschuss)."
+            "Kz 81/86 (Bemessungsgrundlagen 19 %/7 %, volle Euro), Kz 41/42/43/44 "
+            "(ig. Lieferungen, Ausfuhren), Kz 48 (steuerfrei ohne Vorsteuerabzug), Kz 21/45 "
+            "(nicht steuerbar: EU-Leistungen § 18b, übrige), Kz 60, Kz 89/93 (ig. Erwerb), "
+            "Kz 46/47 und 84/85 (§ 13b), Kz 66/61/67 (Vorsteuer), Kz 83 (Zahllast/Überschuss). "
+            "Erträge ohne Umsatzsteuer ordnet die DATEV-Kontenfunktion zu (z. B. 8125 → 41, "
+            "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist."
         ),
         input_schema={
             "type": "object",
@@ -2675,6 +2679,42 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="GET",
         path="/vat-return",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_zm_report",
+        description=(
+            "Zusammenfassende Meldung (ZM) für einen Meldezeitraum: EU-Umsätze je "
+            "Kunden-USt-IdNr. und Art (L = ig. Lieferung, D = Dreiecksgeschäft, "
+            "S = sonstige Leistung), Beträge in Cent und vollen Euro. 'missing' listet "
+            "ZM-relevante Erlöse ohne EU-USt-IdNr. des Kunden (Partner auf der "
+            "Debitorenzeile zuordnen). Übermittlung an das BZSt erfolgt außerhalb."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period": {
+                    "type": "string",
+                    "description": (
+                        "Meldezeitraum: Monat 'JJJJ-MM' oder Quartal 'JJJJ-Qn'. "
+                        "Alternativ date_from/date_to."
+                    ),
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Zeitraumbeginn JJJJ-MM-TT (alternativ zu period).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Zeitraumende JJJJ-MM-TT (alternativ zu period).",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/zm",
         arg_location="query",
     ),
     ToolSpec(

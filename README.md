@@ -855,6 +855,58 @@ damit ohne DATEV genauso wie mit.
 Beispiel Ausgangsrechnung: Forderungen 1.190 € (Soll) an Erlöse 1.000 € (Haben, `USt19`)
 → System bucht zusätzlich 190 € Umsatzsteuer (Haben).
 
+## UStVA: EU-Umsätze, Reverse Charge und Zusammenfassende Meldung
+
+Die UStVA (UI **UStVA**, `GET /api/v1/vat-return`, MCP `get_vat_return`) ordnet
+Umsätze ohne Umsatzsteuer über die **DATEV-Kontenfunktion** des Erlöskontos einer
+Kennzahl zu (`data/kontenrahmen/datev_kontenfunktionen.csv`, Spalte `kennzahl`,
+Kontenrahmen wie beim DATEV-Export erkannt):
+
+| Erlöskonto (SKR03/SKR04) | Kennzahl |
+|---|---|
+| 8125/4125 steuerfreie innergemeinschaftliche Lieferungen | 41 (+ ZM „L“) |
+| 8130/4130 Lieferungen des ersten Abnehmers im Dreiecksgeschäft | 42 (+ ZM „D“) |
+| 8336/4336 sonstige Leistungen, für die der EU-Kunde die Steuer schuldet | 21 (+ ZM „S“) |
+| 8120/4120, 8150/4150 Ausfuhr, § 4 Nr. 2–7 | 43 |
+| 8100/4100, 8105/4105, 8110/4110 § 4 Nr. 8 ff., Vermietung | 48 |
+| 8338/4338, 8339/4339 im Inland nicht steuerbar | 45 |
+| 8337/4337 § 13b als leistender Unternehmer | 60 |
+| 8290/4290 0 % (§ 12 Abs. 3) | 87 |
+
+Zeilen mit dem 0-%-Steuercode `frei` zählen ohne solche Kontenfunktion in Kz 48.
+Erträge ohne Umsatzsteuer auf Konten **ohne** UStVA-Funktion (z. B. 2650 Zinsen)
+meldet die UStVA nicht mehr pauschal in Kz 48: Sie erscheinen als Hinweis
+(`warnings`, Liste `unassigned`) – steuerfreie oder nicht steuerbare Umsätze gehören
+auf das passende Konto.
+
+**Reverse Charge (§ 13b, Leistungsempfänger) und innergemeinschaftlicher Erwerb**
+erkennt die UStVA an den Steuerkonten; die Bemessungsgrundlage liefern die Aufwands-
+bzw. Anlagenzeilen derselben Buchung:
+
+| Vorgang | Buchung (SKR03, SKR04 in Klammern) | Kennzahlen |
+|---|---|---|
+| § 13b-Leistung eines EU-Unternehmers (z. B. Software-Abo aus Irland) | Aufwand netto an Bank/Kreditor; 1577 (1407) Vorsteuer 19 % an 1787 (3837) Umsatzsteuer 19 % | 46/47, Vorsteuer 67 |
+| andere § 13b-Leistung (Drittland, Bauleistung) | wie oben | 84/85, Vorsteuer 67 |
+| innergemeinschaftlicher Erwerb 19 % (7 %) | Aufwand/Anlage netto an Bank/Kreditor; 1574 (1404) an 1774 (3804) | 89 (93), Vorsteuer 61 |
+
+Kz 46/47 gilt, wenn das Aufwandskonto die EU-Funktion trägt (3123/5923 …) oder der
+Lieferant als Geschäftspartner mit EU-USt-IdNr. in der Buchung steht (Kreditorenzeile);
+ohne diese Angabe meldet die UStVA Kz 84/85 und gibt einen Hinweis. Fehlt die
+Aufwandszeile – etwa bei einer Nachbuchung der § 13b-Steuer eines Quartals nur mit den
+beiden Steuerzeilen –, ergibt sich die Bemessungsgrundlage aus Steuer ÷ Steuersatz.
+Kz 83 rechnet alle Umsatzsteuer (inkl. 47/85 und ig. Erwerb) gegen alle Vorsteuer
+(66, 61, 67).
+
+**Zusammenfassende Meldung** (UStVA-Seite, `GET /api/v1/zm?company_id=…&period=2026-Q3`,
+MCP `get_zm_report`): summiert die Erlöse der Kennzahlen 41/42/21 je Kunden-USt-IdNr.
+und Art („L“ Lieferung, „D“ Dreiecksgeschäft, „S“ sonstige Leistung); Gutschriften
+mindern. Kunde ist der Geschäftspartner der Buchung (in der Regel auf der
+Debitorenzeile), seine USt-IdNr. (Ländercode aus dem Präfix) wird gemeldet. Wie in der
+UStVA entfallen Centbeträge (die BZSt-Vorgabe dazu ist hier nicht amtlich belegt, das
+österreichische BMF verlangt dasselbe). Zeilen ohne Partner oder ohne EU-USt-IdNr.
+erscheinen unter `missing`. Die Übermittlung an das BZSt (ELSTER) erfolgt außerhalb von
+OpenBuchhaltung.
+
 ## REST API (API-First)
 
 Die API-Authentifizierung ist **standardmäßig aktiv** (default-secure): alle

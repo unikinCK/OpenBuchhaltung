@@ -8,6 +8,28 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### UStVA: EU-Umsätze, Reverse Charge, ig. Erwerb und Zusammenfassende Meldung
+
+- Erträge ohne Umsatzsteuer ordnet die UStVA über die DATEV-Kontenfunktion des
+  Erlöskontos zu: Kz 41 (ig. Lieferung, 8125/4125), 42 (Dreiecksgeschäft), 43 (Ausfuhr,
+  § 4 Nr. 2–7), 44, 48 (§ 4 Nr. 8 ff.), 21 (sonstige Leistung an EU-Unternehmer,
+  8336/4336), 45 (nicht steuerbar), 60 (§ 13b als Leistender), 87 (0 %). Neue Spalte
+  `kennzahl` in `data/kontenrahmen/datev_kontenfunktionen.csv`.
+- **Geändert:** Erträge ohne Umsatzsteuer auf Konten ohne UStVA-Funktion (z. B. Zinsen)
+  zählen nicht mehr pauschal in Kz 48 (Review F10), sondern erscheinen als Hinweis;
+  `GET /api/v1/vat-return` liefert dazu `warnings` und `unassigned`, die UStVA-Seite
+  zeigt beides.
+- Reverse Charge als Leistungsempfänger und innergemeinschaftlicher Erwerb über die
+  Steuerkonten (SKR03 1572/1574, 1577/1578, 1772/1774, 1785/1787; SKR04 1402/1404,
+  1407/1408, 3802/3804, 3835/3837): Kz 46/47 bzw. 84/85, 89/93, Vorsteuer 61/67;
+  Bemessungsgrundlage aus den Aufwands-/Anlagenzeilen der Buchung, EU-Leistungen über
+  das EU-Aufwandskonto (3123/5923) oder einen Partner mit EU-USt-IdNr.; Kz 83 rechnet
+  alle Umsatz- gegen alle Vorsteuer.
+- Neu: Zusammenfassende Meldung je Kunden-USt-IdNr. und Art (L/D/S) – UI auf der
+  UStVA-Seite, API `GET /api/v1/zm`, MCP `get_zm_report`.
+- DATEV-Kontenfunktionen liegen jetzt in `app/services/datev_account_functions.py`
+  (gemeinsam für DATEV-Export und UStVA).
+
 ### DATEV-Export: Rundungscent und Steuerkonten des anderen Kontenrahmens
 
 - Weicht die gebuchte Steuer um wenige Cent von DATEVs Rechnung aus dem Bruttobetrag ab
