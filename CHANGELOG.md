@@ -22,9 +22,10 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Reverse Charge als Leistungsempfänger und innergemeinschaftlicher Erwerb über die
   Steuerkonten (SKR03 1572/1574, 1577/1578, 1772/1774, 1785/1787; SKR04 1402/1404,
   1407/1408, 3802/3804, 3835/3837): Kz 46/47 bzw. 84/85, 89/93, Vorsteuer 61/67;
-  Bemessungsgrundlage aus den Aufwands-/Anlagenzeilen der Buchung, EU-Leistungen über
-  das EU-Aufwandskonto (3123/5923) oder einen Partner mit EU-USt-IdNr.; Kz 83 rechnet
-  alle Umsatz- gegen alle Vorsteuer.
+  Bemessungsgrundlage aus den Aufwands-/Anlagenzeilen der Buchung (ohne Aufwandszeile
+  oder bei zusätzlicher normaler Vorsteuer aus Steuer ÷ Satz), EU-Leistungen über das
+  EU-Aufwandskonto (3123/5923) oder einen Partner mit EU-USt-IdNr.; Kz 83 rechnet alle
+  Umsatz- gegen alle Vorsteuer.
 - Neu: Zusammenfassende Meldung je Kunden-USt-IdNr. und Art (L/D/S) – UI auf der
   UStVA-Seite, API `GET /api/v1/zm`, MCP `get_zm_report`.
 - DATEV-Kontenfunktionen liegen jetzt in `app/services/datev_account_functions.py`

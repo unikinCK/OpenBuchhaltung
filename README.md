@@ -893,7 +893,8 @@ Kz 46/47 gilt, wenn das Aufwandskonto die EU-Funktion trägt (3123/5923 …) ode
 Lieferant als Geschäftspartner mit EU-USt-IdNr. in der Buchung steht (Kreditorenzeile);
 ohne diese Angabe meldet die UStVA Kz 84/85 und gibt einen Hinweis. Fehlt die
 Aufwandszeile – etwa bei einer Nachbuchung der § 13b-Steuer eines Quartals nur mit den
-beiden Steuerzeilen –, ergibt sich die Bemessungsgrundlage aus Steuer ÷ Steuersatz.
+beiden Steuerzeilen – oder enthält die Buchung daneben normale Vorsteuer (gemischte
+Rechnung), ergibt sich die Bemessungsgrundlage aus Steuer ÷ Steuersatz.
 Kz 83 rechnet alle Umsatzsteuer (inkl. 47/85 und ig. Erwerb) gegen alle Vorsteuer
 (66, 61, 67).
 
