@@ -31,6 +31,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - MCP: API-Antworten werden im Zeichensatz des Content-Type gelesen; `export_datev_csv`
   liefert Umlaute damit korrekt (vorher Ersatzzeichen, weil Windows-1252 als UTF-8 galt).
 
+### UStVA: Steuer auch ohne Steuercodes
+
+- UStVA und DATEV-Export erkennen Steuerzeilen über dieselbe Funktion
+  (`company_tax_accounts`): die Steuerkonten der Steuercodes und – auch wenn eine
+  Gesellschaft gar keine Steuercodes hat – die Standard-Steuerkonten 1571/1576/1771/1776
+  (SKR03) bzw. 1401/1406/3801/3806 (SKR04), sofern Kontoart und Bezeichnung passen.
+  Bisher zählte die UStVA ohne Steuercodes alle Erlöse als steuerfrei (Kz 48) und
+  keine Vorsteuer (betraf z. B. Buchungen auf alten SKR04-Steuerkonten in einer
+  SKR03-Buchhaltung).
+- Umbuchungen zwischen Steuerkonten (Bereinigung 3806 → 1776, 1406 → 1576) sind für die
+  UStVA neutral; der Hinweis der Kontenrahmen-Prüfung zu Steuerkonten mit Steuercode
+  nennt deshalb nur noch das Deaktivieren als Problem.
+
 ### KI-Zugang (LLM-API-Key) je Benutzer
 
 - Der Administrator hinterlegt je Benutzer einen KI-Zugang: Standard OpenAI

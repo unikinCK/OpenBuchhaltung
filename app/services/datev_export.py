@@ -29,8 +29,9 @@ Was der DATEV-Import verlangt (Prüfung im Oktober 2026):
 
 Aufbau des Exports:
 
-1. Steuerzeilen (Steuerkonten der Steuercodes und die Standard-Steuerkonten
-   1571/1576/1771/1776 bzw. 1401/1406/3801/3806) werden ihrer Bemessungsgrundlage
+1. Steuerzeilen (dieselben Steuerkonten wie in der UStVA, ``company_tax_accounts``:
+   Steuerkonten der Steuercodes, sonst die Standard-Steuerkonten 1571/1576/1771/1776
+   bzw. 1401/1406/3801/3806) werden ihrer Bemessungsgrundlage
    zugeordnet: einer Zeile derselben Seite, deren Bruttobetrag DATEV auf genau
    diese Steuer zurückrechnet (kaufmännisch gerundet). Beide werden zu einem
    Bruttobetrag zusammengefasst.
@@ -75,7 +76,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.account_chart_check import detect_company_chart
-from app.services.tax_codes import DEFAULT_TAX_CODES
+from app.services.tax_codes import TaxAccount, company_tax_accounts
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
@@ -125,14 +126,6 @@ TAX_KEYS: dict[tuple[str, Decimal], str] = {
     (TAX_KIND_OUTPUT, Decimal("7")): "102",
     (TAX_KIND_INPUT, Decimal("19")): "401",
     (TAX_KIND_INPUT, Decimal("7")): "402",
-}
-# Standard-Steuerkonten (USt/VSt 19 % und 7 %) beider Kontenrahmen; erkennt
-# Steuerzeilen auch ohne Steuercode (E-Rechnung, Belegabgleich, manuelle Zeilen).
-STANDARD_TAX_ACCOUNTS: dict[str, tuple[str, Decimal]] = {
-    code: (default.kind, default.rate)
-    for default in DEFAULT_TAX_CODES
-    if default.rate > ZERO
-    for code in default.vat_account_codes
 }
 
 
@@ -329,7 +322,9 @@ def _is_debit(line) -> bool:
     return line.debit_amount > ZERO
 
 
-def _tax_of_line(line, tax_codes: dict[int, TaxCode], tax_accounts: dict[int, tuple]):
+def _tax_of_line(
+    line, tax_codes: dict[int, TaxCode], tax_accounts: dict[int, TaxAccount]
+) -> tuple[str, Decimal] | None:
     """(Art, Satz) einer Steuerzeile oder None für andere Zeilen."""
     tax_code = tax_codes.get(line.tax_code_id)
     if (
@@ -338,7 +333,10 @@ def _tax_of_line(line, tax_codes: dict[int, TaxCode], tax_accounts: dict[int, tu
         and tax_code.rate > ZERO
     ):
         return tax_code.kind, tax_code.rate
-    return tax_accounts.get(line.account_id) or STANDARD_TAX_ACCOUNTS.get(line.code)
+    tax_account = tax_accounts.get(line.account_id)
+    if tax_account is None or tax_account.rate is None:
+        return None
+    return tax_account.kind, tax_account.rate
 
 
 def _tax_groups(lines, tax_codes: dict[int, TaxCode], tax_accounts) -> list[_TaxGroup]:
@@ -635,18 +633,7 @@ def build_datev_export(
         .scalars()
         .all()
     }
-    # Steuerkonten der Steuercodes; ein Konto mit widersprüchlichen Codes zählt nicht.
-    rates_by_account: dict[int, set[tuple[str, Decimal]]] = {}
-    for tax_code in tax_codes.values():
-        if tax_code.vat_account_id is not None and tax_code.rate > ZERO:
-            rates_by_account.setdefault(tax_code.vat_account_id, set()).add(
-                (tax_code.kind, tax_code.rate)
-            )
-    tax_accounts = {
-        account_id: next(iter(rates))
-        for account_id, rates in rates_by_account.items()
-        if len(rates) == 1
-    }
+    tax_accounts = company_tax_accounts(session=session, company_id=company_id)
 
     dates = [entry.entry_date for entry in entries]
     fiscal_year_start = date(min(dates).year, 1, 1) if dates else date(generated_at.year, 1, 1)

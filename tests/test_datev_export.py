@@ -471,6 +471,47 @@ def test_reversal_mirrors_the_gross_booking(session: Session) -> None:
     assert _datev_balances(content, "skr03") == {}
 
 
+def test_old_skr04_tax_accounts_without_tax_codes(session: Session) -> None:
+    # SKR03-Buchhaltung ohne Steuercodes mit Steuerkonten aus dem alten SKR04-Import
+    # (wie die unikin GmbH): dieselbe Steuerkonten-Erkennung wie in der UStVA.
+    company = _seed(
+        session,
+        SKR03_ACCOUNTS
+        + (
+            ("1406", "Abziehbare Vorsteuer 19 %", "asset"),
+            ("3806", "Umsatzsteuer 19 %", "liability"),
+        ),
+    )
+    _book(
+        session,
+        company,
+        "Erlös, USt auf 3806",
+        ("1400", "1190.00", "0"),
+        ("8000", "0", "1000.00"),
+        ("3806", "0", "190.00"),
+    )
+    _book(
+        session,
+        company,
+        "Bürobedarf, VSt auf 1406",
+        ("4930", "100.00", "0"),
+        ("1406", "19.00", "0"),
+        ("1200", "0", "119.00"),
+    )
+
+    content = _export(session, company)
+
+    assert _row_summary(content) == [
+        ("1190,00", '"S"', "1400", "8000", '"101"'),
+        ("119,00", '"H"', "1200", "4930", '"401"'),
+    ]
+    # DATEV bucht die Steuer auf seine SKR03-Steuerkonten statt auf 3806/1406.
+    ledger = _ledger_balances(session, company)
+    ledger["1776"] = ledger.pop("3806")
+    ledger["1576"] = ledger.pop("1406")
+    assert _datev_balances(content, "skr03") == ledger
+
+
 def test_skr04_is_detected_and_uses_its_automatic_accounts(session: Session) -> None:
     company = _seed(session, SKR04_ACCOUNTS)
     _book(

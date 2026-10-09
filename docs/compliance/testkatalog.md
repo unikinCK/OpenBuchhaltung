@@ -166,6 +166,7 @@ Jeder Testfall sollte dokumentieren:
 | T-VAT-003 | UStVA Jahr | Jahreswerte stimmen mit Journaldaten ueberein | automatisiert | mittel |
 | T-VAT-004 | Storno in UStVA | Storno neutralisiert urspruengliche Buchung | automatisiert | hoch |
 | T-VAT-005 | UStVA-Snapshot festhalten | Snapshot bleibt unveraendert trotz spaeterer Buchungen | automatisiert | hoch |
+| T-VAT-006 | UStVA ohne Steuercodes | Standard-Steuerkonten beider Kontenrahmen (1571/1576/1771/1776, 1401/1406/3801/3806) zaehlen bei passender Kontoart und Bezeichnung als Steuerkonten; Umbuchung zwischen Steuerkonten ist neutral; 1401 als Forderungskonto bleibt aussen vor | automatisiert | hoch |
 
 ## 10. Anlagenbuchhaltung
 

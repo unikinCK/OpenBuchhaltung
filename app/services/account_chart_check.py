@@ -505,10 +505,11 @@ def check_account_chart(*, session: Session, company_id: int) -> dict[str, objec
     if taxed:
         listed = "; ".join(f"{row['code']}: {', '.join(row['tax_codes'])}" for row in taxed)
         warnings.append(
-            f"Steuerkonten mit Steuercode nicht umbuchen ({listed}): Die UStVA erkennt "
-            "Umsatz- und Vorsteuerzeilen über die Steuerkonten der Steuercodes, eine "
-            "Umbuchung änderte die Steuer des Umbuchungszeitraums. Steuercodes lassen "
-            "sich derzeit nicht auf ein anderes Steuerkonto umstellen."
+            f"Steuerkonten mit Steuercode nicht deaktivieren ({listed}): Buchungen mit "
+            "dem Steuercode laufen über dieses Konto, und Steuercodes lassen sich derzeit "
+            "nicht auf ein anderes Steuerkonto umstellen. Den Saldo auf das "
+            "SKR03-Steuerkonto umzubuchen ändert die UStVA dagegen nicht: Sie zählt "
+            "beide als Steuerkonten."
         )
     if nonstandard_rows:
         warnings.append(

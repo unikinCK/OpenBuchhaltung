@@ -812,6 +812,15 @@ Umsatzsteuer = liability).
 In der Buchungsmaske wird der Betrag einer Zeile mit Steuercode als **Netto** interpretiert;
 die Steuerzeile (z. B. auf 1776 bzw. im SKR04 3806 Umsatzsteuer 19 %) wird automatisch ergänzt.
 
+Steuerzeilen **ohne Steuercode** (manuelle Zeilen, E-Rechnung, Belegabgleich, Importe)
+erkennen UStVA und DATEV-Export gleich (`company_tax_accounts`): über die Steuerkonten
+der Steuercodes und – auch wenn die Gesellschaft gar keine Steuercodes hat – über die
+Standard-Steuerkonten 1571/1576/1771/1776 (SKR03) bzw. 1401/1406/3801/3806 (SKR04),
+sofern Kontoart (Vorsteuer `asset`, Umsatzsteuer `liability`) und Bezeichnung
+(„…steuer“, „USt“, „VSt“) passen. Die Bemessungsgrundlage bilden dann die Erlöszeilen
+derselben Buchung, der Steuersatz folgt aus dem Verhältnis. Die Steuer funktioniert
+damit ohne DATEV genauso wie mit.
+
 Beispiel Ausgangsrechnung: Forderungen 1.190 € (Soll) an Erlöse 1.000 € (Haben, `USt19`)
 → System bucht zusätzlich 190 € Umsatzsteuer (Haben).
 
@@ -1571,13 +1580,13 @@ Vorgehen:
    umbuchen: Solange 2970 aktiv ist, bucht der Abschluss das Ergebnis dorthin,
    danach auf 0860.
 4. **Steuerkonten, auf die ein Steuercode verweist** (`tax_codes`), nicht
-   umbuchen: Die UStVA erkennt Umsatz- und Vorsteuerzeilen über die Steuerkonten
-   der Steuercodes — eine Umbuchung von 1406 auf 1576 minderte die Vorsteuer des
-   Umbuchungszeitraums. Steuercodes lassen sich derzeit nicht auf ein anderes
-   Steuerkonto umstellen; bis dahin bleiben diese Konten in Gebrauch. Gibt es noch
-   keine Steuercodes, zuerst die SKR03-Steuerkonten anlegen —
-   `POST /api/v1/tax-codes/defaults` (MCP `ensure_default_tax_codes`) verknüpft
-   dann 1776/1771/1576/1571.
+   deaktivieren: Buchungen mit dem Steuercode laufen über dieses Konto, und
+   Steuercodes lassen sich derzeit nicht auf ein anderes Steuerkonto umstellen.
+   Den Saldo umzubuchen (z. B. 1406 auf 1576) ändert die UStVA nicht, denn sie
+   erkennt die Standard-Steuerkonten beider Kontenrahmen auch ohne Steuercode
+   (siehe „Steuercodes“). Gibt es noch keine Steuercodes, zuerst die
+   SKR03-Steuerkonten anlegen — `POST /api/v1/tax-codes/defaults` (MCP
+   `ensure_default_tax_codes`) verknüpft dann 1776/1771/1576/1571.
 
 Als **Hinweis** (`nonstandard_skr03_accounts`, ohne Einfluss auf `ok`) nennt die
 Prüfung außerdem SKR03-Nummern der alten Datei, die laut DATEV ein anderes Konto
