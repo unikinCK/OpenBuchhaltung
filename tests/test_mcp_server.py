@@ -3,14 +3,17 @@ from __future__ import annotations
 import base64
 import io
 import json
+from email.message import Message
 from pathlib import Path
 
 from document_files import pdf_document_bytes
 
+import app.services.mcp_server as mcp_server_module
 from app import create_app
 from app.services.mcp_server import (
     TOOLS,
     ApiResponse,
+    HttpApiClient,
     MCPServer,
     build_server_from_env,
     serve,
@@ -1739,6 +1742,32 @@ def test_build_server_from_env_uses_configured_url_and_token() -> None:
     server = build_server_from_env(getenv=env.get)
     assert server.http.base_url == "http://example.test/api/v1"
     assert server.http.token == "obk_secret"
+
+
+def test_http_client_decodes_the_response_charset(monkeypatch) -> None:
+    # Der DATEV-Export kommt als Windows-1252; als UTF-8 gelesen gingen Umlaute verloren.
+    headers = Message()
+    headers["Content-Type"] = "text/csv; charset=windows-1252"
+
+    class _Response:
+        status = 200
+
+        def __init__(self) -> None:
+            self.headers = headers
+
+        def read(self) -> bytes:
+            return '"Erlöse 19 % USt"'.encode("cp1252")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> bool:
+            return False
+
+    monkeypatch.setattr(mcp_server_module, "urlopen", lambda request, timeout: _Response())
+    response = HttpApiClient("http://example.test/api/v1").call("GET", "/exports/datev.csv")
+    assert response.text == '"Erlöse 19 % USt"'
+    assert response.content_type == "text/csv; charset=windows-1252"
 
 
 class _TestClientHttp:

@@ -115,7 +115,7 @@ Jeder Testfall sollte dokumentieren:
 | ID | Testfall | Erwartung | Art | Prioritaet |
 |---|---|---|---|---|
 | T-EXP-001 | DATEV-Export einfache Buchung | Datei enthaelt korrekte Werte und Encoding | automatisiert | hoch |
-| T-EXP-002 | DATEV-Export Splitbuchung | Splitbuchung bleibt nachvollziehbar | automatisiert | hoch |
+| T-EXP-002 | DATEV-Export mehrzeilige Buchung | Jeder Buchungssatz mit Konto und Gegenkonto, über Belegfeld 1 gruppiert; Aufteilung auf mehrere Gegenkonten bleibt brutto, solange DATEV die Steuer exakt nachrechnet | automatisiert | hoch |
 | T-EXP-003 | DATEV-Export festgeschriebener Stapel | Festschreibekennzeichen wird korrekt gesetzt | automatisiert | hoch |
 | T-EXP-004 | Prueferexport erzeugen | Paket enthaelt Manifest, Daten, Belegindex und Belege | automatisiert | hoch |
 | T-EXP-005 | Prueferexport Hashes pruefen | Alle im Manifest genannten Hashes stimmen | automatisiert | hoch |
@@ -133,6 +133,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-017 | Kontenrahmen-Pruefung bei Altbestand des fehlerhaften SKR04-Imports | Altkonten mit SKR04-Nummer, Buchungen und Saldo gemeldet (UI, API, MCP); SKR03 und korrekter SKR04 ohne Befund; nichts wird geaendert | automatisiert | hoch |
 | T-EXP-018 | Geschaeftspartner exportieren | Partnerstamm, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
 | T-EXP-019 | Kontenrahmen-Pruefung bei SKR03-Buchhaltung nach fehlerhaftem SKR04-Import | Vorherrschender Kontenrahmen SKR03 erkannt; SKR04-Fremdkonten mit DATEV-SKR03-Gegenkonto, Buchungen, Saldo und Steuercodes gemeldet, 0400/3400/4800/6200/8000 als Hinweis; nachimportierter SKR04 oder ein einzelnes SKR03-Konto kippt die Erkennung nicht; nichts wird geaendert (UI, API, MCP) | automatisiert | hoch |
+| T-EXP-020 | DATEV-Export Steuer nach Brutto-Prinzip (SKR03/SKR04) | Steuerzeile im Bruttobetrag: ohne BU-Schlüssel auf Automatikkonten, Steuerschlüssel 101/102/401/402 sonst; BU 40 und eigene Steuerzeile bei Rundungs- oder Steuersatzabweichung und auf Automatikkonten ohne Steuer; die nachgerechneten DATEV-Salden entsprechen dem Journal | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 
@@ -165,6 +166,7 @@ Jeder Testfall sollte dokumentieren:
 | T-VAT-003 | UStVA Jahr | Jahreswerte stimmen mit Journaldaten ueberein | automatisiert | mittel |
 | T-VAT-004 | Storno in UStVA | Storno neutralisiert urspruengliche Buchung | automatisiert | hoch |
 | T-VAT-005 | UStVA-Snapshot festhalten | Snapshot bleibt unveraendert trotz spaeterer Buchungen | automatisiert | hoch |
+| T-VAT-006 | UStVA ohne Steuercodes | Standard-Steuerkonten beider Kontenrahmen (1571/1576/1771/1776, 1401/1406/3801/3806) zaehlen bei passender Kontoart und Bezeichnung als Steuerkonten; Umbuchung zwischen Steuerkonten ist neutral; 1401 als Forderungskonto bleibt aussen vor | automatisiert | hoch |
 
 ## 10. Anlagenbuchhaltung
 

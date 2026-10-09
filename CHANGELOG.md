@@ -8,6 +8,42 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### DATEV-Export: Brutto-Prinzip und Gegenkonto
+
+- Der Buchungsstapel folgt dem Brutto-Prinzip, das DATEV beim Import verlangt
+  (DATEV-Hilfe Dok.-Nr. 1036228): Steuerzeilen gehen in den Bruttobetrag ihrer
+  Bemessungsgrundlage auf – auf Automatikkonten (AM/AV laut DATEV-Kontenrahmen 2026,
+  z. B. 8400/4400, SKR03 3400) ohne BU-Schlüssel, sonst mit Steuerschlüssel
+  101/102/401/402. Bisher standen der Nettobetrag auf dem Automatikkonto und die Steuer
+  in eigener Zeile; DATEV hätte die Steuer ein zweites Mal errechnet.
+- Rechnet DATEV aus dem Brutto nicht exakt die gebuchte Steuer (Rundung laut Rechnung,
+  Aufteilung auf mehrere Gegenkonten), passt der Steuersatz nicht zur Kontenfunktion oder
+  fehlt die Steuerzeile (Abschluss-, Umbuchungen), trägt der Satz auf dem Automatikkonto
+  BU 40 (Aufhebung der Automatik) und die Steuer bleibt eigener Satz.
+- Jeder Buchungssatz hat Konto und Gegenkonto (DATEV-Muss-Felder, sonst Importfehler
+  REW00223); mehrzeilige Buchungen werden zerlegt statt als Zeilen ohne Gegenkonto
+  exportiert.
+- Der Kontenrahmen SKR03/SKR04 wird erkannt (`detect_company_chart`), im Kopffeld 27
+  „Sachkontenrahmen“ übergeben und auf der Berichte-Seite am Download genannt; die
+  Kopfzeile hat alle 31 Felder des DATEV-Musters.
+- Neu: `data/kontenrahmen/datev_kontenfunktionen.csv` (Automatik- und Zusatzfunktionen
+  aus den DATEV-Kontenrahmen 2026) und `tools/datev_kontenfunktionen.py` zum Erneuern.
+- MCP: API-Antworten werden im Zeichensatz des Content-Type gelesen; `export_datev_csv`
+  liefert Umlaute damit korrekt (vorher Ersatzzeichen, weil Windows-1252 als UTF-8 galt).
+
+### UStVA: Steuer auch ohne Steuercodes
+
+- UStVA und DATEV-Export erkennen Steuerzeilen über dieselbe Funktion
+  (`company_tax_accounts`): die Steuerkonten der Steuercodes und – auch wenn eine
+  Gesellschaft gar keine Steuercodes hat – die Standard-Steuerkonten 1571/1576/1771/1776
+  (SKR03) bzw. 1401/1406/3801/3806 (SKR04), sofern Kontoart und Bezeichnung passen.
+  Bisher zählte die UStVA ohne Steuercodes alle Erlöse als steuerfrei (Kz 48) und
+  keine Vorsteuer (betraf z. B. Buchungen auf alten SKR04-Steuerkonten in einer
+  SKR03-Buchhaltung).
+- Umbuchungen zwischen Steuerkonten (Bereinigung 3806 → 1776, 1406 → 1576) sind für die
+  UStVA neutral; der Hinweis der Kontenrahmen-Prüfung zu Steuerkonten mit Steuercode
+  nennt deshalb nur noch das Deaktivieren als Problem.
+
 ### KI-Zugang (LLM-API-Key) je Benutzer
 
 - Der Administrator hinterlegt je Benutzer einen KI-Zugang: Standard OpenAI

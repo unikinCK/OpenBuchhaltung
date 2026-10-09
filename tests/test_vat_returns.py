@@ -1303,6 +1303,121 @@ def test_compute_vat_return_mixes_tagged_and_untagged_lines(session: Session) ->
     assert amounts["USt"] == Decimal("57.00")
 
 
+def _seed_without_tax_codes(session: Session) -> Company:
+    """SKR03-Buchhaltung ohne Steuercodes, mit Steuerkonten aus dem alten SKR04-Import."""
+    tenant = Tenant(name="Ohne Steuercodes")
+    company = Company(tenant=tenant, name="Ohne Steuercodes GmbH", currency_code="EUR")
+    session.add_all([tenant, company])
+    session.flush()
+    for code, name, account_type in (
+        ("1200", "Bank", "asset"),
+        ("1401", "Forderungen Kunde Nord", "asset"),  # SKR03: reserviert, frei zuteilbar
+        ("1406", "Abziehbare Vorsteuer 19 %", "asset"),  # SKR04-Nummer
+        ("1576", "Abziehbare Vorsteuer 19 %", "asset"),
+        ("1776", "Umsatzsteuer 19 %", "liability"),
+        ("3806", "Umsatzsteuer 19 %", "liability"),  # SKR04-Nummer
+        ("4930", "Bürobedarf", "expense"),
+        ("8000", "Erlöse 19 % USt", "income"),
+    ):
+        session.add(
+            Account(
+                tenant_id=tenant.id,
+                company_id=company.id,
+                code=code,
+                name=name,
+                account_type=account_type,
+            )
+        )
+    session.commit()
+    return company
+
+
+def _book_codes(session: Session, company: Company, description: str, *lines) -> None:
+    _book(
+        session,
+        company,
+        entry_date=date(2026, 9, 10),
+        description=description,
+        lines=[
+            JournalLineInput(
+                account_id=_account_id(session, company, code),
+                debit_amount=Decimal(debit),
+                credit_amount=Decimal(credit),
+            )
+            for code, debit, credit in lines
+        ],
+    )
+
+
+def test_compute_vat_return_without_any_tax_codes(session: Session) -> None:
+    """Ohne Steuercodes erkennt die UStVA die Standard-Steuerkonten beider
+    Kontenrahmen – die Steuer funktioniert auch ohne DATEV."""
+    company = _seed_without_tax_codes(session)
+    _book_codes(
+        session,
+        company,
+        "Ausgangsrechnung, USt auf SKR04-Konto",
+        ("1200", "1190.00", "0"),
+        ("8000", "0", "1000.00"),
+        ("3806", "0", "190.00"),
+    )
+    _book_codes(
+        session,
+        company,
+        "Ausgangsrechnung, USt auf SKR03-Konto",
+        ("1200", "119.00", "0"),
+        ("8000", "0", "100.00"),
+        ("1776", "0", "19.00"),
+    )
+    _book_codes(
+        session,
+        company,
+        "Bürobedarf, VSt auf SKR04-Konto",
+        ("4930", "100.00", "0"),
+        ("1406", "19.00", "0"),
+        ("1200", "0", "119.00"),
+    )
+    # Bereinigung: Saldo von SKR04 3806 auf SKR03 1776 umbuchen – für die UStVA neutral.
+    _book_codes(session, company, "Umbuchung USt", ("3806", "190.00", "0"), ("1776", "0", "190.00"))
+
+    amounts = _amounts_by_kz(
+        compute_vat_return(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 9, 1),
+            date_to=date(2026, 9, 30),
+        )
+    )
+    assert amounts["81"] == Decimal("1100")
+    assert amounts["48"] == Decimal("0")
+    assert amounts["USt"] == Decimal("209.00")
+    assert amounts["66"] == Decimal("19.00")
+    assert amounts["83"] == Decimal("190.00")
+
+
+def test_standard_tax_numbers_need_a_tax_account(session: Session) -> None:
+    # SKR03 1401 als Forderungskonto ist keine Vorsteuer, trotz Standardnummer.
+    company = _seed_without_tax_codes(session)
+    _book_codes(
+        session,
+        company,
+        "Steuerfreier Erlös an Kunde Nord",
+        ("1401", "500.00", "0"),
+        ("8000", "0", "500.00"),
+    )
+
+    amounts = _amounts_by_kz(
+        compute_vat_return(
+            session=session,
+            company_id=company.id,
+            date_from=date(2026, 9, 1),
+            date_to=date(2026, 9, 30),
+        )
+    )
+    assert amounts["66"] == Decimal("0.00")
+    assert amounts["48"] == Decimal("500")
+
+
 def test_year_end_close_does_not_distort_vat_return(session: Session) -> None:
     from app.services.periods import close_fiscal_year
 

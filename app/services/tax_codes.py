@@ -47,6 +47,73 @@ DEFAULT_TAX_CODES: tuple[DefaultTaxCode, ...] = (
     DefaultTaxCode("frei", Decimal("0.00"), "Steuerfrei", ()),
 )
 
+# Die Standard-Steuerkonten beider Kontenrahmen gelten auch ohne Steuercode als
+# Steuerkonten (Gesellschaften ohne Steuercodes, Altbuchungen auf den Konten des
+# anderen Kontenrahmens wie SKR04 3806 in einer SKR03-Buchhaltung).
+STANDARD_TAX_ACCOUNTS: dict[str, tuple[str, Decimal]] = {
+    code: (default.kind, default.rate)
+    for default in DEFAULT_TAX_CODES
+    if default.rate > Decimal("0.00")
+    for code in default.vat_account_codes
+}
+_TAX_ACCOUNT_TYPES = {TAX_KIND_INPUT: "asset", TAX_KIND_OUTPUT: "liability"}
+# SKR03 1401–1406 sind reserviert und z. B. als Forderungskonten zuteilbar:
+# Ohne Steuerbegriff in der Bezeichnung zählt die Nummer allein nicht.
+_TAX_ACCOUNT_NAME_PARTS = ("steuer", "ust", "vst")
+
+
+@dataclass(slots=True, frozen=True)
+class TaxAccount:
+    """Steuerkonto mit Richtung und Steuersatz (None, wenn Codes mehrerer Sätze darauf zeigen)."""
+
+    kind: str
+    rate: Decimal | None
+
+
+def company_tax_accounts(*, session: Session, company_id: int) -> dict[int, TaxAccount]:
+    """Steuerkonten einer Gesellschaft, über die UStVA und DATEV-Export Steuerzeilen erkennen.
+
+    Maßgeblich sind die Steuerkonten der Steuercodes. Daneben zählen die
+    Standard-Steuerkonten (``STANDARD_TAX_ACCOUNTS``), auf die kein Steuercode
+    zeigt, sofern Kontoart (Vorsteuer aktiv, Umsatzsteuer passiv) und Bezeichnung
+    passen – so funktioniert die Steuer auch ohne Steuercodes. Deaktivierte Konten
+    zählen mit, damit Altbuchungen in früheren Zeiträumen erkannt bleiben.
+    """
+    kinds: dict[int, str] = {}
+    rates: dict[int, set[Decimal]] = {}
+    for vat_account_id, kind, rate in session.execute(
+        select(TaxCode.vat_account_id, TaxCode.kind, TaxCode.rate).where(
+            TaxCode.company_id == company_id, TaxCode.vat_account_id.is_not(None)
+        )
+    ):
+        # Die Kontoart des Steuerkontos legt die Richtung fest (normalize_tax_kind).
+        kinds[vat_account_id] = kind
+        if rate is not None and rate > Decimal("0.00"):
+            rates.setdefault(vat_account_id, set()).add(Decimal(rate))
+    result = {
+        account_id: TaxAccount(
+            kind=kind,
+            rate=next(iter(rates[account_id])) if len(rates.get(account_id, ())) == 1 else None,
+        )
+        for account_id, kind in kinds.items()
+    }
+
+    for account in session.execute(
+        select(Account).where(
+            Account.company_id == company_id,
+            Account.code.in_(STANDARD_TAX_ACCOUNTS),
+        )
+    ).scalars():
+        if account.id in result:
+            continue
+        kind, rate = STANDARD_TAX_ACCOUNTS[account.code]
+        name = (account.name or "").casefold()
+        if account.account_type == _TAX_ACCOUNT_TYPES[kind] and any(
+            part in name for part in _TAX_ACCOUNT_NAME_PARTS
+        ):
+            result[account.id] = TaxAccount(kind=kind, rate=rate)
+    return result
+
 
 def derive_tax_kind(*, code: str, vat_account_type: str | None) -> str:
     """Richtung eines Steuercodes ohne explizite Angabe ableiten.

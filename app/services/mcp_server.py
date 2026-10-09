@@ -1262,7 +1262,12 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="export_datev_csv",
-        description="Exportiert den DATEV-Buchungsstapel (EXTF) als CSV.",
+        description=(
+            "Exportiert den DATEV-Buchungsstapel (EXTF) als CSV: Buchungssätze mit "
+            "Konto und Gegenkonto nach dem Brutto-Prinzip (Steuer über DATEV-"
+            "Automatikkonto bzw. BU-Schlüssel, sonst BU 40 und eigene Steuerzeile); "
+            "Kontenrahmen SKR03/SKR04 wird erkannt und steht im Kopffeld 27."
+        ),
         input_schema=_company_id_schema(),
         http_method="GET",
         path="/exports/datev.csv",
@@ -3712,6 +3717,15 @@ TOOLS: list[ToolSpec] = [
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}
 
 
+def _decode_body(raw: bytes, headers) -> str:
+    """Antworttext im Zeichensatz des Content-Type (DATEV-Export: Windows-1252)."""
+    charset = (headers.get_content_charset() if headers is not None else None) or "utf-8"
+    try:
+        return raw.decode(charset, errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")
+
+
 class HttpApiClient:
     """Ruft die OpenBuchhaltung-REST-API über HTTP auf (stdlib urllib)."""
 
@@ -3744,11 +3758,11 @@ class HttpApiClient:
         request = Request(url, data=data, headers=headers, method=method)
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8", errors="replace")
+                body = _decode_body(response.read(), response.headers)
                 content_type = response.headers.get("Content-Type", "")
                 status = response.status
         except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
+            body = _decode_body(exc.read(), exc.headers)
             content_type = exc.headers.get("Content-Type", "") if exc.headers else ""
             status = exc.code
         except URLError as exc:

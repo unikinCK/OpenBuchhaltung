@@ -8,6 +8,7 @@ from io import StringIO
 
 from flask import flash, make_response, redirect, render_template, request, url_for
 
+from app.services.account_chart_check import detect_company_chart
 from app.services.reports import (
     balance_sheet_for_company,
     income_statement_for_company,
@@ -40,6 +41,7 @@ def reports_page():
         trial_balance = []
         income_statement = {"revenues": [], "expenses": [], "totals": {}}
         balance_sheet = {"assets": [], "liabilities_and_equity": [], "totals": {}, "period": {}}
+        datev_chart = None
         if selected_company_id:
             trial_balance = trial_balance_for_company(
                 session=session,
@@ -61,6 +63,8 @@ def reports_page():
                 date_to=date_to,
                 include_closing_entries=include_closing_entries,
             )
+            # Kontenrahmen, nach dem der DATEV-Export Automatikkonten setzt.
+            datev_chart = detect_company_chart(session=session, company_id=selected_company_id)
 
     return render_template(
         "berichte.html",
@@ -69,6 +73,7 @@ def reports_page():
         trial_balance=trial_balance,
         income_statement=income_statement,
         balance_sheet=balance_sheet,
+        datev_chart=datev_chart,
         date_from=date_from,
         date_to=date_to,
         include_closing_entries=include_closing_entries,

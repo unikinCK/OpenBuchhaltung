@@ -9,11 +9,13 @@ sind Buchungszeilen mit Steuercode:
   Bemessungsgrundlagen.
 
 Buchungszeilen **ohne Steuercode** (importierte oder manuelle Buchungen) werden
-datengetrieben ausgewertet: Zeilen auf Konten, die ein Steuercode der
-Gesellschaft als Steuerkonto referenziert, zählen als Umsatz-/Vorsteuerzeilen;
-Ertragszeilen derselben Buchung bilden die Bemessungsgrundlage, deren
-Steuersatz aus dem Verhältnis USt/Bemessungsgrundlage abgeleitet wird.
-Ertragsbuchungen ohne Umsatzsteuerzeile gelten als steuerfrei (Kz 48).
+datengetrieben ausgewertet: Zeilen auf Steuerkonten (``company_tax_accounts``:
+Steuerkonten der Steuercodes, sonst die Standard-Steuerkonten 1571/1576/1771/1776
+bzw. 1401/1406/3801/3806 – auch ganz ohne Steuercodes) zählen als
+Umsatz-/Vorsteuerzeilen; Ertragszeilen derselben Buchung bilden die
+Bemessungsgrundlage, deren Steuersatz aus dem Verhältnis USt/Bemessungsgrundlage
+abgeleitet wird. Ertragsbuchungen ohne Umsatzsteuerzeile gelten als steuerfrei
+(Kz 48).
 
 Die Richtung ergibt sich aus ``TaxCode.kind``: ``output`` = Umsatzsteuer
 (Ausgangsumsätze), ``input`` = Vorsteuer (Eingangsleistungen). Steuerfreie
@@ -44,6 +46,7 @@ from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
 from app.services.journal_entries import CARRYFORWARD_SOURCES
+from app.services.tax_codes import company_tax_accounts
 from domain.models import (
     TAX_KIND_INPUT,
     Account,
@@ -138,19 +141,18 @@ def period_bounds(period_label: str) -> tuple[date, date, str]:
 
 
 def _company_vat_accounts(session: Session, company_id: int) -> dict[int, str]:
-    """Steuerkonten der Gesellschaft laut Steuercode-Definitionen.
+    """Steuerkonten der Gesellschaft als ``{account_id: kind}`` (``input``/``output``).
 
-    Liefert ``{account_id: kind}`` (``input``/``output``) für alle Konten, die
-    von einem Steuercode als Steuerkonto referenziert werden. Über diese
-    Zuordnung werden auch Buchungszeilen ohne Steuercode als
+    Über diese Zuordnung (``company_tax_accounts``: Steuercodes und
+    Standard-Steuerkonten) werden auch Buchungszeilen ohne Steuercode als
     Umsatz-/Vorsteuerzeilen erkannt.
     """
-    rows = session.execute(
-        select(TaxCode.vat_account_id, TaxCode.kind).where(
-            TaxCode.company_id == company_id, TaxCode.vat_account_id.is_not(None)
-        )
-    ).all()
-    return {row.vat_account_id: row.kind for row in rows}
+    return {
+        account_id: tax_account.kind
+        for account_id, tax_account in company_tax_accounts(
+            session=session, company_id=company_id
+        ).items()
+    }
 
 
 def _match_rate(raw_rate: Decimal, known_rates: set[Decimal]) -> Decimal:
@@ -173,7 +175,8 @@ def compute_vat_return(
 
     Zeilen mit Steuercode werden direkt zugeordnet. Zeilen ohne Steuercode
     (z. B. importierte oder manuelle Buchungen) werden datengetrieben
-    ausgewertet: Steuerzeilen über die Steuerkonten der Steuercodes, die
+    ausgewertet: Steuerzeilen über die Steuerkonten (Steuercodes und
+    Standard-Steuerkonten), die
     Bemessungsgrundlage über Ertragszeilen derselben Buchung; der Steuersatz
     wird aus dem Verhältnis USt/Bemessungsgrundlage abgeleitet. Ertragsbuchungen
     ganz ohne Umsatzsteuerzeile gelten als steuerfrei (Kz 48).
