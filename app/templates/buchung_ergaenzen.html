@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Buchung {{ entry.posting_number }} ergänzen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Buchung {{ entry.posting_number }} ergänzen</h1>
+
+  <section class="card">
+    <p>
+      <strong>{{ entry.entry_date.isoformat() }}</strong> – {{ entry.description }}
+    </p>
+    {% if entry.is_finalized or entry.is_system_entry or entry.reversed_by %}
+      <p class="muted">
+        {% if entry.is_finalized %}Die Buchung ist festgeschrieben und unveränderbar; Korrekturen nur per Storno und Neubuchung.{% elif entry.reversed_by %}Die Buchung ist storniert ({{ entry.reversed_by }}); das festgeschriebene Storno spiegelt den bisherigen Stand, deshalb lässt sie sich nicht mehr ergänzen.{% else %}Vortragsbuchungen des Jahresabschlusses lassen sich nicht ergänzen.{% endif %}
+      </p>
+    {% else %}
+      <p class="muted">
+        Vor der Festschreibung lassen sich Leistungsdatum und Geschäftspartner nachtragen.
+        Beträge, Konten und Datum bleiben unverändert; jede Änderung steht mit altem und
+        neuem Wert im Audit-Log.
+      </p>
+      <form method="post" action="{{ url_for('main.amend_journal_entry_action', journal_entry_id=entry.entry_id) }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+        <label for="service_date">Leistungsdatum</label>
+        <input id="service_date" name="service_date" type="date" value="{{ entry.service_date.isoformat() if entry.service_date else '' }}" style="width:auto;" />
+        <span class="muted">Tag der Leistung bzw. Ende des Leistungszeitraums; bestimmt den Umsatzsteuer-Meldezeitraum (UStVA, ZM). Leer = Datum der Buchung.</span>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Zeile</th>
+              <th>Konto</th>
+              <th class="num">Soll</th>
+              <th class="num">Haben</th>
+              <th>Geschäftspartner</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for line in lines %}
+              <tr>
+                <td>{{ line.line_number }}</td>
+                <td>{{ line.account_code }} – {{ line.account_name }}</td>
+                <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount }}{% endif %}</td>
+                <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount }}{% endif %}</td>
+                <td>
+                  {% if line.subledger %}
+                    <select name="line_partner_{{ line.line_number }}" aria-label="Geschäftspartner Zeile {{ line.line_number }}">
+                      <option value="">Ohne Partner</option>
+                      {% for partner_id, label, is_active in partner_choices[line.subledger] %}
+                        {% if is_active or partner_id == line.partner_id %}
+                          <option value="{{ partner_id }}" {% if partner_id == line.partner_id %}selected{% endif %}>{{ label }}{% if not is_active %} (inaktiv){% endif %}</option>
+                        {% endif %}
+                      {% endfor %}
+                    </select>
+                  {% else %}
+                    <span class="muted">nur auf Sammelkonten</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <div>
+          <button type="submit">Speichern</button>
+          <a href="{{ url_for('main.journal_page', company_id=entry.company_id) }}">Abbrechen</a>
+        </div>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -10,8 +10,13 @@ Erlöskontos, ``revenue_kennzahl``):
 Den Kunden liefert der Geschäftspartner der Buchung (in der Regel auf der
 Debitorenzeile); gemeldet werden Ländercode, USt-IdNr. und die Summe je Art,
 Gutschriften mindern sie. Wie in der UStVA entfallen Centbeträge. Fehlt der
-Partner oder seine EU-USt-IdNr., erscheint die Zeile unter ``missing``. Die
-Übermittlung an das BZSt (ELSTER) liegt außerhalb von OpenBuchhaltung.
+Partner oder seine EU-USt-IdNr., erscheint die Zeile unter ``missing`` – außer
+Buchung und Storno liegen beide im Zeitraum und heben sich auf. Die Übermittlung
+an das BZSt (ELSTER) liegt außerhalb von OpenBuchhaltung.
+
+Meldezeitraum (§ 18a Abs. 8 UStG): sonstige Leistungen nach dem Leistungsdatum
+der Buchung, Lieferungen nach der Rechnung (Buchungsdatum), spätestens im Monat
+nach der Lieferung (``app.services.tax_period``).
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from app.services.vat_returns import (
     EU_COUNTRY_CODES,
     partner_vat_country,
     revenue_kennzahl,
+    revenue_tax_rule,
     vat_entries,
 )
 from domain.models import BusinessPartner
@@ -68,7 +74,10 @@ def compute_zm(
     names: dict[tuple[str, str, str], str] = {}
     result = ZmResult()
 
-    for entry in vat_entries(session, company_id, date_from, date_to, False).values():
+    entries = vat_entries(session, company_id, date_from, date_to, False)
+    missing_by_entry: dict[int, list[dict[str, object]]] = {}
+
+    for entry_id, entry in entries.items():
         partner_ids = {row.partner_id for row in entry.rows if row.partner_id is not None}
         partner = partners.get(next(iter(partner_ids))) if len(partner_ids) == 1 else None
         for row in entry.rows:
@@ -76,8 +85,11 @@ def compute_zm(
                 continue
             if row.tax_code_id is not None and row.rate != ZERO:
                 continue
-            kind = ZM_KINDS.get(revenue_kennzahl(chart, row.account_code) or "")
+            kennzahl = revenue_kennzahl(chart, row.account_code)
+            kind = ZM_KINDS.get(kennzahl or "")
             if kind is None:
+                continue
+            if not date_from <= entry.tax_point(revenue_tax_rule(kennzahl)) <= date_to:
                 continue
             amount = row.credit_amount - row.debit_amount
             vat_id = _normalized_vat_id(partner.vat_id if partner else None)
@@ -95,7 +107,7 @@ def compute_zm(
             else:
                 reason = None
             if reason is not None:
-                result.missing.append(
+                missing_by_entry.setdefault(entry_id, []).append(
                     {
                         "posting_number": entry.posting_number,
                         "entry_date": entry.entry_date.isoformat(),
@@ -110,6 +122,13 @@ def compute_zm(
             key = (country, vat_id, kind)
             totals[key] = totals.get(key, ZERO) + amount
             names.setdefault(key, partner.name)
+
+    # Buchung und Storno im selben Zeitraum heben sich auf: nicht als fehlend melden.
+    for entry_id, entry in entries.items():
+        if entry.reversal_of_id in missing_by_entry and entry_id in missing_by_entry:
+            missing_by_entry.pop(entry.reversal_of_id)
+            missing_by_entry.pop(entry_id)
+    result.missing = [item for items in missing_by_entry.values() for item in items]
 
     for (country, vat_id, kind), amount in sorted(totals.items()):
         result.rows.append(

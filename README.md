@@ -587,7 +587,7 @@ Gebucht wird weiter auf die Sammelkonten. Konten tragen dafür das Kennzeichen
 für verbundene Unternehmen). Der Kontenrahmen-Import erkennt Forderungen und
 Verbindlichkeiten aLuL an der exakten Bezeichnung. Nur Zeilen auf Sammelkonten dürfen einen Geschäftspartner tragen,
 und dessen Rolle muss zur Seite passen. Festgeschriebene Buchungen versiegeln den
-Partner (Inhaltshash Version 3, ältere Siegel bleiben Version 2), Storno spiegelt
+Partner (Inhaltshash ab Version 3, ältere Siegel bleiben Version 2), Storno spiegelt
 ihn, der Saldovortrag trägt Sammelkonten je Partner ins Folgejahr. Sammelkonten
 erscheinen nicht als Bankkonten.
 
@@ -824,6 +824,13 @@ erzeugt aus den DATEV-Kontenrahmen 2026 (Art.-Nr. 11174/11175) mit
 `tools/datev_kontenfunktionen.py`. Individuell eingerichtete Automatikkonten eines
 DATEV-Mandanten kennt der Export nicht.
 
+**Leistungsdatum.** Tragen Buchungen des Stapels ein Leistungsdatum, schreibt der
+Export alle Sätze mit 116 Feldern: Feld 115 „Leistungsdatum“ und – laut
+DATEV-Formatbeschreibung dann Pflicht – Feld 116 „Datum Zuord. Steuerperiode“ mit dem
+Steuerzeitpunkt wie in der UStVA (beide TTMMJJJJ, z. B. Rechnung vom 01.07. für Juni:
+`30062026`/`30062026`). Ohne Leistungsdatum bleibt es bei 14 Feldern. DATEV verlangt,
+den Einsatz des Leistungsdatums mit dem Steuerberater abzustimmen.
+
 Noch offen: Personenkonten (Debitoren/Kreditoren) und Golden-File-Tests. Der Export
 ist DATEV-kompatibel, aber nicht zertifiziert.
 
@@ -907,6 +914,43 @@ UStVA entfallen Centbeträge (die BZSt-Vorgabe dazu ist hier nicht amtlich beleg
 österreichische BMF verlangt dasselbe). Zeilen ohne Partner oder ohne EU-USt-IdNr.
 erscheinen unter `missing`. Die Übermittlung an das BZSt (ELSTER) erfolgt außerhalb von
 OpenBuchhaltung.
+
+## Leistungsdatum und Ergänzen offener Buchungen
+
+Buchungen tragen optional ein **Leistungsdatum** (`service_date`): den Tag der
+Lieferung oder Leistung, bei Leistungszeiträumen dessen Ende. Es bestimmt, in welchen
+Umsatzsteuer-Meldezeitraum (UStVA, Jahreserklärung, ZM) eine Buchung fällt; ohne
+Angabe gilt wie bisher das Buchungsdatum. Typischer Fall: Die Rechnung vom 01.07. für
+Leistungen im Juni bekommt das Leistungsdatum 30.06. und zählt damit im Juni bzw. Q2;
+die Dezember-Leistung mit Rechnung im Januar gehört in die Erklärung des alten Jahres.
+
+| Teil der Buchung | Steuerzeitpunkt mit Leistungsdatum | Grundlage |
+|---|---|---|
+| Umsätze (Sollversteuerung), auch Kz 21 und ZM „S“ | Leistungsdatum | § 13 Abs. 1 Nr. 1 Buchst. a, § 18b Satz 1 Nr. 2, § 18a Abs. 8 UStG |
+| Innergemeinschaftliche Lieferungen (Kz 41/42/44, ZM „L“/„D“) | Rechnung (Buchungsdatum), spätestens Ende des Folgemonats der Lieferung | § 18b Satz 2, § 18a Abs. 8 UStG |
+| § 13b-Leistung eines EU-Unternehmers (Kz 46/47) | Leistungsdatum | § 13b Abs. 1 UStG |
+| Übrige § 13b-Fälle (Kz 84/85), ig. Erwerb (Kz 89/93) | Rechnung, spätestens Ende des Folgemonats | § 13b Abs. 2, § 13 Abs. 1 Nr. 6 UStG |
+| Vorsteuer (Kz 66) | späteres Datum aus Leistung und Rechnung | § 15 Abs. 1 Satz 1 Nr. 1 UStG |
+
+Erfassung: Feld **Leistungsdatum** in der Buchungsmaske (Journal zeigt „Leistung …“),
+API `POST /api/v1/journal-entries` mit `service_date`, MCP `create_journal_entry`.
+Ein Storno übernimmt das Leistungsdatum und neutralisiert die Steuer im selben
+Zeitraum; in der ZM heben sich Buchung und Storno ohne Partner im selben Zeitraum auf
+und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
+Istversteuerung bildet OpenBuchhaltung nicht ab.
+
+**Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum und
+Geschäftspartner (nur auf Debitoren-/Kreditoren-Sammelkonten, Rolle wie beim Buchen)
+nachtragen: Link **Ergänzen** im Journal, API `PATCH /api/v1/journal-entries/<id>` mit
+`service_date` (null entfernt es) und `lines: [{"line_number": 1, "partner_id": …}]`
+bzw. `partner_number`, MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
+unverändert; jede Änderung steht mit altem und neuem Wert im Audit-Log (`amended`).
+Festgeschriebene und stornierte Buchungen (das festgeschriebene Storno spiegelt den
+alten Stand), gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt die Funktion
+ab – dort bleibt Storno und Neubuchung. Neue Festschreibungen versiegeln das
+Leistungsdatum (Inhaltshash Version 4); Siegel der Versionen 2 und 3 bleiben gültig.
+Das Journal-CSV führt die Spalte `service_date`, der DATEV-Export die Felder 115/116
+(siehe DATEV-Export).
 
 ## REST API (API-First)
 

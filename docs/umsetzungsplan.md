@@ -586,6 +586,13 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         und die Steuerkonten, Hinweis statt Kz-48-Pauschale, ZM je Kunden-USt-IdNr. in
         UI/API/MCP. Offen: Steuercodes mit zwei Steuerkonten für Reverse Charge in den
         Buchungsmasken, ZM-Übermittlung.
+  - [x] Leistungsdatum und Ergänzen offener Buchungen *(2026-10-09)*: `service_date`
+        bestimmt den Meldezeitraum von UStVA, Jahreserklärung und ZM (Leistung,
+        Rechnung bzw. spätestens Folgemonat, Vorsteuer zum späteren Datum), Storno
+        übernimmt es, Hashversion 4, DATEV-Felder 115/116; offene Buchungen lassen
+        sich um Leistungsdatum und Partner ergänzen (Audit-Log) in UI/API/MCP
+        (Migration `20261009_0044`). Offen: Leistungsdatum in E-Rechnung,
+        Beleg-OCR und Vorlagen.
   - [ ] Kunden-/Lieferantenstamm, PR 2–4: OPOS/Zahllauf/Mahnwesen am Partner,
         Partnerkonto und Saldenliste, Partnererkennung in automatischen
         Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.

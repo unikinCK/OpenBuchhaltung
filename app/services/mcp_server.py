@@ -888,6 +888,14 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Belegdatum im Format JJJJ-MM-TT.",
                 },
+                "service_date": {
+                    "type": "string",
+                    "description": (
+                        "Optionales Leistungsdatum (JJJJ-MM-TT; bei Leistungszeiträumen das "
+                        "Ende, z. B. Rechnung vom 01.07. für Juni → '2026-06-30'). Bestimmt den "
+                        "Umsatzsteuer-Meldezeitraum (UStVA/ZM); ohne Angabe gilt entry_date."
+                    ),
+                },
                 "description": {"type": "string", "description": "Buchungstext."},
                 "status": {
                     "type": "string",
@@ -960,6 +968,56 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/journal-entries",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="amend_journal_entry",
+        description=(
+            "Ergänzt eine offene (nicht festgeschriebene) Buchung: Leistungsdatum setzen "
+            "oder entfernen und Geschäftspartner auf Debitoren-/Kreditoren-Sammelkonto-"
+            "Zeilen zuordnen. Beträge, Konten und Datum bleiben unverändert; jede Änderung "
+            "wird mit altem und neuem Wert protokolliert. Festgeschriebene und stornierte "
+            "Buchungen nur per Storno und Neubuchung korrigieren."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "journal_entry_id": {"type": "integer", "description": "ID der Buchung."},
+                "service_date": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Leistungsdatum JJJJ-MM-TT; null entfernt es, weglassen lässt es "
+                        "unverändert."
+                    ),
+                },
+                "lines": {
+                    "type": "array",
+                    "description": (
+                        "Partner je Buchungszeile (Zeilennummer aus list_journal_entries)."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "line_number": {"type": "integer"},
+                            "partner_id": {
+                                "type": ["integer", "null"],
+                                "description": "Partner-ID; null entfernt den Partner.",
+                            },
+                            "partner_number": {
+                                "type": "string",
+                                "description": "Alternativ: Debitoren-/Kreditorennummer.",
+                            },
+                        },
+                        "required": ["line_number"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["journal_entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/journal-entries/{journal_entry_id}",
         arg_location="json",
     ),
     ToolSpec(

@@ -57,7 +57,11 @@ USt-IdNr, Steuernummer, Kontakt, Bankverbindung, Zahlungsziel und Aktivstatus
 exportiert. Journalzeilen auf Sammelkonten (Kennzeichen `subledger` im Kontenstamm)
 tragen den optionalen Schlüssel `partner_id`. Festgeschriebene Buchungen ab
 Inhaltshash-Version 3 versiegeln diese Zuordnung; Buchungen, die vor Einführung des
-Nebenbuchs festgeschrieben wurden, behalten ihr Siegel der Version 2. Anlage,
+Nebenbuchs festgeschrieben wurden, behalten ihr Siegel der Version 2. Buchungen
+tragen optional das Leistungsdatum `service_date` (Umsatzsteuer-Meldezeitraum); ab
+Inhaltshash-Version 4 ist es Teil des Siegels, ältere Siegel behalten ihre Version.
+Nachträge vor der Festschreibung (Leistungsdatum, Partner) stehen als Aktion
+`amended` mit altem und neuem Wert im Audit-Log. Anlage,
 Änderungen und Bankdatenänderungen (`bank_details_changed`) stehen mit
 Audit-Hashes in `business_partner_history.json`.
 

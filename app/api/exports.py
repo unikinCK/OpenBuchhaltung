@@ -115,6 +115,7 @@ def export_journal_csv():
                 BusinessPartner.debtor_number,
                 BusinessPartner.creditor_number,
                 BusinessPartner.name.label("partner_name"),
+                JournalEntry.service_date,
             )
             .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
             .join(Account, Account.id == JournalEntryLine.account_id)
@@ -142,6 +143,7 @@ def export_journal_csv():
             "profit_center_code",
             "partner_number",
             "partner_name",
+            "service_date",
         ]
     )
     for row in journal_rows:
@@ -162,6 +164,7 @@ def export_journal_csv():
                 row.profit_center_code,
                 partner_number,
                 row.partner_name,
+                row.service_date.isoformat() if row.service_date else "",
             ]
         )
 

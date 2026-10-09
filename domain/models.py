@@ -455,7 +455,7 @@ class JournalEntry(Base):
             "AND content_hash_version IS NULL) OR "
             "(is_finalized = true AND content_hash IS NOT NULL "
             "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
-            "AND content_hash_version IN (2, 3)))",
+            "AND content_hash_version IN (2, 3, 4)))",
             name="ck_journal_entry_finalized_content_hash",
         ),
     )
@@ -475,6 +475,10 @@ class JournalEntry(Base):
     )
     posting_number: Mapped[str] = mapped_column(String(30), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Leistungsdatum (Tag der Lieferung/Leistung, bei Leistungszeiträumen deren Ende):
+    # bestimmt den Umsatzsteuer-Meldezeitraum (app.services.tax_period); leer =
+    # Buchungsdatum.
+    service_date: Mapped[date | None] = mapped_column(Date)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
     # GoBD-Festschreibung: festgeschriebene Buchungen sind unveränderbar;

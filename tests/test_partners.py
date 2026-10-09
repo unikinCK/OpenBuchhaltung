@@ -335,7 +335,7 @@ def test_partner_only_on_matching_collective_account(session: Session) -> None:
     session.rollback()
 
 
-def test_storno_mirrors_partner_and_seal_version_3_covers_it(session: Session) -> None:
+def test_storno_mirrors_partner_and_seal_covers_it(session: Session) -> None:
     company, accounts = _seed(session)
     customer = create_partner(
         session=session, company=company, changed_by="t", name="Kunde", is_customer=True
@@ -344,7 +344,7 @@ def test_storno_mirrors_partner_and_seal_version_3_covers_it(session: Session) -
     entry = _sale(session, company, accounts, amount="119.00", partner_id=customer.id)
 
     finalized = finalize_journal_entry(session=session, journal_entry_id=entry.id, changed_by="t")
-    assert finalized.content_hash_version == 3
+    assert finalized.content_hash_version == 4
     assert finalized.content_hash == calculate_journal_entry_content_hash(finalized)
 
     # Der Partner ist Teil des versiegelten Inhalts.
@@ -365,7 +365,7 @@ def test_storno_mirrors_partner_and_seal_version_3_covers_it(session: Session) -
     mirrored = {line.account_id: line for line in reversal.lines}
     assert mirrored[accounts["1400"].id].partner_id == customer.id
     assert mirrored[accounts["1400"].id].credit_amount == Decimal("119.00")
-    assert reversal.content_hash_version == 3
+    assert reversal.content_hash_version == 4
     assert verify_compliance_integrity(session=session, company_id=company.id).valid is True
 
 
@@ -852,8 +852,8 @@ def test_partner_api_journal_exports_and_ui(tmp_path: Path) -> None:
         "/api/v1/exports/journal.csv", query_string={"company_id": company_id}
     ).get_data(as_text=True)
     header, *rows = journal_csv.strip().splitlines()
-    assert header.endswith("partner_number,partner_name")
-    assert any(row.endswith("10000,Kunde Nord GmbH") for row in rows)
+    assert header.endswith("partner_number,partner_name,service_date")
+    assert any(row.endswith("10000,Kunde Nord GmbH,") for row in rows)
 
     package = client.get(
         "/api/v1/exports/audit-package.zip",
@@ -999,7 +999,7 @@ def test_partner_migration_roundtrip_keeps_seals_valid(tmp_path: Path) -> None:
         assert connection.execute(
             text("SELECT content_hash_version FROM journal_entry WHERE id = :id"),
             {"id": entry_id},
-        ).scalar_one() == 3
+        ).scalar_one() == 4
 
     command.downgrade(config, "20261008_0041")
     columns = {column["name"] for column in inspect(engine).get_columns("journal_entry_line")}
