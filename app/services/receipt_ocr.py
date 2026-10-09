@@ -32,6 +32,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from app.services.llm_settings import llm_headers
+
 logger = logging.getLogger(__name__)
 
 _CENT = Decimal("0.01")
@@ -254,7 +256,13 @@ def _read_pdf_hex(text: str, start: int) -> tuple[str, int]:
 
 
 def _ocr_via_endpoint(
-    *, endpoint_url: str, model: str, file_bytes: bytes, mime_type: str, file_name: str
+    *,
+    endpoint_url: str,
+    model: str,
+    file_bytes: bytes,
+    mime_type: str,
+    file_name: str,
+    api_key: str | None = None,
 ) -> str:
     """Schickt den Beleg an einen OpenAI-``/responses``-kompatiblen OCR-Endpoint.
 
@@ -265,6 +273,12 @@ def _ocr_via_endpoint(
     import base64
 
     encoded = base64.b64encode(file_bytes).decode("ascii")
+    data_url = f"data:{mime_type};base64,{encoded}"
+    # PDFs gehen als Datei, Bilder als Bild an die /responses-API.
+    if mime_type == "application/pdf":
+        document_block = {"type": "input_file", "filename": file_name, "file_data": data_url}
+    else:
+        document_block = {"type": "input_image", "image_url": data_url}
     payload = {
         "model": model,
         "input": [
@@ -284,10 +298,7 @@ def _ocr_via_endpoint(
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:{mime_type};base64,{encoded}",
-                    },
+                    document_block,
                     {"type": "input_text", "text": f"Beleg: {file_name}"},
                 ],
             },
@@ -297,7 +308,7 @@ def _ocr_via_endpoint(
     request = Request(
         endpoint_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=llm_headers(api_key),
         method="POST",
     )
     try:
@@ -358,6 +369,7 @@ def extract_document_text(
     file_name: str,
     ocr_endpoint: str | None = None,
     ocr_model: str = "gpt-4.1-mini",
+    ocr_api_key: str | None = None,
 ) -> tuple[str, str]:
     """Gewinnt Text aus einem Beleg. Gibt ``(text, quelle)`` zurück.
 
@@ -384,13 +396,15 @@ def extract_document_text(
                         file_bytes=file_bytes,
                         mime_type=mime_type or "application/pdf",
                         file_name=file_name,
+                        api_key=ocr_api_key,
                     )
                 ),
                 "ocr-endpoint",
             )
         raise ReceiptOCRError(
             "Das PDF enthält keine auslesbare Textebene. Für gescannte Belege bitte "
-            "einen OCR-Endpoint (RECEIPT_OCR_ENDPOINT_URL) konfigurieren."
+            "einen KI-Zugang für den Benutzer hinterlegen (Verwaltung) oder einen "
+            "OCR-Endpoint (RECEIPT_OCR_ENDPOINT_URL) konfigurieren."
         )
 
     if kind == "image":
@@ -403,12 +417,14 @@ def extract_document_text(
                         file_bytes=file_bytes,
                         mime_type=mime_type or "image/png",
                         file_name=file_name,
+                        api_key=ocr_api_key,
                     )
                 ),
                 "ocr-endpoint",
             )
         raise ReceiptOCRError(
-            "Für Bild-Belege (JPG/PNG) wird ein OCR-Endpoint benötigt. Bitte "
+            "Für Bild-Belege (JPG/PNG) wird ein OCR-Endpoint benötigt. Bitte einen "
+            "KI-Zugang für den Benutzer hinterlegen (Verwaltung) oder "
             "RECEIPT_OCR_ENDPOINT_URL konfigurieren."
         )
 
@@ -716,7 +732,7 @@ def _parse_llm_json(text: str) -> dict:
 
 
 def extract_receipt_fields_llm(
-    text: str, *, endpoint_url: str, model: str
+    text: str, *, endpoint_url: str, model: str, api_key: str | None = None
 ) -> LlmReceiptFields:
     """Lässt ein LLM die Belegfelder strukturiert (als JSON) extrahieren."""
     if not endpoint_url:
@@ -738,7 +754,7 @@ def extract_receipt_fields_llm(
     request = Request(
         endpoint_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=llm_headers(api_key),
         method="POST",
     )
     try:
@@ -843,6 +859,8 @@ def analyze_document(
     ocr_model: str = "gpt-4.1-mini",
     llm_endpoint: str | None = None,
     llm_model: str = "gpt-4.1-mini",
+    ocr_api_key: str | None = None,
+    llm_api_key: str | None = None,
 ) -> ReceiptExtraction:
     """Komplette Pipeline: Text gewinnen, regelbasiert analysieren und – falls ein
     ``llm_endpoint`` konfiguriert ist – per LLM ergänzen und gegenprüfen.
@@ -857,6 +875,7 @@ def analyze_document(
             file_name=file_name,
             ocr_endpoint=ocr_endpoint,
             ocr_model=ocr_model,
+            ocr_api_key=ocr_api_key,
         )
     except ReceiptOCRError:
         raise
@@ -872,7 +891,7 @@ def analyze_document(
     if llm_endpoint:
         try:
             llm_fields = extract_receipt_fields_llm(
-                text, endpoint_url=llm_endpoint, model=llm_model
+                text, endpoint_url=llm_endpoint, model=llm_model, api_key=llm_api_key
             )
             apply_llm_control(extraction, llm_fields)
         except ReceiptLLMError as exc:

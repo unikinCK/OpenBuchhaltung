@@ -154,6 +154,8 @@ EXPECTED_TOOL_NAMES = {
     "reject_chat_action",
     "unlock_user_login",
     "set_user_password",
+    "set_user_llm_settings",
+    "clear_user_llm_settings",
     "change_own_password",
     "list_oauth_grants",
     "revoke_oauth_grant",

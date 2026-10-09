@@ -345,7 +345,12 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `DOCUMENT_MAX_UPLOAD_BYTES` | `10485760` | Maximale Beleggröße (zugleich Request-Limit). |
 | `DOCUMENT_MIN_UPLOAD_BYTES` | `1024` | Mindestgröße hochgeladener Belege. |
 
-**LLM-Endpunkte** (OpenAI-/responses-kompatibel; ohne Endpoint bleiben die Funktionen inaktiv)
+**LLM-Endpunkte** (OpenAI-/responses-kompatibel). API-Keys werden nicht per Umgebung
+gesetzt, sondern vom Administrator je Benutzer hinterlegt (siehe
+[KI-Zugang je Benutzer](#ki-zugang-llm-je-benutzer)); die folgenden Variablen sind
+Instanz-Endpoints **ohne** Key für Benutzer ohne eigenen KI-Zugang (z. B. ein lokales
+Ollama oder ein per Proxy abgesicherter Endpoint). Ohne beides bleiben die Funktionen
+inaktiv.
 
 | Variable | Default | Wirkung |
 |---|---|---|
@@ -354,7 +359,7 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `RECEIPT_LLM_ENDPOINT_URL`, `RECEIPT_LLM_MODEL` | Fallback | Feldextraktion und Kontrolle des Buchungsvorschlags. |
 | `RECEIPT_MATCH_LLM_ENDPOINT_URL`, `RECEIPT_MATCH_LLM_MODEL` | Fallback | Belegabgleich. |
 | `CHAT_LLM_ENDPOINT_URL`, `CHAT_LLM_MODEL` | Fallback | KI-Chat. |
-| `CHAT_LLM_API_KEY` | – | Authorization-Header für gehostete Provider. |
+| `CHAT_LLM_API_KEY` | – | **Entfernt** – wird ignoriert (Warnung beim Start); API-Keys je Benutzer in der Verwaltung hinterlegen. |
 | `CHAT_LLM_MAX_TOOL_CALLS` | `15` | Tool-Aufrufe je Chat-Nachricht. |
 | `CHAT_LLM_TIMEOUT_SECONDS` | `120` | Timeout je LLM-Aufruf. |
 
@@ -1035,22 +1040,51 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), RES
 (`create_receipt_match_suggestion`, `list_receipt_match_suggestions`,
 `approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`).
 
+## KI-Zugang (LLM) je Benutzer
+
+Statt eines gemeinsamen API-Keys in der Umgebung hinterlegt der Administrator je
+Benutzer einen eigenen KI-Zugang (**Verwaltung → KI-Zugang (LLM) je Benutzer**,
+`POST /api/v1/users/<id>/llm`, MCP `set_user_llm_settings`):
+
+- **OpenAI (Standard):** nur API-Key (und optional Modell, Default `gpt-4.1-mini`)
+  eintragen; Endpoint ist `https://api.openai.com/v1/responses`.
+- **Anderer Endpunkt:** URL eines OpenAI-`/responses`-kompatiblen Endpoints, z. B.
+  Azure OpenAI, OpenRouter oder ein lokales Ollama/vLLM (`…/v1` wird zu
+  `…/v1/responses` ergänzt); API-Key optional.
+
+KI-Chat, Beleg-OCR, KI-Kontrolle, Belegabgleich und Dokument-Update laufen dann mit
+dem Zugang des handelnden Benutzers (UI-Login, Benutzer-API-Token oder
+OAuth-Connector); Benutzer ohne Zugang nutzen die Instanz-Endpoints
+(`*_LLM_ENDPOINT_URL`, ohne Key). Der Key wird mit einem aus `SECRET_KEY`
+abgeleiteten Schlüssel verschlüsselt gespeichert und nie wieder ausgegeben (nur die
+letzten vier Zeichen). **Wird `SECRET_KEY` gewechselt, sind gespeicherte Keys nicht
+mehr lesbar** — die Verwaltung markiert sie, der Administrator trägt sie neu ein.
+Änderungen landen als `llm_settings_updated`/`llm_settings_cleared` im Audit-Log
+(ohne Key). Entfernen: `POST /api/v1/users/<id>/llm/delete` bzw. MCP
+`clear_user_llm_settings`. Im KI-Chat sind diese Tools gesperrt.
+
+```bash
+curl -X POST "$BASE/api/v1/users/7/llm" -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "openai", "api_key": "sk-...", "model": "gpt-4.1-mini"}'
+```
+
 ## KI-Chat (integrierter Assistent mit Tool-Zugriff)
 
 Unter **KI-Chat** steht ein LibreChat-angelehnter Chat direkt in der Oberfläche zur
 Verfügung: Sidebar mit Unterhaltungen, Verlauf mit Nachrichten-Bubbles, Anhänge und
-einsehbare Tool-Aufrufe. Der Assistent spricht den konfigurierten
-OpenAI-`/responses`-kompatiblen LLM-Endpoint und erhält dabei die MCP-Tools als
+einsehbare Tool-Aufrufe. Der Assistent spricht den KI-Zugang des angemeldeten
+Benutzers (siehe [KI-Zugang je Benutzer](#ki-zugang-llm-je-benutzer)) bzw. den
+Instanz-Endpoint und erhält dabei die MCP-Tools als
 Funktionsdefinitionen — er kann also Konten, Buchungen, Berichte, offene Posten
 usw. direkt lesen. Schreibende Aktionen (Buchungen, Stammdaten, Anlagen) schlägt
 er nur vor: Sie werden erst ausgeführt, wenn der Benutzer sie im Chat bestätigt
 (Human-in-the-Loop).
 
 ```bash
+# Instanz-Endpoint ohne API-Key für Benutzer ohne eigenen KI-Zugang (optional)
 export CHAT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
 export CHAT_LLM_MODEL="gpt-4.1-mini"
-# Optional: Authorization-Header für gehostete Provider
-export CHAT_LLM_API_KEY="sk-..."
 # Optional: Limits (Default 15 Tool-Aufrufe je Nachricht, 120 s Timeout)
 export CHAT_LLM_MAX_TOOL_CALLS=15
 export CHAT_LLM_TIMEOUT_SECONDS=120

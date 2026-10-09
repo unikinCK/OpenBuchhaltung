@@ -1337,6 +1337,15 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    # KI-Zugang (LLM) des Benutzers, vom Administrator gepflegt: ``openai``
+    # (Standard-Endpoint) oder ``custom`` (eigener /responses-kompatibler Endpoint);
+    # ohne Anbieter gelten die Instanz-Endpoints. Der API-Key liegt nur
+    # verschlüsselt vor (siehe app.services.llm_settings).
+    llm_provider: Mapped[str | None] = mapped_column(String(20))
+    llm_endpoint_url: Mapped[str | None] = mapped_column(String(500))
+    llm_model: Mapped[str | None] = mapped_column(String(120))
+    llm_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    llm_api_key_last4: Mapped[str | None] = mapped_column(String(4))
 
     tenant: Mapped[Tenant | None] = relationship()
 

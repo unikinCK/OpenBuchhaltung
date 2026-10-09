@@ -39,6 +39,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.llm_settings import llm_headers
 from app.services.receipt_ocr import (
     ReceiptExtraction,
     ReceiptLLMError,
@@ -196,6 +197,7 @@ def choose_match_llm(
     candidates: list[JournalEntry],
     endpoint_url: str,
     model: str,
+    api_key: str | None = None,
 ) -> MatchDecision:
     """Lässt ein LLM aus den Kandidaten die passende Buchung wählen (oder keine)."""
     user_text = (
@@ -220,7 +222,7 @@ def choose_match_llm(
     request = Request(
         endpoint_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=llm_headers(api_key),
         method="POST",
     )
     try:
@@ -318,6 +320,8 @@ def create_match_suggestion(
     ocr_model: str = "gpt-4.1-mini",
     llm_endpoint: str | None = None,
     llm_model: str = "gpt-4.1-mini",
+    ocr_api_key: str | None = None,
+    llm_api_key: str | None = None,
 ) -> ReceiptMatchSuggestion:
     """Analysiert einen unverknüpften Beleg und legt einen Abgleichsvorschlag an."""
     company = session.get(Company, company_id)
@@ -353,6 +357,8 @@ def create_match_suggestion(
             ocr_model=ocr_model,
             llm_endpoint=llm_endpoint,
             llm_model=llm_model,
+            ocr_api_key=ocr_api_key,
+            llm_api_key=llm_api_key,
         )
     except ReceiptOCRError as exc:
         raise ReceiptMatchError(f"Beleg konnte nicht ausgelesen werden: {exc}") from exc
@@ -369,6 +375,7 @@ def create_match_suggestion(
                 candidates=candidates,
                 endpoint_url=llm_endpoint,
                 model=llm_model,
+                api_key=llm_api_key,
             )
         except ReceiptLLMError as exc:
             decision = choose_match_rule_based(extraction=extraction, candidates=candidates)

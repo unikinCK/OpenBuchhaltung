@@ -23,6 +23,7 @@ from app.auth import current_tenant_id
 from app.services.audit_log import log_audit_event
 from app.services.document_llm import DocumentLLMError, send_document_update
 from app.services.documents import document_file_metadata
+from app.services.llm_settings import PURPOSE_DOCUMENT, resolve_llm_endpoint
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -214,12 +215,13 @@ def upload_document():
         uploaded_journal_entry_id = document.journal_entry_id
         uploaded_document_date = document.document_date
 
-    llm_endpoint = current_app.config.get("DOCUMENT_LLM_ENDPOINT_URL")
-    if llm_endpoint:
+    llm_endpoint = resolve_llm_endpoint(PURPOSE_DOCUMENT)
+    if llm_endpoint is not None:
         try:
             llm_response = send_document_update(
-                endpoint_url=llm_endpoint,
-                model=current_app.config.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
+                endpoint_url=llm_endpoint.url,
+                model=llm_endpoint.model,
+                api_key=llm_endpoint.api_key,
                 company_id=company_id,
                 document_id=uploaded_document_id,
                 file_name=uploaded_file_name,

@@ -99,6 +99,7 @@
               <th>Rolle</th>
               <th>Mandant</th>
               <th>API</th>
+              <th>KI-Zugang</th>
               <th>Status</th>
               <th>Aktionen</th>
             </tr>
@@ -110,6 +111,8 @@
                 <td><span class="badge">{{ user.role }}</span></td>
                 <td>{{ user.tenant.name if user.tenant else "Global" }}</td>
                 <td>{{ "..." ~ user.api_token_last4 if user.api_token_last4 else "kein Token" }}</td>
+                {% set llm = llm_summaries[user.id] %}
+                <td>{{ llm.provider_label if llm.configured else "Instanz-Standard" }}</td>
                 <td>{{ "aktiv" if user.is_active else "inaktiv" }}</td>
                 <td>
                   <form method="post" action="{{ url_for('main.rotate_user_api_token_action', user_id=user.id) }}" style="display:inline">
@@ -142,6 +145,96 @@
       <p class="muted">Benutzer verwalten kann nur ein Administrator.</p>
     {% endif %}
   </section>
+
+  {% if is_admin %}
+    <section class="card" id="ki-zugang">
+      <h2>KI-Zugang (LLM) je Benutzer</h2>
+      <p class="muted">
+        KI-Chat, Beleg-OCR, KI-Kontrolle und Belegabgleich laufen mit dem KI-Zugang des
+        handelnden Benutzers. Standard ist OpenAI ({{ llm_openai_url }}); alternativ ein
+        anderer OpenAI-<code>/responses</code>-kompatibler Endpunkt (z.&nbsp;B. Azure OpenAI,
+        OpenRouter, lokales Ollama). Der API-Key wird verschlüsselt gespeichert und nie
+        wieder angezeigt. Ohne KI-Zugang gelten die Instanz-Endpunkte der Konfiguration.
+      </p>
+      {% if users %}
+        <form method="post" action="{{ url_for('main.set_user_llm_settings_action') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+          <label for="llm_user_id">Benutzer</label>
+          <select id="llm_user_id" name="user_id" required>
+            {% for user in users %}
+              <option value="{{ user.id }}">{{ user.username }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="llm_provider">Anbieter</label>
+          <select id="llm_provider" name="provider" data-show-when="custom" data-show-target="#llm-endpoint-field">
+            <option value="openai">OpenAI (Standard)</option>
+            <option value="custom">Anderer Endpunkt (OpenAI-/responses-kompatibel)</option>
+          </select>
+
+          <div id="llm-endpoint-field">
+            <label for="llm_endpoint_url">Endpunkt-URL (nur bei anderem Endpunkt)</label>
+            <input id="llm_endpoint_url" name="endpoint_url" type="url"
+                   placeholder="https://example.com/v1/responses" />
+          </div>
+
+          <label for="llm_model">Modell</label>
+          <input id="llm_model" name="model" placeholder="{{ llm_default_model }}" />
+
+          <label for="llm_api_key">API-Key</label>
+          <input id="llm_api_key" name="api_key" type="password" autocomplete="off"
+                 placeholder="leer lassen = gespeicherten Key behalten" />
+
+          <button type="submit">KI-Zugang speichern</button>
+        </form>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Benutzer</th>
+              <th>Anbieter</th>
+              <th>Endpunkt</th>
+              <th>Modell</th>
+              <th>API-Key</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              {% set llm = llm_summaries[user.id] %}
+              <tr>
+                <td>{{ user.username }}</td>
+                {% if llm.configured %}
+                  <td><span class="badge">{{ llm.provider_label }}</span></td>
+                  <td><code>{{ llm.endpoint_url }}</code></td>
+                  <td>{{ llm.model }}</td>
+                  <td>
+                    {% if llm.api_key_last4 %}
+                      ...{{ llm.api_key_last4 }}
+                      {% if llm.api_key_readable == false %}
+                        <span class="muted">(nicht lesbar – SECRET_KEY geändert? Bitte neu eintragen)</span>
+                      {% endif %}
+                    {% else %}
+                      kein Key
+                    {% endif %}
+                  </td>
+                  <td>
+                    <form method="post" action="{{ url_for('main.clear_user_llm_settings_action', user_id=user.id) }}" style="display:inline">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit">Entfernen</button>
+                    </form>
+                  </td>
+                {% else %}
+                  <td colspan="5" class="muted">kein eigener KI-Zugang – Instanz-Standard</td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% endif %}
 
   <section class="card">
     <h2>Kontenrahmen &amp; Demo-Daten</h2>

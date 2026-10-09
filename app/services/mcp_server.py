@@ -323,6 +323,63 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="set_user_llm_settings",
+        description=(
+            "Hinterlegt den KI-Zugang (LLM-API-Key) eines Benutzers (Administrator). "
+            "Standard ist OpenAI; provider=custom mit endpoint_url für einen anderen "
+            "OpenAI-/responses-kompatiblen Endpunkt. Ohne api_key bleibt ein "
+            "gespeicherter Key erhalten. Der Key wird nie zurückgegeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+                "provider": {
+                    "type": "string",
+                    "enum": ["openai", "custom"],
+                    "description": "openai (Standard) oder custom.",
+                },
+                "endpoint_url": {
+                    "type": "string",
+                    "description": (
+                        "Nur bei custom: URL des /responses-Endpunkts "
+                        "(…/v1 wird zu …/v1/responses ergänzt)."
+                    ),
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Modellname; Standard gpt-4.1-mini.",
+                },
+                "api_key": {
+                    "type": "string",
+                    "description": "API-Key; bei OpenAI Pflicht, falls noch keiner hinterlegt.",
+                },
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/llm",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="clear_user_llm_settings",
+        description=(
+            "Entfernt den KI-Zugang eines Benutzers; danach gelten die Instanz-Endpoints."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/llm/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_oauth_grants",
         description=(
             "Listet per OAuth verbundene Apps (z. B. ChatGPT-Connector): eigene, als "

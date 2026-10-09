@@ -31,6 +31,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - MCP: API-Antworten werden im Zeichensatz des Content-Type gelesen; `export_datev_csv`
   liefert Umlaute damit korrekt (vorher Ersatzzeichen, weil Windows-1252 als UTF-8 galt).
 
+### KI-Zugang (LLM-API-Key) je Benutzer
+
+- Der Administrator hinterlegt je Benutzer einen KI-Zugang: Standard OpenAI
+  (`https://api.openai.com/v1/responses`, nur API-Key und optional Modell) oder ein
+  anderer OpenAI-`/responses`-kompatibler Endpunkt (Azure, OpenRouter, Ollama …;
+  Key optional). Der Key liegt Fernet-verschlüsselt (Schlüssel aus `SECRET_KEY`
+  abgeleitet) in `user.llm_api_key_encrypted`, ausgegeben werden nur die letzten
+  vier Zeichen; Audit-Ereignisse `llm_settings_updated`/`llm_settings_cleared`.
+- KI-Chat, Beleg-OCR, KI-Kontrolle, Belegabgleich und Dokument-Update verwenden den
+  Zugang des handelnden Benutzers und senden den Key als Bearer-Header; ohne Zugang
+  gelten die Instanz-Endpoints (`*_LLM_ENDPOINT_URL`) wie bisher. PDF-Scans gehen
+  als `input_file` an den OCR-Endpoint (von OpenAI akzeptiertes Format).
+- UI: Abschnitt **KI-Zugang (LLM) je Benutzer** in der Verwaltung; API:
+  `POST /api/v1/users/<id>/llm`, `POST /api/v1/users/<id>/llm/delete`, Feld `llm`
+  in der Benutzerausgabe; MCP: `set_user_llm_settings`, `clear_user_llm_settings`
+  (im KI-Chat gesperrt). Migration `20261009_0043`.
+- **Entfernt:** `CHAT_LLM_API_KEY` wird nicht mehr ausgewertet (Warnung beim Start).
+- Neue Abhängigkeit `cryptography`.
+
 ### Geschäftspartner (Debitoren/Kreditoren), PR 1
 
 - Neuer Kunden-/Lieferantenstamm `business_partner`: Debitoren- (10000–69999) und

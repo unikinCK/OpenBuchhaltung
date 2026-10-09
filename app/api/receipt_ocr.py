@@ -29,6 +29,7 @@ from app.services.documents import (
 )
 from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
+from app.services.llm_settings import PURPOSE_RECEIPT, receipt_analysis_options
 from app.services.receipt_ocr import ReceiptExtraction, ReceiptOCRError, analyze_document
 from app.web.helpers import ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_DOCUMENT_MIME_TYPES
 from domain.models import Document
@@ -197,10 +198,7 @@ def create_receipt_ocr_suggestion_via_api():
             file_bytes=content,
             mime_type=mime_type,
             file_name=file_name,
-            ocr_endpoint=current_app.config.get("RECEIPT_OCR_ENDPOINT_URL"),
-            ocr_model=current_app.config.get("RECEIPT_OCR_MODEL", "gpt-4.1-mini"),
-            llm_endpoint=current_app.config.get("RECEIPT_LLM_ENDPOINT_URL"),
-            llm_model=current_app.config.get("RECEIPT_LLM_MODEL", "gpt-4.1-mini"),
+            **receipt_analysis_options(llm_purpose=PURPOSE_RECEIPT),
         )
     except ReceiptOCRError as exc:
         return jsonify({"error": str(exc), "document_id": document_id}), 422
