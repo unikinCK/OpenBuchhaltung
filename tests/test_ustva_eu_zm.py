@@ -212,6 +212,39 @@ def test_intra_eu_acquisition_and_reverse_charge(session: Session) -> None:
     assert any(unclassified.posting_number in warning for warning in result.warnings)
 
 
+def test_mixed_invoice_with_domestic_input_tax_derives_the_reverse_charge_base(
+    session: Session,
+) -> None:
+    company = _company(session)
+    session.add(
+        Account(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            code="1576",
+            name="Abziehbare Vorsteuer 19 %",
+            account_type="asset",
+        )
+    )
+    session.commit()
+    # Eine Zahlung für ein EU-Abo (§ 13b) und Inlandsware mit normaler Vorsteuer.
+    _book(
+        session,
+        company,
+        "Sammelzahlung",
+        ("4806", "100.00", "0"),
+        ("1577", "19.00", "0"),
+        ("1787", "0", "19.00"),
+        ("4806", "50.00", "0"),
+        ("1576", "9.50", "0"),
+        ("1200", "0", "159.50"),
+    )
+
+    amounts = _amounts(_details(session, company))
+    assert amounts["84"] == Decimal("100")
+    assert amounts["85"] == Decimal("19.00")
+    assert amounts["66"] == Decimal("9.50")
+
+
 def test_reverse_charge_tax_without_base_line_derives_the_base(session: Session) -> None:
     company = _company(session)
     # Nachbuchung der § 13b-Steuer eines Quartals nur mit den Steuerzeilen.

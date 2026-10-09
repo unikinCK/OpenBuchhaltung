@@ -357,6 +357,7 @@ def compute_vat_return_details(
         special_output: dict[tuple[str, Decimal | None], Decimal] = {}
         special_output_debit = False
         purchase_lines = []
+        has_regular_tax = False
         partner_countries = {
             partners.get(row.partner_id) for row in entry.rows if row.partner_id is not None
         } - {None}
@@ -374,7 +375,14 @@ def compute_vat_return_details(
                     special_output_debit = row.debit_amount > ZERO
                 continue
 
-            if row.line_account_type in {"expense", "asset"}:
+            is_regular_tax = (
+                row.vat_account_id is not None and row.account_id == row.vat_account_id
+                if row.tax_code_id is not None
+                else row.account_id in vat_accounts
+            )
+            if is_regular_tax:
+                has_regular_tax = True
+            elif row.line_account_type in {"expense", "asset"}:
                 purchase_lines.append(row)
 
             if row.tax_code_id is not None:
@@ -465,7 +473,10 @@ def compute_vat_return_details(
             if tax == ZERO:
                 continue
             output_tax += tax
-            base = purchase_base if len(special_output) == 1 else ZERO
+            # Mit normaler Steuer in derselben Buchung (gemischte Rechnung) oder
+            # mehreren Sondersteuern ist die Aufwandszeile nicht eindeutig: Die
+            # Bemessungsgrundlage folgt dann aus Steuer ÷ Satz.
+            base = purchase_base if len(special_output) == 1 and not has_regular_tax else ZERO
             rate = account_rate
             if rate is None and base != ZERO:
                 rate = _match_rate(tax / base * Decimal("100"), known_rates)
