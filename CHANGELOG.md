@@ -8,6 +8,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### DATEV-Export je Wirtschaftsjahr
+
+- Der Buchungsstapel umfasst genau ein Wirtschaftsjahr bzw. einen Zeitraum darin:
+  DATEV liest das Jahr des Belegdatums (TTMM) aus dem WJ-Beginn im Kopffeld 13.
+  Bisher enthielt die Datei alle Jahre mit WJ-Beginn 1.1. des ältesten Belegs; ein
+  Mehrjahresstapel landete in DATEV im falschen Jahr oder wurde abgelehnt (Review F3).
+- Kopffeld 13 ist der tatsächliche WJ-Beginn (auch abweichendes und Rumpf-WJ),
+  15/16 der gewählte Zeitraum (Standard: das ganze Wirtschaftsjahr), das
+  Festschreibekennzeichen (Feld 21) gilt nur für die exportierten Buchungen.
+- **Geändert:** `GET /api/v1/exports/datev.csv` und MCP `export_datev_csv` nehmen
+  `fiscal_year_id` sowie optional `date_from`/`date_to`. Ohne Angabe wird das
+  Wirtschaftsjahr mit Buchungen exportiert; haben mehrere Wirtschaftsjahre
+  Buchungen, antwortet die API mit 400 und listet sie unter `fiscal_years`.
+  Ein Zeitraum über die WJ-Grenze ergibt ebenfalls 400. Dateiname mit WJ und
+  Zeitraum (`EXTF_Buchungsstapel_1_WJ2026_20260101-20261231.csv`).
+- UI: Auf der Berichte-Seite Auswahl des Wirtschaftsjahres (vorgewählt das des
+  Auswertungszeitraums bzw. das jüngste mit Buchungen) mit optionalem Von/Bis;
+  eine ungültige Auswahl erscheint als Hinweis (`GET /reports/datev.csv`).
+
 ### DATEV-Export: Brutto-Prinzip und Gegenkonto
 
 - Der Buchungsstapel folgt dem Brutto-Prinzip, das DATEV beim Import verlangt

@@ -753,14 +753,39 @@ Positionen berechnet.
 
 ## DATEV-Export (Buchungsstapel)
 
-Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF, SKR03)**
-bzw. **(EXTF, SKR04)** zur Verfügung (API: `GET /api/v1/exports/datev.csv?company_id=…`,
-MCP: `export_datev_csv`).
+Auf der **Berichte**-Seite steht der Export **DATEV-Buchungsstapel (EXTF, SKR03)**
+bzw. **(EXTF, SKR04)** mit Auswahl des Wirtschaftsjahres und optionalem Zeitraum zur
+Verfügung (API: `GET /api/v1/exports/datev.csv?company_id=…&fiscal_year_id=…`,
+optional `date_from`/`date_to`; MCP: `export_datev_csv`).
 
 Die Datei folgt dem DATEV-Format (Kategorie 21 Buchungsstapel, Formatversion 13):
 Kopfzeile mit allen 31 Feldern, Spaltenüberschriften und Buchungssätze, kodiert in
 Windows-1252. Berater-/Mandantennummer sind über `DATEV_CONSULTANT_NUMBER` bzw.
 `DATEV_CLIENT_NUMBER` konfigurierbar.
+
+**Ein Stapel je Wirtschaftsjahr.** Das Belegdatum hat das Format TTMM, „das Jahr wird
+immer aus dem Feld #13 des Headers ermittelt“ (WJ-Beginn), und DATEV empfiehlt eine
+Datei je Buchungsperiode (DATEV-Formatbeschreibung Header/Buchungsstapel). Der Export
+umfasst deshalb die Buchungen genau eines Wirtschaftsjahres der Gesellschaft oder
+eines Zeitraums darin:
+
+| Kopffeld | Inhalt |
+|---|---|
+| 13 WJ-Beginn | Beginn des Wirtschaftsjahres, auch bei abweichendem oder Rumpf-WJ (z. B. `20260701`, `20260415`) |
+| 15/16 Datum von/bis | gewählter Zeitraum, ohne Angabe das ganze Wirtschaftsjahr |
+| 21 Festschreibung | `1` nur, wenn alle Buchungen dieses Stapels festgeschrieben sind (DATEV schreibt den Stapel dann beim Import fest, Dok.-Nr. 1080697) |
+
+Auswahl: `fiscal_year_id` (aus `GET /api/v1/fiscal-years` bzw. `list_fiscal_years`)
+und/oder `date_from`/`date_to`; ein Zeitraum allein bestimmt das Wirtschaftsjahr, in
+dem er liegt. Ohne Angabe wird das Wirtschaftsjahr mit Buchungen exportiert. Haben
+mehrere Wirtschaftsjahre Buchungen, ist die Auswahl Pflicht: Die API antwortet mit
+400 und listet sie unter `fiscal_years` (ID, Bezeichnung, Zeitraum, Anzahl
+Buchungen). Ein stiller Standard wie „das jüngste Jahr“ übergäbe leicht das falsche
+Jahr an DATEV. Ein Zeitraum über die WJ-Grenze ist ebenfalls ein 400er. Die Datei
+heißt `EXTF_Buchungsstapel_<Gesellschaft>_WJ<Bezeichnung>_<von>-<bis>.csv`, z. B.
+`EXTF_Buchungsstapel_1_WJ2026-2027_20260701-20270630.csv`. Auf der Berichte-Seite
+ist das Wirtschaftsjahr des Auswertungszeitraums bzw. das jüngste mit Buchungen
+vorgewählt; eine ungültige Auswahl erscheint dort als Hinweis.
 
 **Brutto-Prinzip.** DATEV importiert Buchungen mit Umsatzsteuer nur brutto, mit
 BU-Schlüssel oder auf einem Automatikkonto, und errechnet die Steuer selbst; Sätze
@@ -792,9 +817,8 @@ erzeugt aus den DATEV-Kontenrahmen 2026 (Art.-Nr. 11174/11175) mit
 `tools/datev_kontenfunktionen.py`. Individuell eingerichtete Automatikkonten eines
 DATEV-Mandanten kennt der Export nicht.
 
-Noch offen: Export je Wirtschaftsjahr (das Belegdatum TTMM trägt kein Jahr, DATEV
-empfiehlt eine Datei je Buchungsperiode), Personenkonten (Debitoren/Kreditoren) und
-Golden-File-Tests. Der Export ist DATEV-kompatibel, aber nicht zertifiziert.
+Noch offen: Personenkonten (Debitoren/Kreditoren) und Golden-File-Tests. Der Export
+ist DATEV-kompatibel, aber nicht zertifiziert.
 
 ## Steuercodes (USt/VSt)
 

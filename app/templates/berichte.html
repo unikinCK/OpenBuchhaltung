@@ -69,10 +69,34 @@
         ·
         <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id, **report_args) }}">SuSa-Export (CSV, API-Format)</a>
         ·
-        <a href="{{ url_for('api.export_datev_csv', company_id=selected_company_id) }}" title="Brutto-Prinzip: Umsatz-/Vorsteuer über DATEV-Automatikkonten bzw. Steuerschlüssel">DATEV-Buchungsstapel (EXTF, {{ datev_chart|upper if datev_chart else 'Kontenrahmen nicht erkannt' }})</a>
-        ·
         <a href="{{ url_for('api.export_audit_package', company_id=selected_company_id) }}">Prüferexport (ZIP)</a>
       </p>
+      {% if datev_fiscal_years %}
+        <form method="get" action="{{ url_for('main.download_datev_csv') }}" class="inline-form" id="datev-export">
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <strong title="Brutto-Prinzip: Umsatz-/Vorsteuer über DATEV-Automatikkonten bzw. Steuerschlüssel">DATEV-Buchungsstapel (EXTF, {{ datev_chart|upper if datev_chart else 'Kontenrahmen nicht erkannt' }})</strong>
+          <label for="datev_fiscal_year_id">Wirtschaftsjahr</label>
+          <select id="datev_fiscal_year_id" name="fiscal_year_id" style="width:auto;">
+            {% for fiscal_year in datev_fiscal_years %}
+              <option value="{{ fiscal_year.id }}" {% if fiscal_year.id == datev_selection.fiscal_year_id %}selected{% endif %}>
+                {{ fiscal_year.label }} ({{ fiscal_year.start_date.isoformat() }} – {{ fiscal_year.end_date.isoformat() }}, {{ fiscal_year.entry_count }} {{ 'Buchung' if fiscal_year.entry_count == 1 else 'Buchungen' }})
+              </option>
+            {% endfor %}
+          </select>
+          <label for="datev_date_from">Von</label>
+          <input id="datev_date_from" name="date_from" type="date" value="{{ datev_selection.date_from }}" style="width:auto;" />
+          <label for="datev_date_to">Bis</label>
+          <input id="datev_date_to" name="date_to" type="date" value="{{ datev_selection.date_to }}" style="width:auto;" />
+          <button type="submit">Exportieren</button>
+        </form>
+        <p class="muted">
+          Ein Stapel je Wirtschaftsjahr: DATEV liest das Jahr des Belegdatums (TTMM) aus dem
+          WJ-Beginn im Kopf der Datei. Ohne Von/Bis wird das ganze Wirtschaftsjahr exportiert,
+          sonst nur der Zeitraum darin (z. B. ein Monat).
+        </p>
+      {% else %}
+        <p class="muted">DATEV-Buchungsstapel: noch kein Wirtschaftsjahr angelegt – es entsteht mit der ersten Buchung.</p>
+      {% endif %}
     </section>
 
     <div class="report-grid">
