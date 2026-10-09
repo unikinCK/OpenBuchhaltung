@@ -135,6 +135,7 @@ Jeder Testfall sollte dokumentieren:
 | T-EXP-019 | Kontenrahmen-Pruefung bei SKR03-Buchhaltung nach fehlerhaftem SKR04-Import | Vorherrschender Kontenrahmen SKR03 erkannt; SKR04-Fremdkonten mit DATEV-SKR03-Gegenkonto, Buchungen, Saldo und Steuercodes gemeldet, 0400/3400/4800/6200/8000 als Hinweis; nachimportierter SKR04 oder ein einzelnes SKR03-Konto kippt die Erkennung nicht; nichts wird geaendert (UI, API, MCP) | automatisiert | hoch |
 | T-EXP-020 | DATEV-Export Steuer nach Brutto-Prinzip (SKR03/SKR04) | Steuerzeile im Bruttobetrag: ohne BU-Schlüssel auf Automatikkonten, Steuerschlüssel 101/102/401/402 sonst; BU 40 und eigene Steuerzeile bei Rundungs- oder Steuersatzabweichung und auf Automatikkonten ohne Steuer; die nachgerechneten DATEV-Salden entsprechen dem Journal | automatisiert | hoch |
 | T-EXP-021 | DATEV-Export je Wirtschaftsjahr (auch abweichendes und Rumpf-WJ) | Nur Buchungen des gewählten WJ bzw. Zeitraums; Kopffeld 13 = WJ-Beginn, 15/16 = Zeitraum; das aus TTMM und WJ-Beginn gelesene Belegdatum entspricht dem Journal; Zeitraum über die WJ-Grenze und fehlende Auswahl bei mehreren WJ mit Buchungen werden abgewiesen (UI, API, MCP) | automatisiert | hoch |
+| T-EXP-022 | DATEV-Export Rundungscent und fremde Steuerkonten | Steuerabweichung bis 5 Cent/1 % bleibt brutto mit Korrektursatz „Steuer-Rundungsdifferenz“, groessere faellt auf Netto + Steuerzeile zurueck; SKR04-Steuerkonten im SKR03 unter 1571/1576/1771/1776, Umbuchung zwischen ihnen entfaellt | automatisiert | hoch |
 
 ## 8.1 Kostenstellen und Profitcenter
 

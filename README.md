@@ -801,12 +801,19 @@ Bruttobetrag zusammen:
 |---|---|
 | Automatikkonto mit passendem Steuersatz (z. B. 8400 + 1776) | brutto, kein BU-Schlüssel |
 | Konto ohne Automatik (z. B. 8000 + 1776, 4930 + 1576) | brutto mit Steuerschlüssel 101/102 (USt 19/7 %) bzw. 401/402 (VSt 19/7 %) |
-| DATEV käme auf einen anderen Cent (Rundung laut Rechnung, Aufteilung auf mehrere Gegenkonten), anderer Steuersatz als die Kontenfunktion, Sonderfunktion (ig. Erwerb, § 13b), Konto ohne Steuerschlüssel (KU) | netto, auf Automatikkonten mit BU 40 (Aufhebung der Automatik); die Steuer als eigener Satz |
+| DATEV käme auf wenige Cent anders (Rundung laut Rechnung, Aufteilung auf mehrere Gegenkonten; höchstens 5 Cent und 1 % der Steuer) | brutto wie oben, dazu ein Korrektursatz „Steuer-Rundungsdifferenz“ zwischen Konto und DATEV-Steuerkonto (auf Automatikkonten mit BU 40) |
+| Größere Abweichung, anderer Steuersatz als die Kontenfunktion, Sonderfunktion (ig. Erwerb, § 13b), Konto ohne Steuerschlüssel (KU) | netto, auf Automatikkonten mit BU 40 (Aufhebung der Automatik); die Steuer als eigener Satz |
 | Automatikkonto ohne Steuerzeile (Abschluss, Umbuchung, Saldovortrag) | BU 40; steuerfreie Automatikkonten (z. B. 8125/4125) ohne BU-Schlüssel |
 
 Mehrzeilige Buchungen werden in Sätze mit Konto und Gegenkonto zerlegt und über
 Belegfeld 1 (Buchungsnummer) gruppiert. Was DATEV nach dem Import bucht, entspricht
 so auf den Cent dem Journal.
+
+Steuerkonten des jeweils anderen Kontenrahmens – etwa SKR04 1406/3806 aus einem
+Altimport in einer SKR03-Buchhaltung – stehen im Stapel unter der Nummer des erkannten
+Rahmens (1576/1776), denn dort sind die fremden Nummern nicht oder anders vergeben
+(SKR03 1401–1406 sind reservierte Forderungskonten). Sätze, die danach Konto und
+Gegenkonto gleich hätten (die Bereinigungsumbuchung 1406 → 1576), entfallen.
 
 Welche Konten Automatikkonten sind, hängt vom Kontenrahmen ab (SKR04 4400 ist
 Erlöse 19 % USt, SKR03 4400 frei verfügbar). Der Export erkennt SKR03 bzw. SKR04 wie

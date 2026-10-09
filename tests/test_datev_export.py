@@ -419,9 +419,7 @@ def test_input_tax_on_automatic_account_is_exported_gross(session: Session) -> N
     assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
 
 
-def test_invoice_tax_off_by_a_cent_keeps_tax_line_and_suspends_automatic(
-    session: Session,
-) -> None:
+def test_invoice_tax_off_by_a_cent_gets_a_rounding_row(session: Session) -> None:
     company = _seed(session)
     # Steuer laut Rechnung 19,01 €; DATEV käme aus 119,01 € auf 19,00 €.
     _book(
@@ -435,9 +433,33 @@ def test_invoice_tax_off_by_a_cent_keeps_tax_line_and_suspends_automatic(
 
     content = _export(session, company)
 
+    # Brutto auf dem Automatikkonto, der Cent wandert per Korrektursatz (BU 40,
+    # damit 3400 darauf keine Steuer rechnet) aufs Vorsteuerkonto.
+    assert _row_summary(content) == [
+        ("119,01", '"H"', "1600", "3400", '""'),
+        ("0,01", '"S"', "1576", "3400", '"40"'),
+    ]
+    assert _rows(content)[1][13] == '"Steuer-Rundungsdifferenz Wareneingang laut Rechnung"'
+    assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
+
+
+def test_larger_tax_difference_keeps_tax_line_and_suspends_automatic(session: Session) -> None:
+    company = _seed(session)
+    # 19,10 € Steuer auf 100 €: 8 Cent über DATEVs 19,02 € – kein Rundungsfall mehr.
+    _book(
+        session,
+        company,
+        "Wareneingang mit abweichender Steuer",
+        ("3400", "100.00", "0"),
+        ("1576", "19.10", "0"),
+        ("1600", "0", "119.10"),
+    )
+
+    content = _export(session, company)
+
     assert _row_summary(content) == [
         ("100,00", '"H"', "1600", "3400", '"40"'),
-        ("19,01", '"S"', "1576", "1600", '""'),
+        ("19,10", '"S"', "1576", "1600", '""'),
     ]
     assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
 
@@ -500,7 +522,7 @@ def test_split_payment_keeps_gross_amount_when_tax_adds_up(session: Session) -> 
     assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
 
 
-def test_split_with_rounding_difference_keeps_net_and_tax_lines(session: Session) -> None:
+def test_split_with_rounding_difference_gets_a_rounding_row(session: Session) -> None:
     company = _seed(session)
     # DATEV rechnete aus 1,02 + 1,02 + 116,96 nur 0,16 + 0,16 + 18,67 = 18,99 € heraus.
     _book(
@@ -516,10 +538,53 @@ def test_split_with_rounding_difference_keeps_net_and_tax_lines(session: Session
 
     content = _export(session, company)
 
-    rows = _row_summary(content)
-    assert all(row[3] != "8400" or row[4] == '"40"' for row in rows)
-    assert ("19,00", '"S"', "1360", "1776", '""') in rows
+    assert _row_summary(content) == [
+        ("1,02", '"S"', "1200", "8400", '""'),
+        ("1,02", '"S"', "1000", "8400", '""'),
+        ("116,96", '"S"', "1360", "8400", '""'),
+        ("0,01", '"H"', "1776", "8400", '"40"'),
+    ]
     assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
+
+
+def test_foreign_tax_accounts_are_exported_under_the_chart_number(session: Session) -> None:
+    # SKR03-Buchhaltung mit Vorsteuerkonten aus dem alten SKR04-Import (wie die unikin).
+    company = _seed(
+        session,
+        SKR03_ACCOUNTS
+        + (
+            ("1401", "Abziehbare Vorsteuer 7 %", "asset"),
+            ("1406", "Abziehbare Vorsteuer 19 %", "asset"),
+            ("4650", "Bewirtungskosten", "expense"),
+            ("4654", "Nicht abziehbare Bewirtungskosten", "expense"),
+        ),
+    )
+    # Bewirtung mit 7 % und 19 %, aufgeteilt nach Abziehbarkeit: kein Steuerpaar.
+    _book(
+        session,
+        company,
+        "Bewirtung",
+        ("4650", "24.46", "0"),
+        ("4654", "10.48", "0"),
+        ("1401", "1.92", "0"),
+        ("1406", "1.44", "0"),
+        ("1200", "0", "38.30"),
+    )
+    # Bereinigung: Saldo von 1406 auf 1576 umbuchen – im SKR03 dasselbe Konto.
+    _book(session, company, "Umbuchung Vorsteuer", ("1576", "1.44", "0"), ("1406", "0", "1.44"))
+
+    content = _export(session, company)
+
+    assert _row_summary(content) == [
+        ("24,46", '"S"', "4650", "1200", '""'),
+        ("10,48", '"S"', "4654", "1200", '""'),
+        ("1,92", '"S"', "1571", "1200", '""'),
+        ("1,44", '"S"', "1576", "1200", '""'),
+    ]
+    ledger = _ledger_balances(session, company)
+    ledger["1571"] = ledger.pop("1401")
+    ledger["1576"] = ledger.pop("1576") + ledger.pop("1406", Decimal("0"))
+    assert _datev_balances(content, "skr03") == ledger
 
 
 def test_reversal_mirrors_the_gross_booking(session: Session) -> None:

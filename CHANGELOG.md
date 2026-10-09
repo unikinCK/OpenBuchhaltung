@@ -8,6 +8,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### DATEV-Export: Rundungscent und Steuerkonten des anderen Kontenrahmens
+
+- Weicht die gebuchte Steuer um wenige Cent von DATEVs Rechnung aus dem Bruttobetrag ab
+  (einzeln gerundete Rechnungspositionen, Aufteilung auf mehrere Gegenkonten; höchstens
+  5 Cent und 1 % der Steuer), bleibt der Satz brutto mit Automatikkonto bzw.
+  Steuerschlüssel; ein Korrektursatz „Steuer-Rundungsdifferenz“ verschiebt die Differenz
+  zwischen Konto und DATEV-Steuerkonto. Bisher fiel der ganze Satz auf Netto plus
+  eigene Steuerzeile zurück.
+- Steuerkonten des jeweils anderen Kontenrahmens (SKR04 1401/1406/3801/3806 in einer
+  SKR03-Buchhaltung und umgekehrt) erscheinen im Stapel unter der Nummer des erkannten
+  Rahmens; Sätze, die danach Konto und Gegenkonto gleich hätten, entfallen.
+
 ### DATEV-Export je Wirtschaftsjahr
 
 - Der Buchungsstapel umfasst genau ein Wirtschaftsjahr bzw. einen Zeitraum darin:
