@@ -29,7 +29,7 @@ Jeder Testfall sollte dokumentieren:
 | T-BOOK-006 | Rundungsfall mit Centbetraegen | Summe bleibt ausgeglichen, Steuerbetrag nachvollziehbar | automatisiert | hoch |
 | T-BOOK-007 | Mehrzeilige Splitbuchung | Buchung wird korrekt gespeichert und exportiert | automatisiert | hoch |
 | T-BOOK-008 | Buchung ohne Pflichtfelder | Speicherung wird abgewiesen | automatisiert | mittel |
-| T-BOOK-009 | Offene Buchung ergaenzen (Leistungsdatum, Partner auf Sammelkonto) | Aenderung mit altem und neuem Wert im Audit-Log; Partner auf Nicht-Sammelkonto, festgeschriebene Buchung, gesperrte Periode und fremde Gesellschaft werden abgewiesen; UI, API (PATCH), MCP | automatisiert | hoch |
+| T-BOOK-009 | Offene Buchung ergaenzen (Leistungsdatum, Partner auf Sammelkonto) | Aenderung mit altem und neuem Wert im Audit-Log; Partner auf Nicht-Sammelkonto, festgeschriebene oder stornierte Buchung, gesperrte Periode und fremde Gesellschaft werden abgewiesen; UI, API (PATCH), MCP | automatisiert | hoch |
 
 ## 3. Festschreibung und Storno
 

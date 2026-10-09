@@ -8,12 +8,11 @@ Erlöskontos, ``revenue_kennzahl``):
 * Kz 21 (sonstige Leistungen an EU-Unternehmer, § 18b) → Art „S“.
 
 Den Kunden liefert der Geschäftspartner der Buchung (in der Regel auf der
-Debitorenzeile); ein Storno ohne eigenen Partner gehört zum Kunden der stornierten
-Buchung (festgeschriebene Stornos lassen sich nicht ergänzen). Gemeldet werden
-Ländercode, USt-IdNr. und die Summe je Art, Gutschriften mindern sie. Wie in der
-UStVA entfallen Centbeträge. Fehlt der Partner oder seine EU-USt-IdNr., erscheint
-die Zeile unter ``missing``. Die Übermittlung an das BZSt (ELSTER) liegt außerhalb
-von OpenBuchhaltung.
+Debitorenzeile); gemeldet werden Ländercode, USt-IdNr. und die Summe je Art,
+Gutschriften mindern sie. Wie in der UStVA entfallen Centbeträge. Fehlt der
+Partner oder seine EU-USt-IdNr., erscheint die Zeile unter ``missing`` – außer
+Buchung und Storno liegen beide im Zeitraum und heben sich auf. Die Übermittlung
+an das BZSt (ELSTER) liegt außerhalb von OpenBuchhaltung.
 
 Meldezeitraum (§ 18a Abs. 8 UStG): sonstige Leistungen nach dem Leistungsdatum
 der Buchung, Lieferungen nach der Rechnung (Buchungsdatum), spätestens im Monat
@@ -37,7 +36,7 @@ from app.services.vat_returns import (
     revenue_tax_rule,
     vat_entries,
 )
-from domain.models import BusinessPartner, JournalEntryLine
+from domain.models import BusinessPartner
 
 ZERO = Decimal("0.00")
 ZM_KINDS = {"41": "L", "42": "D", "21": "S"}
@@ -76,22 +75,10 @@ def compute_zm(
     result = ZmResult()
 
     entries = vat_entries(session, company_id, date_from, date_to, False)
-    # Partner der stornierten Originalbuchungen (auch außerhalb des Zeitraums).
-    originals = {entry.reversal_of_id for entry in entries.values() if entry.reversal_of_id}
-    original_partners: dict[int, set[int]] = {}
-    if originals:
-        for journal_entry_id, partner_id in session.execute(
-            select(JournalEntryLine.journal_entry_id, JournalEntryLine.partner_id).where(
-                JournalEntryLine.journal_entry_id.in_(originals),
-                JournalEntryLine.partner_id.is_not(None),
-            )
-        ):
-            original_partners.setdefault(journal_entry_id, set()).add(partner_id)
+    missing_by_entry: dict[int, list[dict[str, object]]] = {}
 
-    for entry in entries.values():
+    for entry_id, entry in entries.items():
         partner_ids = {row.partner_id for row in entry.rows if row.partner_id is not None}
-        if not partner_ids and entry.reversal_of_id is not None:
-            partner_ids = original_partners.get(entry.reversal_of_id, set())
         partner = partners.get(next(iter(partner_ids))) if len(partner_ids) == 1 else None
         for row in entry.rows:
             if row.line_account_type not in {"revenue", "income"}:
@@ -120,7 +107,7 @@ def compute_zm(
             else:
                 reason = None
             if reason is not None:
-                result.missing.append(
+                missing_by_entry.setdefault(entry_id, []).append(
                     {
                         "posting_number": entry.posting_number,
                         "entry_date": entry.entry_date.isoformat(),
@@ -135,6 +122,13 @@ def compute_zm(
             key = (country, vat_id, kind)
             totals[key] = totals.get(key, ZERO) + amount
             names.setdefault(key, partner.name)
+
+    # Buchung und Storno im selben Zeitraum heben sich auf: nicht als fehlend melden.
+    for entry_id, entry in entries.items():
+        if entry.reversal_of_id in missing_by_entry and entry_id in missing_by_entry:
+            missing_by_entry.pop(entry.reversal_of_id)
+            missing_by_entry.pop(entry_id)
+    result.missing = [item for items in missing_by_entry.values() for item in items]
 
     for (country, vat_id, kind), amount in sorted(totals.items()):
         result.rows.append(

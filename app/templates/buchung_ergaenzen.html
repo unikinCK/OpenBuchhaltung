@@ -9,9 +9,9 @@
     <p>
       <strong>{{ entry.entry_date.isoformat() }}</strong> – {{ entry.description }}
     </p>
-    {% if entry.is_finalized or entry.is_system_entry %}
+    {% if entry.is_finalized or entry.is_system_entry or entry.reversed_by %}
       <p class="muted">
-        {% if entry.is_finalized %}Die Buchung ist festgeschrieben und unveränderbar; Korrekturen nur per Storno und Neubuchung.{% else %}Vortragsbuchungen des Jahresabschlusses lassen sich nicht ergänzen.{% endif %}
+        {% if entry.is_finalized %}Die Buchung ist festgeschrieben und unveränderbar; Korrekturen nur per Storno und Neubuchung.{% elif entry.reversed_by %}Die Buchung ist storniert ({{ entry.reversed_by }}); das festgeschriebene Storno spiegelt den bisherigen Stand, deshalb lässt sie sich nicht mehr ergänzen.{% else %}Vortragsbuchungen des Jahresabschlusses lassen sich nicht ergänzen.{% endif %}
       </p>
     {% else %}
       <p class="muted">

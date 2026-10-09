@@ -1050,9 +1050,10 @@ def amend_journal_entry(
     BOOK-001); jede Änderung steht mit altem und neuem Wert im Audit-Log.
     Beträge, Konten und Buchungsdatum bleiben unberührt. Partner gelten wie beim
     Buchen nur auf Debitoren-/Kreditoren-Sammelkonten (``line_partners``:
-    Zeilennummer → Partner-ID, None entfernt den Partner). Festgeschriebene
-    Buchungen, Vortragsbuchungen, gesperrte Perioden und abgeschlossene
-    Geschäftsjahre lehnt die Funktion ab – dort bleibt nur das Storno.
+    Zeilennummer → Partner-ID, None entfernt den Partner). Festgeschriebene,
+    stornierte und Vortragsbuchungen, gesperrte Perioden und abgeschlossene
+    Geschäftsjahre lehnt die Funktion ab – das festgeschriebene Storno spiegelt den
+    alten Stand, ein Nachtrag am Original verschöbe Partnersaldo und Meldezeitraum.
     """
     entry = session.execute(
         select(JournalEntry)
@@ -1070,6 +1071,14 @@ def amend_journal_entry(
         raise JournalEntryCreationError(
             f"Buchung {entry.posting_number} ist eine Vortragsbuchung des Jahresabschlusses "
             "und kann nicht ergänzt werden."
+        )
+    reversal_number = session.execute(
+        select(JournalEntry.posting_number).where(JournalEntry.reversal_of_id == entry.id)
+    ).scalar_one_or_none()
+    if reversal_number is not None:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} ist storniert ({reversal_number}); ein Nachtrag "
+            "würde nur das Original ändern, nicht das festgeschriebene Storno."
         )
     fiscal_year = session.get(FiscalYear, entry.fiscal_year_id)
     if fiscal_year is not None and fiscal_year.is_closed:

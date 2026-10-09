@@ -515,6 +515,11 @@ def amend_journal_entry_page(journal_entry_id: int):
             "description": entry.description,
             "is_finalized": entry.is_finalized,
             "is_system_entry": entry.source in CARRYFORWARD_SOURCES,
+            "reversed_by": session.execute(
+                select(JournalEntry.posting_number).where(
+                    JournalEntry.reversal_of_id == entry.id
+                )
+            ).scalar_one_or_none(),
         }
     return render_template(
         "buchung_ergaenzen.html",

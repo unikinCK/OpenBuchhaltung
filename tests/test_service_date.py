@@ -729,7 +729,7 @@ def test_service_date_via_api_mcp_and_ui(tmp_path) -> None:
         assert july.lines[0].partner_id == partner_id
 
 
-def test_zm_attributes_a_sealed_reversal_to_the_customer_of_the_original(
+def test_reversed_entries_cannot_be_amended_and_cancel_out_in_the_zm(
     session: Session,
 ) -> None:
     company = _company(session)
@@ -759,25 +759,36 @@ def test_zm_attributes_a_sealed_reversal_to_the_customer_of_the_original(
         ("8336", "0", "5051.08"),
         day=date(2026, 6, 1),
     )
-    reverse_journal_entry(
+    reversal = reverse_journal_entry(
         session=session,
         journal_entry_id=doubled.id,
         reversal_date=date(2026, 6, 1),
         changed_by="t",
     )
-    # Das festgeschriebene Storno bleibt ohne Partner; die Originale werden ergänzt.
-    for entry in (kept, doubled):
+    # Das festgeschriebene Storno spiegelt den Stand ohne Partner: Ein Nachtrag am
+    # Original würde den Partnersaldo einseitig verschieben.
+    refused = f"storniert \\({reversal.posting_number}\\)"
+    with pytest.raises(JournalEntryCreationError, match=refused):
         amend_journal_entry(
             session=session,
             company_id=company.id,
-            journal_entry_id=entry.id,
+            journal_entry_id=doubled.id,
             changed_by="t",
             line_partners={1: czech.id},
         )
+    session.rollback()
+    amend_journal_entry(
+        session=session,
+        company_id=company.id,
+        journal_entry_id=kept.id,
+        changed_by="t",
+        line_partners={1: czech.id},
+    )
 
     result = compute_zm(session=session, company_id=company.id, date_from=Q2[0], date_to=Q2[1])
     assert [(row["vat_id"], row["kind"], row["amount"]) for row in result.rows] == [
         ("CZ60751983", "S", "5051.08")
     ]
+    # Buchung und Storno ohne Partner heben sich im Zeitraum auf.
     assert result.missing == []
     assert result.warnings == []

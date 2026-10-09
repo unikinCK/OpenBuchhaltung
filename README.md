@@ -935,8 +935,8 @@ die Dezember-Leistung mit Rechnung im Januar gehört in die Erklärung des alten
 Erfassung: Feld **Leistungsdatum** in der Buchungsmaske (Journal zeigt „Leistung …“),
 API `POST /api/v1/journal-entries` mit `service_date`, MCP `create_journal_entry`.
 Ein Storno übernimmt das Leistungsdatum und neutralisiert die Steuer im selben
-Zeitraum; in der ZM zählt ein Storno ohne eigenen Partner (etwa ein festgeschriebenes
-Storno einer später ergänzten Buchung) zum Kunden der stornierten Buchung. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
+Zeitraum; in der ZM heben sich Buchung und Storno ohne Partner im selben Zeitraum auf
+und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
 Istversteuerung bildet OpenBuchhaltung nicht ab.
 
 **Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum und
@@ -945,8 +945,9 @@ nachtragen: Link **Ergänzen** im Journal, API `PATCH /api/v1/journal-entries/<i
 `service_date` (null entfernt es) und `lines: [{"line_number": 1, "partner_id": …}]`
 bzw. `partner_number`, MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
 unverändert; jede Änderung steht mit altem und neuem Wert im Audit-Log (`amended`).
-Festgeschriebene Buchungen, gesperrte Perioden und abgeschlossene Geschäftsjahre
-lehnt die Funktion ab – dort bleibt das Storno. Neue Festschreibungen versiegeln das
+Festgeschriebene und stornierte Buchungen (das festgeschriebene Storno spiegelt den
+alten Stand), gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt die Funktion
+ab – dort bleibt Storno und Neubuchung. Neue Festschreibungen versiegeln das
 Leistungsdatum (Inhaltshash Version 4); Siegel der Versionen 2 und 3 bleiben gültig.
 Das Journal-CSV führt die Spalte `service_date`, der DATEV-Export die Felder 115/116
 (siehe DATEV-Export).

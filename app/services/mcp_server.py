@@ -976,8 +976,8 @@ TOOLS: list[ToolSpec] = [
             "Ergänzt eine offene (nicht festgeschriebene) Buchung: Leistungsdatum setzen "
             "oder entfernen und Geschäftspartner auf Debitoren-/Kreditoren-Sammelkonto-"
             "Zeilen zuordnen. Beträge, Konten und Datum bleiben unverändert; jede Änderung "
-            "wird mit altem und neuem Wert protokolliert. Festgeschriebene Buchungen nur "
-            "per Storno korrigieren."
+            "wird mit altem und neuem Wert protokolliert. Festgeschriebene und stornierte "
+            "Buchungen nur per Storno und Neubuchung korrigieren."
         ),
         input_schema={
             "type": "object",
