@@ -1263,12 +1263,42 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="export_datev_csv",
         description=(
-            "Exportiert den DATEV-Buchungsstapel (EXTF) als CSV: Buchungssätze mit "
-            "Konto und Gegenkonto nach dem Brutto-Prinzip (Steuer über DATEV-"
-            "Automatikkonto bzw. BU-Schlüssel, sonst BU 40 und eigene Steuerzeile); "
-            "Kontenrahmen SKR03/SKR04 wird erkannt und steht im Kopffeld 27."
+            "Exportiert den DATEV-Buchungsstapel (EXTF) eines Wirtschaftsjahres als CSV: "
+            "Buchungssätze mit Konto und Gegenkonto nach dem Brutto-Prinzip (Steuer über "
+            "DATEV-Automatikkonto bzw. BU-Schlüssel, sonst BU 40 und eigene Steuerzeile); "
+            "Kontenrahmen SKR03/SKR04 wird erkannt und steht im Kopffeld 27. DATEV liest "
+            "das Jahr des Belegdatums (TTMM) aus dem WJ-Beginn (Kopffeld 13), daher genau "
+            "ein Wirtschaftsjahr je Datei: fiscal_year_id (aus list_fiscal_years) und/oder "
+            "date_from/date_to innerhalb eines Wirtschaftsjahres (Kopffelder 15/16). Ohne "
+            "Angabe das Wirtschaftsjahr mit Buchungen; haben mehrere Wirtschaftsjahre "
+            "Buchungen, ist die Angabe Pflicht (der Fehler listet sie unter fiscal_years)."
         ),
-        input_schema=_company_id_schema(),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "fiscal_year_id": {
+                    "type": "integer",
+                    "description": "ID des Wirtschaftsjahres (list_fiscal_years), optional.",
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": (
+                        "Zeitraum-Beginn innerhalb des Wirtschaftsjahres (JJJJ-MM-TT, "
+                        "optional; Standard: WJ-Beginn)."
+                    ),
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": (
+                        "Zeitraum-Ende einschließlich, im selben Wirtschaftsjahr "
+                        "(JJJJ-MM-TT, optional; Standard: WJ-Ende)."
+                    ),
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
         http_method="GET",
         path="/exports/datev.csv",
         arg_location="query",

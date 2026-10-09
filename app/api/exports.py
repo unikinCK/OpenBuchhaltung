@@ -19,7 +19,13 @@ from app.api.helpers import (
 )
 from app.services.audit_export import build_audit_export_package
 from app.services.controlling import ControllingError, controlling_result_report
-from app.services.datev_export import DatevExportOptions, build_datev_export
+from app.services.datev_export import (
+    DatevExportError,
+    DatevExportOptions,
+    build_datev_export,
+    datev_export_file_name,
+    resolve_datev_export_period,
+)
 from app.services.reports import trial_balance_for_company
 from domain.models import (
     Account,
@@ -238,15 +244,41 @@ def export_controlling_csv():
 
 @api_bp.get("/exports/datev.csv")
 def export_datev_csv():
+    """Buchungsstapel eines Wirtschaftsjahres (``fiscal_year_id``) bzw. Zeitraums darin."""
     company_id = request.args.get("company_id", type=int)
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
+    raw_fiscal_year_id = (request.args.get("fiscal_year_id") or "").strip()
+    try:
+        fiscal_year_id = int(raw_fiscal_year_id) if raw_fiscal_year_id else None
+    except ValueError:
+        return jsonify({"error": "fiscal_year_id must be an integer."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    generated_at = datetime.now(timezone.utc)
 
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
+        try:
+            period = resolve_datev_export_period(
+                session=session,
+                company_id=company_id,
+                fiscal_year_id=fiscal_year_id,
+                date_from=date_from,
+                date_to=date_to,
+                today=generated_at.date(),
+            )
+        except DatevExportError as exc:
+            error: dict[str, object] = {"error": str(exc)}
+            if exc.fiscal_years:
+                error["fiscal_years"] = [year.as_dict() for year in exc.fiscal_years]
+            return jsonify(error), 400
 
         options = DatevExportOptions(
             consultant_number=current_app.config.get("DATEV_CONSULTANT_NUMBER") or 1000,
@@ -256,12 +288,13 @@ def export_datev_csv():
             session=session,
             company_id=company_id,
             options=options,
-            generated_at=datetime.now(timezone.utc),
+            generated_at=generated_at,
+            period=period,
         )
 
     # DATEV erwartet Windows-1252; nicht abbildbare Zeichen werden ersetzt.
     payload = content.encode("cp1252", errors="replace")
-    file_name = f"EXTF_Buchungsstapel_{company_id}_{date.today().isoformat()}.csv"
+    file_name = datev_export_file_name(company_id, period)
     return Response(
         payload,
         content_type="text/csv; charset=windows-1252",

@@ -57,6 +57,14 @@ Kopffeld „Sachkontenrahmen“; die Kontenfunktionen stehen in
 ``data/kontenrahmen/datev_kontenfunktionen.csv`` (erzeugt mit
 ``tools/datev_kontenfunktionen.py``).
 
+Ein Stapel umfasst genau ein Wirtschaftsjahr: Das Belegdatum hat das Format
+TTMM, „das Jahr wird immer aus dem Feld #13 des Headers ermittelt“ (WJ-Beginn),
+und Datum von/bis (Kopffelder 15/16) begrenzen den Stapel; DATEV empfiehlt eine
+Datei je Buchungsperiode (DATEV-Formatbeschreibung, Header und Buchungsstapel).
+Exportiert werden deshalb die Buchungen eines Wirtschaftsjahres der Gesellschaft
+oder eines Zeitraums darin (``resolve_datev_export_period``); das
+Festschreibekennzeichen (Kopffeld 21) gilt nur für diese Buchungen.
+
 Der Export ist bewusst als "DATEV-kompatibler" Stapel ausgelegt (nicht
 zertifiziert).
 """
@@ -64,6 +72,7 @@ zertifiziert).
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -72,15 +81,18 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.services.account_chart_check import detect_company_chart
+from app.services.journal_entries import fiscal_year_bounds
 from app.services.tax_codes import TaxAccount, company_tax_accounts
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
     Account,
+    Company,
+    FiscalYear,
     JournalEntry,
     JournalEntryLine,
     TaxCode,
@@ -579,6 +591,186 @@ def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str:
     return ";".join(fields)
 
 
+class DatevExportError(ValueError):
+    """Wirtschaftsjahr oder Zeitraum des Stapels ist ungültig oder nicht eindeutig."""
+
+    def __init__(self, message: str, *, fiscal_years: list[DatevFiscalYear] | None = None):
+        super().__init__(message)
+        # Zur Auswahl, wenn ohne Angabe mehrere Wirtschaftsjahre in Frage kommen.
+        self.fiscal_years = fiscal_years or []
+
+
+@dataclass(frozen=True, slots=True)
+class DatevFiscalYear:
+    """Wirtschaftsjahr zur Auswahl des Stapels, mit der Anzahl seiner Buchungen."""
+
+    id: int
+    label: str
+    start_date: date
+    end_date: date
+    entry_count: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
+            "entry_count": self.entry_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DatevExportPeriod:
+    """Wirtschaftsjahr und Zeitraum eines Buchungsstapels."""
+
+    fiscal_year_id: int | None  # None: noch kein Wirtschaftsjahr angelegt
+    label: str
+    fiscal_year_start: date  # Kopffeld 13 "WJ-Beginn"
+    fiscal_year_end: date
+    date_from: date  # Kopffeld 15 "Datum von"
+    date_to: date  # Kopffeld 16 "Datum bis"
+
+
+def datev_fiscal_years(*, session: Session, company_id: int) -> list[DatevFiscalYear]:
+    """Wirtschaftsjahre der Gesellschaft, das jüngste zuerst, mit Anzahl der Buchungen."""
+    entry_counts = dict(
+        session.execute(
+            select(JournalEntry.fiscal_year_id, func.count(JournalEntry.id))
+            .where(JournalEntry.company_id == company_id)
+            .group_by(JournalEntry.fiscal_year_id)
+        ).all()
+    )
+    fiscal_years = session.execute(
+        select(FiscalYear)
+        .where(FiscalYear.company_id == company_id)
+        .order_by(FiscalYear.start_date.desc())
+    ).scalars()
+    return [
+        DatevFiscalYear(
+            id=fiscal_year.id,
+            label=fiscal_year.label,
+            start_date=fiscal_year.start_date,
+            end_date=fiscal_year.end_date,
+            entry_count=entry_counts.get(fiscal_year.id, 0),
+        )
+        for fiscal_year in fiscal_years
+    ]
+
+
+def resolve_datev_export_period(
+    *,
+    session: Session,
+    company_id: int,
+    fiscal_year_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    today: date | None = None,
+) -> DatevExportPeriod:
+    """Wirtschaftsjahr und Zeitraum des Stapels zur Auswahl.
+
+    * ``fiscal_year_id``: dieses Wirtschaftsjahr; ``date_from``/``date_to``
+      grenzen den Zeitraum darin ein (sonst das ganze Wirtschaftsjahr).
+    * nur ``date_from``/``date_to``: das Wirtschaftsjahr, in dem sie liegen.
+    * keine Angabe: das Wirtschaftsjahr mit Buchungen. Haben mehrere
+      Wirtschaftsjahre Buchungen, ist die Auswahl Pflicht – ein stiller
+      Standard übergäbe leicht das falsche Jahr an DATEV. Ohne Buchungen gilt
+      das jüngste Wirtschaftsjahr, ohne Wirtschaftsjahr das reguläre zum Tag
+      ``today`` (leerer Stapel).
+
+    Ein Zeitraum über die Grenze des Wirtschaftsjahres ist ein Fehler: DATEV
+    liest das Jahr des Belegdatums aus dem WJ-Beginn.
+    """
+    if date_from and date_to and date_from > date_to:
+        raise DatevExportError(
+            f"Das Datum von ({date_from.isoformat()}) liegt nach dem Datum bis "
+            f"({date_to.isoformat()})."
+        )
+
+    if fiscal_year_id is not None:
+        fiscal_year = session.get(FiscalYear, fiscal_year_id)
+        if fiscal_year is None or fiscal_year.company_id != company_id:
+            raise DatevExportError("Wirtschaftsjahr nicht gefunden.")
+    elif date_from or date_to:
+        anchor = date_from or date_to
+        fiscal_year = (
+            session.execute(
+                select(FiscalYear).where(
+                    FiscalYear.company_id == company_id,
+                    FiscalYear.start_date <= anchor,
+                    FiscalYear.end_date >= anchor,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fiscal_year is None:
+            raise DatevExportError(
+                f"Für den {anchor.isoformat()} ist kein Wirtschaftsjahr angelegt."
+            )
+    else:
+        fiscal_years = datev_fiscal_years(session=session, company_id=company_id)
+        with_entries = [year for year in fiscal_years if year.entry_count]
+        if len(with_entries) > 1:
+            raise DatevExportError(
+                "Buchungen in mehreren Wirtschaftsjahren ("
+                + ", ".join(year.label for year in with_entries)
+                + "); DATEV erwartet einen Stapel je Wirtschaftsjahr. Bitte das "
+                "Wirtschaftsjahr (fiscal_year_id) oder einen Zeitraum angeben.",
+                fiscal_years=with_entries,
+            )
+        if not fiscal_years:
+            company = session.get(Company, company_id)
+            start, end, label = fiscal_year_bounds(
+                company.fiscal_year_start_month if company else 1, today or date.today()
+            )
+            return DatevExportPeriod(
+                fiscal_year_id=None,
+                label=label,
+                fiscal_year_start=start,
+                fiscal_year_end=end,
+                date_from=start,
+                date_to=end,
+            )
+        fiscal_year = session.get(FiscalYear, (with_entries or fiscal_years)[0].id)
+
+    period_from = date_from or fiscal_year.start_date
+    period_to = date_to or fiscal_year.end_date
+    if not fiscal_year.start_date <= period_from <= period_to <= fiscal_year.end_date:
+        if date_from and date_to:
+            chosen = f"{date_from.isoformat()} – {date_to.isoformat()}"
+        else:
+            chosen = f"ab {date_from.isoformat()}" if date_from else f"bis {date_to.isoformat()}"
+        raise DatevExportError(
+            f"Der gewählte Zeitraum ({chosen}) liegt nicht im Wirtschaftsjahr "
+            f"{fiscal_year.label} ({fiscal_year.start_date.isoformat()} – "
+            f"{fiscal_year.end_date.isoformat()}). DATEV liest das Jahr des Belegdatums aus "
+            "dem WJ-Beginn; je Wirtschaftsjahr ist ein eigener Stapel zu exportieren."
+        )
+    return DatevExportPeriod(
+        fiscal_year_id=fiscal_year.id,
+        label=fiscal_year.label,
+        fiscal_year_start=fiscal_year.start_date,
+        fiscal_year_end=fiscal_year.end_date,
+        date_from=period_from,
+        date_to=period_to,
+    )
+
+
+def datev_export_file_name(company_id: int, period: DatevExportPeriod) -> str:
+    """Dateiname mit Wirtschaftsjahr und Zeitraum.
+
+    ``EXTF_`` kennzeichnet in DATEV Daten aus einem Nicht-DATEV-Programm; die
+    WJ-Bezeichnung wird auf ASCII-Buchstaben und -Ziffern reduziert
+    (``2026/2027`` → ``2026-2027``).
+    """
+    label = re.sub(r"[^0-9A-Za-z]+", "-", period.label).strip("-")
+    return (
+        f"EXTF_Buchungsstapel_{company_id}_WJ{label or period.fiscal_year_start.year}_"
+        f"{period.date_from:%Y%m%d}-{period.date_to:%Y%m%d}.csv"
+    )
+
+
 def build_datev_export(
     *,
     session: Session,
@@ -586,20 +778,34 @@ def build_datev_export(
     options: DatevExportOptions | None = None,
     generated_at: datetime,
     chart: str | None = None,
+    period: DatevExportPeriod | None = None,
 ) -> str:
     """Erzeugt den EXTF-Buchungsstapel als String für eine Gesellschaft.
 
     ``chart`` ("skr03"/"skr04") legt den Kontenrahmen für Automatikkonten und
     Steuerschlüssel fest; ohne Angabe wird er an den Konten erkannt.
+    ``period`` (``resolve_datev_export_period``) wählt Wirtschaftsjahr und
+    Zeitraum; ohne Angabe gilt die Standardauswahl (``DatevExportError``, wenn
+    mehrere Wirtschaftsjahre Buchungen haben).
     """
     options = options or DatevExportOptions()
     if chart is None:
         chart = detect_company_chart(session=session, company_id=company_id)
+    if period is None:
+        period = resolve_datev_export_period(
+            session=session, company_id=company_id, today=generated_at.date()
+        )
+    in_period = (
+        JournalEntry.company_id == company_id,
+        JournalEntry.fiscal_year_id == period.fiscal_year_id,
+        JournalEntry.entry_date >= period.date_from,
+        JournalEntry.entry_date <= period.date_to,
+    )
 
     entries = (
         session.execute(
             select(JournalEntry)
-            .where(JournalEntry.company_id == company_id)
+            .where(*in_period)
             .order_by(JournalEntry.entry_date, JournalEntry.id)
         )
         .scalars()
@@ -619,7 +825,7 @@ def build_datev_export(
         )
         .join(Account, Account.id == JournalEntryLine.account_id)
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
-        .where(JournalEntry.company_id == company_id)
+        .where(*in_period)
         .order_by(JournalEntryLine.journal_entry_id, JournalEntryLine.line_number)
     ).all()
 
@@ -635,17 +841,14 @@ def build_datev_export(
     }
     tax_accounts = company_tax_accounts(session=session, company_id=company_id)
 
-    dates = [entry.entry_date for entry in entries]
-    fiscal_year_start = date(min(dates).year, 1, 1) if dates else date(generated_at.year, 1, 1)
-
     buffer = StringIO()
     buffer.write(
         _header_row(
             options=options,
             generated_at=generated_at,
-            fiscal_year_start=fiscal_year_start,
-            date_from=min(dates) if dates else None,
-            date_to=max(dates) if dates else None,
+            fiscal_year_start=period.fiscal_year_start,
+            date_from=period.date_from,
+            date_to=period.date_to,
             finalized=bool(entries) and all(entry.is_finalized for entry in entries),
             chart=chart,
         )
