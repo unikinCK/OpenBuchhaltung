@@ -560,6 +560,10 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       Docker-Build, Downgrade-Rundlauf (T6); Paritätstest aus `url_map` (A2);
       `DomainError` + Errorhandler (A4); Index-Drift (A5); Lockfile (A7);
       DATEV je WJ mit BU-Schlüsseln + Golden-Files (F3, T7).
+  - [x] DATEV-Export nach Brutto-Prinzip *(2026-10-09, F3 teilweise)*: Steuer über
+        Automatikkonto bzw. Steuerschlüssel 101/102/401/402, BU 40 als Rückfall,
+        Konto und Gegenkonto in jedem Satz, Kontenrahmen im Kopffeld 27. Offen:
+        Export je WJ, Golden-Files.
 - [ ] **Sprint 5 – Produkt-Basis**: Firmenstammdaten in DB (#3);
       Kunden-/Lieferantenstamm (#1); Eingangsrechnung → OPOS (#5); Skonto
       (#11); Zahllauf markiert Posten (F8); § 13b / ig. Erwerb / ZM (#4, F10);

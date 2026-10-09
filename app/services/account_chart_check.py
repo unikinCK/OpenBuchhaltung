@@ -308,6 +308,19 @@ def detect_dominant_chart(
     return ("skr03" if score["skr03"] > score["skr04"] else "skr04"), evidence
 
 
+def detect_company_chart(*, session: Session, company_id: int) -> str | None:
+    """SKR03 oder SKR04, nach dem eine Gesellschaft bucht; None ohne klaren Hinweis.
+
+    Gleiche Gewichtung wie ``detect_dominant_chart``, aber ohne Vorgabe für den
+    Gleichstand: Wer den Kontenrahmen nur braucht (etwa der DATEV-Export für die
+    Automatikkonten), soll bei fehlenden Hinweisen nicht raten.
+    """
+    accounts = session.execute(select(Account).where(Account.company_id == company_id)).scalars()
+    chart, evidence = detect_dominant_chart(accounts, _posting_stats(session, company_id))
+    scores = {name: sum(counts.values()) for name, counts in evidence.items()}
+    return None if scores["skr03"] == scores["skr04"] else chart
+
+
 def _account_row(
     account: Account, stats: dict[int, tuple[int, Decimal]]
 ) -> dict[str, object] | None:

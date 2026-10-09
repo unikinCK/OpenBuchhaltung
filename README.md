@@ -748,20 +748,48 @@ Positionen berechnet.
 
 ## DATEV-Export (Buchungsstapel)
 
-Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF)**
-zur Verfügung (auch als API: `GET /api/v1/exports/datev.csv?company_id=…`).
+Auf der **Berichte**-Seite steht der Download **DATEV-Buchungsstapel (EXTF, SKR03)**
+bzw. **(EXTF, SKR04)** zur Verfügung (API: `GET /api/v1/exports/datev.csv?company_id=…`,
+MCP: `export_datev_csv`).
 
-Die Datei folgt dem EXTF-Format (Kategorie 21, Buchungsstapel): Kopfzeile mit
-Metadaten, Spaltenüberschriften und Buchungssätze, kodiert in Windows-1252.
-Buchungen mit genau einer Soll- und einer Habenzeile werden als
-Konto/Gegenkonto-Satz exportiert; mehrzeilige Buchungen (z. B. mit USt-Zeile)
-als Splitbuchung — eine Zeile je Position, gruppiert über Belegfeld 1
-(Buchungsnummer). Berater-/Mandantennummer sind über `DATEV_CONSULTANT_NUMBER`
-bzw. `DATEV_CLIENT_NUMBER` konfigurierbar.
+Die Datei folgt dem DATEV-Format (Kategorie 21 Buchungsstapel, Formatversion 13):
+Kopfzeile mit allen 31 Feldern, Spaltenüberschriften und Buchungssätze, kodiert in
+Windows-1252. Berater-/Mandantennummer sind über `DATEV_CONSULTANT_NUMBER` bzw.
+`DATEV_CLIENT_NUMBER` konfigurierbar.
 
-Der Export ist DATEV-kompatibel, aber nicht zertifiziert: eine
-Steuerautomatik über BU-Schlüssel wird nicht gesetzt, da die Umsatzsteuer
-bereits als eigene Buchungszeile geführt wird.
+**Brutto-Prinzip.** DATEV importiert Buchungen mit Umsatzsteuer nur brutto, mit
+BU-Schlüssel oder auf einem Automatikkonto, und errechnet die Steuer selbst; Sätze
+mit den Nettowerten je Konto in eigenen Zeilen lassen sich nicht importieren
+(DATEV-Hilfe Dok.-Nr. 1036228). Konto und Gegenkonto sind Muss-Felder (Dok.-Nr.
+1003221, Importmeldung REW00223). Automatikkonten tragen im DATEV-Kontenrahmen die
+Funktion AM/AV (z. B. 8400/4400 Erlöse 19 % USt, SKR03 3400 Wareneingang 19 %
+Vorsteuer): Ein Nettobetrag dort plus eigene Steuerzeile ergäbe die Steuer doppelt.
+Der Export fasst deshalb jede Steuerzeile mit ihrer Bemessungsgrundlage zum
+Bruttobetrag zusammen:
+
+| Fall | Buchungssatz |
+|---|---|
+| Automatikkonto mit passendem Steuersatz (z. B. 8400 + 1776) | brutto, kein BU-Schlüssel |
+| Konto ohne Automatik (z. B. 8000 + 1776, 4930 + 1576) | brutto mit Steuerschlüssel 101/102 (USt 19/7 %) bzw. 401/402 (VSt 19/7 %) |
+| DATEV käme auf einen anderen Cent (Rundung laut Rechnung, Aufteilung auf mehrere Gegenkonten), anderer Steuersatz als die Kontenfunktion, Sonderfunktion (ig. Erwerb, § 13b), Konto ohne Steuerschlüssel (KU) | netto, auf Automatikkonten mit BU 40 (Aufhebung der Automatik); die Steuer als eigener Satz |
+| Automatikkonto ohne Steuerzeile (Abschluss, Umbuchung, Saldovortrag) | BU 40; steuerfreie Automatikkonten (z. B. 8125/4125) ohne BU-Schlüssel |
+
+Mehrzeilige Buchungen werden in Sätze mit Konto und Gegenkonto zerlegt und über
+Belegfeld 1 (Buchungsnummer) gruppiert. Was DATEV nach dem Import bucht, entspricht
+so auf den Cent dem Journal.
+
+Welche Konten Automatikkonten sind, hängt vom Kontenrahmen ab (SKR04 4400 ist
+Erlöse 19 % USt, SKR03 4400 frei verfügbar). Der Export erkennt SKR03 bzw. SKR04 wie
+die Kontenrahmen-Prüfung, übergibt ihn im Kopffeld 27 (Sachkontenrahmen „03“/„04“)
+und die Berichte-Seite nennt ihn am Download. Die Kontenfunktionen (AM/AV sowie die
+Zusatzfunktionen KU/V/M) stehen in `data/kontenrahmen/datev_kontenfunktionen.csv`,
+erzeugt aus den DATEV-Kontenrahmen 2026 (Art.-Nr. 11174/11175) mit
+`tools/datev_kontenfunktionen.py`. Individuell eingerichtete Automatikkonten eines
+DATEV-Mandanten kennt der Export nicht.
+
+Noch offen: Export je Wirtschaftsjahr (das Belegdatum TTMM trägt kein Jahr, DATEV
+empfiehlt eine Datei je Buchungsperiode), Personenkonten (Debitoren/Kreditoren) und
+Golden-File-Tests. Der Export ist DATEV-kompatibel, aber nicht zertifiziert.
 
 ## Steuercodes (USt/VSt)
 
@@ -1434,7 +1462,9 @@ u. a. Kasse `1600`, Bank `1800`, Geldtransit `1460`, Forderungen aLuL `1200`,
 Verbindlichkeiten aLuL `3300`, Erlöse 19 %/7 % `4400`/`4300`, Gewinnvortrag `2970`.
 Automatiken finden ihre Funktionskonten (Geldtransit, Gewinnvortrag,
 Saldenvortrag, Vorauswahl von Bank- und Kreditorenkonto) in beiden
-Kontenrahmen (`app/services/standard_accounts.py`).
+Kontenrahmen (`app/services/standard_accounts.py`). Die dritte Datei im Ordner,
+`datev_kontenfunktionen.csv`, ist kein Kontenrahmen zum Import, sondern die Liste der
+DATEV-Kontenfunktionen für den DATEV-Export.
 
 ### Kontenrahmen-Prüfung und Altbestände aus dem SKR04-Import
 

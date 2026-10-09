@@ -69,7 +69,7 @@
         ·
         <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id, **report_args) }}">SuSa-Export (CSV, API-Format)</a>
         ·
-        <a href="{{ url_for('api.export_datev_csv', company_id=selected_company_id) }}">DATEV-Buchungsstapel (EXTF)</a>
+        <a href="{{ url_for('api.export_datev_csv', company_id=selected_company_id) }}" title="Brutto-Prinzip: Umsatz-/Vorsteuer über DATEV-Automatikkonten bzw. Steuerschlüssel">DATEV-Buchungsstapel (EXTF, {{ datev_chart|upper if datev_chart else 'Kontenrahmen nicht erkannt' }})</a>
         ·
         <a href="{{ url_for('api.export_audit_package', company_id=selected_company_id) }}">Prüferexport (ZIP)</a>
       </p>

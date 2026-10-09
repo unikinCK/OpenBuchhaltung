@@ -1,0 +1,562 @@
+kontenrahmen,von,bis,funktion,steuer,bezeichnung
+skr03,0600,0800,KU,,
+skr03,0809,0809,KU,,
+skr03,0819,0963,KU,,
+skr03,0968,0969,KU,,
+skr03,0987,0989,KU,,
+skr03,0996,0999,KU,,
+skr03,1000,1371,KU,,
+skr03,1372,1372,V,,
+skr03,1373,1509,KU,,
+skr03,1510,1512,V,,
+skr03,1511,1511,AV,7,"Geleistete Anzahlungen, 7 % Vorsteuer"
+skr03,1512,1512,AV,5,"Geleistete Anzahlungen, 5 % Vorsteuer"
+skr03,1513,1516,KU,,
+skr03,1517,1517,AV,16,"Geleistete Anzahlungen, 16 % Vorsteuer"
+skr03,1517,1518,V,,
+skr03,1518,1518,AV,19,"Geleistete Anzahlungen, 19 % Vorsteuer"
+skr03,1519,1709,KU,,
+skr03,1710,1712,M,,
+skr03,1711,1711,AM,7,"Erhaltene, versteuerte Anzahlungen 7 % USt (Verbindlichkeiten)"
+skr03,1712,1712,AM,5,"Erhaltene, versteuerte Anzahlungen 5 % USt (Verbindlichkeiten)"
+skr03,1713,1716,KU,,
+skr03,1714,1714,AM,frei,"Erhaltene, versteuerte Anzahlungen 0 % USt (Verbindlichkeiten)"
+skr03,1717,1717,AM,16,"Erhaltene, versteuerte Anzahlungen 16 % USt (Verbindlichkeiten)"
+skr03,1717,1724,M,,
+skr03,1718,1718,AM,19,"Erhaltene, versteuerte Anzahlungen 19 % USt (Verbindlichkeiten)"
+skr03,1725,1868,KU,,
+skr03,1869,1869,V,,
+skr03,1870,1878,KU,,
+skr03,1879,1879,M,,
+skr03,1880,1999,KU,,
+skr03,2310,2319,KU,,
+skr03,2350,2374,V,,
+skr03,2400,2409,M,,
+skr03,2401,2401,AM,7,Forderungsverluste 7 % USt (übliche Höhe)
+skr03,2402,2402,AM,frei,Forderungsverluste aus steuerfreien EU-Lieferungen (übliche Höhe)
+skr03,2403,2403,AM,7,Forderungsverluste aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt (übliche Höhe)
+skr03,2406,2406,AM,19,Forderungsverluste 19 % USt (übliche Höhe)
+skr03,2408,2408,AM,19,Forderungsverluste aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt (übliche Höhe)
+skr03,2430,2449,M,,
+skr03,2431,2431,AM,7,Forderungsverluste 7 % USt (soweit unüblich hoch)
+skr03,2436,2436,AM,19,Forderungsverluste 19 % USt (soweit unüblich hoch)
+skr03,2481,2481,KU,,
+skr03,2660,2669,KU,,
+skr03,2707,2712,M,,
+skr03,2715,2715,M,,
+skr03,2720,2722,M,,
+skr03,2725,2725,M,,
+skr03,2727,2729,KU,,
+skr03,2732,2734,M,,
+skr03,2736,2736,V,,
+skr03,2737,2741,KU,,
+skr03,2750,2752,M,,
+skr03,2751,2751,AM,frei,"Erlöse aus Vermietung und Verpachtung, umsatzsteuerfrei § 4 Nr. 12 UStG"
+skr03,2752,2752,AM,19,Erlöse aus Vermietung und Verpachtung 19 % USt
+skr03,2841,2841,KU,,
+skr03,2865,2865,KU,,
+skr03,2867,2867,KU,,
+skr03,3000,3028,V,,
+skr03,3010,3019,AV,7,"Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr03,3029,3029,KU,,
+skr03,3030,3039,AV,19,"Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr03,3030,3106,V,,
+skr03,3060,3060,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr03,3062,3063,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3066,3066,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb ohne Vorsteuer und 7 % Umsatzsteuer"
+skr03,3067,3067,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb ohne Vorsteuer und 19 % Umsatzsteuer"
+skr03,3070,3070,AV,5.5,"Einkauf Roh-, Hilfs- und Betriebsstoffe 5,5 % Vorsteuer"
+skr03,3071,3071,AV,7.8,"Einkauf Roh-, Hilfs- und Betriebsstoffe 7,8 % Vorsteuer"
+skr03,3075,3075,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe aus einem USt-Lager § 13a UStG 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr03,3076,3076,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe aus einem USt-Lager § 13a UStG 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3089,3089,AV,sonder,"Erwerb Roh-, Hilfs- und Betriebsstoffe als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3091,3091,AV,7,Energiestoffe (Fertigung) 7 % VSt
+skr03,3092,3092,AV,19,Energiestoffe (Fertigung) 19 % VSt
+skr03,3106,3106,AV,19,Fremdleistungen 19 % Vorsteuer
+skr03,3107,3107,KU,,
+skr03,3108,3108,AV,7,Fremdleistungen 7 % Vorsteuer
+skr03,3108,3108,V,,
+skr03,3109,3109,KU,,
+skr03,3110,3110,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3110,3348,V,,
+skr03,3113,3113,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3115,3115,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3120,3121,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3123,3123,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3125,3126,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3130,3130,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr03,3133,3133,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr03,3135,3135,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr03,3140,3141,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr03,3143,3143,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr03,3145,3146,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr03,3150,3150,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird"
+skr03,3151,3151,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3153,3153,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird ohne Vorsteuer aber mit Umsatzsteuer"
+skr03,3154,3154,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird ohne Vorsteuer, mit 19 % Umsatzsteuer"
+skr03,3300,3309,AV,7,Wareneingang 7 % Vorsteuer
+skr03,3347,3347,AV,7,Wareneingang 7 % Vorsteuer
+skr03,3349,3349,KU,,
+skr03,3350,3599,V,,
+skr03,3400,3409,AV,19,Wareneingang 19 % Vorsteuer
+skr03,3418,3418,AV,19,Wareneingang 19 % Vorsteuer
+skr03,3420,3424,AV,sonder,Innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3425,3429,AV,sonder,Innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3430,3430,AV,sonder,Innergemeinschaftlicher Erwerb ohne Vorsteuer und 7 % Umsatzsteuer
+skr03,3435,3435,AV,sonder,Innergemeinschaftlicher Erwerb ohne Vorsteuer und 19 % Umsatzsteuer
+skr03,3440,3440,AV,sonder,Innergemeinschaftlicher Erwerb von Neufahrzeugen von Lieferanten ohne USt-Id-Nr. 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3505,3509,AV,5.5,"Wareneingang 5,5 % Vorsteuer"
+skr03,3540,3549,AV,7.8,"Wareneingang zum Durchschnittssatz nach § 24 UStG 7,8 % Vorsteuer"
+skr03,3550,3550,AV,frei,Steuerfreier innergemeinschaftlicher Erwerb
+skr03,3552,3552,AV,sonder,Erwerb 1. Abnehmer innerhalb eines Dreiecksgeschäftes
+skr03,3553,3553,AV,sonder,Erwerb Waren als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3560,3560,AV,sonder,"Waren aus einem Umsatzsteuerlager, § 13a UStG 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr03,3565,3565,AV,sonder,"Waren aus einem Umsatzsteuerlager, § 13a UStG 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3700,3949,V,,
+skr03,3710,3711,AV,7,Nachlässe 7 % Vorsteuer
+skr03,3714,3714,AV,7,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr03,3715,3715,AV,19,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr03,3717,3717,AV,sonder,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr03,3718,3718,AV,sonder,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3720,3721,AV,19,Nachlässe 19 % Vorsteuer
+skr03,3724,3724,AV,sonder,Nachlässe aus innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3725,3725,AV,sonder,Nachlässe aus innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3730,3730,AV,sonder,Erhaltene Skonti
+skr03,3731,3731,AV,7,Erhaltene Skonti 7 % Vorsteuer
+skr03,3733,3733,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe"
+skr03,3734,3734,AV,7,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr03,3736,3736,AV,19,Erhaltene Skonti 19 % Vorsteuer
+skr03,3738,3738,AV,19,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr03,3741,3741,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3743,3743,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr03,3744,3744,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb"
+skr03,3745,3745,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb
+skr03,3746,3746,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr03,3748,3748,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3750,3751,AV,7,Erhaltene Boni 7 % Vorsteuer
+skr03,3754,3754,AV,7,"Erhaltene Boni aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr03,3755,3755,AV,19,"Erhaltene Boni aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr03,3760,3761,AV,19,Erhaltene Boni 19 % Vorsteuer
+skr03,3780,3781,AV,7,Erhaltene Rabatte 7 % Vorsteuer
+skr03,3784,3784,AV,7,"Erhaltene Rabatte aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr03,3785,3785,AV,19,"Erhaltene Rabatte aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr03,3787,3787,AV,9,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 9,0 % Vorsteuer"
+skr03,3790,3791,AV,19,Erhaltene Rabatte 19 % Vorsteuer
+skr03,3792,3792,AV,sonder,"Erhaltene Skonti aus Erwerb Roh-, Hilfs- und Betriebsstoffe als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr03,3793,3793,AV,sonder,Erhaltene Skonti aus Erwerb Waren als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer
+skr03,3794,3794,AV,5.5,"Erhaltene Skonti 5,5 % Vorsteuer"
+skr03,3795,3795,AV,9,"Erhaltene Skonti 9,0 % Vorsteuer"
+skr03,3798,3798,AV,5.5,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 5,5 % Vorsteuer"
+skr03,3950,3999,KU,,
+skr03,4000,4099,V,,
+skr03,4200,4299,V,,
+skr03,4400,4509,V,,
+skr03,4510,4519,KU,,
+skr03,4520,4821,V,,
+skr03,4900,4983,V,,
+skr03,4985,4989,V,,
+skr03,7000,7999,KU,,
+skr03,8000,8191,M,,
+skr03,8100,8104,AM,frei,Steuerfreie Umsätze § 4 Nr. 8 ff. UStG
+skr03,8105,8105,AM,frei,Steuerfreie Umsätze nach § 4 Nr. 12 UStG (Vermietung und Verpachtung)
+skr03,8110,8110,AM,frei,Sonstige steuerfreie Umsätze Inland
+skr03,8120,8120,AM,frei,Steuerfreie Umsätze nach § 4 Nr. 1a UStG
+skr03,8125,8125,AM,frei,Steuerfreie innergemeinschaftliche Lieferungen nach § 4 Nr. 1b UStG
+skr03,8130,8130,AM,frei,Lieferungen des ersten Abnehmers bei innergemeinschaftlichen Dreiecksgeschäften § 25b Abs. 2 UStG
+skr03,8135,8135,AM,frei,Steuerfreie innergemeinschaftliche Lieferungen von Neufahrzeugen an Abnehmer ohne USt-Id-Nr.
+skr03,8140,8140,AM,frei,Steuerfreie Umsätze Offshore usw.
+skr03,8150,8150,AM,frei,Sonstige steuerfreie Umsätze (z. B. § 4 Nr. 2 bis 7 UStG)
+skr03,8160,8160,AM,frei,"Steuerfreie Umsätze ohne Vorsteuerabzug zum Gesamtumsatz gehörend, § 4 UStG"
+skr03,8165,8165,AM,frei,Steuerfreie Umsätze ohne Vorsteuerabzug zum Gesamtumsatz gehörend
+skr03,8191,8191,AM,19,Umsatzerlöse nach §§ 25 und 25a UStG 19 % USt
+skr03,8192,8192,AM,frei,Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG
+skr03,8192,8193,KU,,
+skr03,8194,8194,AM,frei,"Umsatzerlöse aus Reiseleistungen § 25 Abs. 2 UStG, steuerfrei"
+skr03,8194,8603,M,,
+skr03,8198,8198,AM,19,Umsatzerlöse nach § 25 UStG 19 % USt
+skr03,8199,8199,AM,19,Umsatzerlöse nach § 25a UStG 19 % USt
+skr03,8290,8290,AM,frei,Erlöse 0 % USt
+skr03,8300,8309,AM,7,Erlöse 7 % USt
+skr03,8310,8314,AM,7,Erlöse aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr03,8315,8319,AM,19,Erlöse aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr03,8334,8334,AM,7,Erlöse 7 % USt
+skr03,8335,8335,AM,frei,"Erlöse aus Lieferungen von Mobilfunkgeräten, Tablet-Computern, Spielekonsolen und integrierten Schaltkreisen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr03,8336,8336,AM,frei,"Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet"
+skr03,8337,8337,AM,frei,"Erlöse aus Leistungen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr03,8338,8338,AM,frei,"Erlöse aus im Drittland steuerbaren Leistungen, im Inland nicht steuerbare Umsätze"
+skr03,8339,8339,AM,frei,"Erlöse aus im anderen EU-Land steuerbaren Leistungen, im Inland nicht steuerbare Umsätze"
+skr03,8340,8349,AM,16,Erlöse 16 % USt
+skr03,8400,8409,AM,19,Erlöse 19 % USt
+skr03,8410,8419,AM,19,Erlöse 19 % USt
+skr03,8449,8449,AM,19,Erlöse aus im Inland steuerpflichtigen elektronischen Dienstleistungen 19 % USt
+skr03,8514,8514,AM,frei,"Provisionsumsätze, steuerfrei § 4 Nr. 8 ff. UStG"
+skr03,8515,8515,AM,frei,"Provisionsumsätze, steuerfrei § 4 Nr. 5 UStG"
+skr03,8519,8519,AM,19,Provisionsumsätze 19 % USt
+skr03,8591,8591,AM,7,Sachbezüge 7 % USt (Waren)
+skr03,8595,8595,AM,19,Sachbezüge 19 % USt (Waren)
+skr03,8604,8604,KU,,
+skr03,8605,8613,M,,
+skr03,8609,8609,AM,frei,"Sonstige Erträge betrieblich und regelmäßig, steuerfrei § 4 Nr. 8 ff. UStG"
+skr03,8611,8611,AM,19,Verrechnete sonstige Sachbezüge aus Fahrzeug-Gestellung 19 % USt
+skr03,8613,8613,AM,19,Verrechnete sonstige Sachbezüge 19 % USt
+skr03,8614,8614,KU,,
+skr03,8615,8904,M,,
+skr03,8625,8629,AM,frei,"Sonstige betriebliche Erträge, steuerfrei z. B. § 4 Nr. 2 bis 7 UStG"
+skr03,8630,8634,AM,7,Sonstige Erträge betrieblich und regelmäßig 7 % USt
+skr03,8640,8644,AM,19,Sonstige Erträge betrieblich und regelmäßig 19 % USt
+skr03,8649,8649,AM,16,Sonstige Erträge betrieblich und regelmäßig 16 % USt
+skr03,8701,8701,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 4 Nr. 8 ff. UStG
+skr03,8702,8702,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 4 Nr. 2 bis 7 UStG
+skr03,8703,8703,AM,frei,Erlösschmälerungen für sonstige steuerfreie Umsätze ohne Vorsteuerabzug
+skr03,8704,8704,AM,frei,Erlösschmälerungen für sonstige steuerfreie Umsätze mit Vorsteuerabzug
+skr03,8705,8705,AM,frei,Erlösschmälerungen aus steuerfreien Umsätzen § 4 Nr. 1a UStG
+skr03,8706,8706,AM,frei,Erlösschmälerungen für steuerfreie innergemeinschaftliche Dreiecksgeschäfte nach § 25b Abs. 2 und 4 UStG
+skr03,8707,8707,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 19 Abs. 1 UStG
+skr03,8708,8708,AM,19,Erlösschmälerungen für Umsätze nach § 25 UStG 19 % USt
+skr03,8709,8709,AM,19,Erlösschmälerungen für Umsätze nach § 25a UStG 19 % USt
+skr03,8710,8711,AM,7,Erlösschmälerungen 7 % USt
+skr03,8719,8719,AM,frei,Erlösschmälerungen 0 % USt
+skr03,8720,8721,AM,19,Erlösschmälerungen 19 % USt
+skr03,8724,8724,AM,frei,Erlösschmälerungen aus steuerfreien innergemeinschaftlichen Lieferungen
+skr03,8725,8725,AM,7,Erlösschmälerungen aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr03,8726,8726,AM,19,Erlösschmälerungen aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr03,8730,8730,AM,sonder,Gewährte Skonti
+skr03,8731,8731,AM,7,Gewährte Skonti 7 % USt
+skr03,8734,8734,AM,frei,Gewährte Skonti 0 % USt
+skr03,8736,8736,AM,19,Gewährte Skonti 19 % USt
+skr03,8738,8738,AM,frei,"Gewährte Skonti aus Lieferungen von Mobilfunkgeräten etc., für die der Leistungsempfänger die Umsatzsteuer nach § 13b Abs. 2 Nr. 10 UStG schuldet"
+skr03,8741,8741,AM,frei,"Gewährte Skonti aus Leistungen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr03,8742,8742,AM,frei,"Gewährte Skonti aus Erlösen aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet"
+skr03,8743,8743,AM,frei,Gewährte Skonti aus steuerfreien innergemeinschaftlichen Lieferungen § 4 Nr. 1b UStG
+skr03,8745,8745,AM,sonder,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen
+skr03,8746,8746,AM,7,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr03,8748,8748,AM,19,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr03,8750,8751,AM,7,Gewährte Boni 7 % USt
+skr03,8760,8761,AM,19,Gewährte Boni 19 % USt
+skr03,8780,8781,AM,7,Gewährte Rabatte 7 % USt
+skr03,8790,8791,AM,19,Gewährte Rabatte 19 % USt
+skr03,8801,8806,AM,19,Erlöse aus Verkäufen Sachanlagevermögen 19 % USt (bei Buchverlust)
+skr03,8807,8807,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1a UStG (bei Buchverlust)
+skr03,8808,8808,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1b UStG (bei Buchverlust)
+skr03,8820,8825,AM,19,Erlöse aus Verkäufen Sachanlagevermögen 19 % USt (bei Buchgewinn)
+skr03,8827,8827,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1a UStG (bei Buchgewinn)
+skr03,8828,8828,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1b UStG (bei Buchgewinn)
+skr03,8850,8850,AM,19,Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens 19 % USt für § 4 Abs. 3 Satz 4 EStG
+skr03,8851,8851,AM,frei,"Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens, umsatzsteuerfrei § 4 Nr. 8 ff. UStG i. V. m. § 4 Abs. 3 Satz 4 EStG"
+skr03,8852,8852,AM,frei,"Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens, umsatzsteuerfrei § 4 Nr. 8 ff. UStG i. V. m. § 4 Abs. 3 Satz 4 EStG und § 3 Nr. 40 EStG bzw. § 8b Abs. 2 KStG"
+skr03,8905,8906,KU,,
+skr03,8907,8917,M,,
+skr03,8910,8913,AM,19,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 19 % USt
+skr03,8915,8916,AM,7,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 7 % USt
+skr03,8917,8917,AM,7,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 7 % USt
+skr03,8918,8919,KU,,
+skr03,8920,8920,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt
+skr03,8920,8923,M,,
+skr03,8921,8921,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt (Fahrzeug-Nutzung)
+skr03,8922,8922,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt (Telefon-Nutzung)
+skr03,8924,8924,KU,,
+skr03,8925,8927,AM,19,Unentgeltliche Erbringung einer sonstigen Leistung 19 % USt
+skr03,8925,8928,M,,
+skr03,8929,8929,KU,,
+skr03,8930,8930,AM,7,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 7 % USt
+skr03,8930,8938,M,,
+skr03,8931,8931,AM,7,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 7 % USt
+skr03,8932,8932,AM,7,Unentgeltliche Erbringung einer sonstigen Leistung 7 % USt
+skr03,8933,8933,AM,7,Unentgeltliche Erbringung einer sonstigen Leistung 7 % USt
+skr03,8935,8937,AM,19,Unentgeltliche Zuwendung von Gegenständen 19 % USt
+skr03,8939,8939,KU,,
+skr03,8940,8943,AM,19,Unentgeltliche Zuwendung von Waren 19 % USt
+skr03,8940,8948,M,,
+skr03,8945,8946,AM,7,Unentgeltliche Zuwendung von Waren 7 % USt
+skr03,8947,8947,AM,7,Unentgeltliche Zuwendung von Waren 7 % USt
+skr03,8949,8999,KU,,
+skr03,9000,9998,KU,,
+skr04,0050,0089,KU,,
+skr04,1000,1179,KU,,
+skr04,1180,1189,V,,
+skr04,1181,1181,AV,7,Geleistete Anzahlungen 7 % Vorsteuer
+skr04,1182,1182,AV,5,"Geleistete Anzahlungen, 5 % Vorsteuer"
+skr04,1184,1184,AV,16,"Geleistete Anzahlungen, 16 % Vorsteuer"
+skr04,1186,1186,AV,19,Geleistete Anzahlungen 19 % Vorsteuer
+skr04,1190,1199,M,,
+skr04,1200,1486,KU,,
+skr04,1487,1487,V,,
+skr04,1488,1899,KU,,
+skr04,2000,2308,KU,,
+skr04,2309,2309,V,,
+skr04,2310,2318,KU,,
+skr04,2319,2319,V,,
+skr04,2320,2328,KU,,
+skr04,2329,2329,V,,
+skr04,2330,2338,KU,,
+skr04,2339,2339,V,,
+skr04,2340,2348,KU,,
+skr04,2349,2349,V,,
+skr04,2350,2358,KU,,
+skr04,2359,2359,M,,
+skr04,2360,2368,KU,,
+skr04,2369,2369,M,,
+skr04,2370,2378,KU,,
+skr04,2379,2379,M,,
+skr04,2380,2388,KU,,
+skr04,2389,2389,M,,
+skr04,2390,2398,KU,,
+skr04,2399,2399,M,,
+skr04,2400,2900,KU,,
+skr04,2908,2999,KU,,
+skr04,3000,3069,KU,,
+skr04,3079,3084,KU,,
+skr04,3100,3249,KU,,
+skr04,3250,3299,M,,
+skr04,3260,3260,AM,7,"Erhaltene, versteuerte Anzahlungen 7 % USt (Verbindlichkeiten)"
+skr04,3261,3261,AM,5,"Erhaltene, versteuerte Anzahlungen 5 % USt (Verbindlichkeiten)"
+skr04,3264,3264,AM,frei,"Erhaltene, versteuerte Anzahlungen 0 % USt (Verbindlichkeiten)"
+skr04,3270,3270,AM,16,"Erhaltene, versteuerte Anzahlungen 16 % USt (Verbindlichkeiten)"
+skr04,3272,3272,AM,19,"Erhaltene, versteuerte Anzahlungen 19 % USt (Verbindlichkeiten)"
+skr04,3300,3899,KU,,
+skr04,4000,4136,M,,
+skr04,4100,4104,AM,frei,Steuerfreie Umsätze § 4 Nr. 8 ff. UStG
+skr04,4105,4105,AM,frei,Steuerfreie Umsätze nach § 4 Nr. 12 UStG (Vermietung und Verpachtung)
+skr04,4110,4110,AM,frei,Sonstige steuerfreie Umsätze Inland
+skr04,4120,4120,AM,frei,Steuerfreie Umsätze nach § 4 Nr. 1a UStG
+skr04,4125,4125,AM,frei,Steuerfreie innergemeinschaftliche Lieferungen nach § 4 Nr. 1b UStG
+skr04,4130,4130,AM,frei,Lieferungen des ersten Abnehmers bei innergemeinschaftlichen Dreiecksgeschäften § 25b Abs. 2 UStG
+skr04,4133,4133,AM,19,Umsatzerlöse nach § 25 UStG 19 % USt
+skr04,4134,4134,AM,19,Umsatzerlöse nach § 25a UStG 19 % USt
+skr04,4135,4135,AM,frei,Steuerfreie innergemeinschaftliche Lieferungen von Neufahrzeugen an Abnehmer ohne Umsatzsteuer-Identifikationsnummer
+skr04,4136,4136,AM,19,Umsatzerlöse nach §§ 25 und 25a UStG 19 % USt
+skr04,4137,4138,KU,,
+skr04,4139,4139,AM,frei,"Umsatzerlöse aus Reiseleistungen § 25 Abs. 2 UStG, steuerfrei"
+skr04,4139,4604,M,,
+skr04,4140,4140,AM,frei,Steuerfreie Umsätze Offshore etc.
+skr04,4150,4150,AM,frei,Sonstige steuerfreie Umsätze (z. B. § 4 Nr. 2 bis 7 UStG)
+skr04,4160,4160,AM,frei,"Steuerfreie Umsätze ohne Vorsteuerabzug zum Gesamtumsatz gehörend, § 4 UStG"
+skr04,4165,4165,AM,frei,Steuerfreie Umsätze ohne Vorsteuerabzug zum Gesamtumsatz gehörend
+skr04,4184,4184,AM,frei,Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG
+skr04,4290,4290,AM,frei,Erlöse 0 % USt
+skr04,4300,4309,AM,7,Erlöse 7 % USt
+skr04,4310,4314,AM,7,Erlöse aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr04,4315,4319,AM,19,Erlöse aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr04,4334,4334,AM,7,Erlöse 7 % USt
+skr04,4335,4335,AM,frei,"Erlöse aus Lieferungen von Mobilfunkgeräten, Tablet-Computern, Spielekonsolen und integrierten Schaltkreisen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr04,4336,4336,AM,frei,"Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet"
+skr04,4337,4337,AM,frei,"Erlöse aus Leistungen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr04,4338,4338,AM,frei,"Erlöse aus im Drittland steuerbaren Leistungen, im Inland nicht steuerbare Umsätze"
+skr04,4339,4339,AM,frei,"Erlöse aus im anderen EU-Land steuerbaren Leistungen, im Inland nicht steuerbare Umsätze"
+skr04,4340,4349,AM,16,Erlöse 16 % USt
+skr04,4400,4409,AM,19,Erlöse 19 % USt
+skr04,4410,4419,AM,19,Erlöse 19 % USt
+skr04,4449,4449,AM,19,Erlöse aus im Inland steuerpflichtigen elektronischen Dienstleistungen 19 % USt
+skr04,4564,4564,AM,frei,"Provisionsumsätze, steuerfrei § 4 Nr. 8 ff. UStG"
+skr04,4565,4565,AM,frei,"Provisionsumsätze, steuerfrei § 4 Nr. 5 UStG"
+skr04,4569,4569,AM,19,Provisionsumsätze 19 % USt
+skr04,4605,4605,KU,,
+skr04,4606,4618,M,,
+skr04,4610,4615,AM,7,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 7 % USt
+skr04,4616,4616,AM,7,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 7 % USt
+skr04,4619,4619,KU,,
+skr04,4620,4626,AM,19,Entnahme durch den Unternehmer für Zwecke außerhalb des Unternehmens (Waren) 19 % USt
+skr04,4620,4636,M,,
+skr04,4630,4635,AM,7,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 7 % USt
+skr04,4636,4636,AM,7,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 7 % USt
+skr04,4637,4639,KU,,
+skr04,4640,4644,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt
+skr04,4640,4658,M,,
+skr04,4645,4645,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt (Fahrzeug-Nutzung)
+skr04,4646,4646,AM,19,Verwendung von Gegenständen für Zwecke außerhalb des Unternehmens 19 % USt (Telefon-Nutzung)
+skr04,4650,4655,AM,7,Unentgeltliche Erbringung einer sonstigen Leistung 7 % USt
+skr04,4656,4656,AM,7,Unentgeltliche Erbringung einer sonstigen Leistung 7 % USt
+skr04,4659,4659,KU,,
+skr04,4660,4666,AM,19,Unentgeltliche Erbringung einer sonstigen Leistung 19 % USt
+skr04,4660,4678,M,,
+skr04,4670,4675,AM,7,Unentgeltliche Zuwendung von Waren 7 % USt
+skr04,4676,4676,AM,7,Unentgeltliche Zuwendung von Waren 7 % USt
+skr04,4679,4679,KU,,
+skr04,4680,4684,AM,19,Unentgeltliche Zuwendung von Waren 19 % USt
+skr04,4680,4688,M,,
+skr04,4686,4687,AM,19,Unentgeltliche Zuwendung von Gegenständen 19 % USt
+skr04,4689,4699,KU,,
+skr04,4700,4799,M,,
+skr04,4701,4701,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 4 Nr. 8 ff. UStG
+skr04,4702,4702,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 4 Nr. 2 bis 7 UStG
+skr04,4703,4703,AM,frei,Erlösschmälerungen für sonstige steuerfreie Umsätze ohne Vorsteuerabzug
+skr04,4704,4704,AM,frei,Erlösschmälerungen für sonstige steuerfreie Umsätze mit Vorsteuerabzug
+skr04,4705,4705,AM,frei,Erlösschmälerungen aus steuerfreien Umsätzen § 4 Nr. 1a UStG
+skr04,4706,4706,AM,frei,Erlösschmälerungen für steuerfreie innergemeinschaftliche Dreiecksgeschäfte nach § 25b Abs. 2 und 4 UStG
+skr04,4707,4707,AM,frei,Erlösschmälerungen für steuerfreie Umsätze nach § 19 Abs. 1 UStG
+skr04,4708,4708,AM,19,Erlösschmälerungen für Umsätze nach § 25 UStG 19 % USt
+skr04,4709,4709,AM,19,Erlösschmälerungen für Umsätze nach § 25a UStG 19 % USt
+skr04,4710,4711,AM,7,Erlösschmälerungen 7 % USt
+skr04,4719,4719,AM,frei,Erlösschmälerungen 0 % USt
+skr04,4720,4721,AM,19,Erlösschmälerungen 19 % USt
+skr04,4724,4724,AM,frei,Erlösschmälerungen aus steuerfreien innergemeinschaftlichen Lieferungen
+skr04,4725,4725,AM,7,Erlösschmälerungen aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr04,4726,4726,AM,19,Erlösschmälerungen aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr04,4730,4730,AM,sonder,Gewährte Skonti
+skr04,4731,4731,AM,7,Gewährte Skonti 7 % USt
+skr04,4734,4734,AM,frei,Gewährte Skonti 0 % USt
+skr04,4736,4736,AM,19,Gewährte Skonti 19 % USt
+skr04,4738,4738,AM,frei,"Gewährte Skonti aus Lieferungen von Mobilfunkgeräten etc., für die der Leistungsempfänger die Umsatzsteuer nach § 13b Abs. 2 Nr. 10 UStG schuldet"
+skr04,4741,4741,AM,frei,"Gewährte Skonti aus Leistungen, für die der Leistungsempfänger die Umsatzsteuer nach § 13b UStG schuldet"
+skr04,4742,4742,AM,frei,"Gewährte Skonti aus Erlösen aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet"
+skr04,4743,4743,AM,frei,Gewährte Skonti aus steuerfreien innergemeinschaftlichen Lieferungen § 4 Nr. 1b UStG
+skr04,4745,4745,AM,sonder,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen
+skr04,4746,4746,AM,7,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt
+skr04,4748,4748,AM,19,Gewährte Skonti aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt
+skr04,4750,4751,AM,7,Gewährte Boni 7 % USt
+skr04,4760,4761,AM,19,Gewährte Boni 19 % USt
+skr04,4780,4781,AM,7,Gewährte Rabatte 7 % USt
+skr04,4790,4791,AM,19,Gewährte Rabatte 19 % USt
+skr04,4800,4829,KU,,
+skr04,4830,4837,M,,
+skr04,4834,4834,AM,16,Sonstige Erträge betrieblich und regelmäßig 16 % USt
+skr04,4836,4836,AM,19,Sonstige Erträge betrieblich und regelmäßig 19 % USt
+skr04,4838,4838,KU,,
+skr04,4839,4839,M,,
+skr04,4840,4840,KU,,
+skr04,4841,4841,AM,frei,"Sonstige Erträge betrieblich und regelmäßig, steuerfrei § 4 Nr. 8 ff. UStG"
+skr04,4841,4842,M,,
+skr04,4842,4842,AM,frei,"Sonstige betriebliche Erträge, steuerfrei z. B. § 4 Nr. 2 bis 7 UStG"
+skr04,4843,4843,KU,,
+skr04,4844,4844,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1a UStG (bei Buchgewinn)
+skr04,4844,4845,M,,
+skr04,4845,4845,AM,19,Erlöse aus Verkäufen Sachanlagevermögen 19 % USt (bei Buchgewinn)
+skr04,4846,4847,KU,,
+skr04,4848,4848,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1b UStG (bei Buchgewinn)
+skr04,4848,4854,M,,
+skr04,4855,4859,KU,,
+skr04,4860,4900,M,,
+skr04,4861,4861,AM,frei,"Erlöse aus Vermietung und Verpachtung, umsatzsteuerfrei § 4 Nr. 12 UStG"
+skr04,4862,4862,AM,19,Erlöse aus Vermietung und Verpachtung 19 % USt
+skr04,4865,4865,AM,19,Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens 19 % USt für § 4 Abs. 3 Satz 4 EStG
+skr04,4866,4866,AM,frei,"Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens, umsatzsteuerfrei § 4 Nr. 8 ff. UStG i. V. m. § 4 Abs. 3 Satz 4 EStG"
+skr04,4867,4867,AM,frei,"Erlöse aus Verkäufen von Wirtschaftsgütern des Umlaufvermögens, umsatzsteuerfrei § 4 Nr. 8 ff. UStG i. V. m. § 4 Abs. 3 Satz 4 EStG, § 3 Nr. 40 EStG bzw. § 8b Abs. 2 KStG"
+skr04,4905,4905,M,,
+skr04,4910,4912,M,,
+skr04,4915,4915,M,,
+skr04,4924,4926,M,,
+skr04,4927,4929,KU,,
+skr04,4932,4934,V,,
+skr04,4935,4939,KU,,
+skr04,4940,4948,M,,
+skr04,4941,4941,AM,7,Sachbezüge 7 % USt (Waren)
+skr04,4945,4945,AM,19,Sachbezüge 19 % USt (Waren)
+skr04,4947,4947,AM,19,Verrechnete sonstige Sachbezüge aus Fahrzeug-Gestellung 19 % USt
+skr04,4948,4948,AM,19,Verrechnete sonstige Sachbezüge 19 % USt
+skr04,4949,4949,KU,,
+skr04,4950,4959,M,,
+skr04,5000,5348,V,,
+skr04,5110,5119,AV,7,"Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr04,5130,5139,AV,19,"Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr04,5160,5160,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr04,5162,5163,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5166,5166,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb ohne Vorsteuer und 7 % Umsatzsteuer"
+skr04,5167,5167,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb ohne Vorsteuer und 19 % Umsatzsteuer"
+skr04,5170,5170,AV,5.5,"Einkauf Roh-, Hilfs- und Betriebsstoffe 5,5 % Vorsteuer"
+skr04,5171,5171,AV,7.8,"Einkauf Roh-, Hilfs- und Betriebsstoffe 7,8 % Vorsteuer"
+skr04,5175,5175,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe aus einem USt-Lager § 13a UStG 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr04,5176,5176,AV,sonder,"Einkauf Roh-, Hilfs- und Betriebsstoffe aus einem USt-Lager § 13a UStG 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5189,5189,AV,sonder,"Erwerb Roh-, Hilfs- und Betriebsstoffe als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5191,5191,AV,7,Energiestoffe (Fertigung) 7 % Vorsteuer
+skr04,5192,5192,AV,19,Energiestoffe (Fertigung) 19 % Vorsteuer
+skr04,5300,5309,AV,7,Wareneingang 7 % Vorsteuer
+skr04,5347,5347,AV,7,Wareneingang 7 % Vorsteuer
+skr04,5349,5349,KU,,
+skr04,5350,5599,V,,
+skr04,5400,5409,AV,19,Wareneingang 19 % Vorsteuer
+skr04,5418,5418,AV,19,Wareneingang 19 % Vorsteuer
+skr04,5420,5424,AV,sonder,Innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5425,5429,AV,sonder,Innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5430,5430,AV,sonder,Innergemeinschaftlicher Erwerb ohne Vorsteuer und 7 % Umsatzsteuer
+skr04,5435,5435,AV,sonder,Innergemeinschaftlicher Erwerb ohne Vorsteuer und 19 % Umsatzsteuer
+skr04,5440,5440,AV,sonder,Innergemeinschaftlicher Erwerb von Neufahrzeugen von Lieferanten ohne Umsatzsteuer-Identifikationsnummer 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5505,5509,AV,5.5,"Wareneingang 5,5 % Vorsteuer"
+skr04,5540,5549,AV,7.8,"Wareneingang zum Durchschnittssatz nach § 24 UStG 7,8 % Vorsteuer"
+skr04,5550,5550,AV,frei,Steuerfreier innergemeinschaftlicher Erwerb
+skr04,5552,5552,AV,sonder,Erwerb 1. Abnehmer innerhalb eines Dreiecksgeschäftes
+skr04,5553,5553,AV,sonder,Erwerb Waren als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5560,5560,AV,sonder,"Waren aus einem Umsatzsteuerlager, § 13a UStG 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr04,5565,5565,AV,sonder,"Waren aus einem Umsatzsteuerlager, § 13a UStG 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5700,5859,V,,
+skr04,5710,5711,AV,7,Nachlässe 7 % Vorsteuer
+skr04,5714,5714,AV,7,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr04,5715,5715,AV,19,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr04,5717,5717,AV,sonder,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr04,5718,5718,AV,sonder,"Nachlässe aus Einkauf Roh-, Hilfs- und Betriebsstoffe, innergemeinschaftlicher Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5720,5721,AV,19,Nachlässe 19 % Vorsteuer
+skr04,5724,5724,AV,sonder,Nachlässe aus innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5725,5725,AV,sonder,Nachlässe aus innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5730,5730,AV,sonder,Erhaltene Skonti
+skr04,5731,5731,AV,7,Erhaltene Skonti 7 % Vorsteuer
+skr04,5733,5733,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe"
+skr04,5734,5734,AV,7,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr04,5736,5736,AV,19,Erhaltene Skonti 19 % Vorsteuer
+skr04,5738,5738,AV,19,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr04,5741,5741,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5743,5743,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer"
+skr04,5744,5744,AV,sonder,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe aus steuerpflichtigem innergemeinschaftlichem Erwerb"
+skr04,5745,5745,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb
+skr04,5746,5746,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5748,5748,AV,sonder,Erhaltene Skonti aus steuerpflichtigem innergemeinschaftlichem Erwerb 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5750,5751,AV,7,Erhaltene Boni 7 % Vorsteuer
+skr04,5754,5754,AV,7,"Erhaltene Boni aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr04,5755,5755,AV,19,"Erhaltene Boni aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr04,5760,5761,AV,19,Erhaltene Boni 19 % Vorsteuer
+skr04,5780,5781,AV,7,Erhaltene Rabatte 7 % Vorsteuer
+skr04,5784,5784,AV,7,"Erhaltene Rabatte aus Einkauf Roh-, Hilfs- und Betriebsstoffe 7 % Vorsteuer"
+skr04,5785,5785,AV,19,"Erhaltene Rabatte aus Einkauf Roh-, Hilfs- und Betriebsstoffe 19 % Vorsteuer"
+skr04,5787,5787,AV,9,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 9,0 % Vorsteuer"
+skr04,5790,5791,AV,19,Erhaltene Rabatte 19 % Vorsteuer
+skr04,5792,5792,AV,sonder,"Erhaltene Skonti aus Erwerb Roh-, Hilfs- und Betriebsstoffe als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5793,5793,AV,sonder,Erhaltene Skonti aus Erwerb Waren als letzter Abnehmer innerhalb Dreiecksgeschäft 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5794,5794,AV,5.5,"Erhaltene Skonti 5,5 % Vorsteuer"
+skr04,5795,5795,AV,9,"Erhaltene Skonti 9,0 % Vorsteuer"
+skr04,5798,5798,AV,5.5,"Erhaltene Skonti aus Einkauf Roh-, Hilfs- und Betriebsstoffe 5,5 % Vorsteuer"
+skr04,5860,5899,KU,,
+skr04,5900,5906,V,,
+skr04,5906,5906,AV,19,Fremdleistungen 19 % Vorsteuer
+skr04,5907,5908,KU,,
+skr04,5908,5908,AV,7,Fremdleistungen 7 % Vorsteuer
+skr04,5909,5909,KU,,
+skr04,5910,5910,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5910,5999,V,,
+skr04,5913,5913,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5915,5915,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers 7 % Vorsteuer und 7 % Umsatzsteuer
+skr04,5920,5921,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5923,5923,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5925,5926,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers 19 % Vorsteuer und 19 % Umsatzsteuer
+skr04,5930,5930,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr04,5933,5933,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr04,5935,5935,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers ohne Vorsteuer und 7 % Umsatzsteuer
+skr04,5940,5941,AV,sonder,Bauleistungen eines im Inland ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr04,5943,5943,AV,sonder,Sonstige Leistungen eines im anderen EU-Land ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr04,5945,5946,AV,sonder,Leistungen eines im Ausland ansässigen Unternehmers ohne Vorsteuer und 19 % Umsatzsteuer
+skr04,5950,5950,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird"
+skr04,5951,5951,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird 19 % Vorsteuer und 19 % Umsatzsteuer"
+skr04,5953,5953,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird ohne Vorsteuer aber mit Umsatzsteuer"
+skr04,5954,5954,AV,sonder,"Erhaltene Skonti aus Leistungen, für die als Leistungsempfänger die Steuer nach § 13b UStG geschuldet wird ohne Vorsteuer, mit 19 % Umsatzsteuer"
+skr04,6250,6259,V,,
+skr04,6280,6299,M,,
+skr04,6281,6281,AM,7,Forderungsverluste 7 % USt (soweit unüblich hoch)
+skr04,6286,6286,AM,19,Forderungsverluste 19 % USt (soweit unüblich hoch)
+skr04,6300,6389,V,,
+skr04,6450,6853,V,,
+skr04,6855,6859,V,,
+skr04,6884,6884,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1a UStG (bei Buchverlust)
+skr04,6884,6894,M,,
+skr04,6885,6885,AM,19,Erlöse aus Verkäufen Sachanlagevermögen 19 % USt (bei Buchverlust)
+skr04,6888,6888,AM,frei,Erlöse aus Verkäufen Sachanlagevermögen steuerfrei § 4 Nr. 1b UStG (bei Buchverlust)
+skr04,6895,6899,KU,,
+skr04,6930,6939,M,,
+skr04,6931,6931,AM,7,Forderungsverluste 7 % USt (übliche Höhe)
+skr04,6932,6932,AM,frei,Forderungsverluste aus steuerfreien EU-Lieferungen (übliche Höhe)
+skr04,6933,6933,AM,7,Forderungsverluste aus im Inland steuerpflichtigen EU-Lieferungen 7 % USt (übliche Höhe)
+skr04,6936,6936,AM,19,Forderungsverluste 19 % USt (übliche Höhe)
+skr04,6938,6938,AM,19,Forderungsverluste aus im Inland steuerpflichtigen EU-Lieferungen 19 % USt (übliche Höhe)
+skr04,7685,7689,KU,,
+skr04,7705,7705,KU,,
+skr04,7725,7725,KU,,
+skr04,7751,7751,KU,,
+skr04,7781,7781,KU,,
+skr04,7800,7899,V,,
+skr04,9000,9998,KU,,
