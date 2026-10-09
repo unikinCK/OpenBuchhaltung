@@ -17,7 +17,8 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   ZM „S“, § 13b Abs. 1 Kz 46/47) im Zeitraum der Leistung, ig. Lieferungen, ig. Erwerb
   und übrige § 13b-Fälle mit der Rechnung (spätestens Ende des Folgemonats), Vorsteuer
   zum späteren Datum aus Leistung und Rechnung. Ohne Leistungsdatum gilt weiter das
-  Buchungsdatum. Ein Storno übernimmt das Leistungsdatum.
+  Buchungsdatum. Ein Storno übernimmt das Leistungsdatum; in der ZM gehört ein Storno
+  ohne eigenen Partner zum Kunden der stornierten Buchung.
 - Neu: Offene (nicht festgeschriebene) Buchungen ergänzen – Leistungsdatum und
   Geschäftspartner auf Sammelkonto-Zeilen; UI-Link „Ergänzen“, API
   `PATCH /api/v1/journal-entries/<id>`, MCP `amend_journal_entry`. Jede Änderung steht

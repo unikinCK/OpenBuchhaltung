@@ -262,6 +262,8 @@ class _Entry:
     entry_date: date
     service_date: date | None = None
     rows: list = field(default_factory=list)
+    # Bei Stornobuchungen: ID der stornierten Originalbuchung.
+    reversal_of_id: int | None = None
 
     def tax_point(self, rule: str) -> date:
         return tax_point(self.entry_date, self.service_date, rule)
@@ -289,6 +291,7 @@ def vat_entries(
             JournalEntry.posting_number,
             JournalEntry.entry_date,
             JournalEntry.service_date,
+            JournalEntry.reversal_of_id,
             JournalEntryLine.debit_amount,
             JournalEntryLine.credit_amount,
             JournalEntryLine.account_id,
@@ -324,7 +327,12 @@ def vat_entries(
     for row in session.execute(stmt).all():
         entry = entries.setdefault(
             row.journal_entry_id,
-            _Entry(row.posting_number, row.entry_date, row.service_date),
+            _Entry(
+                row.posting_number,
+                row.entry_date,
+                row.service_date,
+                reversal_of_id=row.reversal_of_id,
+            ),
         )
         entry.rows.append(row)
     return entries

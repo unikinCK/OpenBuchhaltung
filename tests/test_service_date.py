@@ -727,3 +727,57 @@ def test_service_date_via_api_mcp_and_ui(tmp_path) -> None:
     with app.extensions["db_session_factory"]() as db_session:
         july = db_session.get(JournalEntry, july_id)
         assert july.lines[0].partner_id == partner_id
+
+
+def test_zm_attributes_a_sealed_reversal_to_the_customer_of_the_original(
+    session: Session,
+) -> None:
+    company = _company(session)
+    czech = create_partner(
+        session=session,
+        company=company,
+        changed_by="t",
+        name="Wera Werk s.r.o.",
+        is_customer=True,
+        country_code="CZ",
+        vat_id="CZ60751983",
+    )
+    session.commit()
+    kept = _book(
+        session,
+        company,
+        "Beratung Mai",
+        ("1400", "5051.08", "0"),
+        ("8336", "0", "5051.08"),
+        day=date(2026, 6, 1),
+    )
+    doubled = _book(
+        session,
+        company,
+        "Beratung Mai (doppelt)",
+        ("1400", "5051.08", "0"),
+        ("8336", "0", "5051.08"),
+        day=date(2026, 6, 1),
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=doubled.id,
+        reversal_date=date(2026, 6, 1),
+        changed_by="t",
+    )
+    # Das festgeschriebene Storno bleibt ohne Partner; die Originale werden ergänzt.
+    for entry in (kept, doubled):
+        amend_journal_entry(
+            session=session,
+            company_id=company.id,
+            journal_entry_id=entry.id,
+            changed_by="t",
+            line_partners={1: czech.id},
+        )
+
+    result = compute_zm(session=session, company_id=company.id, date_from=Q2[0], date_to=Q2[1])
+    assert [(row["vat_id"], row["kind"], row["amount"]) for row in result.rows] == [
+        ("CZ60751983", "S", "5051.08")
+    ]
+    assert result.missing == []
+    assert result.warnings == []

@@ -935,7 +935,8 @@ die Dezember-Leistung mit Rechnung im Januar gehört in die Erklärung des alten
 Erfassung: Feld **Leistungsdatum** in der Buchungsmaske (Journal zeigt „Leistung …“),
 API `POST /api/v1/journal-entries` mit `service_date`, MCP `create_journal_entry`.
 Ein Storno übernimmt das Leistungsdatum und neutralisiert die Steuer im selben
-Zeitraum. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
+Zeitraum; in der ZM zählt ein Storno ohne eigenen Partner (etwa ein festgeschriebenes
+Storno einer später ergänzten Buchung) zum Kunden der stornierten Buchung. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
 Istversteuerung bildet OpenBuchhaltung nicht ab.
 
 **Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum und
