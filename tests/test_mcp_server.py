@@ -47,6 +47,7 @@ EXPECTED_TOOL_NAMES = {
     "set_partner_bank_details",
     "get_partner_history",
     "create_journal_entry",
+    "amend_journal_entry",
     "list_journal_entries",
     "finalize_journal_entry",
     "finalize_journal_entries_until",

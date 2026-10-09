@@ -24,13 +24,14 @@ from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
+    amend_journal_entry,
     create_journal_entry,
     finalize_journal_entries_until,
     finalize_journal_entry,
     parse_decimal,
     reverse_journal_entry,
 )
-from app.services.partners import partner_display_number
+from app.services.partners import find_partner_by_number, partner_display_number
 from domain.models import JournalEntry, JournalEntryLine
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
@@ -45,6 +46,7 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
         "period_id": entry.period_id,
         "posting_number": entry.posting_number,
         "entry_date": entry.entry_date.isoformat(),
+        "service_date": entry.service_date.isoformat() if entry.service_date else None,
         "description": entry.description,
         "source": entry.source,
         "is_finalized": entry.is_finalized,
@@ -174,6 +176,23 @@ def create_journal_entry_via_api():
         description = (payload.get("description") or "").strip()
         status = (payload.get("status") or "posted").strip()
         raw_lines = payload.get("lines") or []
+        raw_service_date = payload.get("service_date")
+        try:
+            service_date = (
+                date.fromisoformat(str(raw_service_date).strip())
+                if raw_service_date not in (None, "")
+                else None
+            )
+        except ValueError:
+            return validation_error(
+                "Validation failed.",
+                details=[
+                    {
+                        "field": "service_date",
+                        "message": "service_date must be an ISO date (YYYY-MM-DD).",
+                    }
+                ],
+            )
 
         if not description:
             return validation_error(
@@ -256,6 +275,8 @@ def create_journal_entry_via_api():
             description=description,
             status=status,
             lines=lines,
+            changed_by=_api_changed_by(),
+            service_date=service_date,
         )
 
         session_factory = get_session_factory()
@@ -282,6 +303,7 @@ def create_journal_entry_via_api():
             {
                 "id": entry.id,
                 "posting_number": entry.posting_number,
+                "service_date": entry.service_date.isoformat() if entry.service_date else None,
                 "created_at": entry.created_at.isoformat(),
             }
         ),
@@ -291,6 +313,110 @@ def create_journal_entry_via_api():
 
 def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
+
+
+def _amend_line_partners(session, company_id: int, raw_lines) -> tuple[dict, list]:
+    """Zeilennummer → Partner-ID aus ``lines`` (``partner_id`` oder ``partner_number``)."""
+    line_partners: dict[int, int | None] = {}
+    errors = []
+    if not isinstance(raw_lines, list):
+        return {}, [{"field": "lines", "message": "lines must be a list."}]
+    for idx, line in enumerate(raw_lines):
+        field = f"lines[{idx}]"
+        if not isinstance(line, dict):
+            errors.append({"field": field, "message": "line must be an object."})
+            continue
+        try:
+            line_number = int(line.get("line_number"))
+        except (TypeError, ValueError):
+            errors.append({"field": f"{field}.line_number", "message": "line_number is required."})
+            continue
+        raw_number = line.get("partner_number")
+        if raw_number not in (None, ""):
+            partner = find_partner_by_number(
+                session=session, company_id=company_id, number=str(raw_number).strip()
+            )
+            if partner is None:
+                errors.append(
+                    {
+                        "field": f"{field}.partner_number",
+                        "message": f"Geschäftspartner mit Nummer {raw_number} nicht gefunden.",
+                    }
+                )
+                continue
+            line_partners[line_number] = partner.id
+        elif "partner_id" in line:
+            raw_id = line.get("partner_id")
+            try:
+                line_partners[line_number] = int(raw_id) if raw_id is not None else None
+            except (TypeError, ValueError):
+                errors.append(
+                    {"field": f"{field}.partner_id", "message": "partner_id must be an integer."}
+                )
+        else:
+            errors.append(
+                {
+                    "field": field,
+                    "message": "partner_id (null entfernt den Partner) or partner_number required.",
+                }
+            )
+    return line_partners, errors
+
+
+@api_bp.patch("/journal-entries/<int:journal_entry_id>")
+def amend_journal_entry_via_api(journal_entry_id: int):
+    """Offene Buchung ergänzen: Leistungsdatum und Geschäftspartner je Zeile."""
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "JSON object expected."}), 400
+    options: dict[str, object] = {}
+    if "service_date" in payload:
+        raw_service_date = payload.get("service_date")
+        try:
+            options["service_date"] = (
+                date.fromisoformat(str(raw_service_date).strip())
+                if raw_service_date not in (None, "")
+                else None
+            )
+        except ValueError:
+            return validation_error(
+                "Validation failed.",
+                details=[
+                    {
+                        "field": "service_date",
+                        "message": "service_date must be an ISO date (YYYY-MM-DD) or null.",
+                    }
+                ],
+            )
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = session.get(JournalEntry, journal_entry_id)
+        if entry is None or api_scoped_company(session, entry.company_id) is None:
+            return jsonify({"error": "Journal entry not found."}), 404
+        line_partners, errors = _amend_line_partners(
+            session, entry.company_id, payload.get("lines") or []
+        )
+        if errors:
+            return validation_error("Validation failed.", details=errors)
+        try:
+            entry = amend_journal_entry(
+                session=session,
+                company_id=entry.company_id,
+                journal_entry_id=journal_entry_id,
+                changed_by=_api_changed_by(),
+                line_partners=line_partners,
+                **options,
+            )
+        except JournalEntryCreationError as exc:
+            return validation_error(
+                "Validation failed.",
+                details=[{"field": "journal_entry", "message": str(exc)}],
+            )
+        return jsonify(_journal_entry_dict(entry)), 200
 
 
 @api_bp.post("/journal-entries/finalize-until")

@@ -12,6 +12,10 @@ Debitorenzeile); gemeldet werden Ländercode, USt-IdNr. und die Summe je Art,
 Gutschriften mindern sie. Wie in der UStVA entfallen Centbeträge. Fehlt der
 Partner oder seine EU-USt-IdNr., erscheint die Zeile unter ``missing``. Die
 Übermittlung an das BZSt (ELSTER) liegt außerhalb von OpenBuchhaltung.
+
+Meldezeitraum (§ 18a Abs. 8 UStG): sonstige Leistungen nach dem Leistungsdatum
+der Buchung, Lieferungen nach der Rechnung (Buchungsdatum), spätestens im Monat
+nach der Lieferung (``app.services.tax_period``).
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from app.services.vat_returns import (
     EU_COUNTRY_CODES,
     partner_vat_country,
     revenue_kennzahl,
+    revenue_tax_rule,
     vat_entries,
 )
 from domain.models import BusinessPartner
@@ -76,8 +81,11 @@ def compute_zm(
                 continue
             if row.tax_code_id is not None and row.rate != ZERO:
                 continue
-            kind = ZM_KINDS.get(revenue_kennzahl(chart, row.account_code) or "")
+            kennzahl = revenue_kennzahl(chart, row.account_code)
+            kind = ZM_KINDS.get(kennzahl or "")
             if kind is None:
+                continue
+            if not date_from <= entry.tax_point(revenue_tax_rule(kennzahl)) <= date_to:
                 continue
             amount = row.credit_amount - row.debit_amount
             vat_id = _normalized_vat_id(partner.vat_id if partner else None)

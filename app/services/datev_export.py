@@ -94,11 +94,24 @@ from app.services.datev_account_functions import (
     datev_account_function,
 )
 from app.services.journal_entries import fiscal_year_bounds
-from app.services.tax_codes import DEFAULT_TAX_CODES, TaxAccount, company_tax_accounts
+from app.services.tax_codes import (
+    DEFAULT_TAX_CODES,
+    TaxAccount,
+    company_special_tax_accounts,
+    company_tax_accounts,
+)
+from app.services.tax_period import INPUT, INVOICE, SERVICE, tax_point
+from app.services.vat_returns import (
+    EU_COUNTRY_CODES,
+    INVOICE_DATE_KENNZAHLEN,
+    partner_vat_country,
+    revenue_kennzahl,
+)
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
     Account,
+    BusinessPartner,
     Company,
     FiscalYear,
     JournalEntry,
@@ -126,6 +139,70 @@ DATA_COLUMNS = (
     "Belegfeld 2",
     "Skonto",
     "Buchungstext",
+)
+
+# Felder 15–116 des Buchungsstapels (DATEV-Formatbeschreibung „Buchungsstapel“,
+# developer.datev.de). Sie werden nur geschrieben, wenn eine Buchung ein
+# Leistungsdatum trägt: Feld 115 „Leistungsdatum“ verlangt laut DATEV auch Feld
+# 116 „Datum Zuord. Steuerperiode“ (beide TTMMJJJJ). Der Einsatz des
+# Leistungsdatums ist mit dem Steuerberater abzustimmen.
+SERVICE_DATE_COLUMNS = (
+    "Postensperre",
+    "Diverse Adressnummer",
+    "Geschäftspartnerbank",
+    "Sachverhalt",
+    "Zinssperre",
+    "Beleglink",
+    *(
+        f"Beleginfo - {part} {number}"
+        for number in range(1, 9)
+        for part in ("Art", "Inhalt")
+    ),
+    "KOST1 - Kostenstelle",
+    "KOST2 - Kostenstelle",
+    "KOST-Menge",
+    "EU-Mitgliedstaat u. UStID (Bestimmung)",
+    "EU-Steuersatz (Bestimmung)",
+    "Abw. Versteuerungsart",
+    "Sachverhalt L+L",
+    "Funktionsergänzung L+L",
+    "BU 49 Hauptfunktiontyp",
+    "BU 49 Hauptfunktionsnummer",
+    "BU 49 Funktionsergänzung",
+    *(
+        f"Zusatzinformation - {part} {number}"
+        for number in range(1, 21)
+        for part in ("Art", "Inhalt")
+    ),
+    "Stück",
+    "Gewicht",
+    "Zahlweise",
+    "Forderungsart",
+    "Veranlagungsjahr",
+    "Zugeordnete Fälligkeit",
+    "Skontotyp",
+    "Auftragsnummer",
+    "Buchungstyp",
+    "USt-Schlüssel (Anzahlungen)",
+    "EU-Mitgliedstaat (Anzahlungen)",
+    "Sachverhalt L+L (Anzahlungen)",
+    "EU-Steuersatz (Anzahlungen)",
+    "Erlöskonto (Anzahlungen)",
+    "Herkunft-Kz",
+    "Leerfeld",
+    "KOST-Datum",
+    "SEPA-Mandatsreferenz",
+    "Skontosperre",
+    "Gesellschaftername",
+    "Beteiligtennummer",
+    "Identifikationsnummer",
+    "Zeichnernummer",
+    "Postensperre bis",
+    "Bezeichnung SoBil-Sachverhalt",
+    "Kennzeichen SoBil-Buchung",
+    "Festschreibung",
+    "Leistungsdatum",
+    "Datum Zuord. Steuerperiode",
 )
 
 # Kopffeld 27 "Sachkontenrahmen".
@@ -616,9 +693,58 @@ def _entry_bookings(entry, lines, tax_codes, tax_accounts, chart) -> list[_Booki
         groups = [group for group in groups if group is not failed.group]
 
 
-def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str | None:
+def _fmt_full_date(value: date) -> str:
+    """Datum im Format TTMMJJJJ (Felder 115/116)."""
+    return value.strftime("%d%m%Y")
+
+
+def _service_tax_point(entry, lines, chart, tax_accounts, special_accounts, partners) -> date:
+    """Feld 116 „Datum Zuord. Steuerperiode“: Steuerzeitpunkt der Buchung wie in der
+    UStVA – Umsätze nach Leistung (ig. Lieferungen nach Rechnung, spätestens im
+    Folgemonat), § 13b eines EU-Unternehmers nach Leistung, ig. Erwerb und übriges
+    § 13b nach Rechnung, Vorsteuer zum späteren Datum aus Leistung und Rechnung."""
+    revenue = [
+        revenue_kennzahl(chart, line.code)
+        for line in lines
+        if line.account_type in {"revenue", "income"}
+    ]
+    special = {
+        special_accounts[line.account_id].category
+        for line in lines
+        if line.account_id in special_accounts
+    }
+    if revenue:
+        rule = INVOICE if all(k in INVOICE_DATE_KENNZAHLEN for k in revenue) else SERVICE
+    elif special:
+        eu_service = any(
+            datev_account_function(chart, line.code).kennzahl == "46" for line in lines
+        ) or any(
+            partners.get(line.partner_id) in EU_COUNTRY_CODES - {"DE"}
+            for line in lines
+            if line.partner_id is not None
+        )
+        rule = SERVICE if special == {"reverse_charge"} and eu_service else INVOICE
+    elif any(
+        tax_accounts.get(line.account_id) is not None
+        and tax_accounts[line.account_id].kind == TAX_KIND_INPUT
+        for line in lines
+    ):
+        rule = INPUT
+    else:
+        rule = SERVICE
+    return tax_point(entry.entry_date, entry.service_date, rule)
+
+
+def _booking_row(
+    booking: _Booking,
+    *,
+    entry: JournalEntry,
+    service_fields: tuple[str, str] | None = None,
+) -> str | None:
     """Ein Buchungssatz; das Soll-/Haben-Kennzeichen bezieht sich auf das Konto.
 
+    ``service_fields`` (Leistungsdatum, Datum Zuord. Steuerperiode) erweitert den
+    Satz auf 116 Felder; leere Werte, wenn die Buchung kein Leistungsdatum trägt.
     None für Sätze ohne Wirkung (Konto gleich Gegenkonto, ohne Steuer).
     """
     gross = next(
@@ -661,6 +787,10 @@ def _booking_row(booking: _Booking, *, entry: JournalEntry) -> str | None:
         "",  # Skonto
         _quote(_clip(contra.text, 60)),
     ]
+    if service_fields is not None:
+        # Felder 15–114 leer, dann 115 Leistungsdatum und 116 Steuerperiode.
+        fields.extend([""] * (len(SERVICE_DATE_COLUMNS) - 2))
+        fields.extend(service_fields)
     return ";".join(fields)
 
 
@@ -895,6 +1025,8 @@ def build_datev_export(
             JournalEntryLine.debit_amount,
             JournalEntryLine.credit_amount,
             JournalEntryLine.description,
+            JournalEntryLine.partner_id,
+            Account.account_type,
         )
         .join(Account, Account.id == JournalEntryLine.account_id)
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
@@ -927,13 +1059,43 @@ def build_datev_export(
         )
     )
     buffer.write("\r\n")
-    buffer.write(";".join(_quote(column) for column in DATA_COLUMNS))
+    # Mit Leistungsdatum (Feld 115/116) wird der ganze Stapel auf 116 Felder erweitert.
+    with_service_date = any(entry.service_date is not None for entry in entries)
+    columns = DATA_COLUMNS + SERVICE_DATE_COLUMNS if with_service_date else DATA_COLUMNS
+    buffer.write(";".join(_quote(column) for column in columns))
     buffer.write("\r\n")
+    special_accounts = (
+        company_special_tax_accounts(session=session, company_id=company_id)
+        if with_service_date
+        else {}
+    )
+    partners = (
+        {
+            partner.id: partner_vat_country(partner.country_code, partner.vat_id)
+            for partner in session.execute(
+                select(BusinessPartner).where(BusinessPartner.company_id == company_id)
+            ).scalars()
+        }
+        if with_service_date
+        else {}
+    )
 
     for entry in entries:
         lines = lines_by_entry.get(entry.id, [])
+        service_fields = None
+        if with_service_date:
+            service_fields = ("", "")
+            if entry.service_date is not None:
+                service_fields = (
+                    _fmt_full_date(entry.service_date),
+                    _fmt_full_date(
+                        _service_tax_point(
+                            entry, lines, chart, tax_accounts, special_accounts, partners
+                        )
+                    ),
+                )
         for booking in _entry_bookings(entry, lines, tax_codes, tax_accounts, chart):
-            row = _booking_row(booking, entry=entry)
+            row = _booking_row(booking, entry=entry, service_fields=service_fields)
             if row is not None:
                 buffer.write(row)
                 buffer.write("\r\n")

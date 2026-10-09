@@ -165,7 +165,11 @@ FIELD_DESCRIPTIONS = {
     "content_hash": "SHA-256-Inhaltshash der festgeschriebenen Buchung.",
     "content_hash_version": (
         "Version des Verfahrens für den Buchungsinhaltshash (3 = inklusive Geschäftspartner "
-        "je Zeile; ältere Siegel behalten Version 2)."
+        "je Zeile, 4 = zusätzlich Leistungsdatum; ältere Siegel behalten ihre Version)."
+    ),
+    "service_date": (
+        "Leistungsdatum der Buchung (Tag der Lieferung/Leistung bzw. Ende des "
+        "Leistungszeitraums); bestimmt den Umsatzsteuer-Meldezeitraum, leer = Buchungsdatum."
     ),
     "subledger": (
         "Sammelkonto-Kennzeichen: debtor (Debitoren) bzw. creditor (Kreditoren); nur dort "

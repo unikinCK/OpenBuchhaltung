@@ -83,6 +83,9 @@ class JournalEntryInput:
     # schalten das ab: sie spiegeln die bereits expandierten Zeilen 1:1 und
     # behalten die Steuercodes nur als Kennzeichnung (z. B. für die UStVA).
     expand_tax_lines: bool = True
+    # Leistungsdatum (Lieferung/Leistung, bei Zeiträumen deren Ende): bestimmt den
+    # Umsatzsteuer-Meldezeitraum (``app.services.tax_period``); None = Buchungsdatum.
+    service_date: date | None = None
 
 
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
@@ -288,6 +291,7 @@ def create_journal_entry(
             period_id=period.id,
             posting_number=posting_number,
             entry_date=payload.entry_date,
+            service_date=payload.service_date,
             description=payload.description,
             source=payload.source,
             reversal_of_id=payload.reversal_of_id,
@@ -336,6 +340,11 @@ def create_journal_entry(
             "entry_date": entry.entry_date.isoformat(),
             "description": entry.description,
             "line_count": len(lines),
+            **(
+                {"service_date": entry.service_date.isoformat()}
+                if entry.service_date is not None
+                else {}
+            ),
         },
     )
 
@@ -1022,6 +1031,110 @@ def finalize_journal_entries_until(
     return len(entries)
 
 
+# Platzhalter für „Leistungsdatum nicht ändern“ (None entfernt es).
+KEEP_SERVICE_DATE = object()
+
+
+def amend_journal_entry(
+    *,
+    session: Session,
+    company_id: int,
+    journal_entry_id: int,
+    changed_by: str,
+    service_date: date | None | object = KEEP_SERVICE_DATE,
+    line_partners: dict[int, int | None] | None = None,
+) -> JournalEntry:
+    """Ergänzt eine offene Buchung um Leistungsdatum und Geschäftspartner je Zeile.
+
+    Vor der Festschreibung dürfen Buchungen berichtigt werden (GoBD, Katalog
+    BOOK-001); jede Änderung steht mit altem und neuem Wert im Audit-Log.
+    Beträge, Konten und Buchungsdatum bleiben unberührt. Partner gelten wie beim
+    Buchen nur auf Debitoren-/Kreditoren-Sammelkonten (``line_partners``:
+    Zeilennummer → Partner-ID, None entfernt den Partner). Festgeschriebene
+    Buchungen, Vortragsbuchungen, gesperrte Perioden und abgeschlossene
+    Geschäftsjahre lehnt die Funktion ab – dort bleibt nur das Storno.
+    """
+    entry = session.execute(
+        select(JournalEntry)
+        .where(JournalEntry.id == journal_entry_id, JournalEntry.company_id == company_id)
+        .options(selectinload(JournalEntry.lines))
+    ).scalar_one_or_none()
+    if entry is None:
+        raise JournalEntryCreationError("Buchung nicht gefunden.")
+    if entry.is_finalized:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} ist festgeschrieben und unveränderbar; "
+            "Korrekturen nur per Storno und Neubuchung."
+        )
+    if entry.source in CARRYFORWARD_SOURCES:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} ist eine Vortragsbuchung des Jahresabschlusses "
+            "und kann nicht ergänzt werden."
+        )
+    fiscal_year = session.get(FiscalYear, entry.fiscal_year_id)
+    if fiscal_year is not None and fiscal_year.is_closed:
+        raise JournalEntryCreationError(
+            "Das Geschäftsjahr ist abgeschlossen. Ergänzung nicht möglich."
+        )
+    _ensure_period_is_open(session=session, period_id=entry.period_id)
+
+    changes: dict[str, object] = {}
+    if service_date is not KEEP_SERVICE_DATE and service_date != entry.service_date:
+        changes["service_date"] = {
+            "old": entry.service_date.isoformat() if entry.service_date else None,
+            "new": service_date.isoformat() if service_date else None,
+        }
+        entry.service_date = service_date
+
+    lines_by_number = {line.line_number: line for line in entry.lines}
+    line_changes = []
+    for line_number, partner_id in sorted((line_partners or {}).items()):
+        line = lines_by_number.get(line_number)
+        if line is None:
+            raise JournalEntryCreationError(
+                f"Buchung {entry.posting_number} hat keine Zeile {line_number}."
+            )
+        if partner_id == line.partner_id:
+            continue
+        account = session.get(Account, line.account_id)
+        try:
+            validate_partner_assignment(
+                session=session,
+                company_id=entry.company_id,
+                partner_id=partner_id,
+                account=account,
+            )
+        except PartnerError as exc:
+            raise JournalEntryCreationError(f"Zeile {line_number}: {exc}") from exc
+        line_changes.append(
+            {
+                "line_number": line_number,
+                "account_code": account.code,
+                "old_partner_id": line.partner_id,
+                "new_partner_id": partner_id,
+            }
+        )
+        line.partner_id = partner_id
+    if line_changes:
+        changes["partners"] = line_changes
+
+    if not changes:
+        return entry
+    log_audit_event(
+        session=session,
+        tenant_id=entry.tenant_id,
+        company_id=entry.company_id,
+        entity_type="journal_entry",
+        entity_id=str(entry.id),
+        action="amended",
+        changed_by=changed_by,
+        payload={"posting_number": entry.posting_number, **changes},
+    )
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
 def reverse_journal_entry(
     *,
     session: Session,
@@ -1103,6 +1216,9 @@ def reverse_journal_entry(
             source="storno",
             reversal_of_id=original.id,
             expand_tax_lines=False,
+            # Das Storno übernimmt das Leistungsdatum und neutralisiert die
+            # Umsatzsteuer damit im Meldezeitraum der Originalbuchung.
+            service_date=original.service_date,
         ),
         # Stornobuchung, Festschreibung und Audit werden gemeinsam committet.
         commit=False,

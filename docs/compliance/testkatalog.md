@@ -29,6 +29,7 @@ Jeder Testfall sollte dokumentieren:
 | T-BOOK-006 | Rundungsfall mit Centbetraegen | Summe bleibt ausgeglichen, Steuerbetrag nachvollziehbar | automatisiert | hoch |
 | T-BOOK-007 | Mehrzeilige Splitbuchung | Buchung wird korrekt gespeichert und exportiert | automatisiert | hoch |
 | T-BOOK-008 | Buchung ohne Pflichtfelder | Speicherung wird abgewiesen | automatisiert | mittel |
+| T-BOOK-009 | Offene Buchung ergaenzen (Leistungsdatum, Partner auf Sammelkonto) | Aenderung mit altem und neuem Wert im Audit-Log; Partner auf Nicht-Sammelkonto, festgeschriebene Buchung, gesperrte Periode und fremde Gesellschaft werden abgewiesen; UI, API (PATCH), MCP | automatisiert | hoch |
 
 ## 3. Festschreibung und Storno
 
@@ -154,7 +155,7 @@ Jeder Testfall sollte dokumentieren:
 |---|---|---|---|---|
 | T-PAR-001 | Partner anlegen | Debitoren-/Kreditorennummer wird im Bereich vergeben, Dubletten werden gemeldet | automatisiert | hoch |
 | T-PAR-002 | Partner auf Buchungszeile | Nur auf Sammelkonto mit passender Rolle, mandantensicher, nicht inaktiv | automatisiert | hoch |
-| T-PAR-003 | Buchung festschreiben und stornieren | Partner ist im Hash (Version 3) und wird gespiegelt; Version-2-Siegel bleiben gültig | automatisiert | hoch |
+| T-PAR-003 | Buchung festschreiben und stornieren | Partner ist im Hash (ab Version 3) und wird gespiegelt; Version-2-Siegel bleiben gültig | automatisiert | hoch |
 | T-PAR-004 | Rolle oder Nummer nach Verwendung aendern | Aenderung wird abgewiesen | automatisiert | hoch |
 | T-PAR-005 | Jahresabschluss | Sammelkonten werden je Partner vorgetragen | automatisiert | hoch |
 | T-PAR-006 | Migration rueckwaerts und vorwaerts | Siegel bleiben gueltig, Trigger bleiben aktiv | automatisiert | hoch |
@@ -171,6 +172,8 @@ Jeder Testfall sollte dokumentieren:
 | T-VAT-006 | UStVA ohne Steuercodes | Standard-Steuerkonten beider Kontenrahmen (1571/1576/1771/1776, 1401/1406/3801/3806) zaehlen bei passender Kontoart und Bezeichnung als Steuerkonten; Umbuchung zwischen Steuerkonten ist neutral; 1401 als Forderungskonto bleibt aussen vor | automatisiert | hoch |
 | T-VAT-007 | UStVA-Kennzahlen aus der Kontenfunktion | 8125 → Kz 41, 8336 → Kz 21, 8338 → Kz 45; Erträge ohne Steuer und ohne UStVA-Funktion (Zinsen) nicht in Kz 48, sondern als Hinweis | automatisiert | hoch |
 | T-VAT-008 | Ig. Erwerb und § 13b als Leistungsempfänger | Kz 89/61 aus 1574/1774; Kz 46/47 bei EU-Partner oder Konto 3123, sonst 84/85 mit Hinweis; Vorsteuer 67; Kz 83 = 0 bei voller Vorsteuer; Nachbuchung nur mit Steuerzeilen leitet die Bemessungsgrundlage ab, Storno neutralisiert | automatisiert | hoch |
+| T-VAT-010 | Leistungsdatum bestimmt den Meldezeitraum | Rechnung vom 01.07. fuer Juni zaehlt in Q2 (Kz 81/21, ZM S); ig. Lieferung spaetestens im Folgemonat (Kz 41, ZM L); Vorsteuer zum spaeteren Datum aus Leistung und Rechnung; Dezember-Leistung mit Januar-Rechnung im alten Jahr; § 13b-Korrektur im Zeitraum der Leistung (46/47) bzw. Rechnung (84/85); Storno uebernimmt das Leistungsdatum | automatisiert | hoch |
+| T-VAT-011 | Leistungsdatum versiegelt und exportiert | Inhaltshash Version 4 deckt das Leistungsdatum, Version-3-Siegel bleiben gueltig; DATEV-Felder 115/116 nur mit Leistungsdatum (116 = Steuerzeitpunkt) | automatisiert | hoch |
 | T-VAT-009 | Zusammenfassende Meldung | Summen je Kunden-USt-IdNr. und Art (L/S), Gutschrift mindert, Centbeträge entfallen; Zeilen ohne Partner oder ohne USt-IdNr. als fehlend gemeldet; UI, API, MCP | automatisiert | hoch |
 
 ## 10. Anlagenbuchhaltung

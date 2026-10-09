@@ -16,10 +16,10 @@ from app.services.audit_log import AuditIntegrityResult, verify_audit_log_integr
 from app.services.documents import verify_document_file
 from domain.models import Company, Document, JournalEntry
 
-# Version 3 nimmt den Geschäftspartner je Zeile auf. Siegel der Version 2
-# (vor Einführung des Nebenbuchs) bleiben unverändert gültig und prüfbar.
-JOURNAL_CONTENT_HASH_VERSION = 3
-SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS = (2, 3)
+# Version 3 nimmt den Geschäftspartner je Zeile auf, Version 4 das Leistungsdatum
+# der Buchung. Siegel älterer Versionen bleiben unverändert gültig und prüfbar.
+JOURNAL_CONTENT_HASH_VERSION = 4
+SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS = (2, 3, 4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +116,10 @@ def calculate_journal_entry_content_hash(entry: JournalEntry) -> str:
         "source": entry.source,
         "tenant_id": entry.tenant_id,
     }
+    if version >= 4:
+        canonical["service_date"] = (
+            entry.service_date.isoformat() if entry.service_date is not None else None
+        )
     encoded = json.dumps(
         canonical,
         ensure_ascii=False,

@@ -10,9 +10,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from app.services.journal_entries import (
+    CARRYFORWARD_SOURCES,
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
+    amend_journal_entry,
     create_journal_entry,
     finalize_journal_entries_until,
     finalize_journal_entry,
@@ -312,8 +314,10 @@ def create_journal_entry_from_form():
         flash("Gesellschaft, Datum und Beschreibung sind Pflichtfelder.", "error")
         return redirect(url_for("main.journal_page", company_id=company_id))
 
+    service_date_raw = request.form.get("service_date", "").strip()
     try:
         parsed_date = date.fromisoformat(entry_date_raw)
+        service_date = date.fromisoformat(service_date_raw) if service_date_raw else None
     except ValueError:
         flash("Ungültiges Datum.", "error")
         return redirect(url_for("main.journal_page", company_id=company_id))
@@ -404,6 +408,7 @@ def create_journal_entry_from_form():
             changed_by=changed_by(),
             lines=line_inputs,
             post_to_closing_period=bool(request.form.get("post_to_closing_period")),
+            service_date=service_date,
         )
 
         session_factory = get_session_factory()
@@ -447,6 +452,127 @@ def create_journal_entry_from_form():
         return redirect(url_for("main.journal_page", company_id=company_id))
 
     flash(f"Buchung {entry.posting_number} wurde gespeichert.", "success")
+    return redirect(url_for("main.journal_page", company_id=company_id))
+
+
+def _amendable_entry(session, journal_entry_id: int) -> JournalEntry:
+    entry = session.get(JournalEntry, journal_entry_id)
+    if entry is None:
+        abort(404)
+    require_company_access(session, entry.company_id)
+    return entry
+
+
+@main_bp.get("/buchungen/<int:journal_entry_id>/ergaenzen")
+def amend_journal_entry_page(journal_entry_id: int):
+    """Offene Buchung ergänzen: Leistungsdatum und Partner auf Sammelkonto-Zeilen."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = _amendable_entry(session, journal_entry_id)
+        companies, selected_company_id = company_context(session)
+        lines = []
+        for line in sorted(entry.lines, key=lambda item: item.line_number):
+            account = line.account
+            lines.append(
+                {
+                    "line_number": line.line_number,
+                    "account_code": account.code,
+                    "account_name": account.name,
+                    "subledger": account.subledger,
+                    "debit_amount": line.debit_amount,
+                    "credit_amount": line.credit_amount,
+                    "partner_id": line.partner_id,
+                }
+            )
+        partners = (
+            session.execute(
+                scoped_select(BusinessPartner, company_id=entry.company_id).order_by(
+                    BusinessPartner.name
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # Auswahl je Sammelkonto: Debitoren für 1400 & Co., Kreditoren für 1600 & Co.
+        partner_choices = {
+            "debtor": [
+                (partner.id, f"{partner.debtor_number} {partner.name}", partner.is_active)
+                for partner in partners
+                if partner.debtor_number
+            ],
+            "creditor": [
+                (partner.id, f"{partner.creditor_number} {partner.name}", partner.is_active)
+                for partner in partners
+                if partner.creditor_number
+            ],
+        }
+        context = {
+            "entry_id": entry.id,
+            "company_id": entry.company_id,
+            "posting_number": entry.posting_number,
+            "entry_date": entry.entry_date,
+            "service_date": entry.service_date,
+            "description": entry.description,
+            "is_finalized": entry.is_finalized,
+            "is_system_entry": entry.source in CARRYFORWARD_SOURCES,
+        }
+    return render_template(
+        "buchung_ergaenzen.html",
+        companies=companies,
+        selected_company_id=selected_company_id or context["company_id"],
+        entry=context,
+        lines=lines,
+        partner_choices=partner_choices,
+    )
+
+
+@main_bp.post("/buchungen/<int:journal_entry_id>/ergaenzen")
+def amend_journal_entry_action(journal_entry_id: int):
+    service_date_raw = request.form.get("service_date", "").strip()
+    try:
+        service_date = date.fromisoformat(service_date_raw) if service_date_raw else None
+    except ValueError:
+        flash("Ungültiges Leistungsdatum.", "error")
+        return redirect(url_for("main.amend_journal_entry_page", journal_entry_id=journal_entry_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        entry = _amendable_entry(session, journal_entry_id)
+        company_id = entry.company_id
+        line_partners: dict[int, int | None] = {}
+        for line in entry.lines:
+            field = f"line_partner_{line.line_number}"
+            if field in request.form:
+                raw = request.form.get(field, "").strip()
+                line_partners[line.line_number] = int(raw) if raw.isdigit() else None
+        before = (
+            entry.service_date,
+            {line.line_number: line.partner_id for line in entry.lines},
+        )
+        try:
+            entry = amend_journal_entry(
+                session=session,
+                company_id=company_id,
+                journal_entry_id=journal_entry_id,
+                changed_by=changed_by(),
+                service_date=service_date,
+                line_partners=line_partners,
+            )
+        except JournalEntryCreationError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("main.amend_journal_entry_page", journal_entry_id=journal_entry_id)
+            )
+        posting_number = entry.posting_number
+        changed = before != (
+            entry.service_date,
+            {line.line_number: line.partner_id for line in entry.lines},
+        )
+
+    if changed:
+        flash(f"Buchung {posting_number} wurde ergänzt.", "success")
+    else:
+        flash(f"Buchung {posting_number}: keine Änderungen.", "info")
     return redirect(url_for("main.journal_page", company_id=company_id))
 
 

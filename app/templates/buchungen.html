@@ -22,6 +22,10 @@
         <label for="entry_date">Datum</label>
         <input id="entry_date" name="entry_date" type="date" value="{{ today }}" required />
 
+        <label for="service_date">Leistungsdatum <span class="muted">(optional)</span></label>
+        <input id="service_date" name="service_date" type="date" />
+        <span class="muted">Tag der Leistung bzw. Ende des Leistungszeitraums (Rechnung vom 01.07. für Juni → 30.06.); bestimmt den Umsatzsteuer-Meldezeitraum. Leer = Datum.</span>
+
         <label for="description">Beschreibung</label>
         <input id="description" name="description" required style="min-width: 320px;" />
 
@@ -247,7 +251,10 @@
           {% for entry in journal_entries %}
             <tr>
               <td><strong>{{ entry.posting_number }}</strong></td>
-              <td>{{ entry.entry_date.isoformat() }}</td>
+              <td>
+                {{ entry.entry_date.isoformat() }}
+                {% if entry.service_date %}<br /><span class="muted" title="Leistungsdatum (Umsatzsteuer-Meldezeitraum)">Leistung {{ entry.service_date.isoformat() }}</span>{% endif %}
+              </td>
               <td>{{ entry.description }}</td>
               <td colspan="3"></td>
               <td>
@@ -256,6 +263,9 @@
                 {% if reversed_by_entry.get(entry.id) %}<br /><span class="muted">storniert durch {{ reversed_by_entry.get(entry.id) }}</span>{% endif %}
               </td>
               <td>
+                {% if not entry.is_finalized and entry.source not in ("year_end_close", "carryforward") %}
+                  <a href="{{ url_for('main.amend_journal_entry_page', journal_entry_id=entry.id) }}" title="Leistungsdatum und Geschäftspartner ergänzen">Ergänzen</a>
+                {% endif %}
                 {% if not entry.is_finalized %}
                   <form method="post" action="{{ url_for('main.finalize_journal_entry_action', journal_entry_id=entry.id) }}" class="inline-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />

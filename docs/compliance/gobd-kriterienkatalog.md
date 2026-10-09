@@ -17,7 +17,7 @@ Dieser Katalog beschreibt Anforderungen, die OpenBuchhaltung fuer eine GoBD-orie
 
 | ID | Anforderung | Soll-Umsetzung in OpenBuchhaltung | Nachweis | Status |
 |---|---|---|---|---|
-| BOOK-001 | Vorlaeufige Buchungen | Buchungen duerfen vor Festschreibung korrigierbar sein, muessen aber als vorlaeufig erkennbar bleiben. | UI/API-Test | teilweise |
+| BOOK-001 | Vorlaeufige Buchungen | Buchungen duerfen vor Festschreibung korrigierbar sein, muessen aber als vorlaeufig erkennbar bleiben. Leistungsdatum und Geschaeftspartner lassen sich bei offenen Buchungen nachtragen (Audit-Log mit altem und neuem Wert); Betraege, Konten und Datum nur per Storno. | UI/API-Test | teilweise |
 | BOOK-002 | Festschreibung | Buchungen koennen einzeln oder periodisch festgeschrieben werden. Danach keine direkte Aenderung. | Service- und Integrationstest | umgesetzt |
 | BOOK-003 | Technischer Aenderungsschutz | Updates und Deletes festgeschriebener Buchungen muessen auch auf Datenbankebene verhindert werden. | Migration/Trigger-Test | umgesetzt |
 | BOOK-004 | Storno statt Loeschung | Korrekturen festgeschriebener Buchungen erfolgen ausschliesslich ueber Gegenbuchungen. | Storno-Testmatrix | teilweise |
