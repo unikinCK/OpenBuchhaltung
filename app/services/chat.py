@@ -46,6 +46,13 @@ from app.services.documents import (
     document_content_error_code,
 )
 from app.services.internal_api import InProcessApiClient
+from app.services.llm_settings import (
+    DEFAULT_LLM_MODEL,
+    PURPOSE_CHAT,
+    PURPOSE_RECEIPT_OCR,
+    LlmEndpoint,
+    resolve_llm_endpoint,
+)
 from app.services.mcp_server import TOOLS, TOOLS_BY_NAME, MCPServer, ToolSpec
 from app.services.receipt_ocr import (
     ReceiptOCRError,
@@ -264,7 +271,9 @@ def _stored_tool_call(entry: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def process_attachment(*, file_name: str, data: bytes) -> dict[str, Any]:
+def process_attachment(
+    *, file_name: str, data: bytes, ocr: LlmEndpoint | None = None
+) -> dict[str, Any]:
     """Prüft einen Chat-Anhang und extrahiert seinen Inhalt.
 
     Rückgabe: ``{file_name, mime_type, size, kind, text?, error?}`` mit
@@ -315,8 +324,9 @@ def process_attachment(*, file_name: str, data: bytes) -> dict[str, Any]:
             file_bytes=data,
             mime_type=mime_type,
             file_name=file_name,
-            ocr_endpoint=current_app.config.get("RECEIPT_OCR_ENDPOINT_URL"),
-            ocr_model=current_app.config.get("RECEIPT_OCR_MODEL") or "gpt-4.1-mini",
+            ocr_endpoint=ocr.url if ocr else None,
+            ocr_model=ocr.model if ocr else DEFAULT_LLM_MODEL,
+            ocr_api_key=ocr.api_key if ocr else None,
         )
     except ReceiptOCRError as exc:
         meta.update(kind="error", error=str(exc))
@@ -530,27 +540,35 @@ def accessible_conversation(
     return conversation
 
 
-def _llm_endpoint() -> str:
-    endpoint_url = current_app.config.get("CHAT_LLM_ENDPOINT_URL")
-    if not endpoint_url:
+def _llm_endpoint(api_user: dict | None) -> LlmEndpoint:
+    """Chat-Endpoint: KI-Zugang des Benutzers, sonst der Instanz-Endpoint."""
+    endpoint = resolve_llm_endpoint(
+        PURPOSE_CHAT, user_id=api_user.get("id") if api_user else None
+    )
+    if endpoint is None:
         raise ChatError(
-            "Kein Chat-LLM konfiguriert. Bitte CHAT_LLM_ENDPOINT_URL (oder "
-            "DOCUMENT_LLM_ENDPOINT_URL) setzen."
+            "Kein KI-Zugang konfiguriert. Bitte vom Administrator einen API-Key "
+            "hinterlegen lassen (Verwaltung → KI-Zugang) oder CHAT_LLM_ENDPOINT_URL "
+            "(bzw. DOCUMENT_LLM_ENDPOINT_URL) setzen."
         )
-    return endpoint_url
+    return endpoint
 
 
 def _run_turn(
-    *, input_items: list[dict[str, Any]], api_user: dict | None, global_access: bool
+    *,
+    endpoint: LlmEndpoint,
+    input_items: list[dict[str, Any]],
+    api_user: dict | None,
+    global_access: bool,
 ) -> ChatTurnResult:
     config = current_app.config
     return run_chat_turn(
-        endpoint_url=_llm_endpoint(),
-        model=config.get("CHAT_LLM_MODEL") or "gpt-4.1-mini",
+        endpoint_url=endpoint.url,
+        model=endpoint.model,
         input_items=input_items,
         tools=chat_tool_definitions(),
         execute_tool=build_tool_executor(api_user=api_user, global_access=global_access),
-        api_key=config.get("CHAT_LLM_API_KEY"),
+        api_key=endpoint.api_key,
         max_tool_calls=int(config.get("CHAT_LLM_MAX_TOOL_CALLS") or 15),
         timeout=float(config.get("CHAT_LLM_TIMEOUT_SECONDS") or 120.0),
         requires_confirmation=lambda name, _arguments: chat_tool_requires_confirmation(name),
@@ -605,7 +623,7 @@ def run_chat_message(
     ``uploads`` ist eine Liste ``(dateiname, bytes)``. Wirft :class:`ChatError`
     bei fachlichen Fehlern und :class:`ChatLLMError` bei LLM-Problemen.
     """
-    _llm_endpoint()
+    endpoint = _llm_endpoint(api_user)
 
     message_text = sanitize_text(message_text or "").strip()
     if not message_text and not uploads:
@@ -613,8 +631,15 @@ def run_chat_message(
 
     attachments: list[dict[str, Any]] = []
     image_data: dict[str, bytes] = {}
+    ocr = (
+        resolve_llm_endpoint(
+            PURPOSE_RECEIPT_OCR, user_id=api_user.get("id") if api_user else None
+        )
+        if uploads
+        else None
+    )
     for file_name, data in uploads:
-        meta = process_attachment(file_name=file_name, data=data)
+        meta = process_attachment(file_name=file_name, data=data, ocr=ocr)
         attachments.append(meta)
         if meta.get("kind") == "image":
             image_data[meta["file_name"]] = data
@@ -678,7 +703,12 @@ def run_chat_message(
     ]
 
     try:
-        turn = _run_turn(input_items=input_items, api_user=api_user, global_access=global_access)
+        turn = _run_turn(
+            endpoint=endpoint,
+            input_items=input_items,
+            api_user=api_user,
+            global_access=global_access,
+        )
     except ChatLLMError:
         # Benutzer-Nachricht bleibt gespeichert; Fehler geht an den Aufrufer.
         raise
@@ -710,7 +740,7 @@ def resolve_chat_action(
     Ergebnis (bzw. der Ablehnung) fortgesetzt und die Antwort als neue
     Assistenten-Nachricht gespeichert.
     """
-    _llm_endpoint()
+    endpoint = _llm_endpoint(api_user)
     user_id = api_user.get("id") if api_user else None
     tenant_scope = api_user.get("tenant_id") if api_user else None
 
@@ -769,7 +799,12 @@ def resolve_chat_action(
         *history_items,
         *resume_items,
     ]
-    turn = _run_turn(input_items=input_items, api_user=api_user, global_access=global_access)
+    turn = _run_turn(
+        endpoint=endpoint,
+        input_items=input_items,
+        api_user=api_user,
+        global_access=global_access,
+    )
     assistant_message_data = _store_assistant_turn(session_factory, conversation_id, turn)
 
     return ChatActionResult(

@@ -20,6 +20,16 @@ from app.auth import (
     password_policy_error,
     unlock_user_login,
 )
+from app.services.llm_settings import (
+    DEFAULT_LLM_MODEL,
+    OPENAI_RESPONSES_URL,
+    PROVIDER_LABELS,
+    LlmSettingsError,
+    apply_user_llm_settings,
+    clear_user_llm_settings,
+    llm_settings_audit_payload,
+    user_llm_summary,
+)
 from app.services.scoping import scoped_select
 from app.services.security_events import record_security_event
 from app.web.blueprint import main_bp
@@ -61,12 +71,17 @@ def _render_admin_page(**extra):
         if tenant_scope is not None:
             user_query = user_query.where(User.tenant_id == tenant_scope)
         users = session.execute(user_query).scalars().all() if _is_admin() else []
+        llm_summaries = {user.id: user_llm_summary(user) for user in users}
 
     return render_template(
         "verwaltung.html",
         tenants=tenants,
         companies=companies,
         users=users,
+        llm_summaries=llm_summaries,
+        llm_provider_labels=PROVIDER_LABELS,
+        llm_default_model=DEFAULT_LLM_MODEL,
+        llm_openai_url=OPENAI_RESPONSES_URL,
         roles=ROLES,
         selected_company_id=selected_company_id,
         account_count=account_count,
@@ -281,3 +296,64 @@ def set_user_password_action(user_id: int):
 
     flash("Passwort wurde gesetzt.", "success")
     return redirect(url_for("main.admin_page"))
+
+
+@main_bp.post("/users/llm")
+def set_user_llm_settings_action():
+    """Administrator hinterlegt den KI-Zugang (LLM-API-Key) eines Benutzers."""
+    if not _is_admin():
+        flash("KI-Zugänge verwalten kann nur ein Administrator.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    user_id = request.form.get("user_id", type=int)
+    api_key = request.form.get("api_key", "")
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user = _load_managed_user(session, user_id) if user_id else None
+        if user is None:
+            flash("Benutzer wurde nicht gefunden.", "error")
+            return redirect(url_for("main.admin_page"))
+        try:
+            apply_user_llm_settings(
+                user,
+                provider=request.form.get("provider"),
+                endpoint_url=request.form.get("endpoint_url"),
+                model=request.form.get("model"),
+                api_key=api_key,
+            )
+        except LlmSettingsError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.admin_page") + "#ki-zugang")
+        username = user.username
+        record_security_event(
+            session,
+            user=user,
+            action="llm_settings_updated",
+            actor=_actor(),
+            payload={**llm_settings_audit_payload(user), "api_key_changed": bool(api_key.strip())},
+        )
+        session.commit()
+
+    flash(f"KI-Zugang für {username} wurde gespeichert.", "success")
+    return redirect(url_for("main.admin_page") + "#ki-zugang")
+
+
+@main_bp.post("/users/<int:user_id>/llm/delete")
+def clear_user_llm_settings_action(user_id: int):
+    """Entfernt den KI-Zugang eines Benutzers (danach gelten die Instanz-Endpoints)."""
+    if not _is_admin():
+        flash("KI-Zugänge verwalten kann nur ein Administrator.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user = _load_managed_user(session, user_id)
+        if user is None:
+            flash("Benutzer wurde nicht gefunden.", "error")
+            return redirect(url_for("main.admin_page"))
+        clear_user_llm_settings(user)
+        record_security_event(session, user=user, action="llm_settings_cleared", actor=_actor())
+        session.commit()
+
+    flash("KI-Zugang wurde entfernt.", "success")
+    return redirect(url_for("main.admin_page") + "#ki-zugang")

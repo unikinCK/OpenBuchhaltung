@@ -25,6 +25,18 @@
     });
 
     document.querySelectorAll("[data-subledger-account]").forEach(syncPartnerSelect);
+
+    // Felder nur für einen bestimmten Auswahlwert einblenden:
+    // <select data-show-when="custom" data-show-target="#feld">
+    document.querySelectorAll("[data-show-when]").forEach(function (select) {
+      var target = document.querySelector(select.dataset.showTarget);
+      if (!target) return;
+      var sync = function () {
+        target.hidden = select.value !== select.dataset.showWhen;
+      };
+      select.addEventListener("change", sync);
+      sync();
+    });
   });
 
   // Geschäftspartner (Nebenbuch) nur auf Sammelkonten: Die Partnerauswahl einer

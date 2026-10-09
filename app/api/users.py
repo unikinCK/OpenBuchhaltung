@@ -23,6 +23,13 @@ from app.auth import (
     password_policy_error,
     unlock_user_login,
 )
+from app.services.llm_settings import (
+    LlmSettingsError,
+    apply_user_llm_settings,
+    clear_user_llm_settings,
+    llm_settings_audit_payload,
+    user_llm_summary,
+)
 from app.services.security_events import record_security_event
 from domain.models import Tenant, User
 
@@ -56,6 +63,7 @@ def _user_dict(user: User) -> dict[str, object]:
         "tenant_id": user.tenant_id,
         "is_active": user.is_active,
         "api_token_last4": user.api_token_last4,
+        "llm": user_llm_summary(user),
         "created_at": user.created_at.isoformat(),
     }
 
@@ -204,6 +212,67 @@ def set_user_active_via_api(user_id: int):
             action="activated" if is_active else "deactivated",
             actor=_actor(),
         )
+        session.commit()
+        return jsonify(_user_dict(user)), 200
+
+
+@api_bp.post("/users/<int:user_id>/llm")
+def set_user_llm_settings_via_api(user_id: int):
+    """Administrator hinterlegt den KI-Zugang (LLM-API-Key) eines Benutzers.
+
+    ``provider`` ist ``openai`` (Standard) oder ``custom`` mit ``endpoint_url``;
+    ohne ``api_key`` bleibt ein bereits gespeicherter Key erhalten.
+    """
+    if not _api_can_manage_users():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    for field in ("provider", "endpoint_url", "model", "api_key"):
+        if payload.get(field) is not None and not isinstance(payload[field], str):
+            return jsonify({"error": f"{field} must be a string."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user, error = _managed_user_or_404(session, user_id)
+        if error is not None:
+            return error
+        try:
+            apply_user_llm_settings(
+                user,
+                provider=payload.get("provider"),
+                endpoint_url=payload.get("endpoint_url"),
+                model=payload.get("model"),
+                api_key=payload.get("api_key"),
+            )
+        except LlmSettingsError as exc:
+            return jsonify({"error": str(exc)}), 400
+        record_security_event(
+            session,
+            user=user,
+            action="llm_settings_updated",
+            actor=_actor(),
+            payload={
+                **llm_settings_audit_payload(user),
+                "api_key_changed": bool((payload.get("api_key") or "").strip()),
+            },
+        )
+        session.commit()
+        return jsonify(_user_dict(user)), 200
+
+
+@api_bp.post("/users/<int:user_id>/llm/delete")
+def clear_user_llm_settings_via_api(user_id: int):
+    """Entfernt den KI-Zugang eines Benutzers (danach gelten die Instanz-Endpoints)."""
+    if not _api_can_manage_users():
+        return forbidden()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user, error = _managed_user_or_404(session, user_id)
+        if error is not None:
+            return error
+        clear_user_llm_settings(user)
+        record_security_event(session, user=user, action="llm_settings_cleared", actor=_actor())
         session.commit()
         return jsonify(_user_dict(user)), 200
 

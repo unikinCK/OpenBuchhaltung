@@ -6,6 +6,8 @@ from datetime import date
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from app.services.llm_settings import llm_headers
+
 
 @dataclass(slots=True)
 class DocumentLLMError(Exception):
@@ -22,6 +24,7 @@ def send_document_update(
     mime_type: str,
     journal_entry_id: int | None,
     document_date: date | None = None,
+    api_key: str | None = None,
 ) -> dict:
     if not endpoint_url:
         raise DocumentLLMError("LLM endpoint URL is not configured.")
@@ -68,7 +71,7 @@ def send_document_update(
     request = Request(
         endpoint_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=llm_headers(api_key),
         method="POST",
     )
 

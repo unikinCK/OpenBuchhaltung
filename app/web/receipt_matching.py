@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import current_app, flash, redirect, render_template, request, url_for
+from flask import flash, redirect, render_template, request, url_for
 from sqlalchemy import select
 
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
+from app.services.llm_settings import PURPOSE_RECEIPT_MATCH, receipt_analysis_options
 from app.services.receipt_matching import (
     STATUS_OPEN,
     ReceiptMatchError,
@@ -202,10 +203,9 @@ def receipt_matching_suggest():
                 company_id=company.id,
                 document_id=document_id,
                 changed_by=changed_by(),
-                ocr_endpoint=current_app.config.get("RECEIPT_OCR_ENDPOINT_URL"),
-                ocr_model=current_app.config.get("RECEIPT_OCR_MODEL", "gpt-4.1-mini"),
-                llm_endpoint=current_app.config.get("RECEIPT_MATCH_LLM_ENDPOINT_URL"),
-                llm_model=current_app.config.get("RECEIPT_MATCH_LLM_MODEL", "gpt-4.1-mini"),
+                **receipt_analysis_options(
+                    llm_purpose=PURPOSE_RECEIPT_MATCH, session=session
+                ),
             )
         except ReceiptMatchError as exc:
             flash(f"Abgleich nicht möglich: {exc}", "error")
