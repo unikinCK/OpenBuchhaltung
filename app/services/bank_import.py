@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
 from app.services.bank_statement import (
+    MAX_REFERENCE_LENGTH,
     BankStatementParseError,
     BankStatementRow,
     BankStatementRowError,
@@ -57,6 +58,9 @@ CSV_FIELD_ALIASES = {
     ),
 }
 DATE_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y")
+# Original-Kontoauszugsexport der Finom-Bank (Komma-getrennt, Punkt als
+# Dezimaltrenner); erkannt an diesen Spalten.
+FINOM_SIGNATURE_COLUMNS = ("transaktions-id", "zahlungsbetrag")
 
 
 class BankImportError(ValueError):
@@ -159,6 +163,9 @@ def import_bank_items(
     # Hashes; jede solche Zeile darf höchstens eine Referenz-Zeile "schlucken".
     legacy_matchable = set(existing_hashes)
     occurrence_in_batch: dict[str, int] = {}
+    reference_rows_in_batch = _reference_rows_per_legacy_hash(
+        bank_account_id=bank_account.id, items=items
+    )
 
     for item in items:
         report.total_rows += 1
@@ -170,23 +177,28 @@ def import_bank_items(
             _record_error(report, item.position, "Betrag darf nicht 0 sein.")
             continue
 
-        purpose = item.purpose[:255]
-        counterparty = item.counterparty[:255] if item.counterparty else None
-        hash_fields = dict(
-            bank_account_id=bank_account.id,
-            booking_date=item.booking_date,
-            amount=item.amount,
-            purpose=purpose,
-            counterparty=counterparty,
-        )
+        hash_fields = _legacy_hash_fields(bank_account_id=bank_account.id, item=item)
+        purpose = hash_fields["purpose"]
+        counterparty = hash_fields["counterparty"]
         legacy_hash = _dedup_hash(**hash_fields)
         if item.bank_reference:
             dedup_hash = _dedup_hash(**hash_fields, bank_reference=item.bank_reference)
             if dedup_hash in existing_hashes:
                 report.duplicate_rows += 1
                 continue
-            if legacy_hash in legacy_matchable:
-                legacy_matchable.discard(legacy_hash)
+            # Gleich aussehende Altbestandszeilen tragen ab der zweiten das
+            # Suffix "|n:k" — auch diese dürfen je eine Referenz-Zeile decken.
+            legacy_match = next(
+                (
+                    candidate
+                    for occurrence in range(1, reference_rows_in_batch[legacy_hash] + 1)
+                    if (candidate := _dedup_hash(**hash_fields, occurrence=occurrence))
+                    in legacy_matchable
+                ),
+                None,
+            )
+            if legacy_match is not None:
+                legacy_matchable.discard(legacy_match)
                 report.duplicate_rows += 1
                 continue
         else:
@@ -252,6 +264,29 @@ def import_bank_items(
     return report
 
 
+def _legacy_hash_fields(*, bank_account_id: int, item: BankStatementRow) -> dict:
+    return dict(
+        bank_account_id=bank_account_id,
+        booking_date=item.booking_date,
+        amount=item.amount,
+        purpose=item.purpose[:255],
+        counterparty=item.counterparty[:255] if item.counterparty else None,
+    )
+
+
+def _reference_rows_per_legacy_hash(
+    *, bank_account_id: int, items: Sequence[StatementItem]
+) -> dict[str, int]:
+    """Zählt Referenz-Zeilen je referenzlosem Hash (für den Altbestand-Abgleich)."""
+    counts: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, BankStatementRowError) or not item.bank_reference:
+            continue
+        legacy_hash = _dedup_hash(**_legacy_hash_fields(bank_account_id=bank_account_id, item=item))
+        counts[legacy_hash] = counts.get(legacy_hash, 0) + 1
+    return counts
+
+
 def _existing_hashes_for(
     *,
     session: Session,
@@ -262,20 +297,18 @@ def _existing_hashes_for(
     """Lädt nur die Dedup-Hashes, die für diesen Import relevant sein können."""
     candidates: set[str] = set()
     occurrence_in_batch: dict[str, int] = {}
+    reference_occurrence_in_batch: dict[str, int] = {}
     for item in items:
         if isinstance(item, BankStatementRowError):
             continue
-        hash_fields = dict(
-            bank_account_id=bank_account_id,
-            booking_date=item.booking_date,
-            amount=item.amount,
-            purpose=item.purpose[:255],
-            counterparty=item.counterparty[:255] if item.counterparty else None,
-        )
+        hash_fields = _legacy_hash_fields(bank_account_id=bank_account_id, item=item)
         legacy_hash = _dedup_hash(**hash_fields)
         candidates.add(legacy_hash)
         if item.bank_reference:
             candidates.add(_dedup_hash(**hash_fields, bank_reference=item.bank_reference))
+            reference_occurrence = reference_occurrence_in_batch.get(legacy_hash, 0) + 1
+            reference_occurrence_in_batch[legacy_hash] = reference_occurrence
+            candidates.add(_dedup_hash(**hash_fields, occurrence=reference_occurrence))
         else:
             occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
             occurrence_in_batch[legacy_hash] = occurrence
@@ -296,7 +329,13 @@ def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
     reader = csv.DictReader(csv_stream, delimiter=_sniff_delimiter(csv_stream))
     if not reader.fieldnames:
         raise BankImportError("CSV-Kopfzeile fehlt.")
-    header_mapping = _resolve_header_mapping(reader.fieldnames)
+    if _is_finom_header(reader.fieldnames):
+        return _finom_items(reader)
+    return _generic_csv_items(reader)
+
+
+def _generic_csv_items(reader: csv.DictReader) -> Iterable[StatementItem]:
+    header_mapping = _resolve_header_mapping(reader.fieldnames or [])
 
     for line_number, raw_row in enumerate(reader, start=2):
         row = {
@@ -324,6 +363,76 @@ def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
             amount=amount,
             purpose=row["purpose"],
             counterparty=row.get("counterparty") or None,
+        )
+
+
+def _is_finom_header(field_names: Sequence[str]) -> bool:
+    normalized = {name.strip().lstrip("\ufeff").lower() for name in field_names}
+    return all(column in normalized for column in FINOM_SIGNATURE_COLUMNS)
+
+
+def _finom_items(reader: csv.DictReader) -> Iterable[StatementItem]:
+    """Bildet den Finom-Export auf Umsatzzeilen ab.
+
+    Purpose/Counterparty entsprechen exakt der bisherigen manuellen Umwandlung
+    in das Standard-CSV, damit der referenzlose Dedup-Hash des Bestands passt:
+    nur ``Completed``-Zeilen, Betrag = Zahlungsbetrag, Kartenzahlungen als
+    "Kartenzahlung {Empfänger}" plus Ursprungsbetrag bei Fremdwährung. Die
+    Transaktions-ID wird zur bankseitigen Referenz.
+    """
+    for line_number, raw_row in enumerate(reader, start=2):
+        row = {
+            (key or "").strip().lstrip("\ufeff").lower(): (value or "").strip()
+            for key, value in raw_row.items()
+            if not isinstance(value, list)
+        }
+        if row.get("status", "").lower() != "completed":
+            continue
+
+        counterparty = row.get("auftraggeber/empfänger") or None
+        if row.get("transaktionsart", "").lower() == "card":
+            purpose = f"Kartenzahlung {counterparty or ''}".rstrip()
+            original_currency = row.get("ursprungswährung", "").upper()
+            original_amount = row.get("ursprungsbetrag", "")
+            if original_currency and original_currency != "EUR" and original_amount:
+                purpose += f" ({original_currency} {original_amount})"
+        else:
+            purpose = row.get("verwendungszweck", "")
+            if not purpose:
+                # Ohne Verwendungszweck lehnte das Standard-CSV die Zeile ab;
+                # es gibt also keinen Bestand, zu dem der Hash passen müsste.
+                purpose = " ".join(
+                    part for part in (row.get("transaktionsart"), counterparty) if part
+                )
+
+        missing = [
+            label
+            for label, value in (
+                ("Buchungsdatum", row.get("buchungsdatum")),
+                ("Zahlungsbetrag", row.get("zahlungsbetrag")),
+                ("Verwendungszweck", purpose),
+            )
+            if not value
+        ]
+        if missing:
+            yield BankStatementRowError(line_number, f"Pflichtfelder fehlen: {', '.join(missing)}")
+            continue
+
+        try:
+            booking_date = _parse_date(row["buchungsdatum"])
+            amount = _parse_amount(row["zahlungsbetrag"])
+        except BankImportError as exc:
+            yield BankStatementRowError(line_number, str(exc))
+            continue
+
+        yield BankStatementRow(
+            position=line_number,
+            booking_date=booking_date,
+            amount=amount,
+            purpose=purpose,
+            counterparty=counterparty,
+            currency_code=row.get("zahlungswährung", "").upper() or None,
+            bank_reference=row.get("transaktions-id", "")[:MAX_REFERENCE_LENGTH] or None,
         )
 
 
@@ -993,7 +1102,8 @@ def book_transaction(
 
 
 def _sniff_delimiter(csv_stream: TextIO) -> str:
-    sample = csv_stream.read(2048)
+    # Die Kopfzeile entscheidet: Verwendungszwecke enthalten oft Semikolons.
+    sample = csv_stream.readline()
     csv_stream.seek(0)
     if sample.count(";") > sample.count(","):
         return ";"

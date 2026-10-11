@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Bankimport: Finom-Kontoauszug
+- Der CSV-Import erkennt den Original-Export der Finom-Bank (Spalten
+  „Transaktions-ID“ und „Zahlungsbetrag“) – in UI, API und MCP
+  `import_bank_transactions`. Übernommen werden nur Zeilen mit Status „Completed“;
+  Betrag = Zahlungsbetrag, Gegenpartei = Auftraggeber/Empfänger, Kartenzahlungen als
+  „Kartenzahlung {Empfänger}“ plus „({Währung} {Ursprungsbetrag})“ bei Fremdwährung.
+  Die Transaktions-ID wird bankseitige Referenz.
+- Bestände aus der bisherigen manuellen Umwandlung (ohne Referenz) gelten beim
+  Re-Import als Duplikat – jetzt auch mehrere gleich aussehende Zeilen derselben Datei
+  (Hash-Suffix `|n:k`), nicht nur die erste.
+- Das CSV-Trennzeichen wird aus der Kopfzeile bestimmt, damit Semikolons in
+  Verwendungszwecken komma-getrennte Dateien nicht fehldeuten.
+
 ### Leistungsdatum und Ergänzen offener Buchungen
 - Neu: Buchungen tragen optional ein Leistungsdatum (`journal_entry.service_date`,
   Migration 0044) – Feld in der Buchungsmaske, `service_date` in

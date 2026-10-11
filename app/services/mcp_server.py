@@ -2040,7 +2040,12 @@ TOOLS: list[ToolSpec] = [
         name="import_bank_transactions",
         description=(
             "Importiert Bankumsätze aus einer Kontoauszugsdatei (CSV, CAMT.053-XML "
-            "oder MT940/.sta). content_base64 enthält die Datei."
+            "oder MT940/.sta). content_base64 enthält die Datei. CSV: Spalten-Aliasse "
+            "Buchungstag/Datum, Betrag, Verwendungszweck, Auftraggeber/Empfänger; der "
+            "Original-Export der Finom-Bank (Spalten Transaktions-ID, Zahlungsbetrag) "
+            "wird erkannt (nur Status Completed, Kartenzahlungen als 'Kartenzahlung "
+            "<Empfänger>', Transaktions-ID als Bankreferenz). Re-Importe werden "
+            "dedupliziert."
         ),
         input_schema={
             "type": "object",

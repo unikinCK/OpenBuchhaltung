@@ -424,3 +424,130 @@ def test_api_import_rejects_unknown_extension(api_client):
         },
     )
     assert response.status_code == 422
+
+
+FINOM_HEADER = (
+    "Buchungsdatum,Time completed,Status,Transaktionsart,Auftraggeber/Empfänger,"
+    "Counterparty BIC,Counterparty IBAN,Verwendungszweck,Tags,Zahlungsfreigeber,"
+    "Kartennummer,Ursprungswährung,Ursprungsbetrag,Zahlungswährung,Zahlungsbetrag,"
+    "Wallet-Saldo nach Transaktion,Wallet-Name,Wallet-IBAN,Begleitende Dokumente,"
+    "Transaktions-ID\n"
+)
+FINOM_SAMPLE = FINOM_HEADER + (
+    "02.10.2026,02.10.2026 09:14,Completed,Card,OPENAI,,,N/A,,CK,**** 1234,"
+    "USD,-100.00,EUR,-92.15,1907.85,Main,DE00123,,tx-card-usd\n"
+    "03.10.2026,03.10.2026 10:00,Completed,Card,Baeckerei Kraus,,,N/A,,CK,**** 1234,"
+    "EUR,-3.50,EUR,-3.50,1904.35,Main,DE00123,,tx-card-eur-1\n"
+    "03.10.2026,03.10.2026 10:05,Completed,Card,Baeckerei Kraus,,,N/A,,CK,**** 1234,"
+    "EUR,-3.50,EUR,-3.50,1900.85,Main,DE00123,,tx-card-eur-2\n"
+    "05.10.2026,05.10.2026 08:00,Completed,Transfer,Mustermann GmbH,COBADEFFXXX,"
+    'DE89370400440532013000,"RE 2026-015; Danke, Gruss",,,,EUR,1500.00,EUR,1500.00,'
+    "3400.85,Main,DE00123,,tx-transfer\n"
+    "06.10.2026,,Pending,Card,AWS,,,N/A,,CK,**** 1234,USD,-12.00,EUR,-11.05,"
+    "3389.80,Main,DE00123,,tx-pending\n"
+    "06.10.2026,,Declined,Card,AWS,,,N/A,,CK,**** 1234,USD,-12.00,EUR,-11.05,"
+    "3389.80,Main,DE00123,,tx-declined\n"
+)
+# So sah die bisherige manuelle Umwandlung desselben Auszugs aus.
+FINOM_LEGACY_STANDARD_CSV = (
+    "booking_date,amount,purpose,counterparty\n"
+    "2026-10-02,-92.15,Kartenzahlung OPENAI (USD -100.00),OPENAI\n"
+    "2026-10-03,-3.50,Kartenzahlung Baeckerei Kraus,Baeckerei Kraus\n"
+    "2026-10-03,-3.50,Kartenzahlung Baeckerei Kraus,Baeckerei Kraus\n"
+    '2026-10-05,1500.00,"RE 2026-015; Danke, Gruss",Mustermann GmbH\n'
+)
+
+
+def _import(session, company, bank, file_name, text):
+    return import_bank_statement(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        file_name=file_name,
+        content=text.encode("utf-8"),
+        changed_by="tester",
+    )
+
+
+def test_import_finom_export_maps_rows(session: Session):
+    company, bank = _seed_company(session)
+
+    report = _import(session, company, bank, "finom.csv", "﻿" + FINOM_SAMPLE)
+
+    assert report.total_rows == 4
+    assert report.imported_rows == 4
+    assert report.error_rows == 0
+    rows = {tx.bank_reference: tx for tx in session.execute(select(BankTransaction)).scalars()}
+    assert set(rows) == {"tx-card-usd", "tx-card-eur-1", "tx-card-eur-2", "tx-transfer"}
+    card = rows["tx-card-usd"]
+    assert card.booking_date == date(2026, 10, 2)
+    assert card.amount == Decimal("-92.15")
+    assert card.purpose == "Kartenzahlung OPENAI (USD -100.00)"
+    assert card.counterparty == "OPENAI"
+    assert card.currency_code == "EUR"
+    assert rows["tx-card-eur-1"].purpose == "Kartenzahlung Baeckerei Kraus"
+    transfer = rows["tx-transfer"]
+    assert transfer.amount == Decimal("1500.00")
+    assert transfer.purpose == "RE 2026-015; Danke, Gruss"
+    assert transfer.counterparty == "Mustermann GmbH"
+
+    report = _import(session, company, bank, "finom.csv", FINOM_SAMPLE)
+    assert report.imported_rows == 0
+    assert report.duplicate_rows == 4
+
+
+def test_finom_import_is_hash_compatible_with_manual_standard_csv(session: Session):
+    """Bestand aus der manuellen Umwandlung (ohne Referenz) wird nicht verdoppelt."""
+    company, bank = _seed_company(session)
+    report = _import(session, company, bank, "umgewandelt.csv", FINOM_LEGACY_STANDARD_CSV)
+    assert report.imported_rows == 4
+
+    extended = FINOM_SAMPLE + (
+        "07.10.2026,07.10.2026 12:00,Completed,Card,Baeckerei Kraus,,,N/A,,CK,**** 1234,"
+        "EUR,-3.50,EUR,-3.50,1897.35,Main,DE00123,,tx-card-eur-3\n"
+    )
+    report = _import(session, company, bank, "finom.csv", extended)
+    # Auch die zweite identische Kartenzahlung (Altbestand-Hash "|n:2") zählt
+    # als Duplikat; nur die wirklich neue Zeile kommt hinzu.
+    assert report.duplicate_rows == 4
+    assert report.imported_rows == 1
+    transactions = session.execute(select(BankTransaction)).scalars().all()
+    assert len(transactions) == 5
+    assert [tx.bank_reference for tx in transactions if tx.bank_reference] == ["tx-card-eur-3"]
+
+    report = _import(session, company, bank, "finom.csv", extended)
+    assert report.imported_rows == 0
+    assert report.duplicate_rows == 5
+
+
+def test_finom_rows_without_purpose_or_with_bad_amount(session: Session):
+    company, bank = _seed_company(session)
+    text = FINOM_HEADER + (
+        "08.10.2026,,Completed,Fee,Finom,,,,,,,EUR,-9.00,EUR,-9.00,0,Main,DE00123,,tx-fee\n"
+        "09.10.2026,,Completed,Transfer,X,,,Miete,,,,EUR,abc,EUR,abc,0,Main,DE00123,,tx-bad\n"
+    )
+
+    report = _import(session, company, bank, "finom.csv", text)
+
+    assert report.imported_rows == 1
+    assert report.error_rows == 1
+    assert "abc" in report.errors[0].message
+    fee = session.execute(select(BankTransaction)).scalar_one()
+    assert fee.purpose == "Fee Finom"
+    assert fee.bank_reference == "tx-fee"
+
+
+def test_api_import_finom_statement(api_client):
+    client, (company_id, bank_account_id) = api_client
+    response = client.post(
+        "/api/v1/bank-transactions/import",
+        json={
+            "company_id": company_id,
+            "bank_account_id": bank_account_id,
+            "file_name": "finom.csv",
+            "mime_type": "text/csv",
+            "content_base64": base64.b64encode(FINOM_SAMPLE.encode("utf-8")).decode("ascii"),
+        },
+    )
+    assert response.status_code == 201, response.get_json()
+    assert response.get_json()["report"]["imported_rows"] == 4
