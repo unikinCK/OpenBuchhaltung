@@ -37,7 +37,82 @@
       select.addEventListener("change", sync);
       sync();
     });
+
+    document.querySelectorAll("[data-fints-lookup]").forEach(setupFintsLookup);
   });
+
+  // FinTS-Bankzugang: BLZ in der importierten Bankenliste nachschlagen und die
+  // PIN/TAN-URL vorschlagen (überschreibt keine von Hand eingetragene URL).
+  // <input data-fints-lookup="/bank/fints/institut" data-fints-url-target="#url"
+  //        data-fints-info="#info">
+  function setupFintsLookup(input) {
+    var urlField = document.querySelector(input.dataset.fintsUrlTarget);
+    var info = document.querySelector(input.dataset.fintsInfo);
+    var options = urlField && urlField.list;
+    var autoFilled = "";
+    var lastBlz = "";
+    if (!urlField || !info) return;
+
+    function show(text) {
+      info.textContent = text;
+    }
+
+    function lookup() {
+      var blz = input.value.replace(/\s+/g, "");
+      if (blz === lastBlz) return;
+      lastBlz = blz;
+      if (!/^[0-9]{8}$/.test(blz)) {
+        show("");
+        return;
+      }
+      fetch(input.dataset.fintsLookup + "?blz=" + encodeURIComponent(blz), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      })
+        .then(function (response) {
+          return response.json();
+        })
+        .then(function (data) {
+          if (blz !== lastBlz) return;
+          var institutes = data.institutes || [];
+          var urls = data.fints_urls || [];
+          if (options) {
+            options.textContent = "";
+            urls.forEach(function (url) {
+              var option = document.createElement("option");
+              option.value = url;
+              options.appendChild(option);
+            });
+          }
+          if (!institutes.length) {
+            show("BLZ nicht in der FinTS-Bankenliste.");
+          } else {
+            var first = institutes[0];
+            var label = first.name + (first.city ? ", " + first.city : "") +
+              (first.bic ? " (BIC " + first.bic + ")" : "");
+            if (!urls.length) {
+              show(label + " — laut Bankenliste kein PIN/TAN-Zugang.");
+            } else if (urls.length > 1) {
+              show(label + " — mehrere FinTS-URLs, bitte eine auswählen.");
+            } else {
+              show(label);
+            }
+          }
+          if (!urlField.value || urlField.value === autoFilled) {
+            autoFilled = urls.length === 1 ? urls[0] : "";
+            urlField.value = autoFilled;
+          }
+        })
+        .catch(function () {
+          show("");
+        });
+    }
+
+    input.addEventListener("change", lookup);
+    input.addEventListener("input", function () {
+      if (input.value.replace(/\s+/g, "").length === 8) lookup();
+    });
+  }
 
   // Geschäftspartner (Nebenbuch) nur auf Sammelkonten: Die Partnerauswahl einer
   // Buchungszeile zeigt je nach Sammelkonto nur Kunden bzw. Lieferanten. Das

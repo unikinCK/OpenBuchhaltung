@@ -126,8 +126,10 @@ def create_app(test_config: dict | None = None) -> Flask:
         ),
         CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),
         CHAT_LLM_TIMEOUT_SECONDS=float(os.environ.get("CHAT_LLM_TIMEOUT_SECONDS", "120")),
-        # FinTS-Produktkennung (Registrierung der Deutschen Kreditwirtschaft),
-        # Voraussetzung für den Direktabruf von Bankumsätzen.
+        # FinTS-Produktkennung: 25-stellige Registrierungsnummer der Deutschen
+        # Kreditwirtschaft (HKVVB „Produktbezeichnung“), Voraussetzung für den
+        # Direktabruf. Sie ist an den Betreiber gebunden und gehört nur in die
+        # .env der Instanz, nie ins Repository.
         FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
@@ -183,6 +185,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         logger.warning(
             "CHAT_LLM_API_KEY wird nicht mehr ausgewertet. API-Keys hinterlegt der "
             "Administrator je Benutzer (Verwaltung → KI-Zugang)."
+        )
+    fints_product_id = (app.config.get("FINTS_PRODUCT_ID") or "").strip()
+    if fints_product_id and len(fints_product_id) != 25:
+        logger.warning(
+            "FINTS_PRODUCT_ID hat %s statt 25 Zeichen. Die Registrierungsnummer der "
+            "Deutschen Kreditwirtschaft muss vollständig und unverändert eingetragen werden.",
+            len(fints_product_id),
         )
     _configure_hardening(app)
 

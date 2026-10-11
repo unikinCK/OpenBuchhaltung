@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import abort, current_app, flash, redirect, render_template, request, url_for
+from flask import abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask import session as flask_session
 from sqlalchemy import func, select
 
@@ -27,6 +27,12 @@ from app.services.bank_rules import (
     list_rules,
     match_rules_for,
     set_rule_active,
+)
+from app.services.fints_institutes import (
+    FinTSInstituteError,
+    fints_institute_list_status,
+    lookup_fints_institutes,
+    serialize_institute,
 )
 from app.services.fints_sync import (
     FinTSSyncError,
@@ -88,6 +94,7 @@ def bank_page():
         reconciliation = []
         booking_rules = []
         rule_by_tx = {}
+        fints_institute_status = fints_institute_list_status(session)
         if selected_company_id:
             fints_connections = list_fints_connections(
                 session=session, company_id=selected_company_id
@@ -207,7 +214,26 @@ def bank_page():
         fints_connections=fints_connections,
         fints_challenge=fints_challenge,
         fints_configured=bool(current_app.config.get("FINTS_PRODUCT_ID")),
+        fints_institute_status=fints_institute_status,
     )
+
+
+@main_bp.get("/bank/fints/institut")
+def fints_institute_lookup():
+    """BLZ-Abfrage für das Anlageformular (JSON, von app.js aufgerufen)."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        try:
+            institutes = lookup_fints_institutes(session, request.args.get("blz") or "")
+        except FinTSInstituteError as exc:
+            return jsonify({"error": str(exc)}), 422
+        urls: list[str] = []
+        for institute in institutes:
+            if institute.fints_url and institute.fints_url not in urls:
+                urls.append(institute.fints_url)
+        return jsonify(
+            {"institutes": [serialize_institute(item) for item in institutes], "fints_urls": urls}
+        )
 
 
 @main_bp.post("/bank/import")

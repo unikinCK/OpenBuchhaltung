@@ -34,12 +34,20 @@ from sqlalchemy.orm import Session
 from app.services.audit_log import log_audit_event
 from app.services.bank_import import BankImportReport, import_bank_items
 from app.services.bank_statement import row_from_mt940_data
+from app.services.fints_institutes import (
+    FinTSInstituteError,
+    fints_urls_for_blz,
+    validate_fints_url,
+)
 from domain.models import Account, Company, FinTSConnection, FinTSPendingDialog
 
 logger = logging.getLogger(__name__)
 
 DIALOG_MAX_AGE = timedelta(minutes=15)
 DEFAULT_SYNC_DAYS = 30
+# Die DK vergibt 25-stellige Registrierungsnummern; HKVVB „Produktbezeichnung“
+# darf nicht länger belegt werden.
+PRODUCT_ID_LENGTH = 25
 
 
 class FinTSSyncError(ValueError):
@@ -102,10 +110,11 @@ def create_fints_connection(
     name: str,
     blz: str,
     login: str,
-    fints_url: str,
+    fints_url: str = "",
     sepa_iban: str | None = None,
     changed_by: str,
 ) -> FinTSConnection:
+    """Legt einen Bankzugang an; ohne FinTS-URL wird sie per BLZ aus der Bankenliste ermittelt."""
     company = session.get(Company, company_id)
     if company is None:
         raise FinTSSyncError("Gesellschaft nicht gefunden.")
@@ -117,7 +126,7 @@ def create_fints_connection(
     name = name.strip()
     blz = blz.strip()
     login = login.strip()
-    fints_url = fints_url.strip()
+    fints_url = (fints_url or "").strip()
     sepa_iban = (sepa_iban or "").replace(" ", "").upper() or None
 
     if not name:
@@ -126,8 +135,12 @@ def create_fints_connection(
         raise FinTSSyncError("BLZ muss aus genau 8 Ziffern bestehen.")
     if not login:
         raise FinTSSyncError("FinTS-Login fehlt.")
-    if not fints_url.startswith("https://"):
-        raise FinTSSyncError("FinTS-URL muss mit https:// beginnen.")
+    if not fints_url:
+        fints_url = _fints_url_from_institute_list(session, blz)
+    try:
+        fints_url = validate_fints_url(session, fints_url)
+    except FinTSInstituteError as exc:
+        raise FinTSSyncError(str(exc)) from exc
 
     existing = session.execute(
         select(FinTSConnection).where(
@@ -158,11 +171,31 @@ def create_fints_connection(
         entity_id=str(connection.id),
         action="created",
         changed_by=changed_by,
-        payload={"name": name, "blz": blz, "bank_account_id": bank_account.id},
+        payload={
+            "name": name,
+            "blz": blz,
+            "fints_url": fints_url,
+            "bank_account_id": bank_account.id,
+        },
     )
     session.commit()
     session.refresh(connection)
     return connection
+
+
+def _fints_url_from_institute_list(session: Session, blz: str) -> str:
+    urls = fints_urls_for_blz(session, blz)
+    if not urls:
+        raise FinTSSyncError(
+            "FinTS-URL fehlt und die BLZ steht nicht (mit PIN/TAN-Zugang) in der "
+            "FinTS-Bankenliste. Bitte die URL der Bank angeben."
+        )
+    if len(urls) > 1:
+        raise FinTSSyncError(
+            "Für diese BLZ nennt die FinTS-Bankenliste mehrere URLs — bitte eine "
+            "auswählen: " + ", ".join(urls)
+        )
+    return urls[0]
 
 
 def list_fints_connections(
@@ -224,6 +257,7 @@ def start_fints_sync(
     if from_date > to_date:
         raise FinTSSyncError("Der Von-Datum darf nicht nach dem Bis-Datum liegen.")
 
+    _require_known_url(session, connection)
     client = _build_client(connection, pin, product_id)
     from fints.client import NeedTANResponse
 
@@ -297,6 +331,7 @@ def submit_fints_tan(
     _require_pin(pin)
     product_id = _require_product_id(product_id)
 
+    _require_known_url(session, connection)
     client = _build_client(connection, pin, product_id, from_data=pending.client_data)
     from fints.client import NeedTANResponse
 
@@ -402,7 +437,24 @@ def _require_product_id(product_id: str | None) -> str:
             "(https://www.fints.org) — die Kennung als Umgebungsvariable "
             "FINTS_PRODUCT_ID setzen."
         )
+    product_id = product_id.strip()
+    if len(product_id) > PRODUCT_ID_LENGTH or any(ch.isspace() for ch in product_id):
+        raise FinTSSyncError(
+            "FINTS_PRODUCT_ID ist ungültig: Die Registrierungsnummer der Deutschen "
+            f"Kreditwirtschaft hat genau {PRODUCT_ID_LENGTH} Zeichen ohne Leerzeichen."
+        )
     return product_id
+
+
+def _require_known_url(session: Session, connection: FinTSConnection) -> None:
+    """Die PIN geht nur an URLs, die (noch) die Allowlist-Prüfung bestehen."""
+    try:
+        validate_fints_url(session, connection.fints_url)
+    except FinTSInstituteError as exc:
+        raise FinTSSyncError(
+            f"Bankzugang „{connection.name}“: {exc} Den Zugang ggf. deaktivieren und "
+            "mit der aktuellen URL neu anlegen."
+        ) from exc
 
 
 def _get_active_connection(session: Session, connection_id: int) -> FinTSConnection:

@@ -22,6 +22,7 @@ from app.services.account_chart_import import import_account_chart_file
 from app.services.audit_export import verify_audit_export_package
 from app.services.audit_log import verify_audit_log_integrity
 from app.services.compliance_integrity import verify_compliance_integrity
+from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -189,6 +190,33 @@ def register_cli_commands(app: Flask) -> None:
         )
         for error in report.errors:
             click.echo(f"- Zeile {error.line_number}: {error.message}")
+
+    @app.cli.command("import-fints-institute")
+    @click.option(
+        "--csv-path",
+        required=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Pfad zur CSV der FinTS-Bankenliste (Deutsche Kreditwirtschaft)",
+    )
+    def import_fints_institute(csv_path: Path):
+        """Ersetzt die FinTS-Bankenliste (BLZ → PIN/TAN-URL, BIC)."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            try:
+                report = import_fints_institutes(
+                    session=session, content=csv_path.read_bytes(), changed_by="cli"
+                )
+            except FinTSInstituteError as exc:
+                raise click.ClickException(str(exc)) from exc
+
+        click.echo(
+            "FinTS-Bankenliste importiert: "
+            f"einträge={report.imported_rows}, blz={report.distinct_blz}, "
+            f"mit_url={report.with_url}, übersprungen={report.skipped_rows}, "
+            f"duplikate={report.duplicate_rows}"
+        )
+        for error in report.errors:
+            click.echo(f"- {error}")
 
     @app.cli.command("create-user")
     @click.option("--username", required=True)
