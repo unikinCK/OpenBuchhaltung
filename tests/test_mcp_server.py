@@ -115,6 +115,8 @@ EXPECTED_TOOL_NAMES = {
     "set_fints_connection_active",
     "sync_fints_transactions",
     "submit_fints_tan",
+    "lookup_fints_institute",
+    "import_fints_institutes",
     "list_open_items",
     "list_dunning_proposals",
     "record_dunning",

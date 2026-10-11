@@ -8,6 +8,22 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### FinTS-Registrierung und Bankenliste
+- `FINTS_PRODUCT_ID` ist die 25-stellige Registrierungsnummer der Deutschen
+  Kreditwirtschaft: Beim Start wird eine abweichende Länge gewarnt, beim Abruf werden
+  mehr als 25 Zeichen oder Leerzeichen abgelehnt. Doku: je Betreiber eigene
+  Registrierung, Nummer nur in die Instanz-`.env`.
+- Neu: FinTS-Bankenliste (`fints_institute`, Migration 0045) – Import der DK-CSV
+  (cp1252/UTF-8, ersetzt den Bestand) durch globale Administratoren in der Verwaltung,
+  per `POST /api/v1/fints-institutes/import`, MCP `import_fints_institutes` und
+  `flask import-fints-institute`. Die Liste wird nicht mitgeliefert.
+- BLZ-Abfrage `GET /api/v1/fints-institutes?blz=…` bzw. MCP `lookup_fints_institute`;
+  im Anlageformular schlägt die BLZ Institut, BIC und FinTS-URL vor. Die FinTS-URL ist
+  beim Anlegen optional und wird sonst aus der Liste ermittelt.
+- Sicherheit (Review S5): Mit importierter Liste sind nur FinTS-URLs aus der Liste
+  zulässig, beim Anlegen und vor jedem Abruf. Hosts im lokalen oder privaten Netz und
+  URLs mit Zugangsdaten sind immer gesperrt.
+
 ### Leistungsdatum und Ergänzen offener Buchungen
 - Neu: Buchungen tragen optional ein Leistungsdatum (`journal_entry.service_date`,
   Migration 0044) – Feld in der Buchungsmaske, `service_date` in

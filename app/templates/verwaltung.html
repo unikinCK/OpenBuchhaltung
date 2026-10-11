@@ -236,10 +236,30 @@
     </section>
   {% endif %}
 
+  <section class="card" id="fints-bankenliste">
+    <h2>FinTS-Bankenliste</h2>
+    {% if fints_institute_status.count %}
+      <p>{{ fints_institute_status.count }} Einträge, davon {{ fints_institute_status.with_url }} mit PIN/TAN-URL{% if fints_institute_status.imported_at %} — importiert am {{ fints_institute_status.imported_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}.</p>
+      <p class="muted">Beim Anlegen eines FinTS-Bankzugangs wird die URL per BLZ vorgeschlagen; zulässig sind nur URLs aus dieser Liste.</p>
+    {% else %}
+      <p class="muted">Keine Bankenliste importiert. FinTS-URLs werden von Hand eingetragen und nur auf https und öffentliche Hosts geprüft.</p>
+    {% endif %}
+    <p class="muted">Die Liste („fints_institute“, CSV) verteilt die Registrierungsstelle der Deutschen Kreditwirtschaft an registrierte FinTS-Produkte; sie wird nicht mitgeliefert. Ein Import ersetzt den gesamten Bestand.</p>
+    {% if is_global_admin %}
+      <form method="post" action="{{ url_for('main.import_fints_institutes_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="fints_institute_csv">CSV-Datei der Bankenliste</label>
+        <input id="fints_institute_csv" name="fints_institute_csv" type="file" accept=".csv,text/csv" required />
+        <button type="submit">Bankenliste importieren</button>
+      </form>
+    {% endif %}
+  </section>
+
   <section class="card">
     <h2>Kontenrahmen &amp; Demo-Daten</h2>
     <p class="muted">Per CLI verfügbar:</p>
     <p><code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
     <p><code>flask --app run.py seed-demo</code></p>
+    <p><code>flask --app run.py import-fints-institute --csv-path fints_institute.csv</code></p>
   </section>
 {% endblock %}

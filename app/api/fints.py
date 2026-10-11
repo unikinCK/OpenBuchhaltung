@@ -5,13 +5,30 @@ PIN und TAN werden nur durchgereicht, nie gespeichert oder geloggt.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import date
 
 from flask import current_app, jsonify, request
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.helpers import (
+    api_can_create_tenant,
+    api_can_write,
+    api_scoped_company,
+    forbidden,
+    get_session_factory,
+)
 from app.auth import current_api_user
+from app.services.fints_institutes import (
+    FinTSInstituteError,
+    fints_institute_list_status,
+    import_fints_institutes,
+    lookup_fints_institutes,
+    serialize_import_report,
+    serialize_institute,
+    serialize_list_status,
+)
 from app.services.fints_sync import (
     FinTSSyncError,
     FinTSSyncResult,
@@ -210,3 +227,64 @@ def submit_fints_tan_via_api(dialog_id: str):
         except FinTSSyncError as exc:
             return jsonify({"error": str(exc)}), 422
         return _sync_result_response(result)
+
+
+@api_bp.get("/fints-institutes")
+def lookup_fints_institutes_via_api():
+    """Stand der FinTS-Bankenliste; mit ``blz`` zusätzlich die Einträge dieser BLZ."""
+    blz = (request.args.get("blz") or "").strip()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        body: dict = {"list": serialize_list_status(fints_institute_list_status(session))}
+        if blz:
+            try:
+                institutes = lookup_fints_institutes(session, blz)
+            except FinTSInstituteError as exc:
+                return jsonify({"error": str(exc)}), 422
+            urls: list[str] = []
+            for institute in institutes:
+                if institute.fints_url and institute.fints_url not in urls:
+                    urls.append(institute.fints_url)
+            body.update(
+                {
+                    "blz": blz,
+                    "institutes": [serialize_institute(item) for item in institutes],
+                    "fints_urls": urls,
+                }
+            )
+        return jsonify(body), 200
+
+
+@api_bp.post("/fints-institutes/import")
+def import_fints_institutes_via_api():
+    """Ersetzt die instanzweite FinTS-Bankenliste (nur globale Administratoren)."""
+    if not api_can_create_tenant():
+        return forbidden()
+
+    if request.files:
+        uploaded = request.files.get("fints_institute_csv")
+        content = uploaded.read() if uploaded and uploaded.filename else b""
+    else:
+        payload = request.get_json(silent=True) or {}
+        try:
+            content = base64.b64decode(
+                (payload.get("content_base64") or "").strip(), validate=True
+            )
+        except (binascii.Error, ValueError):
+            return jsonify({"error": "content_base64 must be valid base64."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        try:
+            report = import_fints_institutes(
+                session=session, content=content, changed_by=_api_changed_by()
+            )
+        except FinTSInstituteError as exc:
+            return jsonify({"error": str(exc)}), 422
+        status = fints_institute_list_status(session)
+        return (
+            jsonify(
+                {"report": serialize_import_report(report), "list": serialize_list_status(status)}
+            ),
+            200,
+        )

@@ -2218,7 +2218,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="create_fints_connection",
         description=(
-            "Legt einen FinTS/HBCI-Bankzugang an (BLZ, Login, FinTS-URL). PIN und TAN "
+            "Legt einen FinTS/HBCI-Bankzugang an (BLZ, Login, FinTS-URL). Ohne fints_url "
+            "wird die URL per BLZ aus der importierten FinTS-Bankenliste ermittelt; ist "
+            "eine Liste importiert, sind nur URLs aus der Liste zulässig. PIN und TAN "
             "werden nie gespeichert; sie werden erst beim Abruf übergeben."
         ),
         input_schema={
@@ -2234,7 +2236,10 @@ TOOLS: list[ToolSpec] = [
                 "login": {"type": "string", "description": "FinTS-Benutzerkennung."},
                 "fints_url": {
                     "type": "string",
-                    "description": "FinTS-Endpunkt der Bank (https://…).",
+                    "description": (
+                        "FinTS-Endpunkt der Bank (https://…); optional, wenn die BLZ in "
+                        "der FinTS-Bankenliste genau eine PIN/TAN-URL hat."
+                    ),
                 },
                 "sepa_iban": {
                     "type": "string",
@@ -2247,7 +2252,6 @@ TOOLS: list[ToolSpec] = [
                 "name",
                 "blz",
                 "login",
-                "fints_url",
             ],
             "additionalProperties": False,
         },
@@ -2324,6 +2328,47 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/fints-dialogs/{dialog_id}/tan",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="lookup_fints_institute",
+        description=(
+            "Schlägt eine BLZ in der FinTS-Bankenliste nach (Institut, Ort, BIC, "
+            "PIN/TAN-URL) und meldet den Stand der Liste (Anzahl, Importzeitpunkt). "
+            "Ohne blz nur den Stand."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "blz": {"type": "string", "description": "Bankleitzahl (8 Ziffern)."},
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/fints-institutes",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="import_fints_institutes",
+        description=(
+            "Ersetzt die instanzweite FinTS-Bankenliste durch die CSV der Deutschen "
+            "Kreditwirtschaft (Semikolon-getrennt, Spalten BLZ/BIC/Institut/…/"
+            "PIN/TAN-Zugang URL). Nur für globale Administratoren. Die Liste erhalten "
+            "registrierte FinTS-Produkte; sie wird nicht mitgeliefert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "content_base64": {
+                    "type": "string",
+                    "description": "CSV-Inhalt der Bankenliste als Base64.",
+                },
+            },
+            "required": ["content_base64"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-institutes/import",
         arg_location="json",
     ),
     ToolSpec(

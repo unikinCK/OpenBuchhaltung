@@ -66,6 +66,8 @@ EXPECTED_BLOCKED_TOOLS = {
     "set_fints_connection_active",
     "sync_fints_transactions",
     "submit_fints_tan",
+    "lookup_fints_institute",
+    "import_fints_institutes",
     # ELSTER
     "list_elster_submissions",
     "get_elster_submission_summary",
