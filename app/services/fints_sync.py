@@ -259,6 +259,7 @@ def start_fints_sync(
 
     _require_known_url(session, connection)
     client = _build_client(connection, pin, product_id)
+    bank_responses = _record_bank_responses(client)
     from fints.client import NeedTANResponse
 
     try:
@@ -283,11 +284,7 @@ def start_fints_sync(
     except FinTSSyncError:
         raise
     except Exception as exc:  # fints wirft eigene Fehlerklassen + requests-Fehler
-        # Details (inkl. Bank-URL/Antwort) nur ins Log, nicht an den Client.
-        logger.warning("FinTS-Abruf fehlgeschlagen: %s", exc, exc_info=True)
-        raise FinTSSyncError(
-            f"FinTS-Abruf fehlgeschlagen ({type(exc).__name__}). Details im Server-Log."
-        ) from exc
+        raise _bank_error("FinTS-Abruf fehlgeschlagen", exc, bank_responses) from exc
 
     if step is not None:
         return FinTSSyncResult(
@@ -333,6 +330,7 @@ def submit_fints_tan(
 
     _require_known_url(session, connection)
     client = _build_client(connection, pin, product_id, from_data=pending.client_data)
+    bank_responses = _record_bank_responses(client)
     from fints.client import NeedTANResponse
 
     try:
@@ -348,9 +346,7 @@ def submit_fints_tan(
                 next_request = response
                 next_step = pending.step
             elif pending.step == "init":
-                result = _fetch_transactions(
-                    client, connection, pending.from_date, pending.to_date
-                )
+                result = _fetch_transactions(client, connection, pending.from_date, pending.to_date)
                 if isinstance(result, NeedTANResponse):
                     next_request = result
                     next_step = "transactions"
@@ -367,10 +363,7 @@ def submit_fints_tan(
         session.commit()
         if isinstance(exc, FinTSSyncError):
             raise
-        logger.warning("TAN-Bestätigung fehlgeschlagen: %s", exc, exc_info=True)
-        raise FinTSSyncError(
-            f"TAN-Bestätigung fehlgeschlagen ({type(exc).__name__}). Details im Server-Log."
-        ) from exc
+        raise _bank_error("TAN-Bestätigung fehlgeschlagen", exc, bank_responses) from exc
 
     if next_step is not None:
         challenge = _freeze_dialog(
@@ -422,6 +415,63 @@ def _tan_request_from_data(data: bytes):
     from fints.client import NeedTANResponse
 
     return NeedTANResponse.from_data(data)
+
+
+def _record_bank_responses(client) -> list[tuple[str, str]]:
+    """Schreibt die Rückmeldungen der Bank (HIRMG/HIRMS: Code + Text) mit.
+
+    python-fints loggt Rückmeldungen während der Dialog-Initialisierung nicht und
+    bricht beim ersten 9xxx-Code pauschal mit „PIN wrong?“ ab — die genauere
+    Segment-Rückmeldung (z. B. Produkt oder Zugang abgelehnt) kommt oft erst
+    danach. Deshalb wird jede Antwortnachricht vollständig gelesen, bevor
+    python-fints sie verarbeitet. Die Texte enthalten keine PIN.
+    """
+    responses: list[tuple[str, str]] = []
+    original = getattr(client, "process_response_message", None)
+    if original is None:
+        return responses
+    from fints.segments.dialog import HIRMG2, HIRMS2
+
+    def recording(dialog, message, internal_send=True):
+        try:
+            for segment_type in (HIRMG2, HIRMS2):
+                for segment in message.find_segments(segment_type):
+                    for response in segment.responses or ():
+                        responses.append((str(response.code), str(response.text or "").strip()))
+        except Exception:  # Protokollierung darf den Abruf nie stören
+            logger.debug("Bankrückmeldungen nicht lesbar", exc_info=True)
+        return original(dialog, message, internal_send=internal_send)
+
+    client.process_response_message = recording
+    return responses
+
+
+def _bank_error(
+    prefix: str, exc: Exception, bank_responses: list[tuple[str, str]]
+) -> FinTSSyncError:
+    """Fehlermeldung mit den Fehler-/Warnrückmeldungen der Bank statt Bibliothekstext."""
+    from fints.exceptions import FinTSClientPINError
+
+    problems = [(code, text) for code, text in bank_responses if code[:1] in {"3", "9"}]
+    logger.warning(
+        "%s: %s; Rückmeldungen der Bank: %s",
+        prefix,
+        exc,
+        "; ".join(f"{code} {text}" for code, text in bank_responses) or "keine",
+        exc_info=True,
+    )
+    message = f"{prefix} ({type(exc).__name__})."
+    if problems:
+        details = "; ".join(f"{code} {text}".strip() for code, text in problems)
+        message += f" Die Bank meldet: {details[:500]}"
+    else:
+        message += " Details im Server-Log."
+    if isinstance(exc, FinTSClientPINError):
+        message += (
+            " Achtung: Nach mehreren Fehlversuchen sperrt die Bank den Zugang — "
+            "vor dem nächsten Versuch Login, PIN und FinTS-Freischaltung prüfen."
+        )
+    return FinTSSyncError(message)
 
 
 def _require_pin(pin: str) -> None:
@@ -498,9 +548,7 @@ def _fetch_transactions(client, connection: FinTSConnection, from_date, to_date)
         raise FinTSSyncError("Der FinTS-Zugang meldet keine SEPA-Konten.")
 
     if connection.sepa_iban:
-        matching = [
-            account for account in accounts if (account.iban or "") == connection.sepa_iban
-        ]
+        matching = [account for account in accounts if (account.iban or "") == connection.sepa_iban]
         if not matching:
             raise FinTSSyncError(
                 f"Kein SEPA-Konto mit IBAN {connection.sepa_iban} im Zugang gefunden."
@@ -575,9 +623,7 @@ def _freeze_dialog(
     decoupled = bool(getattr(tan_request, "decoupled", False))
     if decoupled:
         challenge_text += " (Freigabe in der Banking-App, danach hier fortsetzen.)"
-    return TanChallenge(
-        dialog_id=pending.id, challenge=challenge_text, decoupled=decoupled
-    )
+    return TanChallenge(dialog_id=pending.id, challenge=challenge_text, decoupled=decoupled)
 
 
 def _dialog_expired(pending: FinTSPendingDialog) -> bool:
