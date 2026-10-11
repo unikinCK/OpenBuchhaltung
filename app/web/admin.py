@@ -1,4 +1,4 @@
-"""Verwaltung: Mandanten-, Gesellschafts- und Benutzeranlage."""
+"""Verwaltung: Mandanten-, Gesellschafts- und Benutzeranlage, FinTS-Bankenliste."""
 
 from __future__ import annotations
 
@@ -19,6 +19,11 @@ from app.auth import (
     hash_password,
     password_policy_error,
     unlock_user_login,
+)
+from app.services.fints_institutes import (
+    FinTSInstituteError,
+    fints_institute_list_status,
+    import_fints_institutes,
 )
 from app.services.llm_settings import (
     DEFAULT_LLM_MODEL,
@@ -72,6 +77,7 @@ def _render_admin_page(**extra):
             user_query = user_query.where(User.tenant_id == tenant_scope)
         users = session.execute(user_query).scalars().all() if _is_admin() else []
         llm_summaries = {user.id: user_llm_summary(user) for user in users}
+        fints_institute_status = fints_institute_list_status(session)
 
     return render_template(
         "verwaltung.html",
@@ -85,6 +91,7 @@ def _render_admin_page(**extra):
         roles=ROLES,
         selected_company_id=selected_company_id,
         account_count=account_count,
+        fints_institute_status=fints_institute_status,
         is_global_admin=tenant_scope is None and _is_admin(),
         is_admin=_is_admin(),
         **extra,
@@ -124,6 +131,37 @@ def create_tenant_and_company():
             return redirect(url_for("main.admin_page"))
 
     flash("Mandant und Gesellschaft wurden angelegt.", "success")
+    return redirect(url_for("main.admin_page"))
+
+
+@main_bp.post("/verwaltung/fints-bankenliste")
+def import_fints_institutes_action():
+    # Instanzweite Referenzdaten: wie die API nur globale Administratoren.
+    if not _is_admin() or current_tenant_id() is not None:
+        flash("Die FinTS-Bankenliste kann nur ein globaler Administrator importieren.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    uploaded = request.files.get("fints_institute_csv")
+    if uploaded is None or not uploaded.filename:
+        flash("Bitte die CSV-Datei der FinTS-Bankenliste auswählen.", "error")
+        return redirect(url_for("main.admin_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        try:
+            report = import_fints_institutes(
+                session=session, content=uploaded.read(), changed_by=_actor()
+            )
+        except FinTSInstituteError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.admin_page"))
+
+    flash(
+        f"FinTS-Bankenliste importiert: {report.imported_rows} Einträge "
+        f"({report.distinct_blz} BLZ, {report.with_url} mit PIN/TAN-URL), "
+        f"{report.skipped_rows} übersprungen.",
+        "success",
+    )
     return redirect(url_for("main.admin_page"))
 
 

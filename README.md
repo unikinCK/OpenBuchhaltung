@@ -367,7 +367,7 @@ inaktiv.
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `FINTS_PRODUCT_ID` | – | FinTS-Produktkennung (Pflicht für den Direktabruf). |
+| `FINTS_PRODUCT_ID` | – | FinTS-Registrierungsnummer der DK, genau 25 Zeichen (Pflicht für den Direktabruf). |
 | `DATEV_CONSULTANT_NUMBER`, `DATEV_CLIENT_NUMBER` | `1000`, – | Berater-/Mandantennummer im DATEV-Export. |
 | `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rechnungssteller im E-Rechnungs-Export. |
 | `ELSTER_ENVIRONMENT` | `test` | `test` oder `production`. |
@@ -522,8 +522,33 @@ der Banking-App) werden unterstützt. Eingefrorene Dialoge verfallen nach
 Kreditwirtschaft (<https://www.fints.org>):
 
 ```bash
-export FINTS_PRODUCT_ID=IHRE-PRODUKT-ID
+export FINTS_PRODUCT_ID=IHRE-25-STELLIGE-REGISTRIERUNGSNUMMER
 ```
+
+Die Registrierungsnummer ist an den Betreiber gebunden: Jede Instanz braucht eine
+eigene Registrierung, die Nummer gehört nur in die `.env` der Instanz (nie ins
+Repository). python-fints setzt sie in HKVVB als „Produktbezeichnung“; sie wird
+vollständig und unverändert eingetragen (ein abweichender Wert wird beim Start
+gewarnt, mehr als 25 Zeichen werden abgelehnt). Neue Nummern sind erst nach
+einigen Werktagen in den Banksystemen bekannt. Der FinTS-Zugang ist für eigene
+Konten gedacht — wer Konten Dritter abruft, ist nach PSD2 ein
+Kontoinformationsdienst und braucht eine Zulassung.
+
+**FinTS-Bankenliste:** Registrierte Produkte erhalten von der DK die Bankenliste
+(CSV, `;`-getrennt, BLZ → PIN/TAN-URL, BIC). Sie wird nicht mitgeliefert, sondern
+vom globalen Administrator importiert — Verwaltung → „FinTS-Bankenliste“,
+`POST /api/v1/fints-institutes/import`, MCP `import_fints_institutes` oder
+
+```bash
+flask --app run.py import-fints-institute --csv-path fints_institute.csv
+```
+
+Ein Import ersetzt den Bestand. Danach schlägt das Anlageformular zur BLZ Institut,
+BIC und FinTS-URL vor (`GET /api/v1/fints-institutes?blz=…`, MCP
+`lookup_fints_institute`); bleibt die URL leer, wird sie aus der Liste ermittelt.
+Mit importierter Liste sind nur noch FinTS-URLs aus der Liste zulässig — auch beim
+Abruf, die PIN geht also nie an einen unbekannten Server. Hosts im lokalen/privaten
+Netz sind immer gesperrt.
 
 **Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
 (Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein

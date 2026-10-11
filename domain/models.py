@@ -1555,6 +1555,32 @@ class FinTSPendingDialog(Base):
     connection: Mapped[FinTSConnection] = relationship()
 
 
+class FinTSInstitute(Base):
+    """Eintrag der FinTS-Bankenliste der Deutschen Kreditwirtschaft.
+
+    Instanzweite Referenzdaten (kein Mandantenbezug): BLZ → PIN/TAN-URL und
+    BIC. Die Liste wird nur an registrierte FinTS-Produkte verteilt und deshalb
+    nicht mitgeliefert, sondern vom Betreiber importiert; ein Import ersetzt
+    den gesamten Bestand.
+    """
+
+    __tablename__ = "fints_institute"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blz: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    bic: Mapped[str | None] = mapped_column(String(11))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(120))
+    data_center: Mapped[str | None] = mapped_column(String(120))
+    organisation: Mapped[str | None] = mapped_column(String(60))
+    fints_url: Mapped[str | None] = mapped_column(String(255))
+    fints_version: Mapped[str | None] = mapped_column(String(40))
+    last_changed: Mapped[date | None] = mapped_column(Date)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class ChatConversation(Base):
     """Eine KI-Chat-Unterhaltung eines Benutzers im Kontext einer Gesellschaft."""
 

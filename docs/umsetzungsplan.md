@@ -554,7 +554,14 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       per Prompt, `seed-demo` in Produktion verweigert, Session-Rotation beim
       Login, Dummy-Hash gegen Timing-Enumeration, Mindestlänge 8 (S10);
       Audit-Events für Login/Fehlversuche/Token/Benutzeranlage/Passwort;
-      Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) offen.
+      Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) umgesetzt
+      2026-10-11 über die FinTS-Bankenliste (s. u.).
+- [x] **FinTS-Registrierung & Bankenliste** *(2026-10-11)*: DK-Registrierungsnummer
+      als `FINTS_PRODUCT_ID` (25 Zeichen, Startwarnung/Ablehnung bei falscher Länge,
+      nur in der Instanz-`.env`); Import der DK-Bankenliste in `fints_institute`
+      [Migration 0045, instanzweit, nur globaler Admin] über UI/API/MCP/CLI;
+      BLZ-Abfrage mit URL-Vorschlag im Anlageformular, URL optional;
+      Allowlist für FinTS-URLs bei Anlage und Abruf, private Hosts gesperrt (S5).
 - [x] **Sprint 3 – Betrieb** *(umgesetzt 2026-09-20)*: `redeploy.sh` auf Prod-Compose (O1);
       `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
       + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,
