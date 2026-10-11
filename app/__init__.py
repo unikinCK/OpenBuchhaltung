@@ -131,6 +131,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         # Direktabruf. Sie ist an den Betreiber gebunden und gehört nur in die
         # .env der Instanz, nie ins Repository.
         FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),
+        # Open Banking (PSD2) über Enable Banking für Banken ohne FinTS: ID und
+        # privater Schlüssel der dort registrierten Anwendung; die Redirect-URL
+        # muss in der Anwendung hinterlegt sein (Default: Callback dieser Instanz).
+        ENABLE_BANKING_APP_ID=os.environ.get("ENABLE_BANKING_APP_ID"),
+        ENABLE_BANKING_KEY_FILE=os.environ.get("ENABLE_BANKING_KEY_FILE"),
+        ENABLE_BANKING_REDIRECT_URL=os.environ.get("ENABLE_BANKING_REDIRECT_URL"),
+        ENABLE_BANKING_API_URL=os.environ.get("ENABLE_BANKING_API_URL"),
         API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
         # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
         # per API_REQUIRE_AUTH=0.

@@ -368,6 +368,9 @@ inaktiv.
 | Variable | Default | Wirkung |
 |---|---|---|
 | `FINTS_PRODUCT_ID` | – | FinTS-Registrierungsnummer der DK, genau 25 Zeichen (Pflicht für den Direktabruf). |
+| `ENABLE_BANKING_APP_ID`, `ENABLE_BANKING_KEY_FILE` | – | Open Banking (PSD2) über Enable Banking: Anwendungs-ID und Pfad zum privaten RSA-Schlüssel (PEM). |
+| `ENABLE_BANKING_REDIRECT_URL` | Callback der Instanz | Rücksprung-URL nach der Bank-Zustimmung (in der Enable-Banking-Anwendung hinterlegen, https). |
+| `ENABLE_BANKING_API_URL` | `https://api.enablebanking.com` | API-Basis-URL von Enable Banking. |
 | `DATEV_CONSULTANT_NUMBER`, `DATEV_CLIENT_NUMBER` | `1000`, – | Berater-/Mandantennummer im DATEV-Export. |
 | `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rechnungssteller im E-Rechnungs-Export. |
 | `ELSTER_ENVIRONMENT` | `test` | `test` oder `production`. |
@@ -549,6 +552,32 @@ BIC und FinTS-URL vor (`GET /api/v1/fints-institutes?blz=…`, MCP
 Mit importierter Liste sind nur noch FinTS-URLs aus der Liste zulässig — auch beim
 Abruf, die PIN geht also nie an einen unbekannten Server. Hosts im lokalen/privaten
 Netz sind immer gesperrt.
+
+**Open Banking (PSD2) für Banken ohne FinTS:** Banken wie **Finom** bieten kein
+FinTS, aber eine PSD2-Schnittstelle. Der Abruf läuft über den Anbieter
+[Enable Banking](https://enablebanking.com): Dort eine Anwendung registrieren,
+den privaten Schlüssel ablegen und die Redirect-URL der Instanz eintragen:
+
+```bash
+export ENABLE_BANKING_APP_ID=<Anwendungs-ID>
+export ENABLE_BANKING_KEY_FILE=/app/instance/enablebanking.pem
+export ENABLE_BANKING_REDIRECT_URL=https://buchhaltung.example.de/bank/open-banking/callback
+```
+
+Unter **Bank → Open Banking (PSD2)** einen Zugang anlegen (Bankname laut
+Enable-Banking-Bankenliste, z. B. „Finom“; Kontotyp Geschäfts-/Privatkonto;
+Bank-Sachkonto), dann **Bank-Zustimmung erteilen**: Die Anwendung leitet zur Bank
+weiter, der Kontoinhaber stimmt dort per SCA zu und landet wieder auf der Bankseite.
+Die Zustimmung gilt je nach Bank bis zu 180 Tage und wird danach erneuert.
+**Umsätze abrufen** importiert gebuchte Umsätze (vorgemerkte nicht) über dieselbe
+Pipeline wie der Dateiimport; ohne Datumsangabe ab dem letzten Abruf mit 7 Tagen
+Überlappung, beim ersten Abruf ab dem Tag nach dem letzten vorhandenen Umsatz des
+Bankkontos (z. B. aus einem CSV-Import, dessen Referenzen anders lauten), sonst
+90 Tage. Bank-Zugangsdaten sieht OpenBuchhaltung nie; die Sitzungs-ID von Enable
+Banking wird mit einem aus `SECRET_KEY` abgeleiteten Schlüssel verschlüsselt
+gespeichert und beim Deaktivieren des Zugangs widerrufen. Hinweis: Der kostenlose
+Modus von Enable Banking deckt laut deren AGB nur private Konten ab — für
+Geschäftskonten ist ein Vertrag mit Enable Banking nötig.
 
 **Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
 (Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein
@@ -1059,6 +1088,11 @@ Bank & FinTS:
 - `GET/POST /api/v1/fints-connections`, `POST /api/v1/fints-connections/<id>/active`
 - `POST /api/v1/fints-connections/<id>/sync` — Abruf; bei TAN-Pflicht `202` mit `dialog_id`
 - `POST /api/v1/fints-dialogs/<id>/tan` — TAN bestätigen bzw. pushTAN-Freigabe prüfen
+- `GET /api/v1/open-banking/institutes?country=DE&q=…` — Bankenliste von Enable Banking
+- `GET/POST /api/v1/open-banking-connections`, `POST /api/v1/open-banking-connections/<id>/active`
+- `POST /api/v1/open-banking-connections/<id>/authorize` — liefert `authorization_url` für die Bank-Zustimmung
+- `POST /api/v1/open-banking/complete` — Zustimmung mit `redirect_url` bzw. `code`/`state` abschließen
+- `POST /api/v1/open-banking-connections/<id>/sync` — gebuchte Umsätze per PSD2 abrufen
 
 Die Report-Endpunkte akzeptieren einen **Zeitraum**: GuV und Summen-/Saldenliste
 werten Buchungen mit `entry_date` in `[date_from, date_to]` aus, die Bilanz als
@@ -1275,7 +1309,7 @@ Funktionsweise und Sicherheit:
   UI zeigt **Ausführen/Ablehnen**. Erst die Bestätigung führt das Tool aus (mit
   den Rechten des bestätigenden Benutzers) und setzt die Unterhaltung fort; eine
   Ablehnung geht als Ergebnis an das Modell zurück. Benutzer-, Token-, Passwort-,
-  ELSTER-, SEPA- und FinTS-Tools sowie die Chat-Tools selbst stehen im Chat gar
+  ELSTER-, SEPA-, FinTS- und Open-Banking-Tools sowie die Chat-Tools selbst stehen im Chat gar
   nicht zur Verfügung — auch dann nicht, wenn ein Anhang oder Verwendungszweck
   dazu auffordert.
 - **Untrusted Data:** Anhangstexte und Tool-Ergebnisse werden dem Modell als

@@ -1520,6 +1520,56 @@ class FinTSConnection(Base):
     bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
 
 
+class OpenBankingConnection(Base):
+    """PSD2-Bankzugang über einen Open-Banking-Anbieter (derzeit Enable Banking).
+
+    Für Banken ohne FinTS (z. B. Finom). Gespeichert werden die Bankauswahl,
+    die vom Anbieter vergebene Sitzung (``session_id_encrypted``, Fernet mit
+    aus ``SECRET_KEY`` abgeleitetem Schlüssel) und das ausgewählte Konto —
+    keine Bank-Zugangsdaten. Die Zustimmung erteilt der Kontoinhaber direkt
+    bei der Bank; sie läuft nach ``consent_valid_until`` ab und muss dann
+    erneuert werden.
+    """
+
+    __tablename__ = "open_banking_connection"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_open_banking_connection_company_name"),
+        UniqueConstraint("auth_state", name="uq_open_banking_connection_auth_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="enable_banking")
+    aspsp_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    aspsp_country: Mapped[str] = mapped_column(String(2), nullable=False)
+    psu_type: Mapped[str] = mapped_column(String(10), nullable=False, default="business")
+    # Optional: IBAN, falls die Zustimmung mehrere Konten umfasst.
+    iban: Mapped[str | None] = mapped_column(String(34))
+    session_id_encrypted: Mapped[str | None] = mapped_column(Text)
+    account_uid: Mapped[str | None] = mapped_column(String(64))
+    consent_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Laufende Autorisierung: zufälliger state für den Rücksprung von der Bank.
+    auth_state: Mapped[str | None] = mapped_column(String(64))
+    auth_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_to: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+
+
 class FinTSPendingDialog(Base):
     """Eingefrorener FinTS-Dialog, der auf eine TAN-Bestätigung wartet.
 

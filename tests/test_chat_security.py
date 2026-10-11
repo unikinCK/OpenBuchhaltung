@@ -68,6 +68,14 @@ EXPECTED_BLOCKED_TOOLS = {
     "submit_fints_tan",
     "lookup_fints_institute",
     "import_fints_institutes",
+    # Open Banking (Bank-Zustimmung)
+    "list_open_banking_institutes",
+    "list_open_banking_connections",
+    "create_open_banking_connection",
+    "set_open_banking_connection_active",
+    "start_open_banking_authorization",
+    "complete_open_banking_authorization",
+    "sync_open_banking_transactions",
     # ELSTER
     "list_elster_submissions",
     "get_elster_submission_summary",

@@ -265,7 +265,7 @@ Bei Exporten an Steuerberater, Wirtschaftspruefer oder Betriebspruefer:
 - sichere Uebertragung verwenden
 - Zugriffe und Downloads protokollieren
 
-## 11. Bankanbindung (FinTS)
+## 11. Bankanbindung (FinTS, Open Banking)
 
 Fuer den FinTS/HBCI-Direktabruf gelten folgende Betriebsregeln:
 
@@ -283,6 +283,23 @@ Fuer den FinTS/HBCI-Direktabruf gelten folgende Betriebsregeln:
   auf Volume- oder Datenbankebene.
 - Bankzugaenge (BLZ, Login, FinTS-URL) sind Stammdaten je Gesellschaft;
   das Anlegen und Deaktivieren wird im Audit-Log protokolliert.
+
+Open Banking (PSD2 ueber Enable Banking, fuer Banken ohne FinTS wie Finom):
+
+- `ENABLE_BANKING_APP_ID` und `ENABLE_BANKING_KEY_FILE` (privater RSA-Schluessel
+  der Enable-Banking-Anwendung) setzen; die Schluesseldatei liegt nur auf dem
+  Server (z. B. im Volume `/app/instance`, Rechte 600) und nie im Repository.
+  Sie ist Teil des Instance-Backups.
+- Die Redirect-URL (`ENABLE_BANKING_REDIRECT_URL`, Default
+  `https://<host>/bank/open-banking/callback`) muss in der Anwendung bei
+  Enable Banking hinterlegt sein.
+- Gespeichert wird nur die Sitzungs-ID von Enable Banking, Fernet-verschluesselt
+  mit einem aus `SECRET_KEY` abgeleiteten Schluessel. Wird `SECRET_KEY`
+  gewechselt, muss die Bank-Zustimmung neu erteilt werden.
+- Anlegen, Zustimmung, Abruf und Deaktivieren (mit Widerruf der Sitzung)
+  werden im Audit-Log protokolliert.
+- Der kostenlose Enable-Banking-Modus deckt laut AGB nur private Konten ab;
+  fuer Geschaeftskonten ist ein Vertrag mit Enable Banking noetig.
 
 ## 12. Mindestabnahme vor Produktivstart
 

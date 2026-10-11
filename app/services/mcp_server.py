@@ -2377,6 +2377,174 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_open_banking_institutes",
+        description=(
+            "Durchsucht die Bankenliste von Enable Banking (PSD2/Open Banking) für Banken "
+            "ohne FinTS, z. B. Finom. Der zurückgegebene Name wird beim Anlegen des "
+            "Zugangs als aspsp_name verwendet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "country": {"type": "string", "description": "ISO-Ländercode, Standard DE."},
+                "q": {"type": "string", "description": "Optional: Namensteil, z. B. Finom."},
+                "psu_type": {
+                    "type": "string",
+                    "enum": ["business", "personal"],
+                    "description": "Optional: nur Banken mit diesem Kontotyp.",
+                },
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/open-banking/institutes",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="list_open_banking_connections",
+        description=(
+            "Listet die Open-Banking-Zugänge (PSD2 über Enable Banking) einer Gesellschaft "
+            "mit Status der Bank-Zustimmung (authorized, expired, authorization_required)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Zugänge einschließen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/open-banking-connections",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_open_banking_connection",
+        description=(
+            "Legt einen Open-Banking-Zugang (PSD2 über Enable Banking) für eine Bank ohne "
+            "FinTS an, z. B. Finom. Danach start_open_banking_authorization aufrufen, "
+            "damit der Kontoinhaber bei der Bank zustimmt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": "ID des Bank-Sachkontos für die importierten Umsätze.",
+                },
+                "name": {"type": "string", "description": "Anzeigename des Zugangs."},
+                "aspsp_name": {
+                    "type": "string",
+                    "description": "Bankname exakt laut list_open_banking_institutes.",
+                },
+                "aspsp_country": {"type": "string", "description": "ISO-Ländercode der Bank."},
+                "psu_type": {
+                    "type": "string",
+                    "enum": ["business", "personal"],
+                    "description": "Kontotyp, Standard business.",
+                },
+                "iban": {
+                    "type": "string",
+                    "description": "Optional: IBAN, falls die Zustimmung mehrere Konten umfasst.",
+                },
+            },
+            "required": ["company_id", "bank_account_id", "name", "aspsp_name", "aspsp_country"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking-connections",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_open_banking_connection_active",
+        description=(
+            "Aktiviert oder deaktiviert einen Open-Banking-Zugang; beim Deaktivieren wird "
+            "die Bank-Sitzung bei Enable Banking widerrufen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des Zugangs."},
+                "is_active": {"type": "boolean", "description": "Neuer Aktiv-Status."},
+            },
+            "required": ["connection_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking-connections/{connection_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="start_open_banking_authorization",
+        description=(
+            "Startet die Bank-Zustimmung für einen Open-Banking-Zugang. Liefert "
+            "authorization_url — der Kontoinhaber öffnet sie im Browser und stimmt bei "
+            "der Bank zu. Der Rücksprung landet auf der Bankseite der Instanz; alternativ "
+            "complete_open_banking_authorization mit der Rücksprung-URL aufrufen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des Zugangs."},
+                "valid_days": {
+                    "type": "integer",
+                    "description": "Optional: Gültigkeit in Tagen (Standard: Maximum der Bank).",
+                },
+            },
+            "required": ["connection_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking-connections/{connection_id}/authorize",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="complete_open_banking_authorization",
+        description=(
+            "Schließt eine Bank-Zustimmung ab, wenn der Rücksprung nicht über die "
+            "Weboberfläche lief: redirect_url (komplette Rücksprung-URL) oder code + state."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "redirect_url": {"type": "string", "description": "Rücksprung-URL der Bank."},
+                "code": {"type": "string", "description": "Autorisierungscode."},
+                "state": {"type": "string", "description": "State aus dem Rücksprung."},
+            },
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking/complete",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="sync_open_banking_transactions",
+        description=(
+            "Ruft gebuchte Bankumsätze per PSD2 (Enable Banking) ab und importiert sie "
+            "(Dedup wie beim Dateiimport). Setzt eine gültige Bank-Zustimmung voraus. "
+            "Ohne Datum: ab letztem Abruf (7 Tage Überlappung), beim ersten Abruf ab dem "
+            "Tag nach dem letzten vorhandenen Umsatz des Bankkontos, sonst 90 Tage."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des Zugangs."},
+                "from_date": {"type": "string", "description": "Optional: Beginn (YYYY-MM-DD)."},
+                "to_date": {"type": "string", "description": "Optional: Ende (YYYY-MM-DD)."},
+            },
+            "required": ["connection_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking-connections/{connection_id}/sync",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."

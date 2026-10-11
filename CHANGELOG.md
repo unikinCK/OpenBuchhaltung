@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Open Banking (PSD2) für Banken ohne FinTS
+- Neu: Umsatzabruf über Enable Banking für Banken ohne FinTS, z. B. Finom.
+  Bankzugang anlegen (Bank laut Enable-Banking-Liste, Geschäfts-/Privatkonto,
+  Bank-Sachkonto, optional IBAN), Bank-Zustimmung per Weiterleitung zur Bank
+  (Rücksprung `/bank/open-banking/callback`), Abruf gebuchter Umsätze mit Pagination
+  über die gemeinsame Import-Pipeline (Quelle `open_banking`, Bankreferenz =
+  `entry_reference`), Deaktivieren widerruft die Sitzung.
+- Tabelle `open_banking_connection` (Migration 0046); die Sitzungs-ID wird
+  Fernet-verschlüsselt (Schlüssel aus `SECRET_KEY`) gespeichert.
+- API: `GET /api/v1/open-banking/institutes`, `GET/POST /api/v1/open-banking-connections`,
+  `…/<id>/active`, `…/<id>/authorize`, `…/<id>/sync`, `POST /api/v1/open-banking/complete`.
+  MCP: `list_open_banking_institutes`, `list_open_banking_connections`,
+  `create_open_banking_connection`, `set_open_banking_connection_active`,
+  `start_open_banking_authorization`, `complete_open_banking_authorization`,
+  `sync_open_banking_transactions` (im KI-Chat gesperrt).
+- Konfiguration: `ENABLE_BANKING_APP_ID`, `ENABLE_BANKING_KEY_FILE`,
+  `ENABLE_BANKING_REDIRECT_URL`, `ENABLE_BANKING_API_URL`.
+
 ### Bankimport: Finom-Kontoauszug
 - Der CSV-Import erkennt den Original-Export der Finom-Bank (Spalten
   „Transaktions-ID“ und „Zahlungsbetrag“) – in UI, API und MCP
