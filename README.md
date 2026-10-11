@@ -497,13 +497,20 @@ wird automatisch erkannt (Dateiendung plus Inhalt, Latin-1-Fallback beim Decodin
   Auftraggeber/Empfänger; Trennzeichen `,` oder `;`). Beträge werden im deutschen
   (`1.234,56`) und englischen Format (`1,234.56`) akzeptiert; mehrdeutige Werte
   wie `1,234` werden abgelehnt statt still umgedeutet.
+  Der **Finom**-Kontoauszugsexport wird an den Spalten „Transaktions-ID“ und
+  „Zahlungsbetrag“ erkannt und direkt übernommen: nur Status „Completed“,
+  Betrag = Zahlungsbetrag, Gegenpartei = Auftraggeber/Empfänger, Kartenzahlungen
+  als „Kartenzahlung {Empfänger}“ (bei Fremdwährung zusätzlich
+  „({Währung} {Ursprungsbetrag})“), die Transaktions-ID als Bankreferenz.
 - **CAMT.053** (ISO 20022, namespace-agnostisch für camt.053.001.02–.08)
 - **MT940** (`.sta`, auch als FinTS-Rückgabeformat)
 
 Re-Importe werden dedupliziert; der Duplikat-Hash berücksichtigt die bankseitige
-Referenz (CAMT `AcctSvcrRef`/`EndToEndId`, MT940-Bank-/EREF-Referenz), sodass
+Referenz (CAMT `AcctSvcrRef`/`EndToEndId`, MT940-Bank-/EREF-Referenz,
+Finom-Transaktions-ID), sodass
 echte Doppelumsätze (z. B. zwei identische Kartenzahlungen am selben Tag)
-erhalten bleiben. Beispiel-CSV: `data/demo/bank_demo.csv`.
+erhalten bleiben. Früher ohne Referenz importierte Zeilen gelten beim Re-Import
+mit Referenz als Duplikat. Beispiel-CSV: `data/demo/bank_demo.csv`.
 
 **FinTS/HBCI-Direktabruf:** Je Gesellschaft lassen sich Bankzugänge (BLZ, Login,
 FinTS-URL, optional IBAN bei Mehrkonten-Zugängen) hinterlegen und Umsätze direkt

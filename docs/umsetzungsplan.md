@@ -317,6 +317,11 @@ UI, REST-API und MCP angeboten und gepflegt.
       Eingangsrechnungs-Service [incoming_invoice] für OCR/E-Rechnung in Web+API,
       Inline-JS in app.js überführt und CSP ohne script-src 'unsafe-inline',
       Doppel-Submit-Schutz, gruppierte Navigation, Flash-Kategorien info/warning)*
+- [x] Finom-Kontoauszug im CSV-Import *(2026-10-11: Erkennung an „Transaktions-ID“
+      + „Zahlungsbetrag“, nur Status Completed, Kartenzahlungen als „Kartenzahlung
+      {Empfänger}“ [+ Ursprungsbetrag bei Fremdwährung], hash-kompatibel zur bisherigen
+      manuellen Umwandlung; Transaktions-ID als Bankreferenz, Altbestand-Abgleich
+      deckt auch gleich aussehende Zeilen [`|n:k`]; Trennzeichen aus der Kopfzeile)*
 - [x] Komfort & Robustheit *(Sprint 2026-08-30: Dashboard-Kacheln „Offene
       Aufgaben" [unverbuchte Bankumsätze, unverknüpfte Belege, überfällige
       OPOS, offene Abgleich-Vorschläge]; Suche (q) + Datumsfilter auf Bank-,
