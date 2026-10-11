@@ -33,6 +33,10 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - BLZ-Abfrage `GET /api/v1/fints-institutes?blz=…` bzw. MCP `lookup_fints_institute`;
   im Anlageformular schlägt die BLZ Institut, BIC und FinTS-URL vor. Die FinTS-URL ist
   beim Anlegen optional und wird sonst aus der Liste ermittelt.
+- FinTS-Fehler zeigen die Rückmeldungen der Bank (Code und Text aus HIRMG/HIRMS) in
+  Fehlermeldung und Log. python-fints meldet abgelehnte Anmeldungen pauschal als
+  „PIN wrong?“ und loggt die Rückmeldungen dabei nicht; bei diesem Fehler weist die
+  Meldung zusätzlich auf die Sperre nach mehreren Fehlversuchen hin.
 - Sicherheit (Review S5): Mit importierter Liste sind nur FinTS-URLs aus der Liste
   zulässig, beim Anlegen und vor jedem Abruf. Hosts im lokalen oder privaten Netz und
   URLs mit Zugangsdaten sind immer gesperrt.

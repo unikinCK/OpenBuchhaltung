@@ -229,17 +229,15 @@ def test_create_list_and_deactivate_connection(session: Session):
     )
     assert list_fints_connections(session=session, company_id=company.id) == []
     assert (
-        len(
-            list_fints_connections(
-                session=session, company_id=company.id, include_inactive=True
-            )
-        )
+        len(list_fints_connections(session=session, company_id=company.id, include_inactive=True))
         == 1
     )
 
-    actions = session.execute(
-        select(AuditLog.action).where(AuditLog.entity_type == "fints_connection")
-    ).scalars().all()
+    actions = (
+        session.execute(select(AuditLog.action).where(AuditLog.entity_type == "fints_connection"))
+        .scalars()
+        .all()
+    )
     assert actions == ["created", "deactivated"]
 
 
@@ -410,6 +408,64 @@ def test_failed_fetch_after_tan_cleans_up_pending_dialog(session: Session, monke
             changed_by="tester",
         )
     assert session.get(FinTSPendingDialog, dialog_id) is None
+
+
+def test_rejected_dialog_init_reports_bank_responses(session: Session, monkeypatch, caplog):
+    """python-fints meldet 9xxx bei der Initialisierung als „PIN wrong?“ — die
+    tatsächlichen Rückmeldungen der Bank müssen in Fehlermeldung und Log stehen."""
+    from fints.exceptions import FinTSClientPINError
+
+    company, bank = _seed_company(session)
+    connection = _create_connection(session, company, bank)
+
+    def responses(*pairs):
+        return SimpleNamespace(
+            responses=[SimpleNamespace(code=code, text=text) for code, text in pairs]
+        )
+
+    # Wie bei der Bank: Nachrichten-Rückmeldungen (HIRMG) vor den
+    # Segment-Rückmeldungen (HIRMS) mit dem eigentlichen Grund.
+    bank_message = SimpleNamespace(
+        find_segments=lambda segment_type: {
+            "HIRMG2": [responses(("9050", "Die Nachricht enthält Fehler."))],
+            "HIRMS2": [
+                responses(
+                    ("3060", "Bitte beachten Sie die enthaltenen Warnungen/Hinweise."),
+                    ("9078", "Zugang für FinTS nicht freigeschaltet."),
+                )
+            ],
+        }.get(segment_type.__name__, [])
+    )
+
+    class RejectingClient(FakeFinTSClient):
+        def process_response_message(self, dialog, message, internal_send=True):
+            # python-fints bricht beim ersten 9xxx der HIRMG ab.
+            raise FinTSClientPINError("Error during dialog initialization, PIN wrong?")
+
+        def get_current_tan_mechanism(self):
+            return None
+
+        def fetch_tan_mechanisms(self):
+            self.process_response_message(None, bank_message, internal_send=True)
+
+    _patch_client(monkeypatch, RejectingClient())
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(FinTSSyncError) as excinfo:
+            start_fints_sync(
+                session=session,
+                connection_id=connection.id,
+                pin="geheim-1234",
+                product_id=PRODUCT_ID,
+                changed_by="tester",
+            )
+    message = str(excinfo.value)
+    assert "FinTSClientPINError" in message
+    assert "Die Bank meldet: 9050 Die Nachricht enthält Fehler." in message
+    assert "9078 Zugang für FinTS nicht freigeschaltet." in message
+    assert "Fehlversuchen sperrt die Bank" in message
+    assert "3060 Bitte beachten" in caplog.text
+    assert "geheim-1234" not in message and "geheim-1234" not in caplog.text
 
 
 def test_wrong_tan_cleans_up_pending_dialog(session: Session, monkeypatch):
@@ -600,9 +656,7 @@ def test_api_connection_lifecycle_and_sync(api_app, monkeypatch):
         assert created.status_code == 201, created.get_json()
         connection_id = created.get_json()["id"]
 
-        listing = client.get(
-            "/api/v1/fints-connections", query_string={"company_id": company_id}
-        )
+        listing = client.get("/api/v1/fints-connections", query_string={"company_id": company_id})
         assert listing.status_code == 200
         assert len(listing.get_json()["connections"]) == 1
 
@@ -646,9 +700,7 @@ def test_api_sync_tan_flow(api_app, monkeypatch):
             },
         ).get_json()["id"]
 
-        sync = client.post(
-            f"/api/v1/fints-connections/{connection_id}/sync", json={"pin": "1234"}
-        )
+        sync = client.post(f"/api/v1/fints-connections/{connection_id}/sync", json={"pin": "1234"})
         assert sync.status_code == 202, sync.get_json()
         payload = sync.get_json()
         assert payload["status"] == "tan_required"
