@@ -194,6 +194,116 @@
     {% endif %}
   </section>
 
+  <section class="card">
+    <h2>Open Banking (PSD2)</h2>
+    <p class="muted">Für Banken ohne FinTS (z. B. Finom): Abruf über Enable Banking. Die Zustimmung erteilt der Kontoinhaber direkt bei der Bank; sie gilt je nach Bank bis zu 180 Tage.</p>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% else %}
+      {% if not open_banking_configured %}
+        <p class="muted">Hinweis: <code>ENABLE_BANKING_APP_ID</code> und <code>ENABLE_BANKING_KEY_FILE</code> sind nicht gesetzt — Zustimmung und Abruf sind erst danach möglich.</p>
+      {% endif %}
+
+      {% if open_banking_connections %}
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Bank</th>
+              <th>IBAN</th>
+              <th>Zustimmung</th>
+              <th>Abruf</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for conn in open_banking_connections %}
+              {% set status = open_banking_status(conn) %}
+              <tr>
+                <td>{{ conn.name }}</td>
+                <td>{{ conn.aspsp_name }} ({{ conn.aspsp_country }}, {{ "Geschäftskonto" if conn.psu_type == "business" else "Privatkonto" }})</td>
+                <td>{{ conn.iban or "–" }}</td>
+                <td>
+                  {% if status == "authorized" %}
+                    gültig bis {{ conn.consent_valid_until.strftime('%d.%m.%Y') if conn.consent_valid_until else "–" }}
+                  {% elif status == "expired" %}
+                    <strong>abgelaufen</strong>
+                  {% else %}
+                    <strong>fehlt</strong>
+                  {% endif %}
+                  <form method="post" action="{{ url_for('main.open_banking_authorize_action', connection_id=conn.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit" class="secondary" style="margin:0;">{% if status == "authorized" %}Erneuern{% else %}Bank-Zustimmung erteilen{% endif %}</button>
+                  </form>
+                </td>
+                <td>
+                  {% if status == "authorized" %}
+                    <form method="post" action="{{ url_for('main.open_banking_sync_action', connection_id=conn.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input name="from_date" type="date" title="Von (Standard: ab letztem Abruf bzw. letztem vorhandenen Umsatz)" aria-label="Von-Datum" />
+                      <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
+                      <button type="submit" class="secondary" style="margin:0;">Umsätze abrufen</button>
+                    </form>
+                    {% if conn.last_synced_to %}<span class="muted">zuletzt bis {{ conn.last_synced_to.strftime('%d.%m.%Y') }}</span>{% endif %}
+                  {% else %}
+                    <span class="muted">erst nach Zustimmung</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <form method="post" action="{{ url_for('main.open_banking_deactivate_action', connection_id=conn.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit" class="secondary" style="margin:0;">Deaktivieren</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch kein Open-Banking-Zugang hinterlegt.</p>
+      {% endif %}
+
+      {% if bank_accounts %}
+        <details style="margin-top:1rem;">
+          <summary>Neuen Open-Banking-Zugang anlegen</summary>
+          <form method="post" action="{{ url_for('main.open_banking_connection_create_action') }}" class="stacked">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+            <label for="ob_name">Name</label>
+            <input id="ob_name" name="name" type="text" placeholder="z. B. Geschäftskonto Finom" required />
+
+            <label for="ob_aspsp_name">Bank (Name laut Enable-Banking-Bankenliste)</label>
+            <input id="ob_aspsp_name" name="aspsp_name" type="text" placeholder="z. B. Finom" required />
+            <p class="muted"><a href="{{ url_for('main.open_banking_institutes_page', company_id=selected_company_id) }}">Bankenliste durchsuchen</a></p>
+
+            <label for="ob_country_new">Land der Bank (ISO-Code)</label>
+            <input id="ob_country_new" name="aspsp_country" type="text" value="DE" maxlength="2" required style="width:5rem;" />
+
+            <label for="ob_psu_type">Kontotyp</label>
+            <select id="ob_psu_type" name="psu_type">
+              <option value="business" selected>Geschäftskonto</option>
+              <option value="personal">Privatkonto</option>
+            </select>
+
+            <label for="ob_iban">IBAN (nur nötig, wenn die Zustimmung mehrere Konten umfasst)</label>
+            <input id="ob_iban" name="iban" type="text" />
+
+            <label for="ob_bank_account">Bank-Sachkonto</label>
+            <select id="ob_bank_account" name="bank_account_id" required>
+              {% for account in bank_accounts %}
+                <option value="{{ account.id }}" {% if account.id == default_bank_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="muted">Bank-Zugangsdaten sieht OpenBuchhaltung nie. Gespeichert wird nur die (verschlüsselte) Sitzung von Enable Banking.</p>
+
+            <button type="submit">Zugang anlegen</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </section>
+
   {% if selected_company_id and contra_accounts %}
     <section class="card">
       <h2>Auto-Kontierung (Regeln)</h2>

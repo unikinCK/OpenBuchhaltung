@@ -19,6 +19,7 @@ from app.web import (  # noqa: F401
     fixed_assets,
     income_taxes,
     journal,
+    open_banking,
     open_items,
     opening_balance,
     partners,

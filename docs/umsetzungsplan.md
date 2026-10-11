@@ -322,6 +322,13 @@ UI, REST-API und MCP angeboten und gepflegt.
       {Empfänger}“ [+ Ursprungsbetrag bei Fremdwährung], hash-kompatibel zur bisherigen
       manuellen Umwandlung; Transaktions-ID als Bankreferenz, Altbestand-Abgleich
       deckt auch gleich aussehende Zeilen [`|n:k`]; Trennzeichen aus der Kopfzeile)*
+- [x] Open Banking (PSD2) für Banken ohne FinTS, z. B. Finom *(2026-10-11: Enable
+      Banking als Anbieter [GoCardless nimmt keine Neukunden mehr an];
+      `open_banking_connection` [Migration 0046] mit Fernet-verschlüsselter Sitzung;
+      Bank-Zustimmung per Redirect + Callback, Abruf gebuchter Umsätze mit Pagination
+      über die gemeinsame Import-Pipeline [Quelle `open_banking`]; Bankenliste,
+      Anlegen, Zustimmung, Abruf, Deaktivieren mit Sitzungs-Widerruf in UI/API/MCP;
+      im KI-Chat gesperrt)*
 - [x] Komfort & Robustheit *(Sprint 2026-08-30: Dashboard-Kacheln „Offene
       Aufgaben" [unverbuchte Bankumsätze, unverknüpfte Belege, überfällige
       OPOS, offene Abgleich-Vorschläge]; Suche (q) + Datumsfilter auf Bank-,

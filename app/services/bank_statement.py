@@ -303,3 +303,60 @@ def parse_mt940(content: bytes) -> list[StatementItem]:
         row_from_mt940_data(position, transaction.data)
         for position, transaction in enumerate(parsed, start=1)
     ]
+
+
+# ---------------------------------------------------------------------------
+# PSD2 / Open Banking (Enable Banking, Berlin-Group-Transaktionen)
+
+
+def row_from_open_banking_transaction(position: int, data: dict) -> StatementItem:
+    """Übersetzt einen per PSD2 abgerufenen Umsatz (Enable-Banking-Schema) in eine Zeile.
+
+    Der Betrag kommt vorzeichenlos; die Richtung steht in
+    ``credit_debit_indicator`` (``DBIT`` = Ausgang). Gegenpartei ist bei
+    Ausgängen der Empfänger (``creditor``), bei Eingängen der Zahler
+    (``debtor``).
+    """
+    amount_obj = data.get("transaction_amount") or {}
+    try:
+        amount = abs(Decimal(str(amount_obj.get("amount"))).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError):
+        return BankStatementRowError(position, "Betrag fehlt oder ist ungültig.")
+    is_debit = (data.get("credit_debit_indicator") or "").upper() == "DBIT"
+    if is_debit:
+        amount = -amount
+
+    raw_date = data.get("booking_date") or data.get("value_date") or data.get("transaction_date")
+    try:
+        booking_date = date.fromisoformat(str(raw_date)[:10])
+    except ValueError:
+        return BankStatementRowError(position, "Buchungsdatum fehlt oder ist ungültig.")
+
+    remittance = data.get("remittance_information") or []
+    if isinstance(remittance, str):
+        remittance = [remittance]
+    bank_code = data.get("bank_transaction_code") or {}
+    purpose = (
+        _clip(" ".join(str(part) for part in remittance if part))
+        or _clip(data.get("note"))
+        or _clip(bank_code.get("description"))
+        or "(kein Verwendungszweck)"
+    )
+
+    party = data.get("creditor" if is_debit else "debtor") or {}
+    counterparty = _clip(party.get("name"))
+    bank_reference = (
+        _clean_reference(data.get("entry_reference"))
+        or _clean_reference(data.get("transaction_id"))
+        or _clean_reference(data.get("reference_number"))
+    )
+
+    return BankStatementRow(
+        position=position,
+        booking_date=booking_date,
+        amount=amount,
+        purpose=purpose,
+        counterparty=counterparty,
+        currency_code=(amount_obj.get("currency") or "").upper() or None,
+        bank_reference=bank_reference,
+    )

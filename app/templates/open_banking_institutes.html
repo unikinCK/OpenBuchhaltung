@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Open-Banking-Banken – OpenBuchhaltung{% endblock %}
+{% block content %}
+  <section class="card">
+    <h1>Banken für Open Banking (PSD2)</h1>
+    <p class="muted">Bankenliste von Enable Banking. Den hier angezeigten Namen exakt beim Anlegen des Zugangs übernehmen.</p>
+    <form method="get" action="{{ url_for('main.open_banking_institutes_page') }}" class="stacked">
+      {% if company_id %}<input type="hidden" name="company_id" value="{{ company_id }}" />{% endif %}
+      <label for="ob_country">Land (ISO-Code)</label>
+      <input id="ob_country" name="country" type="text" value="{{ country }}" maxlength="2" style="width:5rem;" />
+      <label for="ob_q">Name enthält</label>
+      <input id="ob_q" name="q" type="search" value="{{ q }}" placeholder="z. B. Finom" />
+      <button type="submit">Suchen</button>
+    </form>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% elif institutes %}
+      <table>
+        <thead><tr><th>Name</th><th>Land</th><th>BIC</th><th>Kontotypen</th><th>Max. Zustimmung</th></tr></thead>
+        <tbody>
+          {% for item in institutes %}
+            <tr>
+              <td><code>{{ item.name }}</code>{% if item.beta %} <span class="muted">(Beta)</span>{% endif %}</td>
+              <td>{{ item.country }}</td>
+              <td>{{ item.bic or "–" }}</td>
+              <td>{{ item.psu_types | join(", ") }}</td>
+              <td>{% if item.maximum_consent_validity_days %}{{ item.maximum_consent_validity_days }} Tage{% else %}–{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% elif q %}
+      <p class="muted">Keine Bank gefunden.</p>
+    {% endif %}
+    <p><a href="{{ url_for('main.bank_page', company_id=company_id) }}">Zurück zur Bankseite</a></p>
+  </section>
+{% endblock %}

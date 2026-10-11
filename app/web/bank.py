@@ -45,6 +45,11 @@ from app.services.fints_sync import (
     submit_fints_tan,
 )
 from app.services.journal_entries import JournalEntryCreationError
+from app.services.open_banking import (
+    connection_status,
+    list_open_banking_connections,
+    open_banking_configured,
+)
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import BANK, standard_account_id
 from app.web.blueprint import main_bp
@@ -88,6 +93,7 @@ def bank_page():
         cost_centers = []
         profit_centers = []
         fints_connections = []
+        open_banking_connections = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
@@ -97,6 +103,9 @@ def bank_page():
         fints_institute_status = fints_institute_list_status(session)
         if selected_company_id:
             fints_connections = list_fints_connections(
+                session=session, company_id=selected_company_id
+            )
+            open_banking_connections = list_open_banking_connections(
                 session=session, company_id=selected_company_id
             )
             accounts = (
@@ -215,6 +224,9 @@ def bank_page():
         fints_challenge=fints_challenge,
         fints_configured=bool(current_app.config.get("FINTS_PRODUCT_ID")),
         fints_institute_status=fints_institute_status,
+        open_banking_connections=open_banking_connections,
+        open_banking_configured=open_banking_configured(current_app.config),
+        open_banking_status=connection_status,
     )
 
 

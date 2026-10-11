@@ -23,6 +23,7 @@ from app.api import (  # noqa: F401
     journal_templates,
     mcp,
     oauth_grants,
+    open_banking,
     open_items,
     partners,
     payment_runs,
