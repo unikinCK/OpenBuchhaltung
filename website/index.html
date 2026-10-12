@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>OpenBuchhaltung – Open-Source-Buchhaltung für GmbH, UG und gGmbH</title>
+  <meta name="description" content="Webbasierte Open-Source-Buchhaltung für deutsche Kapitalgesellschaften: doppelte Buchführung nach HGB, UStVA mit ELSTER-Anbindung, DATEV-Export, Bankabruf per FinTS und PSD2, REST-API und MCP-Server. Selbst gehostet, Apache-Lizenz 2.0.">
+  <link rel="canonical" href="https://openbuchhaltung.de/">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0c1720" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:site_name" content="OpenBuchhaltung">
+  <meta property="og:url" content="https://openbuchhaltung.de/">
+  <meta property="og:title" content="OpenBuchhaltung – Buchhaltung, die sich nachprüfen lässt">
+  <meta property="og:description" content="Open-Source-Buchhaltung für GmbH, UG und gGmbH: HGB, UStVA, DATEV-Export, FinTS, REST-API und MCP-Server. Selbst gehostet.">
+  <meta property="og:image" content="https://openbuchhaltung.de/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="OpenBuchhaltung – Buchhaltung, die sich nachprüfen lässt">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js"></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "OpenBuchhaltung",
+    "url": "https://openbuchhaltung.de/",
+    "description": "Webbasierte Open-Source-Buchhaltung für deutsche Kapitalgesellschaften (UG, GmbH, gGmbH).",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Linux, macOS, Windows (Docker)",
+    "inLanguage": "de",
+    "license": "https://www.apache.org/licenses/LICENSE-2.0",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+    "publisher": { "@type": "Organization", "name": "unikin GmbH", "url": "https://unikin.de" },
+    "sameAs": ["https://github.com/unikinCK/OpenBuchhaltung"]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="./" aria-label="OpenBuchhaltung, zur Startseite">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect class="mark-bg" width="32" height="32" rx="7"/>
+          <path class="mark-line" d="M7 10.5h18M16 10.5V25" fill="none" stroke-width="2.4" stroke-linecap="round"/>
+          <path class="mark-total" d="M19.6 20.4h4.6M19.6 23.1h4.6" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>OpenBuchhaltung</span>
+      </a>
+
+      <nav class="site-nav" id="site-nav" aria-label="Hauptnavigation">
+        <ul>
+          <li><a href="#funktionen">Funktionen</a></li>
+          <li><a href="#einblick">Einblick</a></li>
+          <li><a href="#steuern">Steuern</a></li>
+          <li><a href="#pruefbarkeit">Prüfbarkeit</a></li>
+          <li><a href="#schnittstellen">Schnittstellen</a></li>
+          <li><a href="#installation">Installation</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </nav>
+
+      <div class="header-actions">
+        <a class="button button-secondary button-small header-github" href="https://github.com/unikinCK/OpenBuchhaltung" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-11.2 7.2"/></svg>
+          <span class="github-label">GitHub</span>
+        </a>
+        <button class="icon-button theme-toggle" type="button" aria-label="Helles oder dunkles Farbschema" hidden>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
+        </button>
+        <button class="icon-button nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false" aria-label="Menü">
+          <svg class="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="inhalt">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-inner">
+        <div>
+          <p class="eyebrow">Open Source · Apache-Lizenz 2.0 · selbst gehostet</p>
+          <h1 id="hero-title">Buchhaltung, die sich nachprüfen lässt.</h1>
+          <p class="hero-lead">
+            OpenBuchhaltung ist eine webbasierte Buchhaltung für GmbH, UG und gGmbH: doppelte
+            Buchführung nach HGB, Umsatzsteuer mit ELSTER-Anbindung, DATEV-Export und Bankabruf,
+            dazu eine offene API und ein MCP-Server für KI-Assistenten. Jede Aktion wird
+            protokolliert, festgeschriebene Buchungen werden versiegelt, und der Quellcode liegt
+            offen auf GitHub.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/unikinCK/OpenBuchhaltung" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>
+              Quellcode auf GitHub
+            </a>
+            <a class="button button-secondary" href="#installation">Lokal ausprobieren</a>
+          </div>
+          <ul class="hero-meta" aria-label="Technik">
+            <li>Python 3.12 und Flask</li>
+            <li>PostgreSQL</li>
+            <li>Docker Compose</li>
+          </ul>
+        </div>
+
+        <figure class="ledger" aria-labelledby="ledger-caption">
+          <div class="ledger-head">
+            <span class="ledger-no">2026-0026</span>
+            <span>Buchung vom 10.09.2026</span>
+            <span class="chip chip-ok">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
+              festgeschrieben
+            </span>
+          </div>
+          <p class="ledger-text">AR 2026-124 Beratungskunde Nord GmbH, Beratung August</p>
+          <p class="ledger-sub">Leistungsdatum 31.08.2026</p>
+          <div class="ledger-table-wrap">
+            <table class="ledger-table">
+              <thead>
+                <tr><th scope="col">Konto</th><th scope="col">Bezeichnung</th><th scope="col" class="num">Soll</th><th scope="col" class="num">Haben</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="acct">1400</td>
+                  <td>Forderungen aLuL<span class="partner">Debitor 10000 · Beratungskunde Nord GmbH</span></td>
+                  <td class="num">3.808,00</td><td></td>
+                </tr>
+                <tr>
+                  <td class="acct">8400</td>
+                  <td>Erlöse 19&nbsp;% USt<span class="partner">Steuercode USt19</span></td>
+                  <td></td><td class="num">3.200,00</td>
+                </tr>
+                <tr>
+                  <td class="acct">1776</td>
+                  <td>Umsatzsteuer 19&nbsp;%<span class="partner">automatisch aus USt19</span></td>
+                  <td></td><td class="num">608,00</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr><td colspan="2">Summe</td><td class="num"><span class="total">3.808,00</span></td><td class="num"><span class="total">3.808,00</span></td></tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="ledger-seal">
+            <span class="seal-label">Inhaltshash SHA-256</span>
+            <code>bd2dfb2c f6b8cab4 296e6ea9 801215be 5e52876c d7fa81c1 e04e2386 9d1f4b60</code>
+          </div>
+          <figcaption class="ledger-caption" id="ledger-caption">
+            Beispielbuchung aus der Demo-Instanz. Der Hash versiegelt Kopfdaten, Leistungsdatum,
+            Partner und alle Zeilen; jede spätere Änderung fällt bei der Integritätsprüfung auf.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="capabilities" aria-label="Unterstützte Standards">
+      <div class="wrap">
+        <ul>
+          <li><span class="cap-label">Kontenrahmen</span>SKR03 · SKR04</li>
+          <li><span class="cap-label">Umsatzsteuer</span>UStVA · ZM · Jahreserklärung</li>
+          <li><span class="cap-label">Kanzlei</span>DATEV-Buchungsstapel</li>
+          <li><span class="cap-label">E-Rechnung</span>XRechnung · ZUGFeRD</li>
+          <li><span class="cap-label">Bank</span>FinTS · PSD2 · CAMT · MT940</li>
+          <li><span class="cap-label">Automatisierung</span>REST-API · MCP</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="fuer-wen" aria-labelledby="fuer-wen-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Zielgruppen</p>
+          <h2 id="fuer-wen-title">Für wen OpenBuchhaltung gedacht ist</h2>
+          <p class="lead">
+            Für alle, die ihre Finanzdaten nachvollziehbar und automatisierbar verwalten wollen,
+            ohne sich an eine geschlossene Plattform zu binden.
+          </p>
+        </div>
+        <div class="audiences">
+          <div class="audience">
+            <h3>Kleine Kapitalgesellschaften</h3>
+            <p>GmbH, UG und gGmbH, die ihre Buchhaltung selbst führen oder genau verstehen wollen, mit Bilanz und GuV statt Einnahmen-Überschuss-Rechnung.</p>
+          </div>
+          <div class="audience">
+            <h3>Steuerkanzleien und Buchhaltungsteams</h3>
+            <p>Mandantentrennung, Rollen, ein DATEV-kompatibler Buchungsstapel je Wirtschaftsjahr und ein Prüferexport mit Manifest und Hashes.</p>
+          </div>
+          <div class="audience">
+            <h3>Entwicklerinnen und Automatisierer</h3>
+            <p>Jede Fachfunktion gibt es in der Oberfläche, als REST-Endpunkt und als MCP-Tool. Buchen, Abgleichen und Auswerten lassen sich in eigene Abläufe einbinden.</p>
+          </div>
+          <div class="audience">
+            <h3>Open-Source-Beitragende</h3>
+            <p>Deutsche Buchhaltungspraxis als lesbarer Python-Code, mit über 700 automatisierten Tests, Architekturentscheidungen und Compliance-Dokumentation im Repository.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="funktionen" aria-labelledby="funktionen-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Funktionen</p>
+          <h2 id="funktionen-title">Was OpenBuchhaltung heute kann</h2>
+          <p class="lead">
+            Der Funktionsumfang wächst in Sprints. Alles auf dieser Seite ist umgesetzt und
+            automatisiert getestet; was noch fehlt, steht im <a href="#status">Projektstand</a>.
+          </p>
+        </div>
+
+        <div class="modules">
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5zM13 4h5.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13zM6.5 8h2M15.5 8h2M6.5 11.5h2M15.5 11.5h2"/></svg></div>
+            <h3>Kernbuchhaltung</h3>
+            <p>Mehrzeilige Journalbuchungen mit Soll/Haben-Prüfung, Steuercodes mit automatischer Steuerzeile, Storno als Gegenbuchung und Festschreibung.</p>
+            <ul>
+              <li>Nummernkreis je Geschäftsjahr</li>
+              <li>Buchungsvorlagen für wiederkehrende Buchungen</li>
+              <li>Eröffnungsbilanz aus dem Altsystem</li>
+              <li>Leistungsdatum für den richtigen Meldezeitraum</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h4v4H4zM4 15h4v4H4zM10 7h10M10 17h10M14 12h6M8 12h2M6 9v6"/></svg></div>
+            <h3>Kontenrahmen und Stammdaten</h3>
+            <p>SKR03 und SKR04 mitgeliefert oder als eigene CSV importiert. Die Kontenrahmen-Prüfung findet Altlasten und beschreibt die Bereinigung.</p>
+            <ul>
+              <li>Mandanten und Gesellschaften getrennt</li>
+              <li>Debitoren 10000–69999, Kreditoren 70000–99999</li>
+              <li>Partner als Nebenbuch an Sammelkonten</li>
+              <li>Verkettete Änderungshistorie</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></div>
+            <h3>Belege und E-Rechnung</h3>
+            <p>Belege als PDF, JPG oder PNG mit SHA-256-Hash und Versionierung. Eingangsrechnungen als XRechnung oder ZUGFeRD direkt verbuchen, Ausgangsrechnungen als E-Rechnung erzeugen.</p>
+            <ul>
+              <li>XRechnung (UBL) und CII/ZUGFeRD</li>
+              <li>Prüfung von Dateisignatur und Mindestgröße</li>
+              <li>Beleg mit Buchung verknüpft</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10M9 9h6M9 15h4"/></svg></div>
+            <h3>Beleg-OCR und Belegabgleich</h3>
+            <p>Betrag, Datum, Lieferant und Rechnungsnummer werden regelbasiert erkannt, ein Sprachmodell ergänzt und kontrolliert auf Wunsch. Gebucht wird erst nach Freigabe.</p>
+            <ul>
+              <li>Ohne KI für PDFs mit Textebene</li>
+              <li>KI-Kontrolle markiert Abweichungen</li>
+              <li>Abgleich Beleg und Buchung mit Begründung</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg></div>
+            <h3>Bank und Zahlungsverkehr</h3>
+            <p>Kontoauszüge als CSV, CAMT.053 oder MT940 importieren oder per FinTS/HBCI und Open Banking (PSD2) abrufen. Regeln kontieren wiederkehrende Umsätze vor.</p>
+            <ul>
+              <li>TAN und pushTAN, die PIN wird nie gespeichert</li>
+              <li>Deduplizierung über Bankreferenzen</li>
+              <li>Geldtransit und Saldenabgleich je Konto</li>
+              <li>SEPA-Überweisungsdatei (pain.001)</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></svg></div>
+            <h3>Offene Posten und Mahnwesen</h3>
+            <p>Debitorische und kreditorische Posten mit Teilausgleich, Verknüpfung zu Bankumsatz oder Zahlungsbuchung und drei Mahnstufen mit druckbarem Mahnschreiben.</p>
+            <ul>
+              <li>Mahnvorschläge nach Fälligkeit</li>
+              <li>Storno lässt ausgeglichene Posten wieder aufleben</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg></div>
+            <h3>Umsatzsteuer und ELSTER</h3>
+            <p>UStVA, Zusammenfassende Meldung und USt-Jahreserklärung aus den Buchungen, einschließlich Reverse Charge nach §&nbsp;13b und innergemeinschaftlichem Erwerb.</p>
+            <ul>
+              <li>Kennzahlen über die DATEV-Kontenfunktion</li>
+              <li>ELSTER-Preflight und Testübermittlung</li>
+              <li>KSt- und GewSt-Arbeitsstände</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></div>
+            <h3>Anlagenbuchhaltung</h3>
+            <p>Anlagenverzeichnis mit Abschreibungsplan: linear, degressiv, nach Leistung, GWG bis 800&nbsp;€ und Sammelposten über fünf Jahre.</p>
+            <ul>
+              <li>Außerplanmäßige Abschreibung</li>
+              <li>Anlagenabgang mit Restbuchwert</li>
+              <li>AfA-Buchung je Wirtschaftsjahr</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.2a3.2 3.2 0 0 1 0 5.6M18 14.4c1.8.9 3 2.9 3 5.6"/></svg></div>
+            <h3>Lohnbuchhaltung <span class="module-note">MVP</span></h3>
+            <p>Mitarbeiterstamm, Lohnläufe und die automatische Buchung von Brutto, Netto, Lohnsteuer und Sozialversicherung. Ein externer PAP-Runner kann die Lohnsteuer berechnen.</p>
+            <ul>
+              <li>Amtliche Meldungen folgen noch</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg></div>
+            <h3>Kostenstellen und Profitcenter</h3>
+            <p>Hierarchische Kostenstellen und Profitcenter mit Gültigkeit und Historie. Bank-, OCR- und E-Rechnungsbuchungen lassen sich direkt kontieren.</p>
+            <ul>
+              <li>Kostenstellenrechnung und Profitcenter-GuV</li>
+              <li>Standardzuordnung für Anlagen und Mitarbeiter</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8.5 3v4M15.5 3v4M9 15l2 2 4-4"/></svg></div>
+            <h3>Abschluss und Auswertungen</h3>
+            <p>Perioden sperren und den Jahresabschluss mit Ergebnis- und Saldovortrag in einer Transaktion buchen. Summen- und Saldenliste, GuV und Bilanz für beliebige Zeiträume.</p>
+            <ul>
+              <li>Dashboard mit offenen Aufgaben</li>
+              <li>Abschlussbuchungen ein- oder ausblendbar</li>
+            </ul>
+          </article>
+
+          <article class="module">
+            <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></svg></div>
+            <h3>Exporte</h3>
+            <p>DATEV-Buchungsstapel je Wirtschaftsjahr nach dem Brutto-Prinzip, Journal und Salden als CSV und ein Prüferexport mit Manifest, Feldkatalog und Hashes.</p>
+            <ul>
+              <li>EXTF-Format, Kategorie 21, Version 13</li>
+              <li>Prüferpaket lokal per Kommandozeile prüfbar</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="ablauf" aria-labelledby="ablauf-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Ablauf</p>
+          <h2 id="ablauf-title">Vom Beleg bis zur Meldung</h2>
+          <p class="lead">So greifen die Module im Monatsablauf ineinander.</p>
+        </div>
+        <ol class="steps">
+          <li class="step">
+            <h3>Beleg erfassen</h3>
+            <p>PDF hochladen, E-Rechnung einlesen oder per OCR auslesen. Der Beleg wird mit Hash unverändert gespeichert.</p>
+          </li>
+          <li class="step">
+            <h3>Buchen</h3>
+            <p>Vorschlag prüfen und freigeben. Die Steuerzeile entsteht aus dem Steuercode, der Partner hängt am Sammelkonto.</p>
+          </li>
+          <li class="step">
+            <h3>Bank abgleichen</h3>
+            <p>Umsätze abrufen oder importieren, Regeln anwenden und Zahlungen ihren Buchungen und Posten zuordnen.</p>
+          </li>
+          <li class="step">
+            <h3>Umsatzsteuer melden</h3>
+            <p>UStVA und ZM für den Zeitraum prüfen, als Stand festhalten und über ELSTER übermitteln.</p>
+          </li>
+          <li class="step">
+            <h3>Festschreiben</h3>
+            <p>Buchungen festschreiben, Perioden sperren und zum Jahresende Ergebnis- und Saldovortrag buchen.</p>
+          </li>
+          <li class="step">
+            <h3>Übergeben</h3>
+            <p>DATEV-Stapel an die Kanzlei, Prüferexport an die Betriebsprüfung, Berichte an die Geschäftsführung.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="einblick" aria-labelledby="einblick-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Einblick</p>
+          <h2 id="einblick-title">So sieht die Oberfläche aus</h2>
+          <p class="lead">
+            Aufnahmen einer lokalen Demo-Instanz mit Beispieldaten der Demo GmbH für das dritte
+            Quartal 2026.
+          </p>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Ansichten der Oberfläche" data-tabs="screens" hidden>
+          <button class="tab" type="button" role="tab" id="tab-dashboard" aria-controls="panel-dashboard" aria-selected="true">Dashboard</button>
+          <button class="tab" type="button" role="tab" id="tab-journal" aria-controls="panel-journal" aria-selected="false" tabindex="-1">Journal</button>
+          <button class="tab" type="button" role="tab" id="tab-bank" aria-controls="panel-bank" aria-selected="false" tabindex="-1">Bank</button>
+          <button class="tab" type="button" role="tab" id="tab-ustva" aria-controls="panel-ustva" aria-selected="false" tabindex="-1">Umsatzsteuer</button>
+          <button class="tab" type="button" role="tab" id="tab-anlagen" aria-controls="panel-anlagen" aria-selected="false" tabindex="-1">Anlagen</button>
+          <button class="tab" type="button" role="tab" id="tab-berichte" aria-controls="panel-berichte" aria-selected="false" tabindex="-1">GuV und Bilanz</button>
+          <button class="tab" type="button" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="false" tabindex="-1">Audit-Log</button>
+        </div>
+
+        <div class="panel" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/</span></div>
+              <img src="assets/screens/dashboard-1800.webp" srcset="assets/screens/dashboard-900.webp 900w, assets/screens/dashboard-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1100" loading="lazy" decoding="async" alt="Dashboard mit Umsatzerlösen, Aufwendungen, Jahresergebnis und Bilanzsumme sowie offenen Aufgaben wie unverbuchten Bankumsätzen">
+            </div>
+            <figcaption><strong>Dashboard.</strong> Kennzahlen der Gesellschaft und offene Aufgaben: unverbuchte Bankumsätze, unverknüpfte Belege, überfällige Posten, Abgleich-Vorschläge und fällige Buchungsvorlagen.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-journal" role="tabpanel" aria-labelledby="tab-journal" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/buchungen</span></div>
+              <img src="assets/screens/journal-1800.webp" srcset="assets/screens/journal-900.webp 900w, assets/screens/journal-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1125" loading="lazy" decoding="async" alt="Journal mit festgeschriebenen Buchungen aus dem August 2026, je Buchung mit Konten, Soll- und Habenbeträgen">
+            </div>
+            <figcaption><strong>Journal.</strong> Festgeschriebene Buchungen aus dem August 2026. Steuerzeilen entstehen aus dem Steuercode, festgeschriebene Buchungen lassen sich nur noch stornieren.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-bank" role="tabpanel" aria-labelledby="tab-bank" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/bank</span></div>
+              <img src="assets/screens/bank-1800.webp" srcset="assets/screens/bank-900.webp 900w, assets/screens/bank-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1175" loading="lazy" decoding="async" alt="Bankseite mit Saldenabgleich des Kontos 1200 und offenen Umsätzen, bei denen eine Kontierungsregel das Gegenkonto vorausgewählt hat">
+            </div>
+            <figcaption><strong>Bank.</strong> Saldenabgleich je Bankkonto und offene Umsätze. Für das Software-Abo hat eine Kontierungsregel das Gegenkonto bereits vorausgewählt.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-ustva" role="tabpanel" aria-labelledby="tab-ustva" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/ustva</span></div>
+              <img src="assets/screens/ustva-1800.webp" srcset="assets/screens/ustva-900.webp 900w, assets/screens/ustva-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1408" loading="lazy" decoding="async" alt="Umsatzsteuer-Voranmeldung für das dritte Quartal 2026 mit den Kennzahlen 81, 21, 46, 47, 66, 67 und 83 sowie der Zusammenfassenden Meldung">
+            </div>
+            <figcaption><strong>Umsatzsteuer.</strong> UStVA für das dritte Quartal mit Reverse Charge (Kz&nbsp;46/47 und 67) und einer EU-Leistung (Kz&nbsp;21), darunter die passende Zusammenfassende Meldung.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-anlagen" role="tabpanel" aria-labelledby="tab-anlagen" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/anlagen</span></div>
+              <img src="assets/screens/anlagen-1800.webp" srcset="assets/screens/anlagen-900.webp 900w, assets/screens/anlagen-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1250" loading="lazy" decoding="async" alt="Anlagenverzeichnis mit drei Anlagegütern und dem Abschreibungsplan eines Notebooks über 36 Monate">
+            </div>
+            <figcaption><strong>Anlagen.</strong> Anlagenverzeichnis mit linearer AfA und GWG-Sofortabschreibung, darunter der Abschreibungsplan eines Notebooks über 36 Monate.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-berichte" role="tabpanel" aria-labelledby="tab-berichte" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/berichte</span></div>
+              <img src="assets/screens/berichte-1800.webp" srcset="assets/screens/berichte-900.webp 900w, assets/screens/berichte-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1221" loading="lazy" decoding="async" alt="Gewinn- und Verlustrechnung und Bilanz nebeneinander mit Summe Aktiva gleich Summe Passiva">
+            </div>
+            <figcaption><strong>GuV und Bilanz.</strong> Auswertungen für den gewählten Zeitraum, mit der Bilanzgleichheit als Kontrolle.</figcaption>
+          </figure>
+        </div>
+
+        <div class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" data-tabs-panel="screens">
+          <figure class="shot">
+            <div class="shot-frame">
+              <div class="shot-bar" aria-hidden="true"><span></span><span></span><span></span><span class="shot-url">localhost:8000/audit-log</span></div>
+              <img src="assets/screens/audit-1800.webp" srcset="assets/screens/audit-900.webp 900w, assets/screens/audit-1800.webp 1800w" sizes="(max-width: 1180px) 100vw, 1120px" width="1800" height="1200" loading="lazy" decoding="async" alt="Audit-Log mit bestandener Integritätsprüfung und verketteten Einträgen mit Sequenznummer und Hash">
+            </div>
+            <figcaption><strong>Audit-Log.</strong> Die Integritätsprüfung über Buchungshashes, Belegdateien und die Hashkette ist bestanden; darunter die verketteten Einträge mit Sequenznummer und Hash.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="steuern" aria-labelledby="steuern-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Umsatzsteuer und DATEV</p>
+          <h2 id="steuern-title">Deutsche Steuerpraxis, eingebaut</h2>
+          <p class="lead">
+            Die Umsatzsteuer ergibt sich direkt aus den Buchungen. Steuercodes, Steuerkonten und
+            die DATEV-Kontenfunktion des Erlöskontos bestimmen, in welche Kennzahl ein Betrag fällt.
+          </p>
+        </div>
+        <div class="split">
+          <dl class="facts">
+            <div>
+              <dt>Leistungsdatum entscheidet</dt>
+              <dd>Die Rechnung vom 1.&nbsp;Juli für Leistungen im Juni zählt im Juni. Die Vorsteuer folgt dem späteren Datum aus Leistung und Rechnung.</dd>
+            </div>
+            <div>
+              <dt>Reverse Charge und EU-Geschäft</dt>
+              <dd>§&nbsp;13b als Leistungsempfänger, innergemeinschaftlicher Erwerb, ig. Lieferungen und sonstige Leistungen an EU-Unternehmer: Kz&nbsp;21, 41, 46/47, 84/85 und 89/93.</dd>
+            </div>
+            <div>
+              <dt>Zusammenfassende Meldung</dt>
+              <dd>Summen je Kunden-USt-IdNr. und Art (L, D, S) aus den Erlöskonten mit ZM-Funktion.</dd>
+            </div>
+            <div>
+              <dt>ELSTER vorbereitet</dt>
+              <dd>Preflight, Readiness-Diagnose, Testübermittlung und Übermittlungshistorie. Für die produktive Übermittlung braucht es eine lokale ERiC-Bibliothek und ein ELSTER-Zertifikat.</dd>
+            </div>
+            <div>
+              <dt>DATEV-Buchungsstapel</dt>
+              <dd>Ein Stapel je Wirtschaftsjahr im EXTF-Format. Steuer nach dem Brutto-Prinzip über Automatikkonten oder BU-Schlüssel, Rundungscents mit Korrektursatz. Kompatibel angelegt, nicht DATEV-zertifiziert.</dd>
+            </div>
+          </dl>
+
+          <figure class="form-card" aria-labelledby="ustva-title">
+            <div class="form-card-head">
+              <span class="form-card-title" id="ustva-title">Umsatzsteuer-Voranmeldung 2026-Q3</span>
+              <span class="form-card-meta">Demo GmbH · Beispielwerte</span>
+            </div>
+            <dl class="kz-list">
+              <div class="kz"><dt><span class="kz-no">81</span><span class="kz-label">Steuerpflichtige Umsätze 19&nbsp;%</span></dt><dd>5.600</dd></div>
+              <div class="kz"><dt><span class="kz-no">21</span><span class="kz-label">Sonstige Leistungen an Unternehmer im EU-Ausland</span></dt><dd>3.000</dd></div>
+              <div class="kz"><dt><span class="kz-no">46</span><span class="kz-label">Leistungen eines EU-Unternehmers (§&nbsp;13b)</span></dt><dd>267</dd></div>
+              <div class="kz"><dt><span class="kz-no">47</span><span class="kz-label">Steuer zu Kz&nbsp;46</span></dt><dd>50,73</dd></div>
+              <div class="kz"><dt><span class="kz-no">66</span><span class="kz-label">Abziehbare Vorsteuer</span></dt><dd>715,25</dd></div>
+              <div class="kz"><dt><span class="kz-no">67</span><span class="kz-label">Vorsteuer aus Leistungen nach §&nbsp;13b</span></dt><dd>50,73</dd></div>
+              <div class="kz kz-total"><dt><span class="kz-no">83</span><span class="kz-label">Verbleibende Vorauszahlung</span></dt><dd>348,75</dd></div>
+            </dl>
+            <figcaption class="form-card-foot">
+              Die Rechnung <strong>AR 2026-112</strong> vom 08.07.2026 trägt das Leistungsdatum 30.06.2026
+              und zählt deshalb im zweiten Quartal. Die ZM meldet <strong>DK29403473</strong> mit
+              3.000&nbsp;€ als sonstige Leistung (S).
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="pruefbarkeit" aria-labelledby="pruefbarkeit-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Nachvollziehbarkeit</p>
+          <h2 id="pruefbarkeit-title">Prüfbar bis zur letzten Buchung</h2>
+          <p class="lead">
+            Die technischen Grundlagen der GoBD sind umgesetzt: Unveränderbarkeit, Protokollierung
+            und maschinelle Prüfbarkeit. Eine formale Zertifizierung ist das nicht.
+          </p>
+        </div>
+        <div class="split">
+          <dl class="facts">
+            <div>
+              <dt>Festschreibung mit Inhaltshash</dt>
+              <dd>Festgeschriebene Buchungen erhalten einen reproduzierbaren SHA-256-Hash über Kopf und alle Zeilen. Die Datenbank verhindert nachträgliche Änderungen.</dd>
+            </div>
+            <div>
+              <dt>Storno statt Löschen</dt>
+              <dd>Korrekturen laufen über Gegenbuchungen. Ein Storno zieht die Nebenbücher mit: Bankumsatz, Anlage, Lohnlauf und offenen Posten.</dd>
+            </div>
+            <div>
+              <dt>Verkettetes Audit-Log</dt>
+              <dd>Jede Aktion landet unveränderlich im Audit-Log, je Mandant über Sequenznummer und Hash verkettet. Ein Kettenanker erkennt auch eine gekürzte Historie.</dd>
+            </div>
+            <div>
+              <dt>Perioden und Jahresabschluss</dt>
+              <dd>Gesperrte Perioden nehmen keine Buchungen mehr an. Der Jahresabschluss bucht Ergebnis- und Saldovortrag in einer Transaktion.</dd>
+            </div>
+            <div>
+              <dt>Prüferexport</dt>
+              <dd>Ein ZIP-Paket mit Daten, Feldkatalog, Benutzern und Rollen, Manifest und SHA-256-Gesamtnachweis, lokal per <code>verify-audit-package</code> prüfbar.</dd>
+            </div>
+          </dl>
+
+          <div>
+            <ol class="chain" aria-label="Ausschnitt aus der Hashkette des Audit-Logs">
+              <li class="chain-entry">
+                <div class="chain-top">
+                  <span class="chain-seq">#117</span>
+                  <span class="chain-action">Buchung angelegt</span>
+                  <span class="chain-object">Zahlungseingang AR 2026-119</span>
+                </div>
+                <dl class="chain-hashes">
+                  <dt>Hash</dt><dd>46ccc4be1f3171e19667f761…</dd>
+                  <dt>Vorgänger</dt><dd>62ff3bd82b269dfa6618a165…</dd>
+                </dl>
+              </li>
+              <li class="chain-entry">
+                <div class="chain-top">
+                  <span class="chain-seq">#118</span>
+                  <span class="chain-action">Bankumsatz zugeordnet</span>
+                  <span class="chain-object">Umsatz 18 zu dieser Buchung</span>
+                </div>
+                <dl class="chain-hashes">
+                  <dt>Hash</dt><dd>a3a33d3f210324777561fce3…</dd>
+                  <dt>Vorgänger</dt><dd class="linked">46ccc4be1f3171e19667f761…</dd>
+                </dl>
+              </li>
+              <li class="chain-entry">
+                <div class="chain-top">
+                  <span class="chain-seq">#119</span>
+                  <span class="chain-action">Kontoauszug importiert</span>
+                  <span class="chain-object">2 neue Umsätze</span>
+                </div>
+                <dl class="chain-hashes">
+                  <dt>Hash</dt><dd>9513ea345a6e401a9884775…</dd>
+                  <dt>Vorgänger</dt><dd class="linked">a3a33d3f210324777561fce3…</dd>
+                </dl>
+              </li>
+            </ol>
+            <pre class="terminal"><span class="prompt">$ </span>flask --app run.py verify-integrity
+Geprüft: 26 festgeschriebene Buchungen, 0 Belege, 131 Audit-Einträge.
+<span class="ok">Integritätsnachweise sind intakt.</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section band" id="schnittstellen" aria-labelledby="schnittstellen-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Schnittstellen und KI</p>
+          <h2 id="schnittstellen-title">Offen für Automatisierung</h2>
+          <p class="lead">
+            Die Oberfläche ist eine von drei Schichten. Jede Fachfunktion gibt es zusätzlich als
+            REST-Endpunkt und als MCP-Tool, mit denselben Rechten und derselben Protokollierung.
+          </p>
+        </div>
+
+        <div class="interfaces">
+          <div class="interface">
+            <h3>REST-API</h3>
+            <p>API-first mit Token-Authentifizierung, Mandanten-Scope und Rollen. Validierungsfehler kommen als 422 mit feldbezogenen Details.</p>
+          </div>
+          <div class="interface">
+            <h3>MCP-Server</h3>
+            <p>Rund 150 Tools für Buchungen, Berichte, Bank, Belege, Anlagen, Lohn und Umsatzsteuer, per stdio oder Streamable HTTP. ChatGPT- und Claude-Connectoren melden sich über OAuth&nbsp;2.1 an.</p>
+          </div>
+          <div class="interface">
+            <h3>KI-Chat in der Oberfläche</h3>
+            <p>Der Assistent liest Konten, Buchungen und Berichte. Schreibende Aktionen schlägt er nur vor, ausgeführt wird erst nach Bestätigung. Bank-, ELSTER- und Benutzerfunktionen bleiben gesperrt.</p>
+          </div>
+          <div class="interface">
+            <h3>Eigenes Modell wählen</h3>
+            <p>OpenAI, Azure OpenAI, OpenRouter oder ein lokales Modell über Ollama oder vLLM, je Benutzer. API-Schlüssel liegen verschlüsselt in der Datenbank.</p>
+          </div>
+        </div>
+
+        <div class="code-grid">
+          <div>
+            <div class="tabs" role="tablist" aria-label="Codebeispiele" data-tabs="code" hidden>
+              <button class="tab" type="button" role="tab" id="tab-rest" aria-controls="panel-rest" aria-selected="true">Buchung per REST</button>
+              <button class="tab" type="button" role="tab" id="tab-mcp-http" aria-controls="panel-mcp-http" aria-selected="false" tabindex="-1">MCP über HTTP</button>
+              <button class="tab" type="button" role="tab" id="tab-desktop" aria-controls="panel-desktop" aria-selected="false" tabindex="-1">Claude Desktop</button>
+            </div>
+
+            <div class="panel" id="panel-rest" role="tabpanel" aria-labelledby="tab-rest" data-tabs-panel="code">
+              <figure class="code-block">
+                <figcaption class="code-block-head"><span>POST /api/v1/journal-entries</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code><span class="c-cmd">curl</span> -X POST https://buchhaltung.example.de/api/v1/journal-entries \
+  -H <span class="c-str">"Authorization: Bearer $TOKEN"</span> \
+  -H <span class="c-str">"Content-Type: application/json"</span> \
+  -d <span class="c-str">'{
+    "company_id": 1,
+    "entry_date": "2026-09-10",
+    "service_date": "2026-08-31",
+    "description": "AR 2026-124 Beratung August",
+    "status": "posted",
+    "lines": [
+      {"account_code": "1400", "debit_amount": "3808.00",
+       "partner_number": "10000"},
+      {"account_code": "8400", "credit_amount": "3200.00",
+       "tax_code_id": 1}
+    ]
+  }'</span>
+<span class="c-comment"># Die Umsatzsteuerzeile (1776, 608,00) ergänzt der Steuercode.</span></code></pre>
+              </figure>
+            </div>
+
+            <div class="panel" id="panel-mcp-http" role="tabpanel" aria-labelledby="tab-mcp-http" data-tabs-panel="code">
+              <figure class="code-block">
+                <figcaption class="code-block-head"><span>POST /mcp · tools/call</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code><span class="c-cmd">curl</span> -X POST https://buchhaltung.example.de/mcp \
+  -H <span class="c-str">"Authorization: Bearer $MCP_TOKEN"</span> \
+  -H <span class="c-str">"Content-Type: application/json"</span> \
+  -H <span class="c-str">"Accept: application/json"</span> \
+  -d <span class="c-str">'{"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+       "params": {"name": "get_vat_return",
+                  "arguments": {"company_id": 1, "period": "2026-Q3"}}}'</span>
+<span class="c-comment"># Antwort: Kennzahlen 81, 21, 46/47, 66, 67 und 83 wie in der Oberfläche.</span></code></pre>
+              </figure>
+            </div>
+
+            <div class="panel" id="panel-desktop" role="tabpanel" aria-labelledby="tab-desktop" data-tabs-panel="code">
+              <figure class="code-block">
+                <figcaption class="code-block-head"><span>claude_desktop_config.json</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code>{
+  <span class="c-key">"mcpServers"</span>: {
+    <span class="c-key">"openbuchhaltung"</span>: {
+      <span class="c-key">"command"</span>: <span class="c-str">"python"</span>,
+      <span class="c-key">"args"</span>: [<span class="c-str">"-m"</span>, <span class="c-str">"app.services.mcp_server"</span>],
+      <span class="c-key">"env"</span>: {
+        <span class="c-key">"OPENBUCHHALTUNG_API_URL"</span>: <span class="c-str">"http://localhost:8000/api/v1"</span>,
+        <span class="c-key">"OPENBUCHHALTUNG_API_TOKEN"</span>: <span class="c-str">"obk_..."</span>
+      }
+    }
+  }
+}</code></pre>
+              </figure>
+            </div>
+          </div>
+
+          <div class="parity">
+            <h3>Eine Funktion, drei Wege</h3>
+            <p>Oberfläche, REST-API und MCP-Server bleiben deckungsgleich. Ein Benutzer-Token sieht und ändert genau das, was der Benutzer auch in der Oberfläche darf.</p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr><th scope="col">Aufgabe</th><th scope="col">REST-API (/api/v1) und MCP-Tool</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Buchung erfassen</td><td><code>POST /journal-entries</code><code>create_journal_entry</code></td></tr>
+                  <tr><td>Kontoauszug importieren</td><td><code>POST /bank-transactions/import</code><code>import_bank_transactions</code></td></tr>
+                  <tr><td>UStVA berechnen</td><td><code>GET /vat-return</code><code>get_vat_return</code></td></tr>
+                  <tr><td>Beleg abgleichen</td><td><code>POST /receipt-matching/suggestions</code><code>create_receipt_match_suggestion</code></td></tr>
+                  <tr><td>DATEV-Export</td><td><code>GET /exports/datev.csv</code><code>export_datev_csv</code></td></tr>
+                  <tr><td>Integrität prüfen</td><td><code>GET /integrity</code><code>verify_compliance_integrity</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="betrieb" aria-labelledby="betrieb-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Betrieb und Sicherheit</p>
+          <h2 id="betrieb-title">Ihre Daten bleiben auf Ihrem Server</h2>
+          <p class="lead">
+            OpenBuchhaltung läuft auf dem eigenen Server oder in der eigenen Cloud. Es gibt keinen
+            zentralen Dienst und keine Telemetrie; externe Dienste kommen nur ins Spiel, wenn Sie
+            sie selbst einrichten.
+          </p>
+        </div>
+        <div class="columns-2">
+          <div>
+            <h3>Betrieb</h3>
+            <ul class="checklist">
+              <li><strong>Docker Compose</strong> mit PostgreSQL, gunicorn und einem Container ohne Root-Rechte</li>
+              <li><strong>Updates per Skript:</strong> Backup, Build, Migration als eigener Schritt, Start und Health-Check</li>
+              <li><strong>Backups</strong> mit Datenbank-Dump, Belegarchiv, Prüfsummen und Restore-Anleitung</li>
+              <li><strong>Health-Endpunkt</strong> mit Version, Commit und Schema-Stand</li>
+              <li><strong>Öffentlich erreichbar</strong> hinter nginx mit Let's Encrypt, im Tailnet oder per Caddy</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Sicherheit</h3>
+            <ul class="checklist">
+              <li><strong>Rollen</strong> Admin, Buchhalter, Prüfer und Support, Mandantentrennung bis in die API</li>
+              <li><strong>Härtung</strong> mit CSRF-Schutz, Login-Rate-Limit, sicheren Sessions und Security-Headern</li>
+              <li><strong>Bankzugang:</strong> PIN und TAN werden nie gespeichert, Sitzungen und API-Schlüssel nur verschlüsselt</li>
+              <li><strong>Uploads</strong> nur als PDF, JPG oder PNG mit Prüfung der Dateisignatur</li>
+              <li><strong>Sicherheitsereignisse</strong> wie Logins und Token-Rotation im Log und in der Hashkette</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="installation" aria-labelledby="installation-title">
+      <div class="wrap install">
+        <div>
+          <p class="eyebrow">Installation</p>
+          <h2 id="installation-title">In wenigen Minuten ausprobieren</h2>
+          <p class="lead">
+            Für einen ersten Eindruck genügt Docker. Die Demo legt eine Beispiel-GmbH mit SKR03,
+            Steuercodes, Geschäftspartnern und ersten Buchungen an.
+          </p>
+          <p class="note">
+            Danach läuft die Anwendung unter <code>http://localhost:8000</code>. Anmeldung mit
+            <code>admin</code> und Passwort <code>admin123</code>; diese Demo-Zugänge legt
+            <code>seed-demo</code> in Produktion nicht an.
+          </p>
+          <p class="note">
+            Für den Produktivbetrieb: <code>.env</code> aus der Vorlage anlegen und
+            <code>./redeploy.sh</code> ausführen. Konfiguration, Backup und Updates beschreibt
+            das <a href="https://github.com/unikinCK/OpenBuchhaltung#readme" rel="noopener">README</a>.
+          </p>
+        </div>
+
+        <div>
+          <div class="tabs" role="tablist" aria-label="Installationswege" data-tabs="install" hidden>
+            <button class="tab" type="button" role="tab" id="tab-docker" aria-controls="panel-docker" aria-selected="true">Mit Docker</button>
+            <button class="tab" type="button" role="tab" id="tab-python" aria-controls="panel-python" aria-selected="false" tabindex="-1">Mit Python</button>
+            <button class="tab" type="button" role="tab" id="tab-prod" aria-controls="panel-prod" aria-selected="false" tabindex="-1">Produktivbetrieb</button>
+          </div>
+
+          <div class="panel" id="panel-docker" role="tabpanel" aria-labelledby="tab-docker" data-tabs-panel="install">
+            <figure class="code-block">
+              <figcaption class="code-block-head"><span>Terminal · Docker</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code><span class="c-cmd">git</span> clone https://github.com/unikinCK/OpenBuchhaltung.git
+<span class="c-cmd">cd</span> OpenBuchhaltung
+<span class="c-cmd">docker</span> compose up --build -d
+<span class="c-cmd">docker</span> compose exec app flask --app run.py seed-demo</code></pre>
+            </figure>
+          </div>
+
+          <div class="panel" id="panel-python" role="tabpanel" aria-labelledby="tab-python" data-tabs-panel="install">
+            <figure class="code-block">
+              <figcaption class="code-block-head"><span>Terminal · Python 3.12</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code><span class="c-cmd">git</span> clone https://github.com/unikinCK/OpenBuchhaltung.git
+<span class="c-cmd">cd</span> OpenBuchhaltung
+<span class="c-cmd">python3.12</span> -m venv .venv &amp;&amp; <span class="c-cmd">source</span> .venv/bin/activate
+<span class="c-cmd">pip</span> install -r requirements-dev.txt
+<span class="c-cmd">export</span> APP_ENV=development
+<span class="c-cmd">flask</span> --app run.py seed-demo
+<span class="c-cmd">python</span> run.py</code></pre>
+            </figure>
+          </div>
+
+          <div class="panel" id="panel-prod" role="tabpanel" aria-labelledby="tab-prod" data-tabs-panel="install">
+            <figure class="code-block">
+              <figcaption class="code-block-head"><span>Terminal · Server</span><button class="copy-button" type="button" hidden>Kopieren</button></figcaption>
+<pre><code><span class="c-cmd">git</span> clone https://github.com/unikinCK/OpenBuchhaltung.git
+<span class="c-cmd">cd</span> OpenBuchhaltung
+<span class="c-cmd">cp</span> .env.example .env
+<span class="c-comment"># SECRET_KEY, POSTGRES_PASSWORD und API_AUTH_TOKEN in .env setzen</span>
+./redeploy.sh
+<span class="c-comment"># Backup, Build, Migration, Start und Health-Check</span></code></pre>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="status" aria-labelledby="status-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Projektstand</p>
+          <h2 id="status-title">Aktiv entwickelt, ehrlich eingeordnet</h2>
+          <p class="lead">
+            Viele Kernabläufe sind umgesetzt und automatisiert getestet. Eine fachliche Prüfung
+            durch Steuerberatung oder Wirtschaftsprüfung ersetzt das Projekt nicht.
+          </p>
+        </div>
+        <div class="columns-2">
+          <div>
+            <h3>Gut zu wissen</h3>
+            <ul class="checklist is-gaps">
+              <li>Der DATEV-Export ist kompatibel angelegt, aber nicht DATEV-zertifiziert.</li>
+              <li>Die GoBD-Funktionen sind eine technische Basis, keine Zertifizierung nach IDW&nbsp;PS&nbsp;880.</li>
+              <li>Die produktive ELSTER-Übermittlung braucht eine lokale ERiC-Bibliothek und ein ELSTER-Zertifikat.</li>
+              <li>Die Lohnbuchhaltung enthält noch keine ELStAM- und DEÜV-Meldungen.</li>
+              <li>Abgebildet ist die Sollversteuerung; Istversteuerung und Fremdwährungsbuchungen fehlen noch.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Als Nächstes geplant</h3>
+            <ul class="checklist">
+              <li>Geschäftspartner in offenen Posten, Zahllauf, Mahnwesen und als DATEV-Personenkonten</li>
+              <li>Ausgangsrechnungen direkt in OpenBuchhaltung schreiben</li>
+              <li>Kassenbuch und Zwei-Faktor-Anmeldung</li>
+              <li>Istversteuerung und Fremdwährung</li>
+              <li>Konsolidierung mehrerer Gesellschaften</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-title">Häufige Fragen</h2>
+        </div>
+        <div class="faq">
+          <details>
+            <summary>Was kostet OpenBuchhaltung?</summary>
+            <p>Nichts. Der Quellcode steht unter der Apache-Lizenz 2.0 und darf kostenlos genutzt, verändert und weitergegeben werden. Kosten entstehen nur für den eigenen Betrieb, etwa für den Server oder einen KI-Anbieter.</p>
+          </details>
+          <details>
+            <summary>Ersetzt OpenBuchhaltung die Steuerberatung?</summary>
+            <p>Nein. Die Software unterstützt die laufende Buchhaltung und erzeugt Auswertungen und Meldungen. Jahresabschluss, Steuererklärungen und die fachliche Prüfung gehören weiterhin in die Hände von Steuerberatung oder Wirtschaftsprüfung; der DATEV-Export erleichtert die Zusammenarbeit.</p>
+          </details>
+          <details>
+            <summary>Ist die Software GoBD-zertifiziert?</summary>
+            <p>Nein. Festschreibung, Inhaltshashes, das verkettete Audit-Log und der Prüferexport bilden eine technische Grundlage. Ordnungsmäßigkeit hängt aber auch von Verfahrensdokumentation, internen Kontrollen und dem Betrieb ab. Vorlagen dafür liegen im Repository unter <code>docs/compliance</code>.</p>
+          </details>
+          <details>
+            <summary>Für welche Unternehmen eignet sich OpenBuchhaltung?</summary>
+            <p>Für Kapitalgesellschaften mit doppelter Buchführung, also GmbH, UG und gGmbH. Eine Einnahmen-Überschuss-Rechnung gehört nicht zum Funktionsumfang, die Istversteuerung wird derzeit nicht abgebildet.</p>
+          </details>
+          <details>
+            <summary>Wo liegen meine Daten?</summary>
+            <p>Auf dem Server, auf dem Sie OpenBuchhaltung betreiben. Externe Dienste kommen nur zum Einsatz, wenn Sie sie selbst einrichten: Ihre Bank, ELSTER, Enable Banking für den PSD2-Abruf oder ein KI-Anbieter.</p>
+          </details>
+          <details>
+            <summary>Brauche ich KI?</summary>
+            <p>Nein. Buchen, Bankabgleich, Umsatzsteuer und Exporte funktionieren ohne Sprachmodell, die Beleg-OCR arbeitet für PDFs mit Textebene regelbasiert. Wer KI nutzen möchte, kann auch ein lokales Modell anbinden, sodass keine Daten das Haus verlassen.</p>
+          </details>
+          <details>
+            <summary>Wie bekommt meine Steuerkanzlei die Daten?</summary>
+            <p>Als DATEV-Buchungsstapel je Wirtschaftsjahr, der sich in DATEV importieren lässt. Den Einsatz des Leistungsdatums sollten Sie mit der Kanzlei abstimmen.</p>
+          </details>
+          <details>
+            <summary>Welche Banken werden unterstützt?</summary>
+            <p>Jede Bank, deren Kontoauszug sich als CSV, CAMT.053 oder MT940 exportieren lässt. Direkt abrufen lassen sich Banken mit FinTS-Zugang, wofür eine Registrierung bei der Deutschen Kreditwirtschaft nötig ist, sowie Banken mit PSD2-Schnittstelle über Enable Banking, zum Beispiel Finom.</p>
+          </details>
+          <details>
+            <summary>Wie kann ich mitmachen?</summary>
+            <p>Issues und Pull Requests auf GitHub sind willkommen. Einen guten Einstieg bieten das README, der Umsetzungsplan, die Coding-Guidelines und die Architekturentscheidungen unter <code>docs/</code>.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="mitmachen" aria-labelledby="mitmachen-title">
+      <div class="wrap contribute">
+        <div>
+          <p class="eyebrow">Open Source</p>
+          <h2 id="mitmachen-title">Quellcode, Dokumentation, Mitarbeit</h2>
+          <p class="lead">
+            OpenBuchhaltung entsteht offen auf GitHub. Änderungen werden im Changelog festgehalten
+            und als Versionen getaggt.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/unikinCK/OpenBuchhaltung" rel="noopener">Repository öffnen</a>
+            <a class="button button-secondary" href="https://github.com/unikinCK/OpenBuchhaltung/issues" rel="noopener">Issue melden</a>
+          </div>
+        </div>
+        <ul class="link-list">
+          <li><a href="https://github.com/unikinCK/OpenBuchhaltung#readme" rel="noopener"><span>README mit Konfiguration und API</span><span class="link-meta">README.md</span></a></li>
+          <li><a href="https://github.com/unikinCK/OpenBuchhaltung/blob/main/CHANGELOG.md" rel="noopener"><span>Änderungen je Version</span><span class="link-meta">CHANGELOG.md</span></a></li>
+          <li><a href="https://github.com/unikinCK/OpenBuchhaltung/blob/main/docs/umsetzungsplan.md" rel="noopener"><span>Umsetzungsplan und Roadmap</span><span class="link-meta">docs/umsetzungsplan.md</span></a></li>
+          <li><a href="https://github.com/unikinCK/OpenBuchhaltung/tree/main/docs/compliance" rel="noopener"><span>GoBD, Betrieb und Prüferexport</span><span class="link-meta">docs/compliance</span></a></li>
+          <li><a href="https://github.com/unikinCK/OpenBuchhaltung/blob/main/LICENSE" rel="noopener"><span>Lizenz</span><span class="link-meta">Apache 2.0</span></a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div>
+        <a class="brand" href="./">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <rect class="mark-bg" width="32" height="32" rx="7"/>
+            <path class="mark-line" d="M7 10.5h18M16 10.5V25" fill="none" stroke-width="2.4" stroke-linecap="round"/>
+            <path class="mark-total" d="M19.6 20.4h4.6M19.6 23.1h4.6" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span>OpenBuchhaltung</span>
+        </a>
+        <p class="footer-text">
+          Ein Open-Source-Projekt der unikin GmbH. Diese Website setzt keine Cookies und lädt
+          keine Inhalte von Drittanbietern.
+        </p>
+      </div>
+      <ul class="footer-links">
+        <li><a href="https://github.com/unikinCK/OpenBuchhaltung" rel="noopener">GitHub</a></li>
+        <li><a href="impressum.html">Impressum</a></li>
+        <li><a href="datenschutz.html">Datenschutz</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>

@@ -32,3 +32,6 @@ redeploy.sh
 backup.sh
 Caddyfile
 tools/
+
+# Projekt-Webseite: wird per Bind-Mount vom nginx ausgeliefert, nicht vom App-Image.
+website/

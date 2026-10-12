@@ -8,6 +8,22 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Projekt-Webseite
+- Neu: statische Projekt-Webseite unter `website/` für openbuchhaltung.de: Funktionen,
+  Ablauf vom Beleg bis zur Meldung, Aufnahmen der Demo-Instanz, Umsatzsteuer und DATEV,
+  Prüfbarkeit (GoBD-Basis), REST-API/MCP/KI-Chat, Betrieb, Installation, Projektstand und
+  FAQ sowie Impressum, Datenschutz und 404-Seite. Ohne Cookies, Tracking und Inhalte von
+  Drittanbietern, ohne Inline-Skripte und -Styles; helles und dunkles Farbschema.
+- Neu: Overlay `docker-compose.website.yml` liefert die Seite über den nginx des
+  nginx-Overlays unter `WEBSITE_DOMAIN` aus: eigenes Let's-Encrypt-Zertifikat für Domain
+  und `www` (Umleitung auf die Domain), strenge Content-Security-Policy, keine
+  Zugriffsprotokolle. Die Dateien kommen per Bind-Mount aus dem Checkout.
+- certbot-Service und Reload-Hook des nginx-Overlays verwalten dafür ein zweites
+  Zertifikat; ohne `WEBSITE_DOMAIN` bleibt alles wie bisher. Das nginx-Overlay bindet
+  seine Vorlage jetzt als einzelne Datei ein.
+- `tests/test_website.py` prüft Links, lokale Ressourcen, CSP-Tauglichkeit der Seiten und
+  die nginx-Vorlage.
+
 ### Open Banking (PSD2) für Banken ohne FinTS
 - Neu: Umsatzabruf über Enable Banking für Banken ohne FinTS, z. B. Finom.
   Bankzugang anlegen (Bank laut Enable-Banking-Liste, Geschäfts-/Privatkonto,
