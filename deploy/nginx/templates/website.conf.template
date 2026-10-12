@@ -83,10 +83,8 @@ server {
     }
 
     # expires setzt Cache-Control ohne add_header, die Sicherheits-Header gelten weiter.
-    location ~* \.(?:css|js)$ {
-        expires 1h;
-    }
-
+    # HTML, CSS und JS werden per ETag revalidiert (no-cache), damit nach einem
+    # git pull keine veralteten Styles ausgeliefert werden; Bilder ändern sich selten.
     location ~* \.(?:webp|png|svg|ico)$ {
         expires 7d;
     }

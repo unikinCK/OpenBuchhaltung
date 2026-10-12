@@ -352,6 +352,11 @@ pre,
   gap: 8px;
 }
 
+/* Unterseiten ohne Navigation: Aktionen rechtsbündig */
+.brand + .header-actions {
+  margin-left: auto;
+}
+
 .icon-button {
   display: inline-grid;
   place-items: center;
