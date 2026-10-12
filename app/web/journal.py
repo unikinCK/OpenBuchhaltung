@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
+from app.services.documents import documents_by_journal_entry
 from app.services.journal_entries import (
     CARRYFORWARD_SOURCES,
     JournalEntryCreationError,
@@ -214,6 +215,7 @@ def journal_page():
                     )
                 ).all()
             )
+        documents_by_entry = documents_by_journal_entry(session, shown_ids)
         posting_number_by_id = {entry.id: entry.posting_number for entry in journal_entries}
         referenced_ids = {
             entry.reversal_of_id for entry in journal_entries if entry.reversal_of_id
@@ -247,6 +249,7 @@ def journal_page():
         date_to=date_to,
         filter_args=filter_url_args(query, date_from, date_to),
         lines_by_entry=lines_by_entry,
+        documents_by_entry=documents_by_entry,
         reversed_by_entry=reversed_by_entry,
         posting_number_by_id=posting_number_by_id,
         today=date.today().isoformat(),

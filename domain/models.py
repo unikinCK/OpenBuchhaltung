@@ -583,6 +583,38 @@ class JournalEntryLine(Base):
         return value
 
 
+class DocumentCategory(Base):
+    """Belegkategorie (z. B. Rechnung, Zahlungsbeleg) je Gesellschaft.
+
+    Die Standardkategorien (``is_default``) werden beim Anlegen einer
+    Gesellschaft gesetzt; Admin und Buchhalter können weitere ergänzen.
+    Kategorien werden nicht gelöscht, sondern deaktiviert, damit bestehende
+    Belege ihre Zuordnung behalten.
+    """
+
+    __tablename__ = "document_category"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_document_category_company_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    documents: Mapped[list[Document]] = relationship(back_populates="category")
+
+
 class Document(Base):
     __tablename__ = "document"
     __table_args__ = (
@@ -598,6 +630,9 @@ class Document(Base):
     )
     journal_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_category.id", ondelete="SET NULL")
     )
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -616,6 +651,7 @@ class Document(Base):
     )
 
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
+    category: Mapped[DocumentCategory | None] = relationship(back_populates="documents")
     replaces_document: Mapped[Document | None] = relationship(remote_side="Document.id")
 
 

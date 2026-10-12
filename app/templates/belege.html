@@ -7,18 +7,26 @@
 {% block content %}
   <h1 class="page-title">Belege</h1>
 
-  <section class="card">
+  <section class="card" id="beleg-hochladen">
     <h2>Beleg hochladen</h2>
     {% if selected_company_id %}
       <form method="post" action="{{ url_for('main.upload_document') }}" enctype="multipart/form-data" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
 
-        <label for="journal_entry_id">Buchung (optional)</label>
+        <label for="journal_entry_id">Buchung (optional – eine Buchung kann mehrere Belege haben)</label>
         <select id="journal_entry_id" name="journal_entry_id">
           <option value="">Keine Verknüpfung</option>
           {% for entry in journal_entries %}
-            <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+            <option value="{{ entry.id }}" {% if entry.id == preselected_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="category_id">Kategorie</label>
+        <select id="category_id" name="category_id">
+          <option value="">Ohne Kategorie</option>
+          {% for category in active_categories %}
+            <option value="{{ category.id }}">{{ category.name }}</option>
           {% endfor %}
         </select>
 
@@ -49,6 +57,7 @@
             <th>Datei</th>
             <th>Version</th>
             <th>Hash</th>
+            <th>Kategorie</th>
             <th>Buchung</th>
             <th>Belegdatum</th>
             <th>Hochgeladen</th>
@@ -66,6 +75,20 @@
               </td>
               <td>v{{ document.version_number }}</td>
               <td class="hash"><code>{{ document.file_sha256[:12] }}</code></td>
+              <td>
+                <form method="post" action="{{ url_for('main.categorize_document', document_id=document.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <select name="category_id" data-autosubmit aria-label="Kategorie">
+                    <option value="">Ohne Kategorie</option>
+                    {% for category in categories %}
+                      {% if category.is_active or category.id == document.category_id %}
+                        <option value="{{ category.id }}" {% if category.id == document.category_id %}selected{% endif %}>{{ category.name }}{% if not category.is_active %} (deaktiviert){% endif %}</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                  <noscript><button type="submit">Speichern</button></noscript>
+                </form>
+              </td>
               <td>
                 <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -102,4 +125,55 @@
       <p class="muted">Noch keine Belege vorhanden.</p>
     {% endif %}
   </section>
+
+  {% if selected_company_id %}
+    <section class="card">
+      {% set can_edit_categories = session.get('user') and session['user']['role'] in ('Admin', 'Buchhalter') %}
+      <h2>Belegkategorien</h2>
+      <p class="muted">Kategorien ordnen Belege ein (z. B. Rechnung und Zahlungsbeleg zur selben Buchung). Deaktivierte Kategorien stehen für neue Zuordnungen nicht mehr zur Auswahl; bestehende Belege behalten sie.</p>
+      {% if categories %}
+        <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Kategorie</th>
+              <th>Herkunft</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for category in categories %}
+              <tr>
+                <td>{{ category.name }}</td>
+                <td>{{ 'Standard' if category.is_default else 'Eigene' }}</td>
+                <td>{% if category.is_active %}<span class="badge">aktiv</span>{% else %}<span class="badge">deaktiviert</span>{% endif %}</td>
+                <td>
+                  {% if can_edit_categories %}
+                    <form method="post" action="{{ url_for('main.set_document_category_active_action', category_id=category.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="is_active" value="{{ '0' if category.is_active else '1' }}" />
+                      <button type="submit" class="secondary">{{ 'Deaktivieren' if category.is_active else 'Aktivieren' }}</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      {% else %}
+        <p class="muted">Noch keine Belegkategorien vorhanden.</p>
+      {% endif %}
+      {% if can_edit_categories %}
+        <form method="post" action="{{ url_for('main.create_document_category_action') }}" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <label for="category_name">Neue Kategorie</label>
+          <input id="category_name" name="name" type="text" maxlength="80" required placeholder="z. B. Lieferschein" />
+          <button type="submit">Kategorie anlegen</button>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
 {% endblock %}

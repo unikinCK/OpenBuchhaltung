@@ -189,6 +189,7 @@ def test_einvoice_upload_books_entry_and_stores_document(tmp_path):
         document = session.execute(select(Document)).scalar_one()
         assert document.journal_entry_id == entry.id
         assert document.file_name == "rechnung.xml"
+        assert document.category.name == "Rechnung"
 
 
 def test_einvoice_upload_rejects_broken_xml(tmp_path):
@@ -282,6 +283,7 @@ def test_einvoice_api_import_books_entry_and_stores_document(tmp_path):
         assert document.journal_entry_id == entry.id
         assert document.document_date == date(2026, 6, 15)
         assert entry.entry_date == date(2026, 6, 15)
+        assert document.category.name == "Rechnung"
         expense_line = next(line for line in entry.lines if line.account_id == expense_id)
         other_lines = [line for line in entry.lines if line.account_id != expense_id]
         assert expense_line.cost_center_id == cost_center_id

@@ -20,6 +20,7 @@ from app.api.helpers import (
     validation_error,
 )
 from app.auth import current_api_user
+from app.services.documents import documents_by_journal_entry
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -146,6 +147,9 @@ def list_journal_entries_via_api():
             stmt = stmt.where(JournalEntry.is_finalized.is_(is_finalized))
 
         entries = session.execute(stmt).scalars().all()
+        documents_by_entry = documents_by_journal_entry(
+            session, [entry.id for entry in entries]
+        )
 
     return (
         jsonify(
@@ -156,7 +160,23 @@ def list_journal_entries_via_api():
                     "date_to": date_to.isoformat() if date_to else None,
                 },
                 "limit": max(1, min(limit, 500)),
-                "entries": [_journal_entry_dict(entry) for entry in entries],
+                "entries": [
+                    {
+                        **_journal_entry_dict(entry),
+                        "documents": [
+                            {
+                                **document,
+                                "document_date": (
+                                    document["document_date"].isoformat()
+                                    if document["document_date"]
+                                    else None
+                                ),
+                            }
+                            for document in documents_by_entry.get(entry.id, [])
+                        ],
+                    }
+                    for entry in entries
+                ],
             }
         ),
         200,

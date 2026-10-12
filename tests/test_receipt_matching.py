@@ -22,6 +22,7 @@ from app.services.receipt_matching import (
     ReceiptMatchError,
     create_match_suggestion,
     find_candidate_entries,
+    linked_document_counts,
 )
 from domain.models import (
     Account,
@@ -237,14 +238,15 @@ def _create_entry(
 # ---------------------------------------------------------------------------
 
 
-def test_find_candidates_skips_linked_and_reversal_entries(tmp_path):
+def test_find_candidates_ranks_linked_entries_last(tmp_path):
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)
     entry_a = _create_entry(app, company_id, "238.00", date(2026, 7, 10), "Kandidat A")
     entry_b = _create_entry(app, company_id, "238.00", date(2026, 7, 12), "Kandidat B")
 
     with app.extensions["db_session_factory"]() as session:
-        # Entry A bereits mit einem Beleg verknüpft -> kein Kandidat mehr.
+        # Entry A bereits mit einem Beleg verknüpft -> bleibt Kandidat (weiterer
+        # Beleg möglich), steht aber hinter Buchungen ohne Beleg.
         company = session.get(Company, company_id)
         session.add(
             Document(
@@ -261,7 +263,8 @@ def test_find_candidates_skips_linked_and_reversal_entries(tmp_path):
         candidates = find_candidate_entries(
             session=session, company_id=company_id, gross_amount=Decimal("238.00")
         )
-        assert [entry.id for entry in candidates] == [entry_b]
+        assert [entry.id for entry in candidates] == [entry_b, entry_a]
+        assert linked_document_counts(session, [entry_a, entry_b]) == {entry_a: 1}
 
         no_amount_ids = [
             entry.id
@@ -269,8 +272,87 @@ def test_find_candidates_skips_linked_and_reversal_entries(tmp_path):
                 session=session, company_id=company_id, gross_amount=None
             )
         ]
-        assert entry_b in no_amount_ids
-        assert entry_a not in no_amount_ids
+        assert no_amount_ids.index(entry_b) < no_amount_ids.index(entry_a)
+
+
+def _link_existing_document(app, tmp_path, company_id: int, entry_id: int, name: str) -> None:
+    with app.extensions["db_session_factory"]() as session:
+        company = session.get(Company, company_id)
+        session.add(
+            Document(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                file_name=name,
+                storage_key=str(tmp_path / name),
+                mime_type="application/pdf",
+                journal_entry_id=entry_id,
+            )
+        )
+        session.commit()
+
+
+def _suggest(app, company_id: int, document_id: int) -> ReceiptMatchSuggestion:
+    with app.extensions["db_session_factory"]() as session:
+        suggestion = create_match_suggestion(
+            session=session,
+            company_id=company_id,
+            document_id=document_id,
+            changed_by="test",
+        )
+        session.expunge(suggestion)
+        return suggestion
+
+
+def test_additional_receipt_matches_entry_that_already_has_documents(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    entry_id = _create_entry(app, company_id, "238.00", date(2026, 7, 20), "Muster Lieferant")
+    _link_existing_document(app, tmp_path, company_id, entry_id, "rechnung.pdf")
+    document_id = _upload_document(app, company_id, RECEIPT_LINES, "zahlung.pdf")
+
+    suggestion = _suggest(app, company_id, document_id)
+    assert suggestion.suggestion_type == "match"
+    assert suggestion.journal_entry_id == entry_id
+    assert suggestion.confidence == "niedrig"
+    assert "bereits 1 Beleg(e)" in suggestion.reason
+
+    with app.extensions["db_session_factory"]() as session:
+        receipt_matching.approve_match_suggestion(
+            session=session, suggestion_id=suggestion.id, changed_by="test"
+        )
+        linked = session.query(Document).filter(Document.journal_entry_id == entry_id).all()
+        assert sorted(document.file_name for document in linked) == [
+            "rechnung.pdf",
+            "zahlung.pdf",
+        ]
+
+
+def test_entry_without_documents_wins_over_entry_with_documents(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    # Die Buchung mit Beleg liegt näher am Belegdatum (08.07.), trotzdem gewinnt
+    # die Buchung ohne Beleg.
+    linked_entry = _create_entry(app, company_id, "238.00", date(2026, 7, 8), "Mit Beleg")
+    free_entry = _create_entry(app, company_id, "238.00", date(2026, 7, 25), "Ohne Beleg")
+    _link_existing_document(app, tmp_path, company_id, linked_entry, "alt.pdf")
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+
+    suggestion = _suggest(app, company_id, document_id)
+    assert suggestion.journal_entry_id == free_entry
+    assert suggestion.confidence == "mittel"
+
+
+def test_additional_receipt_too_far_from_entry_date_becomes_new_booking(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    entry_id = _create_entry(app, company_id, "238.00", date(2026, 12, 1), "Spätere Buchung")
+    _link_existing_document(app, tmp_path, company_id, entry_id, "rechnung.pdf")
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+
+    suggestion = _suggest(app, company_id, document_id)
+    assert suggestion.suggestion_type == "new_booking"
+    assert suggestion.journal_entry_id is None
+    assert "Tage vom Belegdatum entfernt" in suggestion.reason
 
 
 # ---------------------------------------------------------------------------

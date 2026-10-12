@@ -21,6 +21,14 @@ from werkzeug.utils import secure_filename
 
 from app.auth import current_tenant_id
 from app.services.audit_log import log_audit_event
+from app.services.document_categories import (
+    DocumentCategoryError,
+    assign_document_category,
+    create_document_category,
+    list_document_categories,
+    resolve_document_category,
+    set_document_category_active,
+)
 from app.services.document_llm import DocumentLLMError, send_document_update
 from app.services.documents import document_file_metadata
 from app.services.llm_settings import PURPOSE_DOCUMENT, resolve_llm_endpoint
@@ -36,7 +44,7 @@ from app.web.helpers import (
     require_company_access,
     search_args,
 )
-from domain.models import Document, JournalEntry
+from domain.models import Document, DocumentCategory, JournalEntry
 
 # Obergrenze für Verknüpfungs-Dropdowns (jüngste Buchungen).
 LINK_SELECT_LIMIT = 200
@@ -46,6 +54,7 @@ LINK_SELECT_LIMIT = 200
 def documents_page():
     limit, offset = pagination_args()
     query, date_from, date_to = search_args()
+    preselected_entry_id = request.args.get("journal_entry_id", type=int)
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -54,7 +63,11 @@ def documents_page():
         documents_total = 0
         journal_entries = []
         journal_entry_labels = {}
+        categories = []
         if selected_company_id:
+            categories = list_document_categories(
+                session=session, company_id=selected_company_id
+            )
             documents_stmt = scoped_select(Document, company_id=selected_company_id)
             if query:
                 documents_stmt = documents_stmt.where(Document.file_name.ilike(f"%{query}%"))
@@ -87,6 +100,17 @@ def documents_page():
                 .scalars()
                 .all()
             )
+            # Aus der Buchungsliste („+ Beleg“): gewählte Buchung vorauswählen,
+            # auch wenn sie älter als die Auswahlliste ist.
+            if preselected_entry_id is not None:
+                preselected_entry = session.get(JournalEntry, preselected_entry_id)
+                if (
+                    preselected_entry is None
+                    or preselected_entry.company_id != selected_company_id
+                ):
+                    preselected_entry_id = None
+                elif preselected_entry not in journal_entries:
+                    journal_entries = [preselected_entry, *journal_entries]
             linked_ids = {
                 document.journal_entry_id
                 for document in documents
@@ -117,6 +141,9 @@ def documents_page():
         filter_args=filter_url_args(query, date_from, date_to),
         journal_entries=journal_entries,
         journal_entry_labels=journal_entry_labels,
+        categories=categories,
+        preselected_entry_id=preselected_entry_id,
+        active_categories=[category for category in categories if category.is_active],
         today=date.today().isoformat(),
     )
 
@@ -125,6 +152,7 @@ def documents_page():
 def upload_document():
     company_id = request.form.get("company_id", type=int)
     journal_entry_id = request.form.get("journal_entry_id", type=int)
+    category_id = request.form.get("category_id", type=int)
     document_date_raw = request.form.get("document_date", "").strip()
     uploaded_file = request.files.get("document_file")
 
@@ -164,6 +192,14 @@ def upload_document():
                 flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
                 return redirect(url_for("main.documents_page", company_id=company_id))
 
+        try:
+            category = resolve_document_category(
+                session=session, company_id=company.id, category_id=category_id
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=company_id))
+
         unique_name = f"{uuid4().hex}_{original_file_name}"
         tenant_dir = Path(current_app.config["DOCUMENT_UPLOAD_DIR"]) / str(company.tenant_id)
         company_dir = tenant_dir / str(company.id)
@@ -177,6 +213,7 @@ def upload_document():
             tenant_id=company.tenant_id,
             company_id=company.id,
             journal_entry_id=linked_entry.id if linked_entry else None,
+            category_id=category.id if category else None,
             file_name=original_file_name,
             storage_key=str(target_path),
             mime_type=uploaded_file.mimetype or "application/octet-stream",
@@ -198,6 +235,7 @@ def upload_document():
             payload={
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
+                "category_id": document.category_id,
                 "mime_type": document.mime_type,
                 "file_sha256": document.file_sha256,
                 "file_size_bytes": document.file_size_bytes,
@@ -311,6 +349,79 @@ def link_document(document_id: int):
     return redirect(url_for("main.documents_page", company_id=redirect_company_id))
 
 
+@main_bp.post("/documents/<int:document_id>/category")
+def categorize_document(document_id: int):
+    category_id = request.form.get("category_id", type=int)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        require_company_access(session, document.company_id)
+        redirect_company_id = document.company_id
+        try:
+            assign_document_category(
+                session=session,
+                document=document,
+                category_id=category_id,
+                changed_by=changed_by(),
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+        session.commit()
+
+    flash("Belegkategorie wurde gespeichert.", "success")
+    return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+
+
+@main_bp.post("/belegkategorien")
+def create_document_category_action():
+    company_id = request.form.get("company_id", type=int)
+    name = request.form.get("name", "")
+    if not company_id:
+        abort(400)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            category = create_document_category(
+                session=session, company=company, name=name, changed_by=changed_by()
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=company_id))
+        session.commit()
+        category_name = category.name
+
+    flash(f"Belegkategorie „{category_name}“ wurde angelegt.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
+@main_bp.post("/belegkategorien/<int:category_id>/aktiv")
+def set_document_category_active_action(category_id: int):
+    is_active = request.form.get("is_active") == "1"
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        category = session.get(DocumentCategory, category_id)
+        if category is None:
+            abort(404)
+        require_company_access(session, category.company_id)
+        set_document_category_active(
+            session=session, category=category, is_active=is_active, changed_by=changed_by()
+        )
+        session.commit()
+        company_id = category.company_id
+        category_name = category.name
+
+    state = "aktiviert" if is_active else "deaktiviert"
+    flash(f"Belegkategorie „{category_name}“ wurde {state}.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
 @main_bp.post("/documents/<int:document_id>/replace")
 def replace_document(document_id: int):
     uploaded_file = request.files.get("document_file")
@@ -354,6 +465,7 @@ def replace_document(document_id: int):
             tenant_id=previous.tenant_id,
             company_id=previous.company_id,
             journal_entry_id=previous.journal_entry_id,
+            category_id=previous.category_id,
             file_name=original_file_name,
             storage_key=str(target_path),
             mime_type=uploaded_file.mimetype or "application/octet-stream",

@@ -12,6 +12,7 @@ from app.api.helpers import (
     get_session_factory,
 )
 from app.auth import current_api_tenant_id
+from app.services.document_categories import ensure_default_document_categories
 from app.services.scoping import scoped_select
 from domain.models import Company, Tenant
 
@@ -36,6 +37,8 @@ def create_tenant_with_company():
         session.add_all([tenant, company])
 
         try:
+            session.flush()
+            ensure_default_document_categories(session=session, company=company)
             session.commit()
         except IntegrityError:
             session.rollback()

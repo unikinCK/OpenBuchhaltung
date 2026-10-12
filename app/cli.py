@@ -22,6 +22,7 @@ from app.services.account_chart_import import import_account_chart_file
 from app.services.audit_export import verify_audit_export_package
 from app.services.audit_log import verify_audit_log_integrity
 from app.services.compliance_integrity import verify_compliance_integrity
+from app.services.document_categories import ensure_default_document_categories
 from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.journal_entries import (
     JournalEntryInput,
@@ -362,6 +363,12 @@ def register_cli_commands(app: Flask) -> None:
             created_tax_codes = ensure_default_tax_codes(session=session, company=company)
             session.commit()
             click.echo(f"Steuercodes: {created_tax_codes} neu angelegt.")
+
+            created_categories = ensure_default_document_categories(
+                session=session, company=company
+            )
+            session.commit()
+            click.echo(f"Belegkategorien: {created_categories} neu angelegt.")
 
             has_partners = (
                 session.execute(

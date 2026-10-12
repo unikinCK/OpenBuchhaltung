@@ -424,6 +424,12 @@ th.num {
   font-variant-numeric: tabular-nums;
 }
 
+.entry-documents {
+  margin-top: 0.25rem;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
 tr.entry-lines td {
   background: #fafbfc;
   color: var(--text-muted);

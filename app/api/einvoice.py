@@ -21,6 +21,7 @@ from app.api.helpers import (
 )
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
+from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
     EInvoiceExportError,
@@ -255,10 +256,14 @@ def import_einvoice_via_api():
         target_path.write_bytes(content)
         metadata = document_file_metadata(content)
 
+        invoice_category = find_document_category_by_name(
+            session=session, company_id=company.id, name="Rechnung"
+        )
         document = Document(
             tenant_id=company.tenant_id,
             company_id=company.id,
             journal_entry_id=entry.id,
+            category_id=invoice_category.id if invoice_category else None,
             file_name=file_name,
             storage_key=str(target_path),
             mime_type=mime_type,

@@ -6,7 +6,10 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from domain.models import Document
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from domain.models import Document, DocumentCategory
 
 # Magic Bytes je erlaubtem MIME-Type: Dateien, deren Inhalt nicht zum Typ passt
 # (z. B. durch zu aggressive Client-Komprimierung zerstoerte Uploads), werden
@@ -76,3 +79,39 @@ def verify_document_file(document: Document) -> dict[str, object]:
         "actual_sha256": metadata.file_sha256,
         "actual_size_bytes": metadata.file_size_bytes,
     }
+
+
+def documents_by_journal_entry(
+    session: Session, journal_entry_ids: list[int]
+) -> dict[int, list[dict[str, object]]]:
+    """Aktuelle Belegversionen je Buchung (eine Buchung kann mehrere Belege haben)."""
+    if not journal_entry_ids:
+        return {}
+    rows = session.execute(
+        select(
+            Document.id,
+            Document.journal_entry_id,
+            Document.file_name,
+            Document.document_date,
+            Document.category_id,
+            DocumentCategory.name.label("category_name"),
+        )
+        .outerjoin(DocumentCategory, DocumentCategory.id == Document.category_id)
+        .where(
+            Document.journal_entry_id.in_(journal_entry_ids),
+            Document.is_current.is_(True),
+        )
+        .order_by(Document.journal_entry_id, Document.document_date, Document.id)
+    ).all()
+    result: dict[int, list[dict[str, object]]] = {}
+    for row in rows:
+        result.setdefault(row.journal_entry_id, []).append(
+            {
+                "id": row.id,
+                "file_name": row.file_name,
+                "document_date": row.document_date,
+                "category_id": row.category_id,
+                "category_name": row.category_name,
+            }
+        )
+    return result

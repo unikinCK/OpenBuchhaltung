@@ -1203,6 +1203,29 @@ und als Eingangsrechnung vorbuchen:
    können dabei der Netto-Aufwandszeile zugewiesen werden. Alle Schritte werden als Audit-Events
    (`ocr_analyzed` mit `control_status`, `ocr_booked`) protokolliert.
 
+## Belegkategorien & mehrere Belege je Buchung
+
+Eine Buchung kann beliebig viele Belege haben, etwa Rechnung, Zahlungsbeleg und
+Bewirtungsbeleg. Die Buchungsliste zeigt alle Belege einer Buchung mit Kategorie
+und Download-Link; **+ weiterer Beleg** öffnet den Upload mit vorausgewählter
+Buchung.
+
+Belege lassen sich einer **Kategorie** zuordnen, beim Upload oder nachträglich in
+der Belegliste. Jede Gesellschaft startet mit Rechnung, Gutschrift, Zahlungsbeleg,
+Bewirtungsbeleg und Zahlungsanweisung. Admin und Buchhalter ergänzen eigene
+Kategorien unter **Belege → Belegkategorien** und können Kategorien deaktivieren:
+Deaktivierte stehen für neue Zuordnungen nicht mehr zur Wahl, bestehende Belege
+behalten sie. E-Rechnungs-Importe erhalten automatisch „Rechnung“. Anlage,
+(De-)Aktivierung und Zuordnung stehen im Audit-Log; der Prüferexport enthält die
+Kategorien (`document_categories`).
+
+API: `GET/POST /api/v1/document-categories`,
+`POST /api/v1/document-categories/<id>/active`, `POST /api/v1/documents/<id>/category`,
+`category_id` beim Upload (`POST /api/v1/documents`) und als Filter von
+`GET /api/v1/documents`; `GET /api/v1/journal-entries` liefert je Buchung `documents`.
+MCP-Tools: `list_document_categories`, `create_document_category`,
+`set_document_category_active`, `set_document_category`.
+
 ## Belegabgleich (Beleg ↔ Buchung, LLM-gestützt)
 
 Unter **Belegabgleich** werden hochgeladene Belege ohne Buchungsverknüpfung mit den
@@ -1211,9 +1234,11 @@ vorhandenen Buchungen abgeglichen. Jeder Vorschlag muss vom Anwender freigegeben
 
 1. **Belegdaten gewinnen:** Der gespeicherte Beleg durchläuft erneut die
    Beleg-OCR-Pipeline (Bruttobetrag, Datum, Lieferant, Rechnungsnummer …).
-2. **Kandidaten finden (regelbasiert):** Buchungen der Gesellschaft ohne
-   Belegverknüpfung mit passendem Zeilenbetrag (bzw. die jüngsten unverknüpften
-   Buchungen, wenn kein Betrag erkannt wurde). Stornobuchungen sind ausgenommen.
+2. **Kandidaten finden (regelbasiert):** Buchungen der Gesellschaft mit passendem
+   Zeilenbetrag (bzw. die jüngsten Buchungen, wenn kein Betrag erkannt wurde).
+   Buchungen ohne Beleg stehen vorn; Buchungen mit Belegen bleiben Kandidaten, weil
+   eine Buchung mehrere Belege haben kann (z. B. Rechnung und Zahlungsbeleg).
+   Stornobuchungen sind ausgenommen.
 3. **Entscheiden (LLM mit Fallback):** Ist ein LLM-Endpoint konfiguriert, wählt das
    Sprachmodell aus den Kandidaten die passende Buchung (oder keine) und begründet
    die Wahl inkl. Zuverlässigkeit:
@@ -1227,7 +1252,10 @@ vorhandenen Buchungen abgeglichen. Jeder Vorschlag muss vom Anwender freigegeben
    `RECEIPT_LLM_ENDPOINT_URL` bzw. `DOCUMENT_LLM_ENDPOINT_URL` zurück. LLM-Fehler
    (auch halluzinierte Buchungs-IDs außerhalb der Kandidatenliste) blockieren nie:
    es greift die regelbasierte Entscheidung "eindeutiger Betragstreffer", der Grund
-   vermerkt den Ausfall.
+   vermerkt den Ausfall. Passen nur Buchungen, die schon Belege haben, schlägt die
+   Regel den Beleg als weiteren Nachweis zur zeitlich nächsten Buchung vor –
+   nur mit erkanntem Belegdatum und höchstens 60 Tage Abstand (Zuverlässigkeit
+   „niedrig“); das LLM sieht je Kandidat die Anzahl vorhandener Belege.
 4. **Freigeben, ändern oder ablehnen:**
    - **Match-Vorschlag:** Der Beleg wird nach Freigabe mit der Buchung verknüpft;
      vor der Freigabe kann eine andere Buchung gewählt werden (das Audit-Event

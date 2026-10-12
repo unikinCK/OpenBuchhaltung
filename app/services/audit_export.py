@@ -27,6 +27,7 @@ from domain.models import (
     ControllingUnit,
     DepreciationEntry,
     Document,
+    DocumentCategory,
     ElsterSubmission,
     FiscalYear,
     FixedAsset,
@@ -108,6 +109,7 @@ EXPORT_TABLE_MODELS = {
     "account_history": AuditLog,
     "controlling_unit_history": AuditLog,
     "business_partner_history": AuditLog,
+    "document_categories": DocumentCategory,
     "documents": Document,
     "users": User,
 }
@@ -148,6 +150,7 @@ TABLE_DESCRIPTIONS = {
         "Änderungshistorie der Geschäftspartner einschließlich Bankdatenänderungen "
         "mit Vorher-/Nachher-Werten."
     ),
+    "document_categories": "Belegkategorien der Gesellschaft (Standard und eigene).",
     "documents": "Belegindex, Versionen und Prüfsummen der Originaldateien.",
     "users": "Mandantenbezogene Benutzer und Rollen ohne Authentisierungsgeheimnisse.",
 }
@@ -180,6 +183,7 @@ FIELD_DESCRIPTIONS = {
     "file_sha256": "Beim Eingang gespeicherter SHA-256-Hash der Originaldatei.",
     "file_size_bytes": "Beim Eingang gespeicherte Dateigröße in Bytes.",
     "document_date": "Fachliches Datum des Belegs, getrennt vom Erfassungszeitpunkt.",
+    "category_id": "Zugeordnete Belegkategorie (siehe document_categories).",
     "archive_path": "Relativer Pfad der Originaldatei innerhalb des ZIP-Pakets.",
     "archived_file_sha256": "Beim Export berechneter SHA-256-Hash der Originaldatei.",
     "archived_file_size_bytes": "Beim Export ermittelte Dateigröße in Bytes.",
@@ -451,6 +455,15 @@ def build_audit_export_package(
                 AuditLog.company_id == company.id,
                 AuditLog.entity_type == "business_partner",
                 order_by=(AuditLog.changed_at, AuditLog.id),
+            )
+        ],
+        "document_categories": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                DocumentCategory,
+                DocumentCategory.company_id == company.id,
+                order_by=(DocumentCategory.sort_order, DocumentCategory.id),
             )
         ],
         "users": [
