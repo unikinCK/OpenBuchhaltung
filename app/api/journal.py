@@ -20,6 +20,12 @@ from app.api.helpers import (
     validation_error,
 )
 from app.auth import current_api_user
+from app.services.controlling import (
+    ControllingError,
+    find_filter_unit,
+    journal_line_filter,
+    parse_unit_filter,
+)
 from app.services.documents import documents_by_journal_entry
 from app.services.journal_entries import (
     JournalEntryCreationError,
@@ -33,7 +39,7 @@ from app.services.journal_entries import (
     reverse_journal_entry,
 )
 from app.services.partners import find_partner_by_number, partner_display_number
-from domain.models import JournalEntry, JournalEntryLine
+from domain.models import Account, JournalEntry, JournalEntryLine
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -122,6 +128,18 @@ def list_journal_entries_via_api():
     if partner_id_raw and not partner_id_raw.isdigit():
         return jsonify({"error": "partner_id must be an integer."}), 400
     partner_id = int(partner_id_raw) if partner_id_raw else None
+    account_id_raw = (request.args.get("account_id") or "").strip()
+    if account_id_raw and not account_id_raw.isdigit():
+        return jsonify({"error": "account_id must be an integer."}), 400
+    account_id = int(account_id_raw) if account_id_raw else None
+    unit_filters: dict[str, int | str | None] = {}
+    try:
+        for unit_type in ("cost_center", "profit_center"):
+            unit_filters[unit_type] = parse_unit_filter(
+                request.args.get(f"{unit_type}_id"), unit_type=unit_type
+            )
+    except ControllingError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     is_finalized = None
     if is_finalized_raw is not None and is_finalized_raw.strip() != "":
@@ -134,6 +152,18 @@ def list_journal_entries_via_api():
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
+        if account_id is not None:
+            account = session.get(Account, account_id)
+            if account is None or account.company_id != company_id:
+                return jsonify({"error": "Account not found."}), 404
+        for unit_type, value in unit_filters.items():
+            if isinstance(value, int) and (
+                find_filter_unit(
+                    session, company_id=company_id, unit_type=unit_type, unit_id=value
+                )
+                is None
+            ):
+                return jsonify({"error": f"{unit_type}_id not found."}), 404
 
         stmt = (
             select(JournalEntry)
@@ -171,6 +201,13 @@ def list_journal_entries_via_api():
                     )
                 )
             )
+        line_filter = journal_line_filter(
+            account_id=account_id,
+            cost_center=unit_filters["cost_center"],
+            profit_center=unit_filters["profit_center"],
+        )
+        if line_filter is not None:
+            stmt = stmt.where(JournalEntry.id.in_(line_filter))
 
         entries = session.execute(stmt).scalars().all()
         documents_by_entry = documents_by_journal_entry(
@@ -187,6 +224,9 @@ def list_journal_entries_via_api():
                 },
                 "limit": max(1, min(limit, 500)),
                 "partner_id": partner_id,
+                "account_id": account_id,
+                "cost_center_id": unit_filters["cost_center"],
+                "profit_center_id": unit_filters["profit_center"],
                 "entries": [
                     {
                         **_journal_entry_dict(entry),

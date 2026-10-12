@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Buchungen zu Kostenstellen und Profitcentern finden
+- Neu: Journalfilter nach Konto, Kostenstelle und Profitcenter in der Buchungsliste,
+  `GET /api/v1/journal-entries` (`account_id`, `cost_center_id`, `profit_center_id`)
+  und MCP `list_journal_entries`. Konto und Einheit müssen auf derselben Zeile stehen;
+  `none` findet Erlös-/Aufwandszeilen ohne Einheit („Nicht zugeordnet“).
+- Neu: Kostenstellenrechnung und Profitcenter-GuV verlinken Einheit und Konto jeder
+  Zeile auf die gefilterte Buchungsliste; die Controlling-Seite hat einen
+  Berichtszeitraum, der auch für Drilldown und CSV-Export gilt. „Nicht zugeordnet“
+  zeigt jetzt ebenfalls die Konten.
+- Korrigiert: Die MCP-Beschreibung von `get_controlling_report` versprach einen
+  Buchungsdrilldown, den der Bericht selbst nicht liefert; sie verweist nun auf
+  `list_journal_entries`.
+
 ### Übersichtlichere Oberfläche und Geschäftspartner an jeder Buchung
 - Geändert: Geschäftspartner sind auf allen Buchungszeilen zulässig (ADR-002, Nachtrag
   2026-10-12). Auf Debitoren-/Kreditoren-Sammelkonten bildet der Partner weiter das

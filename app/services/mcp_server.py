@@ -717,7 +717,11 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="get_controlling_report",
-        description="Liefert Kostenstellenrechnung oder Profitcenter-GuV mit Buchungsdrilldown.",
+        description=(
+            "Liefert Kostenstellenrechnung oder Profitcenter-GuV (Summen je Einheit und "
+            "Konto). Die einzelnen Buchungen dazu liefert list_journal_entries mit "
+            "cost_center_id/profit_center_id (und account_id), 'none' für nicht zugeordnet."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1089,6 +1093,28 @@ TOOLS: list[ToolSpec] = [
                 "partner_id": {
                     "type": "integer",
                     "description": "Nur Buchungen mit diesem Geschäftspartner (auf einer Zeile).",
+                },
+                "account_id": {
+                    "type": "integer",
+                    "description": (
+                        "Nur Buchungen mit einer Zeile auf diesem Konto (zusammen mit "
+                        "cost_center_id/profit_center_id auf derselben Zeile)."
+                    ),
+                },
+                "cost_center_id": {
+                    "type": ["integer", "string"],
+                    "description": (
+                        "Nur Buchungen mit einer Zeile auf dieser Kostenstelle (ID aus "
+                        "list_controlling_units). 'none' = Erlös-/Aufwandszeilen ohne "
+                        "Kostenstelle (\"Nicht zugeordnet\" im Controlling-Bericht)."
+                    ),
+                },
+                "profit_center_id": {
+                    "type": ["integer", "string"],
+                    "description": (
+                        "Nur Buchungen mit einer Zeile auf diesem Profitcenter. 'none' = "
+                        "Erlös-/Aufwandszeilen ohne Profitcenter."
+                    ),
                 },
                 "limit": {
                     "type": "integer",

@@ -355,3 +355,129 @@ def test_controlling_report_counts_skr03_income_accounts_as_revenue(tmp_path: Pa
     html = page.get_data(as_text=True)
     # Ergebnis 700.00 je einmal in Kostenstellenrechnung und Profitcenter-GuV
     assert html.count("<strong>700.00</strong>") == 2
+
+
+def test_journal_entries_filter_by_controlling_units(tmp_path: Path) -> None:
+    _app, client = _app_and_client(tmp_path)
+    company_id = _seed_company_and_accounts(client)
+    sales = _create_unit(client, company_id, "cost_center", "K100", "Vertrieb")
+    admin = _create_unit(client, company_id, "cost_center", "K200", "Verwaltung")
+    products = _create_unit(client, company_id, "profit_center", "P100", "Produkte")
+    accounts = client.get(f"/api/v1/accounts?company_id={company_id}").get_json()["accounts"]
+    account_ids = {account["code"]: account["id"] for account in accounts}
+
+    def book(description: str, account: str, amount: str, **dimensions) -> int:
+        is_revenue = account == "8400"
+        response = client.post(
+            "/api/v1/journal-entries",
+            json={
+                "company_id": company_id,
+                "entry_date": "2026-07-14",
+                "description": description,
+                "lines": [
+                    {
+                        "account_id": account_ids["1200"],
+                        "debit_amount" if is_revenue else "credit_amount": amount,
+                    },
+                    {
+                        "account_id": account_ids[account],
+                        "credit_amount" if is_revenue else "debit_amount": amount,
+                        **dimensions,
+                    },
+                ],
+            },
+        )
+        assert response.status_code == 201, response.get_json()
+        return response.get_json()["id"]
+
+    sales_revenue = book(
+        "Umsatz Vertrieb",
+        "8400",
+        "250.00",
+        cost_center_id=sales["id"],
+        profit_center_id=products["id"],
+    )
+    sales_expense = book("Fremdleistung Vertrieb", "4400", "80.00", cost_center_id=sales["id"])
+    admin_expense = book("Fremdleistung Verwaltung", "4400", "40.00", cost_center_id=admin["id"])
+    unassigned = book("Fremdleistung ohne Kostenstelle", "4400", "10.00")
+
+    def api_ids(**params) -> set[int]:
+        query = "&".join(f"{key}={value}" for key, value in params.items())
+        response = client.get(f"/api/v1/journal-entries?company_id={company_id}&{query}")
+        assert response.status_code == 200, response.get_json()
+        return {entry["id"] for entry in response.get_json()["entries"]}
+
+    assert api_ids(cost_center_id=sales["id"]) == {sales_revenue, sales_expense}
+    assert api_ids(cost_center_id=admin["id"]) == {admin_expense}
+    # Konto und Kostenstelle müssen auf derselben Zeile stehen.
+    assert api_ids(cost_center_id=sales["id"], account_id=account_ids["4400"]) == {
+        sales_expense
+    }
+    assert api_ids(cost_center_id=sales["id"], account_id=account_ids["1200"]) == set()
+    # „none“ entspricht „Nicht zugeordnet“: nur Erfolgszeilen ohne Kostenstelle.
+    assert api_ids(cost_center_id="none") == {unassigned}
+    assert api_ids(profit_center_id=products["id"]) == {sales_revenue}
+    assert api_ids(profit_center_id="none") == {sales_expense, admin_expense, unassigned}
+    assert api_ids(profit_center_id="none", cost_center_id=sales["id"]) == {sales_expense}
+
+    assert (
+        client.get(
+            f"/api/v1/journal-entries?company_id={company_id}&cost_center_id=K100"
+        ).status_code
+        == 400
+    )
+    assert (
+        client.get(
+            f"/api/v1/journal-entries?company_id={company_id}&cost_center_id={products['id']}"
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/journal-entries?company_id={company_id}&account_id=999999"
+        ).status_code
+        == 404
+    )
+
+    page = client.get(
+        f"/buchungen?company_id={company_id}&cost_center_id={sales['id']}"
+        f"&account_id={account_ids['4400']}"
+    ).get_data(as_text=True)
+    assert "Fremdleistung Vertrieb" in page
+    assert "Umsatz Vertrieb" not in page
+    assert "Fremdleistung Verwaltung" not in page
+    assert f'<option value="{sales["id"]}" selected>K100 – Vertrieb</option>' in page
+
+    page = client.get(f"/buchungen?company_id={company_id}&cost_center_id=none").get_data(
+        as_text=True
+    )
+    assert "Fremdleistung ohne Kostenstelle" in page
+    assert "Fremdleistung Vertrieb" not in page
+
+    # Inaktive Einheiten bleiben als Filter wählbar.
+    assert (
+        client.patch(
+            f"/api/v1/controlling-units/{admin['id']}", json={"is_active": False}
+        ).status_code
+        == 200
+    )
+    page = client.get(
+        f"/buchungen?company_id={company_id}&cost_center_id={admin['id']}"
+    ).get_data(as_text=True)
+    assert "Fremdleistung Verwaltung" in page
+    assert "K200 – Verwaltung (inaktiv)" in page
+
+    controlling = client.get(
+        f"/controlling?company_id={company_id}&date_from=2026-07-01&date_to=2026-07-31"
+    ).get_data(as_text=True)
+    assert (
+        f"/buchungen?date_from=2026-07-01&amp;date_to=2026-07-31&amp;company_id={company_id}"
+        f"&amp;cost_center_id={sales['id']}"
+    ) in controlling
+    assert f"account_id={account_ids['4400']}" in controlling
+    assert "cost_center_id=none" in controlling
+    assert "profit_center_id=none" in controlling
+    empty_period = client.get(
+        f"/controlling?company_id={company_id}&date_from=2027-01-01"
+    ).get_data(as_text=True)
+    assert "250.00" not in empty_period
