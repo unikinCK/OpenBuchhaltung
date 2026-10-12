@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from flask import abort, flash, redirect, render_template, request, url_for
+from sqlalchemy import func, select
 
 from app.services.partners import (
     PartnerError,
@@ -23,7 +24,27 @@ from app.web.helpers import (
     pagination_args,
     require_company_access,
 )
-from domain.models import SUBLEDGER_TYPES, BusinessPartner
+from app.web.journal import entry_overview
+from domain.models import SUBLEDGER_TYPES, BusinessPartner, JournalEntry, JournalEntryLine
+
+# Buchungen eines Partners auf der Detailseite (vollständige Liste im Journal).
+PARTNER_ENTRY_LIMIT = 25
+
+
+def _entry_counts(session, partner_ids: list[int]) -> dict[int, int]:
+    """Anzahl Buchungen je Partner (Buchungen mit mindestens einer Zeile des Partners)."""
+    if not partner_ids:
+        return {}
+    return dict(
+        session.execute(
+            select(
+                JournalEntryLine.partner_id,
+                func.count(func.distinct(JournalEntryLine.journal_entry_id)),
+            )
+            .where(JournalEntryLine.partner_id.in_(partner_ids))
+            .group_by(JournalEntryLine.partner_id)
+        ).all()
+    )
 
 _TEXT_FIELDS = (
     "name",
@@ -76,6 +97,7 @@ def partners_page():
         companies, selected_company_id = company_context(session)
         partners: list[BusinessPartner] = []
         total = 0
+        entry_counts: dict[int, int] = {}
         if selected_company_id:
             partners, total = list_partners(
                 session=session,
@@ -86,6 +108,7 @@ def partners_page():
                 limit=limit,
                 offset=offset,
             )
+            entry_counts = _entry_counts(session, [partner.id for partner in partners])
     filter_args = {
         key: value
         for key, value in (
@@ -101,6 +124,7 @@ def partners_page():
         selected_company_id=selected_company_id,
         partners=partners,
         total=total,
+        entry_counts=entry_counts,
         limit=limit,
         offset=offset,
         role=role,
@@ -170,12 +194,34 @@ def partner_detail_page(partner_id: int):
         partner = _load_partner(session, partner_id)
         companies, _ = company_context(session)
         history = partner_history(session=session, partner_id=partner.id, limit=100)
+        entry_ids = select(JournalEntryLine.journal_entry_id).where(
+            JournalEntryLine.partner_id == partner.id
+        )
+        entries_total = session.execute(
+            select(func.count()).select_from(
+                select(JournalEntry.id).where(JournalEntry.id.in_(entry_ids)).subquery()
+            )
+        ).scalar_one()
+        entries = (
+            session.execute(
+                select(JournalEntry)
+                .where(JournalEntry.id.in_(entry_ids))
+                .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+                .limit(PARTNER_ENTRY_LIMIT)
+            )
+            .scalars()
+            .all()
+        )
+        overview = entry_overview(session, partner.company_id, [entry.id for entry in entries])
         return render_template(
             "partner_detail.html",
             companies=companies,
             selected_company_id=partner.company_id,
             partner=partner,
             history=history,
+            entries=entries,
+            entries_total=entries_total,
+            overview=overview,
         )
 
 

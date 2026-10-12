@@ -192,6 +192,14 @@ def document_upload_error(uploaded_file, file_name: str) -> str | None:
     return None
 
 
+def parse_form_amount(raw: str) -> Decimal:
+    """Betrag aus einem Formularfeld, deutsch (``1.234,56``) oder technisch (``1234.56``)."""
+    text = (raw or "").strip().replace(" ", "").replace("\u202f", "").replace("€", "")
+    if "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    return parse_decimal(text)
+
+
 def optional_decimal(raw: str, *, places: int | None = 2) -> Decimal | None:
     """Optionaler Dezimalwert; ``places=None`` für Sätze/Mengen ohne Cent-Prüfung."""
     raw = (raw or "").strip()

@@ -23,6 +23,7 @@ from domain.models import (
     TAX_KIND_OUTPUT,
     Account,
     BankTransaction,
+    BusinessPartner,
     Company,
     DepreciationEntry,
     FiscalYear,
@@ -59,8 +60,9 @@ class JournalLineInput:
     account_code: str | None = None
     cost_center_id: int | None = None
     profit_center_id: int | None = None
-    # Geschäftspartner (Nebenbuch) nur auf Sammelkonten: per ID oder
-    # Personenkontonummer (Debitor/Kreditor); die Nummer wird zur ID aufgelöst.
+    # Geschäftspartner per ID oder Personenkontonummer (Debitor/Kreditor); die
+    # Nummer wird zur ID aufgelöst. Auf Sammelkonten bildet er das Nebenbuch,
+    # auf allen anderen Konten den Partnerbezug der Buchung.
     partner_id: int | None = None
     partner_number: str | None = None
 
@@ -86,6 +88,10 @@ class JournalEntryInput:
     # Leistungsdatum (Lieferung/Leistung, bei Zeiträumen deren Ende): bestimmt den
     # Umsatzsteuer-Meldezeitraum (``app.services.tax_period``); None = Buchungsdatum.
     service_date: date | None = None
+    # Geschäftspartner der Buchung (ID oder Personenkontonummer): Vorgabe für alle
+    # Zeilen ohne eigenen Partner, ausgenommen Steuerzeilen (``apply_entry_partner``).
+    partner_id: int | None = None
+    partner_number: str | None = None
 
 
 # Feste Nummer der Abschlussperiode je Wirtschaftsjahr (DATEV-Konvention: Periode 13).
@@ -195,6 +201,17 @@ def create_journal_entry(
 
     lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
     lines = _resolve_partner_numbers(session=session, company=company, lines=lines)
+    lines = apply_entry_partner(
+        session=session,
+        company_id=company.id,
+        lines=lines,
+        partner_id=resolve_partner_reference(
+            session=session,
+            company_id=company.id,
+            partner_id=payload.partner_id,
+            partner_number=payload.partner_number,
+        ),
+    )
     tax_codes = _load_tax_codes(session=session, company=company, lines=lines)
     if payload.expand_tax_lines:
         lines = _expand_tax_lines(lines=lines, tax_codes=tax_codes)
@@ -484,6 +501,35 @@ def _validate_tax_code_usage(
             )
 
 
+def resolve_partner_reference(
+    *,
+    session: Session,
+    company_id: int,
+    partner_id: int | None,
+    partner_number: str | None,
+) -> int | None:
+    """Partner-ID aus ID und/oder Personenkontonummer; beide müssen übereinstimmen."""
+    number = (partner_number or "").strip()
+    if not number:
+        if partner_id is not None:
+            partner = session.get(BusinessPartner, partner_id)
+            if partner is None or partner.company_id != company_id:
+                raise JournalEntryCreationError(
+                    "Geschäftspartner in dieser Gesellschaft nicht gefunden."
+                )
+        return partner_id
+    partner = find_partner_by_number(session=session, company_id=company_id, number=number)
+    if partner is None:
+        raise JournalEntryCreationError(
+            f"Geschäftspartner mit Nummer {number} in dieser Gesellschaft nicht gefunden."
+        )
+    if partner_id is not None and partner_id != partner.id:
+        raise JournalEntryCreationError(
+            f"partner_id und partner_number {number} bezeichnen verschiedene Partner."
+        )
+    return partner.id
+
+
 def _resolve_partner_numbers(
     *,
     session: Session,
@@ -497,17 +543,49 @@ def _resolve_partner_numbers(
         if not number:
             resolved.append(line)
             continue
-        partner = find_partner_by_number(session=session, company_id=company.id, number=number)
-        if partner is None:
-            raise JournalEntryCreationError(
-                f"Geschäftspartner mit Nummer {number} in dieser Gesellschaft nicht gefunden."
-            )
-        if line.partner_id is not None and line.partner_id != partner.id:
-            raise JournalEntryCreationError(
-                f"partner_id und partner_number {number} bezeichnen verschiedene Partner."
-            )
-        resolved.append(replace(line, partner_id=partner.id, partner_number=number))
+        partner_id = resolve_partner_reference(
+            session=session,
+            company_id=company.id,
+            partner_id=line.partner_id,
+            partner_number=number,
+        )
+        resolved.append(replace(line, partner_id=partner_id, partner_number=number))
     return resolved
+
+
+def tax_account_ids(session: Session, company_id: int) -> set[int]:
+    """Steuerkonten der Gesellschaft (Steuerkonto eines aktiven oder inaktiven Steuercodes)."""
+    return set(
+        session.execute(
+            select(TaxCode.vat_account_id).where(
+                TaxCode.company_id == company_id, TaxCode.vat_account_id.is_not(None)
+            )
+        ).scalars()
+    )
+
+
+def apply_entry_partner(
+    *,
+    session: Session,
+    company_id: int,
+    lines: list[JournalLineInput],
+    partner_id: int | None,
+) -> list[JournalLineInput]:
+    """Setzt den Geschäftspartner der Buchung auf alle Zeilen ohne eigenen Partner.
+
+    Steuerzeilen (Steuerkonto eines Steuercodes) bleiben ohne Partner – wie die
+    automatisch erzeugten USt-/VSt-Zeilen. Auf Sammelkonten muss die Rolle des
+    Partners passen; das prüft ``validate_partner_assignment`` beim Buchen.
+    """
+    if partner_id is None:
+        return list(lines)
+    tax_accounts = tax_account_ids(session, company_id)
+    return [
+        replace(line, partner_id=partner_id)
+        if line.partner_id is None and line.account_id not in tax_accounts
+        else line
+        for line in lines
+    ]
 
 
 def _expand_tax_lines(
@@ -1033,6 +1111,8 @@ def finalize_journal_entries_until(
 
 # Platzhalter für „Leistungsdatum nicht ändern“ (None entfernt es).
 KEEP_SERVICE_DATE = object()
+# Platzhalter für „Partner der Buchung nicht ändern“ (None entfernt ihn).
+KEEP_PARTNER = object()
 
 
 def amend_journal_entry(
@@ -1043,17 +1123,19 @@ def amend_journal_entry(
     changed_by: str,
     service_date: date | None | object = KEEP_SERVICE_DATE,
     line_partners: dict[int, int | None] | None = None,
+    partner_id: int | None | object = KEEP_PARTNER,
 ) -> JournalEntry:
-    """Ergänzt eine offene Buchung um Leistungsdatum und Geschäftspartner je Zeile.
+    """Ergänzt eine offene Buchung um Leistungsdatum und Geschäftspartner.
 
     Vor der Festschreibung dürfen Buchungen berichtigt werden (GoBD, Katalog
     BOOK-001); jede Änderung steht mit altem und neuem Wert im Audit-Log.
     Beträge, Konten und Buchungsdatum bleiben unberührt. Partner gelten wie beim
-    Buchen nur auf Debitoren-/Kreditoren-Sammelkonten (``line_partners``:
-    Zeilennummer → Partner-ID, None entfernt den Partner). Festgeschriebene,
-    stornierte und Vortragsbuchungen, gesperrte Perioden und abgeschlossene
-    Geschäftsjahre lehnt die Funktion ab – das festgeschriebene Storno spiegelt den
-    alten Stand, ein Nachtrag am Original verschöbe Partnersaldo und Meldezeitraum.
+    Buchen (``line_partners``: Zeilennummer → Partner-ID, None entfernt den
+    Partner); ``partner_id`` setzt den Partner der Buchung auf alle übrigen Zeilen
+    außer Steuerzeilen (None entfernt ihn dort). Festgeschriebene, stornierte und
+    Vortragsbuchungen, gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt
+    die Funktion ab – das festgeschriebene Storno spiegelt den alten Stand, ein
+    Nachtrag am Original verschöbe Partnersaldo und Meldezeitraum.
     """
     entry = session.execute(
         select(JournalEntry)
@@ -1096,21 +1178,34 @@ def amend_journal_entry(
         entry.service_date = service_date
 
     lines_by_number = {line.line_number: line for line in entry.lines}
+    requested = dict(line_partners or {})
+    if partner_id is not KEEP_PARTNER:
+        if partner_id is not None:
+            resolve_partner_reference(
+                session=session,
+                company_id=entry.company_id,
+                partner_id=partner_id,
+                partner_number=None,
+            )
+        tax_accounts = tax_account_ids(session, entry.company_id)
+        for line in entry.lines:
+            if line.line_number not in requested and line.account_id not in tax_accounts:
+                requested[line.line_number] = partner_id
     line_changes = []
-    for line_number, partner_id in sorted((line_partners or {}).items()):
+    for line_number, line_partner_id in sorted(requested.items()):
         line = lines_by_number.get(line_number)
         if line is None:
             raise JournalEntryCreationError(
                 f"Buchung {entry.posting_number} hat keine Zeile {line_number}."
             )
-        if partner_id == line.partner_id:
+        if line_partner_id == line.partner_id:
             continue
         account = session.get(Account, line.account_id)
         try:
             validate_partner_assignment(
                 session=session,
                 company_id=entry.company_id,
-                partner_id=partner_id,
+                partner_id=line_partner_id,
                 account=account,
             )
         except PartnerError as exc:
@@ -1120,10 +1215,10 @@ def amend_journal_entry(
                 "line_number": line_number,
                 "account_code": account.code,
                 "old_partner_id": line.partner_id,
-                "new_partner_id": partner_id,
+                "new_partner_id": line_partner_id,
             }
         )
-        line.partner_id = partner_id
+        line.partner_id = line_partner_id
     if line_changes:
         changes["partners"] = line_changes
 

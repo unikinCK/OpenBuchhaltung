@@ -1,172 +1,215 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
-{% from "_filters.html" import filter_form %}
 
 {% block title %}Belege – OpenBuchhaltung{% endblock %}
 
 {% block content %}
-  <h1 class="page-title">Belege</h1>
-
-  <section class="card" id="beleg-hochladen">
-    <h2>Beleg hochladen</h2>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Belege</h1>
+      {% if selected_company_id %}
+        <p class="page-subtitle">{% if unlinked_total %}<a href="{{ url_for('main.documents_page', company_id=selected_company_id, unlinked=1) }}">{{ unlinked_total }} Beleg{{ "" if unlinked_total == 1 else "e" }} ohne Buchung</a>{% else %}Alle Belege sind Buchungen zugeordnet.{% endif %}</p>
+      {% endif %}
+    </div>
     {% if selected_company_id %}
-      <form method="post" action="{{ url_for('main.upload_document') }}" enctype="multipart/form-data" class="stacked">
+      <div class="page-actions">
+        <a class="button" href="#beleg-hochladen" data-open-details="#beleg-hochladen">+ Beleg hochladen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    <details class="card card-primary" id="beleg-hochladen"{% if preselected_entry_id or not documents_total %} open{% endif %}>
+      <summary>Beleg hochladen <span class="summary-hint">PDF, JPG oder PNG – eine Buchung kann mehrere Belege haben</span></summary>
+      <form method="post" action="{{ url_for('main.upload_document') }}" enctype="multipart/form-data">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-
-        <label for="journal_entry_id">Buchung (optional – eine Buchung kann mehrere Belege haben)</label>
-        <select id="journal_entry_id" name="journal_entry_id">
-          <option value="">Keine Verknüpfung</option>
-          {% for entry in journal_entries %}
-            <option value="{{ entry.id }}" {% if entry.id == preselected_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
-          {% endfor %}
-        </select>
-
-        <label for="category_id">Kategorie</label>
-        <select id="category_id" name="category_id">
-          <option value="">Ohne Kategorie</option>
-          {% for category in active_categories %}
-            <option value="{{ category.id }}">{{ category.name }}</option>
-          {% endfor %}
-        </select>
-
-        <label for="document_date">Belegdatum</label>
-        <input id="document_date" name="document_date" type="date" value="{{ today }}" required />
-
-        <label for="document_file">Datei</label>
-        <input id="document_file" name="document_file" type="file" required />
-
-        <button type="submit">Beleg hochladen</button>
+        <div class="form-grid">
+          <div class="field field-wide">
+            <label for="journal_entry_id">Buchung (optional)</label>
+            <select id="journal_entry_id" name="journal_entry_id">
+              <option value="">Keine Verknüpfung</option>
+              {% for entry in journal_entries %}
+                <option value="{{ entry.id }}" {% if entry.id == preselected_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="category_id">Kategorie</label>
+            <select id="category_id" name="category_id">
+              <option value="">Ohne Kategorie</option>
+              {% for category in active_categories %}
+                <option value="{{ category.id }}">{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="document_date">Belegdatum</label>
+            <input id="document_date" name="document_date" type="date" value="{{ today }}" required />
+          </div>
+          <div class="field field-wide">
+            <label for="document_file">Datei</label>
+            <input id="document_file" name="document_file" type="file" required />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Beleg hochladen</button>
+        </div>
       </form>
-    {% else %}
-      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
-    {% endif %}
-  </section>
+    </details>
 
-  <section class="card">
-    <h2>Hochgeladene Belege</h2>
-    {% if selected_company_id %}
-      {{ filter_form('main.documents_page', selected_company_id, q, date_from, date_to,
-                     placeholder="Dateiname") }}
-    {% endif %}
-    {% if documents %}
-      <div class="table-scroll">
-      <table class="doc-table">
-        <thead>
-          <tr>
-            <th>Datei</th>
-            <th>Version</th>
-            <th>Hash</th>
-            <th>Kategorie</th>
-            <th>Buchung</th>
-            <th>Belegdatum</th>
-            <th>Hochgeladen</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for document in documents %}
-            <tr>
-              <td>
-                {{ document.file_name }}
-                {% if not document.is_current %}
-                  <span class="badge">ersetzt</span>
-                {% endif %}
-              </td>
-              <td>v{{ document.version_number }}</td>
-              <td class="hash"><code>{{ document.file_sha256[:12] }}</code></td>
-              <td>
-                <form method="post" action="{{ url_for('main.categorize_document', document_id=document.id) }}" class="inline-form">
-                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                  <select name="category_id" data-autosubmit aria-label="Kategorie">
-                    <option value="">Ohne Kategorie</option>
-                    {% for category in categories %}
-                      {% if category.is_active or category.id == document.category_id %}
-                        <option value="{{ category.id }}" {% if category.id == document.category_id %}selected{% endif %}>{{ category.name }}{% if not category.is_active %} (deaktiviert){% endif %}</option>
-                      {% endif %}
-                    {% endfor %}
-                  </select>
-                  <noscript><button type="submit">Speichern</button></noscript>
-                </form>
-              </td>
-              <td>
-                <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
-                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                  <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                  <select name="journal_entry_id" data-autosubmit>
-                    <option value="">Keine Verknüpfung</option>
-                    {% for entry in journal_entries %}
-                      <option value="{{ entry.id }}" {% if entry.id == document.journal_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
-                    {% endfor %}
-                  </select>
-                  <noscript><button type="submit">Speichern</button></noscript>
-                </form>
-              </td>
-              <td class="date">{{ document.document_date.isoformat() if document.document_date else 'nicht erfasst' }}</td>
-              <td class="datetime">{{ document.uploaded_at.strftime("%Y-%m-%d %H:%M") }}</td>
-              <td class="doc-actions">
-                <a href="{{ url_for('main.download_document', document_id=document.id) }}">Herunterladen</a>
-                {% if document.is_current %}
-                  <form method="post" action="{{ url_for('main.replace_document', document_id=document.id) }}" enctype="multipart/form-data" class="inline-form">
-                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                    <input name="document_file" type="file" required />
-                    <button type="submit">Ersetzen</button>
-                  </form>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id,
-                    extra=filter_args) }}
-    {% else %}
-      <p class="muted">Noch keine Belege vorhanden.</p>
-    {% endif %}
-  </section>
-
-  {% if selected_company_id %}
     <section class="card">
-      {% set can_edit_categories = session.get('user') and session['user']['role'] in ('Admin', 'Buchhalter') %}
-      <h2>Belegkategorien</h2>
-      <p class="muted">Kategorien ordnen Belege ein (z. B. Rechnung und Zahlungsbeleg zur selben Buchung). Deaktivierte Kategorien stehen für neue Zuordnungen nicht mehr zur Auswahl; bestehende Belege behalten sie.</p>
+      <div class="card-header">
+        <h2>Hochgeladene Belege <span class="count">{{ documents_total }}</span></h2>
+      </div>
+      <form method="get" action="{{ url_for('main.documents_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Dateiname" aria-label="Suchbegriff" />
+        <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
+        <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+        <label class="check"><input type="checkbox" name="unlinked" value="1" {% if unlinked_only %}checked{% endif %} /> nur ohne Buchung</label>
+        <button type="submit" class="secondary">Filtern</button>
+        {% if filter_args %}<a href="{{ url_for('main.documents_page', company_id=selected_company_id) }}">Zurücksetzen</a>{% endif %}
+      </form>
+      {% if documents %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Beleg</th>
+                <th>Kategorie</th>
+                <th>Belegdatum</th>
+                <th>Buchung</th>
+                <th>Hochgeladen</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for document in documents %}
+                <tr{% if not document.is_current %} class="row-muted"{% endif %}>
+                  <td>
+                    <a href="{{ url_for('main.download_document', document_id=document.id) }}" title="Herunterladen">📎 {{ document.file_name }}</a>
+                    {% if not document.is_current %}<span class="badge">ersetzt</span>{% endif %}
+                    <br /><span class="muted small" title="SHA-256 {{ document.file_sha256 }}">v{{ document.version_number }} · {{ document.file_sha256[:12] }}</span>
+                  </td>
+                  <td>
+                    <form method="post" action="{{ url_for('main.categorize_document', document_id=document.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <select name="category_id" data-autosubmit aria-label="Kategorie">
+                        <option value="">Ohne Kategorie</option>
+                        {% for category in categories %}
+                          {% if category.is_active or category.id == document.category_id %}
+                            <option value="{{ category.id }}" {% if category.id == document.category_id %}selected{% endif %}>{{ category.name }}{% if not category.is_active %} (deaktiviert){% endif %}</option>
+                          {% endif %}
+                        {% endfor %}
+                      </select>
+                      <noscript><button type="submit">Speichern</button></noscript>
+                    </form>
+                  </td>
+                  <td class="date">{{ document.document_date | datum if document.document_date else 'nicht erfasst' }}</td>
+                  <td>
+                    {% if document.journal_entry_id %}
+                      <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=document.journal_entry_id) }}">{{ journal_entry_labels.get(document.journal_entry_id, "Buchung") }}</a>
+                    {% else %}
+                      <span class="badge badge-warning">ohne Buchung</span>
+                    {% endif %}
+                  </td>
+                  <td class="datetime">{{ document.uploaded_at | datum_zeit }}</td>
+                  <td class="actions">
+                    <button type="button" class="secondary btn-sm" popovertarget="document-panel-{{ document.id }}">{% if document.journal_entry_id %}Ändern …{% else %}Zuordnen …{% endif %}</button>
+                    <div popover id="document-panel-{{ document.id }}" class="panel">
+                      <div class="panel-header">
+                        <div>
+                          <h3>{{ document.file_name }}</h3>
+                          <p class="muted small" style="margin:0.2rem 0 0;">Belegdatum {{ document.document_date | datum if document.document_date else "nicht erfasst" }}</p>
+                        </div>
+                        <button type="button" class="panel-close" popovertarget="document-panel-{{ document.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
+                      </div>
+                      <div class="panel-section">
+                        <h4>Buchung zuordnen</h4>
+                        <form method="post" action="{{ url_for('main.link_document', document_id=document.id) }}" class="inline-form">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                          <select name="journal_entry_id" aria-label="Buchung" style="max-width:24rem;">
+                            <option value="">Keine Verknüpfung</option>
+                            {% for entry in journal_entries %}
+                              <option value="{{ entry.id }}" {% if entry.id == document.journal_entry_id %}selected{% endif %}>{{ entry.posting_number }} – {{ entry.description }}</option>
+                            {% endfor %}
+                          </select>
+                          <button type="submit">Speichern</button>
+                        </form>
+                      </div>
+                      {% if document.is_current %}
+                        <div class="panel-section">
+                          <h4>Neue Version hochladen</h4>
+                          <form method="post" action="{{ url_for('main.replace_document', document_id=document.id) }}" enctype="multipart/form-data" class="inline-form">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                            <input name="document_file" type="file" required aria-label="Datei" />
+                            <button type="submit" class="secondary">Ersetzen</button>
+                          </form>
+                          <p class="hint">Die bisherige Version bleibt unverändert erhalten (GoBD).</p>
+                        </div>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id,
+                      extra=filter_args) }}
+      {% elif filter_args %}
+        <p class="empty-state">Keine Belege zu diesen Filtern.</p>
+      {% else %}
+        <p class="empty-state">Noch keine Belege vorhanden.</p>
+      {% endif %}
+    </section>
+
+    {% set can_edit_categories = session.get('user') and session['user']['role'] in ('Admin', 'Buchhalter') %}
+    <details class="card" id="belegkategorien">
+      <summary>Belegkategorien <span class="summary-hint">{{ categories | selectattr("is_active") | list | length }} aktiv</span></summary>
+      <p class="hint" style="margin-top:0;">Kategorien ordnen Belege ein (z. B. Rechnung und Zahlungsbeleg zur selben Buchung). Deaktivierte Kategorien stehen für neue Zuordnungen nicht mehr zur Auswahl; bestehende Belege behalten sie.</p>
       {% if categories %}
         <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Kategorie</th>
-              <th>Herkunft</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for category in categories %}
+          <table class="data">
+            <thead>
               <tr>
-                <td>{{ category.name }}</td>
-                <td>{{ 'Standard' if category.is_default else 'Eigene' }}</td>
-                <td>{% if category.is_active %}<span class="badge">aktiv</span>{% else %}<span class="badge">deaktiviert</span>{% endif %}</td>
-                <td>
-                  {% if can_edit_categories %}
-                    <form method="post" action="{{ url_for('main.set_document_category_active_action', category_id=category.id) }}" class="inline-form">
-                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="is_active" value="{{ '0' if category.is_active else '1' }}" />
-                      <button type="submit" class="secondary">{{ 'Deaktivieren' if category.is_active else 'Aktivieren' }}</button>
-                    </form>
-                  {% endif %}
-                </td>
+                <th>Kategorie</th>
+                <th>Herkunft</th>
+                <th>Status</th>
+                <th class="actions"></th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for category in categories %}
+                <tr>
+                  <td>{{ category.name }}</td>
+                  <td>{{ 'Standard' if category.is_default else 'Eigene' }}</td>
+                  <td>{% if category.is_active %}<span class="badge badge-success">aktiv</span>{% else %}<span class="badge">deaktiviert</span>{% endif %}</td>
+                  <td class="actions">
+                    {% if can_edit_categories %}
+                      <form method="post" action="{{ url_for('main.set_document_category_active_action', category_id=category.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="is_active" value="{{ '0' if category.is_active else '1' }}" />
+                        <button type="submit" class="secondary btn-sm">{{ 'Deaktivieren' if category.is_active else 'Aktivieren' }}</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       {% else %}
         <p class="muted">Noch keine Belegkategorien vorhanden.</p>
       {% endif %}
       {% if can_edit_categories %}
-        <form method="post" action="{{ url_for('main.create_document_category_action') }}" class="inline-form">
+        <form method="post" action="{{ url_for('main.create_document_category_action') }}" class="inline-form" style="margin-top:0.75rem;">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
           <label for="category_name">Neue Kategorie</label>
@@ -174,6 +217,6 @@
           <button type="submit">Kategorie anlegen</button>
         </form>
       {% endif %}
-    </section>
+    </details>
   {% endif %}
 {% endblock %}

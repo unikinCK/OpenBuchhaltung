@@ -22,7 +22,17 @@
 {%- endmacro %}
 
 {% block content %}
-  <h1 class="page-title">Anlagenbuchhaltung</h1>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Anlagenbuchhaltung</h1>
+      <p class="page-subtitle">Anlagenverzeichnis und Abschreibungen</p>
+    </div>
+    {% if selected_company_id and accounts %}
+      <div class="page-actions">
+        <a class="button" href="#anlage-erfassen" data-open-details="#anlage-erfassen">+ Anlagegut erfassen</a>
+      </div>
+    {% endif %}
+  </div>
 
   <div class="stat-grid">
     <div class="stat-card">
@@ -31,12 +41,12 @@
     </div>
     <div class="stat-card">
       <div class="stat-label">Summe Buchwerte (aktiv)</div>
-      <div class="stat-value">{{ "%.2f"|format(total_book_value) }}</div>
+      <div class="stat-value">{{ total_book_value | betrag }} €</div>
     </div>
   </div>
 
-  <section class="card">
-    <h2>Anlagegut erfassen</h2>
+  <details class="card card-primary" id="anlage-erfassen"{% if not asset_views %} open{% endif %}>
+    <summary>Anlagegut erfassen</summary>
     {% if not selected_company_id %}
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
     {% elif not accounts %}
@@ -117,15 +127,12 @@
         <button type="submit">Anlagegut speichern</button>
       </form>
     {% endif %}
-  </section>
+  </details>
 
   <section class="card">
-    <h2>
-      Anlagenverzeichnis
-      <span class="badge"><strong>Anzahl:</strong> {{ asset_views|length }}</span>
-    </h2>
+    <h2>Anlagenverzeichnis <span class="count">{{ asset_views|length }}</span></h2>
     {% if asset_views %}
-      <table>
+      <table class="data">
         <thead>
           <tr>
             <th>Inventar-Nr.</th>
@@ -145,9 +152,9 @@
               <td>{{ asset.asset_number }}</td>
               <td>{{ asset.name }}</td>
               <td>{{ method_with_params(asset) }}</td>
-              <td>{{ asset.in_service_date.isoformat() }}</td>
-              <td class="num">{{ asset.acquisition_cost }}</td>
-              <td class="num">{{ "%.2f"|format(view.book_value) }}</td>
+              <td class="date">{{ asset.in_service_date | datum }}</td>
+              <td class="num">{{ asset.acquisition_cost | betrag }}</td>
+              <td class="num">{{ view.book_value | betrag }}</td>
               <td>
                 {% if asset.status == "active" %}<span class="badge">aktiv</span>
                 {% elif asset.status == "fully_depreciated" %}<span class="badge">abgeschrieben</span>

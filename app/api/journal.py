@@ -37,6 +37,19 @@ from domain.models import JournalEntry, JournalEntryLine
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
+def _entry_partners(lines) -> list[dict[str, object]]:
+    """Geschäftspartner der Buchung: verschiedene Partner der Zeilen in Zeilenfolge."""
+    partners: dict[int, dict[str, object]] = {}
+    for line in lines:
+        if line.partner is not None and line.partner_id not in partners:
+            partners[line.partner_id] = {
+                "id": line.partner_id,
+                "name": line.partner.name,
+                "number": partner_display_number(line.partner, line.account.subledger),
+            }
+    return list(partners.values())
+
+
 def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
     lines = sorted(entry.lines, key=lambda line: line.line_number)
     return {
@@ -57,6 +70,7 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
         "content_hash": entry.content_hash,
         "reversal_of_id": entry.reversal_of_id,
         "created_at": entry.created_at.isoformat(),
+        "partners": _entry_partners(lines),
         "lines": [
             {
                 "id": line.id,
@@ -104,6 +118,10 @@ def list_journal_entries_via_api():
     limit = request.args.get("limit", default=100, type=int)
     if limit is None:
         return jsonify({"error": "limit must be an integer."}), 400
+    partner_id_raw = (request.args.get("partner_id") or "").strip()
+    if partner_id_raw and not partner_id_raw.isdigit():
+        return jsonify({"error": "partner_id must be an integer."}), 400
+    partner_id = int(partner_id_raw) if partner_id_raw else None
 
     is_finalized = None
     if is_finalized_raw is not None and is_finalized_raw.strip() != "":
@@ -145,6 +163,14 @@ def list_journal_entries_via_api():
             stmt = stmt.where(JournalEntry.source == source)
         if is_finalized is not None:
             stmt = stmt.where(JournalEntry.is_finalized.is_(is_finalized))
+        if partner_id is not None:
+            stmt = stmt.where(
+                JournalEntry.id.in_(
+                    select(JournalEntryLine.journal_entry_id).where(
+                        JournalEntryLine.partner_id == partner_id
+                    )
+                )
+            )
 
         entries = session.execute(stmt).scalars().all()
         documents_by_entry = documents_by_journal_entry(
@@ -160,6 +186,7 @@ def list_journal_entries_via_api():
                     "date_to": date_to.isoformat() if date_to else None,
                 },
                 "limit": max(1, min(limit, 500)),
+                "partner_id": partner_id,
                 "entries": [
                     {
                         **_journal_entry_dict(entry),
@@ -289,6 +316,8 @@ def create_journal_entry_via_api():
                     ],
                 )
 
+        raw_entry_partner_id = payload.get("partner_id")
+        raw_entry_partner_number = payload.get("partner_number")
         entry_input = JournalEntryInput(
             company_id=company_id,
             entry_date=entry_date,
@@ -297,6 +326,14 @@ def create_journal_entry_via_api():
             lines=lines,
             changed_by=_api_changed_by(),
             service_date=service_date,
+            partner_id=(
+                int(raw_entry_partner_id) if raw_entry_partner_id not in (None, "") else None
+            ),
+            partner_number=(
+                str(raw_entry_partner_number).strip()
+                if raw_entry_partner_number not in (None, "")
+                else None
+            ),
         )
 
         session_factory = get_session_factory()
@@ -385,7 +422,7 @@ def _amend_line_partners(session, company_id: int, raw_lines) -> tuple[dict, lis
 
 @api_bp.patch("/journal-entries/<int:journal_entry_id>")
 def amend_journal_entry_via_api(journal_entry_id: int):
-    """Offene Buchung ergänzen: Leistungsdatum und Geschäftspartner je Zeile."""
+    """Offene Buchung ergänzen: Leistungsdatum und Geschäftspartner (Buchung/Zeile)."""
     if not api_can_write():
         return forbidden()
 
@@ -420,6 +457,28 @@ def amend_journal_entry_via_api(journal_entry_id: int):
         line_partners, errors = _amend_line_partners(
             session, entry.company_id, payload.get("lines") or []
         )
+        raw_number = payload.get("partner_number")
+        if raw_number not in (None, ""):
+            partner = find_partner_by_number(
+                session=session, company_id=entry.company_id, number=str(raw_number).strip()
+            )
+            if partner is None:
+                errors.append(
+                    {
+                        "field": "partner_number",
+                        "message": f"Geschäftspartner mit Nummer {raw_number} nicht gefunden.",
+                    }
+                )
+            else:
+                options["partner_id"] = partner.id
+        elif "partner_id" in payload:
+            raw_id = payload.get("partner_id")
+            try:
+                options["partner_id"] = int(raw_id) if raw_id is not None else None
+            except (TypeError, ValueError):
+                errors.append(
+                    {"field": "partner_id", "message": "partner_id must be an integer or null."}
+                )
         if errors:
             return validation_error("Validation failed.", details=errors)
         try:

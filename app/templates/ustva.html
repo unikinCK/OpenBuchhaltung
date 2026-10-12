@@ -3,67 +3,15 @@
 {% block title %}Umsatzsteuer – OpenBuchhaltung{% endblock %}
 
 {% block content %}
-  <h1 class="page-title">Umsatzsteuer</h1>
-
-  <section class="card">
-    <h2>ELSTER-Konfiguration</h2>
-    <p>
-      <strong>Umgebung:</strong> {{ elster_readiness.environment }}
-      <span class="badge">{{ "produktionsbereit" if elster_readiness.production_ready else "nicht produktionsbereit" }}</span>
-    </p>
-    <p><strong>Mock-Transport:</strong> verfügbar</p>
-    <p><strong>ERiC:</strong> {{ "konfiguriert" if elster_readiness.eric_transport_available else "nicht konfiguriert" }}</p>
-    <table>
-      <thead>
-        <tr>
-          <th>Produktions-Checkliste</th>
-          <th>Status</th>
-          <th>Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for check in elster_readiness.checks %}
-          <tr>
-            <td>
-              {{ check.label }}
-              {% if check.required_for_production %}<span class="badge">Pflicht</span>{% endif %}
-            </td>
-            <td>{{ "ok" if check.ok else "offen" }}</td>
-            <td class="muted">{{ check.detail }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% if elster_readiness.missing_production_requirements %}
-      <p class="muted">
-        Für Produktion fehlt:
-        {{ elster_readiness.missing_production_requirements|join(", ") }}
-      </p>
-    {% endif %}
-    {% if elster_readiness.warnings %}
-      <ul>
-        {% for warning in elster_readiness.warnings %}
-          <li class="muted">{{ warning }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-    {% if elster_summary %}
-      <p>
-        <strong>Übermittlungen:</strong> {{ elster_summary.total }}
-        <span class="badge">ok {{ elster_summary.by_status.transmitted }}</span>
-        <span class="badge">fehlgeschlagen {{ elster_summary.by_status.failed }}</span>
-        <span class="badge">Mock {{ elster_summary.by_transport.mock }}</span>
-        <span class="badge">ERiC {{ elster_summary.by_transport.eric }}</span>
-      </p>
-      {% if elster_summary.latest %}
-        <p class="muted">
-          Letzte Übermittlung: #{{ elster_summary.latest.id }},
-          {{ elster_summary.latest.status }},
-          {{ elster_summary.latest.environment }}/{{ elster_summary.latest.transport }}
-        </p>
-      {% endif %}
-    {% endif %}
-  </section>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Umsatzsteuer</h1>
+      <p class="page-subtitle">Umsatzsteuer-Voranmeldung, Jahreserklärung und Zusammenfassende Meldung</p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary btn-sm" href="#elster-konfiguration" data-open-details="#elster-konfiguration">ELSTER-Konfiguration</a>
+    </div>
+  </div>
 
   <section class="card">
     <h2>Zeitraum wählen</h2>
@@ -343,4 +291,67 @@
       {% endif %}
     </section>
   {% endif %}
+
+  <details class="card" id="elster-konfiguration">
+    <summary>ELSTER-Konfiguration
+      {% if elster_readiness.production_ready %}<span class="badge badge-success">produktionsbereit</span>{% else %}<span class="badge badge-warning">nicht produktionsbereit</span>{% endif %}
+      <span class="summary-hint">Umgebung {{ elster_readiness.environment }}{% if elster_summary %} · {{ elster_summary.total }} Übermittlungen{% endif %}</span>
+    </summary>
+    <p>
+      <strong>Umgebung:</strong> {{ elster_readiness.environment }}
+      <span class="badge">{{ "produktionsbereit" if elster_readiness.production_ready else "nicht produktionsbereit" }}</span>
+    </p>
+    <p><strong>Mock-Transport:</strong> verfügbar</p>
+    <p><strong>ERiC:</strong> {{ "konfiguriert" if elster_readiness.eric_transport_available else "nicht konfiguriert" }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Produktions-Checkliste</th>
+          <th>Status</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for check in elster_readiness.checks %}
+          <tr>
+            <td>
+              {{ check.label }}
+              {% if check.required_for_production %}<span class="badge">Pflicht</span>{% endif %}
+            </td>
+            <td>{{ "ok" if check.ok else "offen" }}</td>
+            <td class="muted">{{ check.detail }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if elster_readiness.missing_production_requirements %}
+      <p class="muted">
+        Für Produktion fehlt:
+        {{ elster_readiness.missing_production_requirements|join(", ") }}
+      </p>
+    {% endif %}
+    {% if elster_readiness.warnings %}
+      <ul>
+        {% for warning in elster_readiness.warnings %}
+          <li class="muted">{{ warning }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if elster_summary %}
+      <p>
+        <strong>Übermittlungen:</strong> {{ elster_summary.total }}
+        <span class="badge">ok {{ elster_summary.by_status.transmitted }}</span>
+        <span class="badge">fehlgeschlagen {{ elster_summary.by_status.failed }}</span>
+        <span class="badge">Mock {{ elster_summary.by_transport.mock }}</span>
+        <span class="badge">ERiC {{ elster_summary.by_transport.eric }}</span>
+      </p>
+      {% if elster_summary.latest %}
+        <p class="muted">
+          Letzte Übermittlung: #{{ elster_summary.latest.id }},
+          {{ elster_summary.latest.status }},
+          {{ elster_summary.latest.environment }}/{{ elster_summary.latest.transport }}
+        </p>
+      {% endif %}
+    {% endif %}
+  </details>
 {% endblock %}

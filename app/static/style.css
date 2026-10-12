@@ -1,11 +1,14 @@
 :root {
   --bg: #f4f6f8;
   --surface: #ffffff;
+  --surface-muted: #f8fafc;
   --border: #dde3ea;
+  --border-strong: #c9d2dc;
   --text: #1f2933;
   --text-muted: #61707f;
   --primary: #1f5f8b;
   --primary-dark: #174868;
+  --primary-soft: #e7f0f8;
   --success-bg: #e3f5e9;
   --success-text: #1e6b3a;
   --error-bg: #fdeaea;
@@ -15,6 +18,8 @@
   --warning-bg: #fdf3e1;
   --warning-text: #8a5a10;
   --topbar: #16344a;
+  --radius: 10px;
+  --shadow-pop: 0 12px 32px rgba(22, 52, 74, 0.18);
 }
 
 * {
@@ -34,40 +39,43 @@ a {
   color: var(--primary);
 }
 
-/* Topbar */
+/* Topbar: Marke, Hauptnavigation, Benutzermenü in einer Zeile */
 .topbar {
   background: var(--topbar);
   color: #fff;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 0.4rem 1.5rem;
-  min-height: 56px;
+  gap: 1rem;
+  padding: 0.35rem 1.25rem;
+  min-height: 52px;
   /* Bei schmalen Fenstern umbrechen statt über den Rand zu laufen. */
   flex-wrap: wrap;
 }
 
 .topbar .brand {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   color: #fff;
   text-decoration: none;
   white-space: nowrap;
+  margin-right: 0.5rem;
 }
 
 .topbar nav {
   display: flex;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 0.15rem;
   flex: 1;
   flex-wrap: wrap;
 }
 
-.topbar nav a {
+.topbar nav a,
+.nav-group-label {
   color: #cfdce6;
   text-decoration: none;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem 0.6rem;
   border-radius: 6px;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   white-space: nowrap;
 }
 
@@ -90,13 +98,9 @@ a {
 .nav-group-label {
   background: transparent;
   border: none;
-  color: #cfdce6;
   font: inherit;
-  font-size: 0.95rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: 6px;
+  font-size: 0.92rem;
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .nav-group:hover .nav-group-label,
@@ -131,58 +135,120 @@ a {
   display: flex;
 }
 
-.topbar .user-area {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.9rem;
+.nav-group-menu a {
   color: #cfdce6;
+  text-decoration: none;
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.93rem;
   white-space: nowrap;
 }
 
-.topbar .user-area form {
-  margin: 0;
-}
-
-.topbar .user-area button {
-  background: transparent;
-  color: #cfdce6;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 6px;
-  padding: 0.25rem 0.7rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.topbar .user-area button:hover {
+.nav-group-menu a:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
 
-/* Company selector bar */
+.nav-group-menu a.active {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Benutzermenü rechts: Rolle, Passwort, Apps, Logout */
+.user-menu .nav-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.user-menu .nav-group-menu {
+  left: auto;
+  right: 0;
+  min-width: 14rem;
+}
+
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.menu-info {
+  display: block;
+  padding: 0.4rem 0.7rem 0.5rem;
+  color: #cfdce6;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  margin-bottom: 0.2rem;
+  white-space: nowrap;
+}
+
+.menu-info .badge {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.nav-group-menu form {
+  margin: 0;
+}
+
+.nav-group-menu .menu-button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #cfdce6;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  margin: 0;
+  font: inherit;
+  font-size: 0.93rem;
+  cursor: pointer;
+}
+
+.nav-group-menu .menu-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Gesellschaftsleiste */
 .company-bar {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 0.6rem 1.5rem;
+  padding: 0.4rem 1.25rem;
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.company-bar form {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .company-bar label {
-  font-size: 0.9rem;
   color: var(--text-muted);
 }
 
 .company-bar select {
   min-width: 220px;
+  padding: 0.3rem 0.5rem;
 }
 
 /* Layout */
 main {
-  max-width: 1100px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 1.25rem 1.5rem 2rem;
 }
 
 .page-title {
@@ -190,20 +256,142 @@ main {
   font-size: 1.4rem;
 }
 
-section.card {
+/* Seitenkopf: Titel links, Aktionen rechts */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.page-header .page-title {
+  margin: 0;
+}
+
+.page-header .page-subtitle {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+section.card,
+details.card {
+  display: block;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.25rem 1.5rem;
-  margin-bottom: 1.5rem;
+  border-radius: var(--radius);
+  padding: 1.1rem 1.4rem;
+  margin-bottom: 1.25rem;
   /* Breite Tabellen scrollen innerhalb der Karte statt über den Rand zu laufen. */
   overflow-x: auto;
 }
 
 section.card h2,
-section.card h3 {
+section.card h3,
+details.card h2,
+details.card h3 {
   margin-top: 0;
   font-size: 1.1rem;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.count {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.95rem;
+}
+
+/* Aufklappbare Karten: Formulare und Werkzeuge, die nicht ständig gebraucht werden. */
+details.card > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin: -0.2rem 0;
+}
+
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.card > summary::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex: none;
+}
+
+details.card[open] > summary {
+  margin-bottom: 0.9rem;
+}
+
+details.card[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+details.card > summary .summary-hint {
+  font-weight: 400;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+details.card > summary:hover {
+  color: var(--primary);
+}
+
+details.card.card-primary {
+  border-color: rgba(31, 95, 139, 0.35);
+}
+
+details.card.card-primary > summary {
+  color: var(--primary);
+}
+
+/* Werkzeugleiste: mehrere kleine Karten nebeneinander */
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 1.25rem;
+  align-items: start;
 }
 
 /* Stat cards */
@@ -211,14 +399,14 @@ section.card h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+  padding: 0.9rem 1.2rem;
 }
 
 .stat-card .stat-label {
@@ -227,9 +415,10 @@ section.card h3 {
 }
 
 .stat-card .stat-value {
-  font-size: 1.5rem;
+  font-size: 1.45rem;
   font-weight: 700;
   margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-card .stat-value.negative {
@@ -245,27 +434,116 @@ form.stacked label {
 }
 
 input,
-select {
+select,
+textarea {
   padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   font-size: 0.95rem;
+  font-family: inherit;
   background: #fff;
   color: var(--text);
   max-width: 100%;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+}
+
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: 2px solid rgba(31, 95, 139, 0.35);
   border-color: var(--primary);
+}
+
+/* Formularraster: Felder nebeneinander statt untereinander */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: start;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.field > label,
+.field-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+}
+
+.field-wide {
+  grid-column: span 2;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: end;
+  padding-bottom: 0.45rem;
+  font-size: 0.92rem;
+}
+
+.field-check input,
+label.check input {
+  width: auto;
+  margin: 0;
+}
+
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+}
+
+.hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.form-actions button {
+  margin-top: 0;
+}
+
+.form-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 1.1rem 0 0.4rem;
 }
 
 button[type="submit"],
 button.primary {
   background: var(--primary);
   color: #fff;
-  border: none;
+  border: 1px solid var(--primary);
   border-radius: 6px;
   padding: 0.5rem 1.1rem;
   font-size: 0.95rem;
@@ -278,14 +556,74 @@ button.primary:hover {
   background: var(--primary-dark);
 }
 
-button.secondary {
+button.secondary,
+a.button,
+a.button-secondary {
+  display: inline-block;
   background: #fff;
   color: var(--primary);
   border: 1px solid var(--primary);
   border-radius: 6px;
   padding: 0.45rem 1rem;
+  font-size: 0.95rem;
   cursor: pointer;
   margin-top: 0.75rem;
+  text-decoration: none;
+  line-height: 1.3;
+}
+
+a.button {
+  background: var(--primary);
+  color: #fff;
+  margin-top: 0;
+}
+
+a.button:hover {
+  background: var(--primary-dark);
+}
+
+a.button-secondary {
+  margin-top: 0;
+}
+
+button.secondary:hover,
+a.button-secondary:hover {
+  background: var(--primary-soft);
+}
+
+button.danger {
+  background: #fff;
+  color: var(--error-text);
+  border: 1px solid rgba(161, 38, 34, 0.5);
+}
+
+button.danger:hover {
+  background: var(--error-bg);
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* Kleine Schaltflächen in Tabellen, Werkzeugleisten und Kopfzeilen */
+.btn-sm,
+button.btn-sm,
+a.btn-sm {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.85rem;
+  margin-top: 0;
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .inline-form {
@@ -301,6 +639,111 @@ button.secondary {
   margin-top: 0;
   padding: 0.25rem 0.6rem;
   font-size: 0.85rem;
+}
+
+/* Aktionen in einer Zeile: Knöpfe und kleine Formulare nebeneinander */
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.row-actions form {
+  margin: 0;
+}
+
+.row-actions button,
+.row-actions a {
+  margin-top: 0;
+}
+
+/* Buchungszeilen der Erfassungsmaske */
+.journal-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.journal-lines-table th {
+  padding: 0.35rem 0.4rem;
+}
+
+.journal-lines-table td {
+  padding: 0.35rem 0.4rem;
+  border-bottom: none;
+  vertical-align: top;
+}
+
+.journal-lines-table select,
+.journal-lines-table input {
+  width: 100%;
+  max-width: none;
+}
+
+.journal-lines-table td.col-account {
+  min-width: 15rem;
+}
+
+.journal-lines-table td.col-side {
+  width: 6.5rem;
+}
+
+.journal-lines-table td.col-amount {
+  width: 8rem;
+}
+
+.journal-lines-table td.col-tax {
+  width: 11rem;
+}
+
+.journal-lines-table td.col-more {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.journal-lines-table td.col-more button {
+  margin: 0;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.3rem;
+}
+
+.journal-lines-table td.col-more button:hover {
+  color: var(--error-text);
+}
+
+.line-totals {
+  margin: 0.35rem 0 0.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-lines-table tr.line-extra td {
+  padding-top: 0;
+  padding-bottom: 0.6rem;
+}
+
+.journal-lines-table tr.line-main td {
+  border-top: 1px solid var(--border);
+}
+
+.line-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+.line-extra-grid label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.15rem;
+}
+
+/* Partnerauswahl ohne Sammelkonto: sichtbar, aber zurückgenommen. */
+select.is-muted {
+  color: var(--text-muted);
 }
 
 .journal-line {
@@ -320,11 +763,6 @@ button.secondary {
 .journal-line select,
 .journal-line input {
   width: 100%;
-}
-
-/* Partnerauswahl ohne Sammelkonto: sichtbar, aber zurückgenommen. */
-.journal-line select.is-muted {
-  opacity: 0.55;
 }
 
 .journal-line label {
@@ -347,6 +785,12 @@ table {
 
 table select {
   max-width: 160px;
+}
+
+table select[data-line-partner] {
+  width: 100%;
+  min-width: 12rem;
+  max-width: 18rem;
 }
 
 .doc-table td:first-child {
@@ -375,24 +819,32 @@ th {
   text-align: left;
   color: var(--text-muted);
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   border-bottom: 2px solid var(--border);
-  padding: 0.5rem 0.6rem;
+  padding: 0.45rem 0.6rem;
+  white-space: nowrap;
 }
 
 td {
   border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.6rem;
+  padding: 0.45rem 0.6rem;
   vertical-align: top;
   /* Lange Token (Dateinamen, Hashes) dürfen umbrechen, statt die Tabelle aufzublähen. */
   overflow-wrap: anywhere;
 }
 
+table.data tbody tr:hover > td {
+  background: var(--surface-muted);
+}
+
 td.num,
-td.date {
+td.date,
+td.nowrap,
+th.nowrap {
   white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 /* Datum + Uhrzeit: nur am Leerzeichen umbrechen, nicht mitten im Token. */
@@ -413,15 +865,39 @@ td.hash code {
   overflow-wrap: normal;
 }
 
-/* Buttons in Tabellen nie mitten im Wort umbrechen. */
+/* Buttons in Tabellen nie mitten im Wort umbrechen und nicht nach unten versetzen. */
 td button {
   white-space: nowrap;
+  margin-top: 0;
 }
 
 td.num,
 th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+td.actions,
+th.actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+tr.row-muted > td {
+  color: var(--text-muted);
+}
+
+tfoot td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+}
+
+.empty-state {
+  padding: 1.5rem 0.5rem;
+  text-align: center;
+  color: var(--text-muted);
 }
 
 .entry-documents {
@@ -436,11 +912,145 @@ tr.entry-lines td {
   font-size: 0.88rem;
 }
 
+/* Journal: eine Zeile je Buchung, Soll- und Habenkonten nebeneinander */
+.journal-table td {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.journal-table .posting-number {
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.journal-table .posting-number:hover {
+  text-decoration: underline;
+}
+
+.journal-table .entry-text {
+  min-width: 12rem;
+}
+
+.journal-table .entry-meta {
+  margin-top: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.journal-table .entry-meta a {
+  color: var(--text-muted);
+}
+
+.journal-table .entry-meta a:hover {
+  color: var(--primary);
+}
+
+.posting-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.86rem;
+}
+
+.posting-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  white-space: nowrap;
+}
+
+.posting-lines .account {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+
+.posting-lines li.credit .account {
+  padding-left: 0.6rem;
+}
+
+.posting-lines .an {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.posting-lines .account-code {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.posting-lines .amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.journal-table td.col-partner {
+  min-width: 9rem;
+  max-width: 12rem;
+}
+
+.journal-table td.col-posting {
+  min-width: 12rem;
+}
+
+.journal-table .status-icon {
+  font-size: 0.8rem;
+  margin-left: 0.15rem;
+  cursor: help;
+}
+
+.journal-table .entry-meta .badge a {
+  color: inherit;
+}
+
+th .th-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* Geschäftspartner als Chip */
+.partner-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.1rem 0.55rem;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+a.partner-chip:hover {
+  background: #d6e6f3;
+}
+
+.partner-chip .partner-number {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.partner-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
 /* Flash messages */
 .flash-list {
   list-style: none;
   margin: 1rem auto 0;
-  max-width: 1100px;
+  max-width: 1320px;
   padding: 0 1.5rem;
 }
 
@@ -504,8 +1114,20 @@ a.task-card:hover {
   min-width: 14rem;
 }
 
+.filter-bar button {
+  margin-top: 0;
+}
+
+.filter-bar select {
+  max-width: 18rem;
+}
+
 .muted {
   color: var(--text-muted);
+}
+
+.small {
+  font-size: 0.85rem;
 }
 
 .negative {
@@ -540,6 +1162,148 @@ fieldset {
   font-size: 0.78rem;
   white-space: nowrap;
   overflow-wrap: normal;
+}
+
+.badge-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.badge-warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.badge-info {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.badge-danger {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+/* Schlüssel-Wert-Übersicht (Detailseiten) */
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 0;
+}
+
+.meta-grid > div {
+  min-width: 0;
+}
+
+.meta-grid dt {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+}
+
+.meta-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Änderungshistorie: geänderte Felder statt kompletter Datensätze */
+.change-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.86rem;
+}
+
+.change-list li {
+  margin-bottom: 0.15rem;
+}
+
+.change-list .field-name {
+  color: var(--text-muted);
+}
+
+.change-list del {
+  color: var(--error-text);
+}
+
+.change-list ins {
+  color: var(--success-text);
+  text-decoration: none;
+}
+
+/* Dialoge über das Popover-API (ohne JavaScript, kein Abschneiden in Karten) */
+[popover].panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem 1.3rem 1.2rem;
+  width: min(640px, calc(100vw - 2rem));
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  background: var(--surface);
+}
+
+[popover].panel::backdrop {
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.panel-header .panel-close {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin: 0;
+  padding: 0 0.2rem;
+}
+
+.panel-section + .panel-section {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+}
+
+.panel-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.panel-section form {
+  margin: 0;
+}
+
+.panel-section select {
+  max-width: 100%;
+}
+
+.callout {
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 0.9rem;
+  font-size: 0.92rem;
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.callout-warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .submission-history {
@@ -609,7 +1373,31 @@ fieldset {
   gap: 1.5rem;
 }
 
-@media (max-width: 800px) {
+@media (max-width: 1180px) {
+  .user-menu .user-name {
+    display: none;
+  }
+  .topbar {
+    gap: 0.6rem;
+  }
+  main,
+  .flash-list {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  section.card,
+  details.card {
+    padding-left: 1.1rem;
+    padding-right: 1.1rem;
+  }
+  td,
+  th {
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+  }
+}
+
+@media (max-width: 900px) {
   .journal-line {
     grid-template-columns: 1fr 1fr;
   }
@@ -617,9 +1405,24 @@ fieldset {
     grid-template-columns: 1fr;
   }
   .topbar {
-    flex-wrap: wrap;
-    height: auto;
     padding: 0.5rem 1rem;
+  }
+  .field-wide {
+    grid-column: 1 / -1;
+  }
+  .user-menu .user-name {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  /* Marke und Benutzermenü oben, Navigation darunter über die volle Breite. */
+  .topbar .brand {
+    flex: 1;
+  }
+  .topbar nav {
+    order: 3;
+    flex-basis: 100%;
   }
 }
 
@@ -641,4 +1444,76 @@ fieldset {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
   }
+  section.card,
+  details.card {
+    padding: 0.9rem 1rem;
+  }
+}
+
+/* Zweispaltige Formulare mit Feld im Label (Lohn) */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.grid-2 > label,
+form.stacked .grid-2 > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.grid-2 > label input,
+.grid-2 > label select {
+  width: 100%;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+/* Listeneinträge (z. B. Lohnläufe) und Aktionszeilen (Anlagen) */
+.list-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.list-item > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+details.line-details > summary {
+  cursor: pointer;
+  margin: 0.25rem 0;
+}
+
+/* Nur für Screenreader sichtbar */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

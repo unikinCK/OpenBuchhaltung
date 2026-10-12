@@ -62,10 +62,12 @@ from app.web.helpers import (
     require_company_access,
     search_args,
 )
+from app.web.journal import entry_overview
 from domain.models import (
     Account,
     BankBookingRule,
     BankTransaction,
+    BusinessPartner,
     ControllingUnit,
     FinTSConnection,
     FinTSPendingDialog,
@@ -100,6 +102,9 @@ def bank_page():
         reconciliation = []
         booking_rules = []
         rule_by_tx = {}
+        partners = []
+        open_count = 0
+        entry_info: dict[int, dict] = {}
         fints_institute_status = fints_institute_list_status(session)
         if selected_company_id:
             fints_connections = list_fints_connections(
@@ -189,6 +194,40 @@ def bank_page():
             )
             booking_rules = list_rules(session=session, company_id=selected_company_id)
             rule_by_tx = match_rules_for(session=session, transactions=transactions)
+            partners = (
+                session.execute(
+                    scoped_select(BusinessPartner, company_id=selected_company_id)
+                    .where(BusinessPartner.is_active.is_(True))
+                    .order_by(BusinessPartner.name)
+                )
+                .scalars()
+                .all()
+            )
+            open_count = session.execute(
+                select(func.count()).select_from(
+                    scoped_select(BankTransaction, company_id=selected_company_id)
+                    .where(BankTransaction.status == "open")
+                    .subquery()
+                )
+            ).scalar_one()
+            # Verknüpfte Buchungen: Belegnummer und Geschäftspartner je Umsatz.
+            linked_ids = [tx.journal_entry_id for tx in transactions if tx.journal_entry_id]
+            if linked_ids:
+                overview = entry_overview(session, selected_company_id, linked_ids)
+                numbers = dict(
+                    session.execute(
+                        select(JournalEntry.id, JournalEntry.posting_number).where(
+                            JournalEntry.id.in_(linked_ids)
+                        )
+                    ).all()
+                )
+                entry_info = {
+                    entry_id: {
+                        "posting_number": numbers.get(entry_id),
+                        "partners": overview.get(entry_id, {}).get("partners", []),
+                    }
+                    for entry_id in linked_ids
+                }
 
     fints_challenge = flask_session.get("fints_challenge")
     if fints_challenge and fints_challenge.get("company_id") != selected_company_id:
@@ -227,6 +266,9 @@ def bank_page():
         open_banking_connections=open_banking_connections,
         open_banking_configured=open_banking_configured(current_app.config),
         open_banking_status=connection_status,
+        partners=partners,
+        open_count=open_count,
+        entry_info=entry_info,
     )
 
 
@@ -414,15 +456,19 @@ def bank_book_action(transaction_id: int):
                 transaction_id=transaction_id,
                 contra_account_id=contra_account_id,
                 tax_code_id=tax_code_id,
+                description=(request.form.get("description") or "").strip() or None,
                 cost_center_id=request.form.get("cost_center_id", type=int),
                 profit_center_id=request.form.get("profit_center_id", type=int),
+                partner_id=request.form.get("partner_id", type=int),
                 changed_by=changed_by(),
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        entry = session.get(JournalEntry, transaction.journal_entry_id)
+        posting_note = f" (Buchung {entry.posting_number})" if entry else ""
 
-    flash("Bankumsatz wurde verbucht.", "success")
+    flash(f"Bankumsatz wurde verbucht{posting_note}.", "success")
     return redirect(url_for("main.bank_page", company_id=company_id))
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from io import StringIO
 
 from flask import abort, flash, redirect, render_template, request, url_for
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.services.account_chart_check import check_account_chart
@@ -33,18 +34,31 @@ from domain.models import Account
 
 @main_bp.get("/konten")
 def accounts_page():
+    query = (request.args.get("q") or "").strip() or None
+    type_filter = (request.args.get("account_type") or "").strip() or None
+    status_filter = (request.args.get("status") or "").strip() or None
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
-        accounts = (
-            session.execute(
-                scoped_select(Account, company_id=selected_company_id).order_by(Account.code)
-            )
-            .scalars()
-            .all()
-            if selected_company_id
-            else []
-        )
+        accounts = []
+        all_accounts_count = 0
+        if selected_company_id:
+            accounts_stmt = scoped_select(Account, company_id=selected_company_id)
+            all_accounts_count = session.execute(
+                select(func.count()).select_from(accounts_stmt.subquery())
+            ).scalar_one()
+            if query:
+                pattern = f"%{query}%"
+                accounts_stmt = accounts_stmt.where(
+                    Account.code.ilike(pattern) | Account.name.ilike(pattern)
+                )
+            if type_filter:
+                accounts_stmt = accounts_stmt.where(Account.account_type == type_filter)
+            if status_filter in {"aktiv", "inaktiv"}:
+                accounts_stmt = accounts_stmt.where(
+                    Account.is_active.is_(status_filter == "aktiv")
+                )
+            accounts = session.execute(accounts_stmt.order_by(Account.code)).scalars().all()
         account_events = (
             list_audit_log_entries(
                 session=session,
@@ -66,6 +80,11 @@ def accounts_page():
         companies=companies,
         selected_company_id=selected_company_id,
         accounts=accounts,
+        all_accounts_count=all_accounts_count,
+        q=query,
+        type_filter=type_filter,
+        status_filter=status_filter,
+        filters_active=bool(query or type_filter or status_filter),
         account_events=account_events,
         chart_check=chart_check,
         bundled_charts=sorted(BUNDLED_ACCOUNT_CHART_FILES),

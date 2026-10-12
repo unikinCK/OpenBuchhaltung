@@ -1,7 +1,7 @@
 # ADR-002: Geschäftspartner als Nebenbuch an Sammelkonten
 
 - **Status:** Angenommen
-- **Datum:** 2026-10-08
+- **Datum:** 2026-10-08 (Nachtrag 2026-10-12: Partnerbezug auf allen Buchungszeilen)
 - **Entscheider:** OpenBuchhaltung Kernteam
 - **Detailplan:** `docs/sprint/sprint-5-geschaeftspartner-stammdaten.md`
 
@@ -64,3 +64,27 @@ dem bestehenden Kontenmodell:
   Personenkonten bucht und Sammelzahlungen mehrere Partner betreffen können.
 - **Re-Hashing aller Siegel auf Version 3:** verworfen; bestehende Siegel sollen
   nicht nachträglich verändert werden.
+
+## Nachtrag 2026-10-12: Partnerbezug auf allen Buchungszeilen
+**Anlass:** In der Praxis (unikin GmbH) laufen die meisten Eingangsrechnungen als
+Direktbuchung „Aufwand an Bank“ (Kartenzahlungen, Abos, Gebühren) ohne Sammelkonto.
+Solche Buchungen konnten keinen Geschäftspartner tragen; im Journal war nicht zu sehen,
+zu welchem Lieferanten sie gehören. Für § 13b (Kz 46/47) und die ZM werten UStVA und
+DATEV-Export ohnehin „den Geschäftspartner der Buchung“ über alle Zeilen aus.
+
+**Änderung von Entscheidung 2 (und Detailplan Abschnitt 9, Frage 2):**
+- `journal_entry_line.partner_id` ist auf **jeder** Zeile zulässig. Auf Sammelkonten
+  bildet der Partner weiter das Nebenbuch, die Rolle muss zur Kontoseite passen; auf allen
+  anderen Konten ist er Partnerbezug ohne Rollenbindung.
+- **Nebenbuch bleibt Sammelkonten vorbehalten:** Saldovortrag je Partner, Partnerkonto
+  und Saldenliste (Schritt 4) sowie das DATEV-Personenkonto (Schritt 6) berücksichtigen
+  nur Zeilen auf Sammelkonten. Der Saldovortrag trägt alle übrigen Konten je Konto vor.
+- **Partner der Buchung:** Buchen, Ergänzen und Bankbuchung nehmen einen Partner auf
+  Buchungsebene an (`partner_id`/`partner_number`). Er wird auf alle Zeilen ohne eigenen
+  Partner geschrieben, ausgenommen Steuerzeilen (Steuerkonto eines Steuercodes). Es gibt
+  kein eigenes Feld am Buchungskopf; gespeichert wird weiterhin je Zeile.
+
+**Konsequenzen:** Kein Schema- und kein Hashwechsel – `partner_id` je Zeile ist seit
+Hashversion 3 versiegelt, Storno spiegelt ihn. Die Rollenprüfung auf Sammelkonten und
+die Sperre inaktiver Partner bleiben. Eine Rolle bzw. Personenkontonummer gilt erst dann
+als verwendet, wenn der Partner auf einem Sammelkonto der Rolle gebucht ist.

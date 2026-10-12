@@ -343,6 +343,8 @@ Sprint 5) abgehakt.
   Leerzeilen. Die Absenderanschrift bleibt bis #3 bei `SELLER_*`.
 
 ### Schritt 4 – Partnerkonto und Saldenliste (S–M)
+Nur Zeilen auf Sammelkonten zählen (ADR-002, Nachtrag 2026-10-12); Partnerbezüge auf
+anderen Konten erscheinen höchstens als Buchungsliste des Partners.
 - [ ] Partnerkonto:
   - die Sammelkontozeilen des Partners mit Anfangssaldo und laufendem Saldo
   - getrennt nach Debitor- und Kreditorseite
@@ -377,7 +379,8 @@ Sprint 5) abgehakt.
 
 ### Schritt 6 – DATEV (M, nach oder zusammen mit F3)
 - [ ] Buchungsstapel: Eine Sammelkontozeile mit Partner wird mit der
-  Personenkontonummer als Konto ausgegeben.
+  Personenkontonummer als Konto ausgegeben. Zeilen mit Partnerbezug auf anderen
+  Konten bleiben Sachkontozeilen.
 - [ ] Stammdatenexport Debitoren/Kreditoren (EXTF, Datenkategorie 16). Die
   Feldbelegung gegen die DATEV-Formatbeschreibung prüfen.
 - [ ] Golden-File-Tests.
@@ -420,9 +423,12 @@ Sprint 5) abgehakt.
 ## 9. Offene Entscheidungen (Vorschlag jeweils fett)
 
 1. Nebenbuch oder Personenkonten als Konten? → **Nebenbuch (Option A).**
-2. Partner nur auf Sammelkonto-Zeilen oder auf jeder Zeile? → **Nur auf
-   Sammelkonten.** Auswertungen wie „Umsatz je Kunde“ laufen über die Buchung
-   (Erlöszeilen derselben Buchung).
+2. Partner nur auf Sammelkonto-Zeilen oder auf jeder Zeile? → ~~Nur auf
+   Sammelkonten.~~ **Geändert am 2026-10-12 (ADR-002, Nachtrag):** auf jeder Zeile;
+   außerhalb der Sammelkonten als Partnerbezug ohne Rollenbindung. Das Nebenbuch
+   (Saldovortrag, Partnerkonto, Saldenliste, DATEV-Personenkonto) bleibt auf
+   Sammelkonto-Zeilen beschränkt. Buchen, Ergänzen und Bankbuchung nehmen einen
+   „Partner der Buchung“ an, der alle Zeilen außer Steuerzeilen erhält.
 3. Hash: Version 3 neben Version 2, oder alle Siegel neu berechnen? → **v3 neben
    v2, kein Re-Hashing.**
 4. Nummernkreise? → **DATEV-Standard 10000–69999 / 70000–99999 mit

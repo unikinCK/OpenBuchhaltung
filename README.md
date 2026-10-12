@@ -24,7 +24,9 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Geschäftspartner:** Kunden-/Lieferantenstamm mit Debitoren- und
   Kreditorennummern (DATEV-Bereiche), Anschrift, USt-IdNr, Zahlungsziel und
   Bankverbindung; Partner hängen als Nebenbuch an Buchungszeilen auf
-  Sammelkonten (z. B. 1400/1600), mit verketteter Änderungshistorie.
+  Sammelkonten (z. B. 1400/1600) und als Partnerbezug an Direktbuchungen
+  („Aufwand an Bank“), mit verketteter Änderungshistorie. Das Journal zeigt den
+  Geschäftspartner jeder Buchung und filtert danach.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
   Kostenstellenrechnung und Profitcenter-GuV. Bank-, OCR- und E-Rechnungsbuchungen
@@ -43,7 +45,11 @@ können, was gebucht, exportiert und protokolliert wird.
   offene Posten und Zahlungsausgleich.
 - **Arbeitskomfort:** Dashboard mit offenen Aufgaben (unverbuchte Umsätze,
   unverknüpfte Belege, überfällige OPOS, offene Abgleich-Vorschläge) sowie
-  Suche und Datumsfilter auf Bank-, Buchungs-, Beleg- und OPOS-Seite.
+  Suche und Datumsfilter auf Bank-, Buchungs-, Beleg- und OPOS-Seite. Die
+  Oberfläche zeigt Beträge und Daten im deutschen Format, hält Erfassungsformulare
+  und Werkzeuge eingeklappt und bucht Bankumsätze, Ausgleiche und Zuordnungen in
+  Dialogen; jede Buchung hat eine eigene Detailseite (Zeilen, Partner, Belege,
+  Bankumsatz, Änderungsprotokoll).
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
 - **Lohnbuchhaltung:** Mitarbeiterstamm, konfigurierbare Abzugsraten,
@@ -650,16 +656,30 @@ Gebucht wird weiter auf die Sammelkonten. Konten tragen dafür das Kennzeichen
 **Konten**. Maßgeblich ist das Kennzeichen, nicht die Kontonummer: SKR03 nutzt
 1400/1600, SKR04 1200/3300, und je Seite sind mehrere Sammelkonten möglich (etwa
 für verbundene Unternehmen). Der Kontenrahmen-Import erkennt Forderungen und
-Verbindlichkeiten aLuL an der exakten Bezeichnung. Nur Zeilen auf Sammelkonten dürfen einen Geschäftspartner tragen,
-und dessen Rolle muss zur Seite passen. Festgeschriebene Buchungen versiegeln den
-Partner (Inhaltshash ab Version 3, ältere Siegel bleiben Version 2), Storno spiegelt
-ihn, der Saldovortrag trägt Sammelkonten je Partner ins Folgejahr. Sammelkonten
-erscheinen nicht als Bankkonten.
+Verbindlichkeiten aLuL an der exakten Bezeichnung. Auf Sammelkonten bildet der
+Geschäftspartner das Nebenbuch; seine Rolle muss zur Seite passen. Auf allen anderen
+Konten ist er **Partnerbezug** ohne Rollenbindung – so tragen auch Direktbuchungen wie
+„Aufwand an Bank“ (Kartenzahlung, Abo) ihren Lieferanten, und UStVA (§ 13b, Kz 46/47)
+sowie ZM erkennen den Partner der Buchung (Nachtrag zu ADR-002). Festgeschriebene
+Buchungen versiegeln den Partner (Inhaltshash ab Version 3, ältere Siegel bleiben
+Version 2), Storno spiegelt ihn, der Saldovortrag trägt Sammelkonten je Partner ins
+Folgejahr (alle übrigen Konten je Konto). Sammelkonten erscheinen nicht als Bankkonten.
+
+**Partner der Buchung:** In der Buchungsmaske, beim Verbuchen eines Bankumsatzes und
+beim Ergänzen genügt ein Partner für die ganze Buchung; er wird auf alle Zeilen ohne
+eigenen Partner geschrieben, ausgenommen Steuerzeilen. Abweichende Partner je Zeile
+(Sammelzahlungen) sind weiter möglich. Das Journal zeigt die Partner je Buchung als
+eigene Spalte, filtert nach Partner und Status und ordnet offenen Buchungen ohne
+Partner per „Partner zuordnen“ direkt aus der Liste einen zu. Die Partnerseite listet
+die Buchungen des Partners.
 
 API: `GET/POST /api/v1/partners` (Filter `role=debtor|creditor`, `q`,
 `include_inactive`, `limit`/`offset`), `GET/PATCH /api/v1/partners/<id>`,
 `POST /api/v1/partners/<id>/bank-details`, `GET /api/v1/partners/<id>/history`;
-Buchungszeilen nehmen `partner_id` oder `partner_number` an. MCP: `list_partners`,
+Buchungszeilen nehmen `partner_id` oder `partner_number` an, die Buchung selbst
+ebenso (Partner der Buchung, auch bei `PATCH /api/v1/journal-entries/<id>` und
+`POST /api/v1/bank-transactions/<id>/book`). `GET /api/v1/journal-entries` filtert mit
+`partner_id` und liefert je Buchung `partners`. MCP: `list_partners`,
 `get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
 `get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
 
@@ -1005,10 +1025,12 @@ und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalte
 Istversteuerung bildet OpenBuchhaltung nicht ab.
 
 **Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum und
-Geschäftspartner (nur auf Debitoren-/Kreditoren-Sammelkonten, Rolle wie beim Buchen)
-nachtragen: Link **Ergänzen** im Journal, API `PATCH /api/v1/journal-entries/<id>` mit
-`service_date` (null entfernt es) und `lines: [{"line_number": 1, "partner_id": …}]`
-bzw. `partner_number`, MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
+Geschäftspartner (auf Sammelkonten mit passender Rolle) nachtragen: auf der
+Detailseite der Buchung (Beleg-Nr. im Journal anklicken) oder per **Partner
+zuordnen** in der Journal-Liste; API `PATCH /api/v1/journal-entries/<id>` mit
+`service_date` (null entfernt es), `partner_id`/`partner_number` für die ganze Buchung
+(alle Zeilen außer Steuerzeilen, null entfernt den Partner) und/oder
+`lines: [{"line_number": 1, "partner_id": …}]`, MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
 unverändert; jede Änderung steht mit altem und neuem Wert im Audit-Log (`amended`).
 Festgeschriebene und stornierte Buchungen (das festgeschriebene Storno spiegelt den
 alten Stand), gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt die Funktion
