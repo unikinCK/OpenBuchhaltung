@@ -635,6 +635,12 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         entfernen, leere Zusatzzeilen blockieren nicht mehr (U3 teilweise);
         Bestätigung beim Einzel-Festschreiben (U4 teilweise). Offen: U2 in den übrigen
         Seiten und Formularen, U1, Combobox für Konten (U3), U5, U6, U8.
+  - [x] Kontoblatt *(2026-10-12)*: Klick auf ein Konto (Kontenplan, Journal,
+        Buchungsdetail, SuSa/GuV/Bilanz, Bank, OPOS, Controlling, Kontenrahmen-Prüfung)
+        öffnet `/konten/<id>` mit Anfangssaldo, Buchungszeilen, Gegenkonten und laufendem
+        Saldo je Geschäftsjahr oder Zeitraum; REST `GET /api/v1/accounts/<id>/ledger`,
+        MCP `get_account_ledger`; Berichte liefern `account_id` je Zeile (behebt
+        „API ohne UI: Kontoblatt“ aus dem Review).
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
       Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
 

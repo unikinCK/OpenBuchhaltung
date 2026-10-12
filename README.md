@@ -1106,6 +1106,11 @@ Basis-Endpunkte:
 - `PATCH /api/v1/accounts/<id>` — Bezeichnung, Status, Sammelkonto-Kennzeichen; die Kontoart
   nur zur Reparatur eines ungültigen Altwerts
 - `GET /api/v1/accounts` — Konten einer Gesellschaft (`company_id`; optional `include_inactive=true`)
+- `GET /api/v1/accounts/<id>/ledger` — Kontoblatt: Buchungszeilen des Kontos mit
+  Anfangssaldo (`opening_balance`), laufendem Saldo (Soll minus Haben), Gegenkonten,
+  Steuercode und Partner; Zeitraum per `fiscal_year_id` und/oder `date_from`/`date_to`,
+  Blättern mit `limit`/`offset`. Saldovorträge stecken im Anfangssaldo, Erfolgskonten
+  beginnen je Geschäftsjahr bei null. MCP `get_account_ledger`; UI `/konten/<id>`.
 - `POST /api/v1/account-chart/import` — Kontenrahmen importieren (`chart` = `skr03`/`skr04`
   oder eigene CSV per `content_base64`); MCP-Tool `import_account_chart`
 - `GET /api/v1/account-chart/check` — Kontenrahmen-Prüfung (`company_id`, siehe
