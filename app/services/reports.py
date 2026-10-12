@@ -56,6 +56,7 @@ def _balance_rows(
     """Soll-/Haben-Summen je Konto für Buchungen der Gesellschaft."""
     stmt = (
         select(
+            Account.id,
             Account.code,
             Account.name,
             Account.account_type,
@@ -74,13 +75,16 @@ def _balance_rows(
         stmt = stmt.where(condition)
     return [
         {
+            "account_id": account_id,
             "code": code,
             "name": name,
             "account_type": account_type,
             "debit_total": debit_total or ZERO,
             "credit_total": credit_total or ZERO,
         }
-        for code, name, account_type, debit_total, credit_total in session.execute(stmt).all()
+        for account_id, code, name, account_type, debit_total, credit_total in session.execute(
+            stmt
+        ).all()
     ]
 
 
@@ -125,6 +129,7 @@ def trial_balance_for_company(
     )
     return [
         {
+            "account_id": row["account_id"],
             "code": row["code"],
             "name": row["name"],
             "debit_total": row["debit_total"],
@@ -152,6 +157,15 @@ def account_balances_by_type(
     )
 
 
+def _amount_row(row: dict, amount: Decimal) -> dict[str, Decimal | str | int]:
+    return {
+        "account_id": row["account_id"],
+        "code": row["code"],
+        "name": row["name"],
+        "amount": amount,
+    }
+
+
 def _profit_and_loss(
     rows: list[dict[str, Decimal | str]],
 ) -> tuple[list[dict[str, Decimal | str]], list[dict[str, Decimal | str]]]:
@@ -160,10 +174,10 @@ def _profit_and_loss(
     for row in rows:
         if row["account_type"] in REVENUE_ACCOUNT_TYPES:
             amount = row["credit_total"] - row["debit_total"]
-            revenues.append({"code": row["code"], "name": row["name"], "amount": amount})
+            revenues.append(_amount_row(row, amount))
         elif row["account_type"] == "expense":
             amount = row["debit_total"] - row["credit_total"]
-            expenses.append({"code": row["code"], "name": row["name"], "amount": amount})
+            expenses.append(_amount_row(row, amount))
     return revenues, expenses
 
 
@@ -240,16 +254,11 @@ def balance_sheet_for_company(
         account_type = row["account_type"]
         if account_type == "asset":
             amount = row["debit_total"] - row["credit_total"]
-            assets.append({"code": row["code"], "name": row["name"], "amount": amount})
+            assets.append(_amount_row(row, amount))
         elif account_type in {"liability", "equity"}:
             amount = row["credit_total"] - row["debit_total"]
             liabilities_and_equity.append(
-                {
-                    "code": row["code"],
-                    "name": row["name"],
-                    "amount": amount,
-                    "account_type": account_type,
-                }
+                {**_amount_row(row, amount), "account_type": account_type}
             )
 
     revenues, expenses = _profit_and_loss(balances)
@@ -259,6 +268,7 @@ def balance_sheet_for_company(
     if net_income != ZERO:
         liabilities_and_equity.append(
             {
+                "account_id": None,
                 "code": "P&L",
                 "name": "Jahresergebnis",
                 "amount": net_income,

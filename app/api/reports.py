@@ -19,6 +19,11 @@ from app.services.reports import (
 )
 
 
+def _account_ref(row: dict) -> dict:
+    """Konto-ID (für das Kontoblatt), Nummer und Bezeichnung einer Berichtszeile."""
+    return {"account_id": row["account_id"], "code": row["code"], "name": row["name"]}
+
+
 @api_bp.get("/trial-balance")
 def get_trial_balance():
     company_id = request.args.get("company_id", type=int)
@@ -57,6 +62,7 @@ def get_trial_balance():
                 },
                 "rows": [
                     {
+                        "account_id": row["account_id"],
                         "code": row["code"],
                         "name": row["name"],
                         "debit_total": str(row["debit_total"]),
@@ -103,11 +109,11 @@ def get_income_statement():
                 "company_id": company_id,
                 "period": report["period"],
                 "revenues": [
-                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    {**_account_ref(row), "amount": str(row["amount"])}
                     for row in report["revenues"]
                 ],
                 "expenses": [
-                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    {**_account_ref(row), "amount": str(row["amount"])}
                     for row in report["expenses"]
                 ],
                 "totals": {key: str(value) for key, value in report["totals"].items()},
@@ -149,13 +155,12 @@ def get_balance_sheet():
                 "company_id": company_id,
                 "period": report["period"],
                 "assets": [
-                    {"code": row["code"], "name": row["name"], "amount": str(row["amount"])}
+                    {**_account_ref(row), "amount": str(row["amount"])}
                     for row in report["assets"]
                 ],
                 "liabilities_and_equity": [
                     {
-                        "code": row["code"],
-                        "name": row["name"],
+                        **_account_ref(row),
                         "account_type": row["account_type"],
                         "amount": str(row["amount"]),
                     }

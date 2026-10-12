@@ -122,6 +122,10 @@ def list_journal_entries_via_api():
     if partner_id_raw and not partner_id_raw.isdigit():
         return jsonify({"error": "partner_id must be an integer."}), 400
     partner_id = int(partner_id_raw) if partner_id_raw else None
+    account_id_raw = (request.args.get("account_id") or "").strip()
+    if account_id_raw and not account_id_raw.isdigit():
+        return jsonify({"error": "account_id must be an integer."}), 400
+    account_id = int(account_id_raw) if account_id_raw else None
 
     is_finalized = None
     if is_finalized_raw is not None and is_finalized_raw.strip() != "":
@@ -171,6 +175,14 @@ def list_journal_entries_via_api():
                     )
                 )
             )
+        if account_id is not None:
+            stmt = stmt.where(
+                JournalEntry.id.in_(
+                    select(JournalEntryLine.journal_entry_id).where(
+                        JournalEntryLine.account_id == account_id
+                    )
+                )
+            )
 
         entries = session.execute(stmt).scalars().all()
         documents_by_entry = documents_by_journal_entry(
@@ -187,6 +199,7 @@ def list_journal_entries_via_api():
                 },
                 "limit": max(1, min(limit, 500)),
                 "partner_id": partner_id,
+                "account_id": account_id,
                 "entries": [
                     {
                         **_journal_entry_dict(entry),

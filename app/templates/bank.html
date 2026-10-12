@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
-{% from "_journal.html" import partner_chips %}
+{% from "_journal.html" import partner_chips, account_link %}
 {% from "_filters.html" import filter_form %}
 
 {% block title %}Bank – OpenBuchhaltung{% endblock %}
@@ -99,13 +99,13 @@
                 {% set linked = entry_info.get(tx.journal_entry_id) if tx.journal_entry_id else none %}
                 <tr>
                   <td class="date">{{ tx.booking_date | datum }}</td>
-                  <td class="nowrap" title="{{ bank_account.name if bank_account else '' }}">{{ bank_account.code if bank_account else tx.bank_account_id }}</td>
+                  <td class="nowrap" title="{{ bank_account.name if bank_account else '' }}">{% if bank_account %}{{ account_link(bank_account.id, bank_account.code) }}{% else %}{{ tx.bank_account_id }}{% endif %}</td>
                   <td>
                     <strong>{{ tx.counterparty or "–" }}</strong><br />
                     <span class="muted small">{{ tx.purpose }}</span>
                     {% if tx.status == 'open' and (rule or transfer) %}
                       <div class="entry-meta small">
-                        {% if rule %}<span class="badge badge-info">Regel</span> <span class="muted">„{{ rule.pattern }}“ → {{ rule.contra_account.code }}</span>{% endif %}
+                        {% if rule %}<span class="badge badge-info">Regel</span> <span class="muted">„{{ rule.pattern }}“ → {{ account_link(rule.contra_account.id, rule.contra_account.code) }}</span>{% endif %}
                         {% if transfer %}<span class="badge badge-info">Eigenübertrag?</span> <span class="muted">Gegenstück am {{ transfer.booking_date | datum }}</span>{% endif %}
                       </div>
                     {% endif %}
@@ -538,7 +538,7 @@
                 {% for rule in booking_rules %}
                   <tr>
                     <td>{{ rule.pattern }}</td>
-                    <td>{{ rule.contra_account.code }} – {{ rule.contra_account.name }}</td>
+                    <td>{{ account_link(rule.contra_account.id, rule.contra_account.code, rule.contra_account.name) }}</td>
                     <td>{{ rule.tax_code.code if rule.tax_code else "–" }}</td>
                     <td class="actions">
                       <form method="post" action="{{ url_for('main.bank_rule_deactivate_action', rule_id=rule.id) }}">
@@ -672,7 +672,7 @@
             <tbody>
               {% for row in reconciliation %}
                 <tr>
-                  <td>{{ row.account_code }} – {{ row.account_name }}</td>
+                  <td>{{ account_link(row.account_id, row.account_code, row.account_name) }}</td>
                   <td class="num">{{ row.book_balance | betrag }}</td>
                   <td class="num">{{ row.statement_total | betrag }}</td>
                   <td class="num">

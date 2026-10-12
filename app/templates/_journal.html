@@ -8,18 +8,28 @@
   </div>
 {%- endmacro %}
 
+{# Konto mit Link aufs Kontoblatt (Nummer hervorgehoben, Bezeichnung optional). #}
+{% macro account_link(account_id, code, name=none, args={}) -%}
+  {% if account_id %}<a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account_id, **args) }}" title="Kontoblatt {{ code }}{% if name %} – {{ name }}{% endif %}"><span class="account-code">{{ code }}</span>{% if name %} {{ name }}{% endif %}</a>{% else %}<span class="account-code">{{ code }}</span>{% if name %} {{ name }}{% endif %}{% endif %}
+{%- endmacro %}
+
+{# Saldo als Betrag mit S (Soll) bzw. H (Haben); Eingabe = Soll minus Haben. #}
+{% macro saldo(value) -%}
+  {{ value | abs | betrag }}&nbsp;{% if value > 0 %}S{% elif value < 0 %}H{% else %}<span class="muted">±</span>{% endif %}
+{%- endmacro %}
+
 {# Buchungssatz kompakt: Sollkonten, darunter „an“ Habenkonten; Beträge nur bei Splitbuchungen. #}
 {% macro posting_record(debit_lines, credit_lines) -%}
   <ul class="posting-lines">
     {% for line in debit_lines %}
       <li title="Soll {{ line.account_code }} – {{ line.account_name }}{% if line.tax_code %} · {{ line.tax_code }}{% endif %}{% if line.description %} · {{ line.description }}{% endif %}">
-        <span class="account"><span class="account-code">{{ line.account_code }}</span> {{ line.account_name }}</span>
+        <span class="account">{{ account_link(line.account_id, line.account_code, line.account_name) }}</span>
         {% if debit_lines | length > 1 %}<span class="amount">{{ line.debit_amount | betrag }}</span>{% endif %}
       </li>
     {% endfor %}
     {% for line in credit_lines %}
       <li class="credit" title="Haben {{ line.account_code }} – {{ line.account_name }}{% if line.tax_code %} · {{ line.tax_code }}{% endif %}{% if line.description %} · {{ line.description }}{% endif %}">
-        <span class="account"><span class="an">an</span> <span class="account-code">{{ line.account_code }}</span> {{ line.account_name }}</span>
+        <span class="account"><span class="an">an</span> {{ account_link(line.account_id, line.account_code, line.account_name) }}</span>
         {% if credit_lines | length > 1 %}<span class="amount">{{ line.credit_amount | betrag }}</span>{% endif %}
       </li>
     {% endfor %}

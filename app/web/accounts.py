@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from io import StringIO
 
 from flask import abort, flash, redirect, render_template, request, url_for
@@ -14,9 +15,16 @@ from app.services.account_chart_import import (
     import_account_chart_csv,
     import_bundled_account_chart,
 )
+from app.services.account_ledger import (
+    DEFAULT_LEDGER_LIMIT,
+    MAX_LEDGER_LIMIT,
+    AccountLedgerError,
+    account_ledger,
+)
 from app.services.accounts import (
     ACCOUNT_TYPES,
     AccountUpdateError,
+    account_history,
     create_account_with_audit,
     update_account_master_data,
 )
@@ -27,9 +35,14 @@ from app.web.helpers import (
     changed_by,
     company_context,
     get_session_factory,
+    pagination_args,
     require_company_access,
+    search_args,
 )
-from domain.models import Account
+from domain.models import Account, FiscalYear, JournalEntry, JournalEntryLine
+
+# Auswahl „Gesamter Zeitraum“ im Kontoblatt (statt eines Geschäftsjahres).
+ALL_FISCAL_YEARS = "alle"
 
 
 @main_bp.get("/konten")
@@ -88,6 +101,95 @@ def accounts_page():
         account_events=account_events,
         chart_check=chart_check,
         bundled_charts=sorted(BUNDLED_ACCOUNT_CHART_FILES),
+        valid_account_types=ACCOUNT_TYPES,
+    )
+
+
+def _default_fiscal_year(fiscal_years: list[FiscalYear]) -> FiscalYear | None:
+    """Laufendes Geschäftsjahr, sonst das jüngste."""
+    today = date.today()
+    for fiscal_year in fiscal_years:
+        if fiscal_year.start_date <= today <= fiscal_year.end_date:
+            return fiscal_year
+    return fiscal_years[0] if fiscal_years else None
+
+
+@main_bp.get("/konten/<int:account_id>")
+def account_detail_page(account_id: int):
+    """Kontoblatt: Buchungen eines Kontos mit Anfangs- und laufendem Saldo."""
+    limit, offset = pagination_args(default=DEFAULT_LEDGER_LIMIT, maximum=MAX_LEDGER_LIMIT)
+    _, date_from, date_to = search_args()
+    fiscal_year_raw = (request.args.get("fiscal_year_id") or "").strip()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        account = session.get(Account, account_id)
+        if account is None:
+            abort(404)
+        require_company_access(session, account.company_id)
+        companies, _ = company_context(session)
+        fiscal_years = (
+            session.execute(
+                select(FiscalYear)
+                .where(FiscalYear.company_id == account.company_id)
+                .order_by(FiscalYear.start_date.desc())
+            )
+            .scalars()
+            .all()
+        )
+        fiscal_year_id = None
+        if fiscal_year_raw.isdigit():
+            fiscal_year_id = int(fiscal_year_raw)
+        elif fiscal_year_raw != ALL_FISCAL_YEARS and not (date_from or date_to):
+            default_year = _default_fiscal_year(fiscal_years)
+            fiscal_year_id = default_year.id if default_year else None
+        try:
+            ledger = account_ledger(
+                session=session,
+                account=account,
+                date_from=date_from,
+                date_to=date_to,
+                fiscal_year_id=fiscal_year_id,
+                limit=limit,
+                offset=offset,
+            )
+        except AccountLedgerError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.account_detail_page", account_id=account.id))
+        posting_count = session.execute(
+            select(func.count(JournalEntryLine.id))
+            .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+            .where(
+                JournalEntryLine.account_id == account.id,
+                JournalEntry.company_id == account.company_id,
+            )
+        ).scalar_one()
+        history = account_history(session=session, account_id=account.id, limit=100)
+
+    filter_args = {
+        key: value
+        for key, value in (
+            ("fiscal_year_id", fiscal_year_id or (ALL_FISCAL_YEARS if fiscal_year_raw else None)),
+            ("date_from", date_from.isoformat() if date_from else None),
+            ("date_to", date_to.isoformat() if date_to else None),
+        )
+        if value
+    }
+    return render_template(
+        "konto_detail.html",
+        companies=companies,
+        selected_company_id=account.company_id,
+        account=account,
+        ledger=ledger,
+        fiscal_years=fiscal_years,
+        fiscal_year_id=fiscal_year_id,
+        all_fiscal_years=ALL_FISCAL_YEARS,
+        explicit_date_from=date_from,
+        explicit_date_to=date_to,
+        posting_count=posting_count,
+        history=history,
+        filter_args=filter_args,
+        limit=limit,
+        offset=offset,
         valid_account_types=ACCOUNT_TYPES,
     )
 
@@ -160,6 +262,8 @@ def update_account(account_id: int):
             )
         except AccountUpdateError as exc:
             flash(str(exc), "error")
+            if request.form.get("next") == "detail":
+                return redirect(url_for("main.account_detail_page", account_id=account_id))
             return redirect(url_for("main.accounts_page", company_id=account.company_id))
         session.commit()
         company_id = account.company_id
@@ -168,6 +272,8 @@ def update_account(account_id: int):
         "Konto wurde geändert." if changed else "Keine Kontoänderung erkannt.",
         "success",
     )
+    if request.form.get("next") == "detail":
+        return redirect(url_for("main.account_detail_page", account_id=account_id))
     return redirect(url_for("main.accounts_page", company_id=company_id))
 
 

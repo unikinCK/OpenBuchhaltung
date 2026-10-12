@@ -633,6 +633,52 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_account_ledger",
+        description=(
+            "Kontoblatt eines Sachkontos: alle Buchungszeilen auf dem Konto, chronologisch, "
+            "mit Belegnummer, Datum, Buchungstext, Soll/Haben, laufendem Saldo, Gegenkonten "
+            "(contra_accounts), Steuercode und Geschäftspartner. Dazu Anfangssaldo "
+            "(opening_balance, Stand vor date_from) und Summen. Salden = Soll minus Haben "
+            "(positiv = Sollsaldo). Zeitraum per fiscal_year_id und/oder date_from/date_to; "
+            "Saldovorträge erscheinen nicht als Zeilen, sondern stecken im Anfangssaldo. "
+            "Die Konto-ID liefern list_accounts sowie Summen-/Saldenliste, GuV und Bilanz "
+            "(account_id). Bei mehr als limit Zeilen mit offset weiterblättern."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "account_id": {"type": "integer", "description": "ID des Kontos."},
+                "fiscal_year_id": {
+                    "type": "integer",
+                    "description": "Geschäftsjahr (setzt date_from/date_to auf dessen Grenzen).",
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Zeitraum-Beginn (Format JJJJ-MM-TT, optional).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Zeitraum-Ende einschließlich (Format JJJJ-MM-TT, optional).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximale Zahl von Zeilen (1 bis 1000).",
+                    "default": 200,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Zeilen überspringen (Blättern).",
+                    "default": 0,
+                },
+            },
+            "required": ["account_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/accounts/{account_id}/ledger",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="create_controlling_unit",
         description="Legt eine Kostenstelle oder ein Profitcenter an.",
         input_schema={
@@ -1060,7 +1106,8 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Listet Buchungen einer Gesellschaft samt Buchungszeilen und den "
             "Geschäftspartnern je Buchung ('partners'). Optional nach date_from/date_to, "
-            "q, source, is_finalized, partner_id und limit filtern."
+            "q, source, is_finalized, partner_id, account_id und limit filtern. Für "
+            "Saldenverlauf und Gegenkonten eines Kontos get_account_ledger verwenden."
         ),
         input_schema={
             "type": "object",
@@ -1089,6 +1136,10 @@ TOOLS: list[ToolSpec] = [
                 "partner_id": {
                     "type": "integer",
                     "description": "Nur Buchungen mit diesem Geschäftspartner (auf einer Zeile).",
+                },
+                "account_id": {
+                    "type": "integer",
+                    "description": "Nur Buchungen mit einer Zeile auf diesem Konto.",
                 },
                 "limit": {
                     "type": "integer",

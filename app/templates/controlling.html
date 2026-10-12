@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_journal.html" import account_link %}
 
 {% block title %}Controlling – OpenBuchhaltung{% endblock %}
 
@@ -79,7 +80,7 @@
                   <td class="num"><strong>{{ bucket.net_income }}</strong></td>
                 </tr>
                 {% for account in bucket.accounts %}
-                  <tr class="entry-lines"><td>{{ account.code }} – {{ account.name }}</td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
+                  <tr class="entry-lines"><td>{{ account_link(account.account_id, account.code, account.name) }}</td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
                 {% endfor %}
               {% endfor %}
               <tr><td>Nicht zugeordnet</td><td class="num">{{ report.unassigned.total_revenue }}</td><td class="num">{{ report.unassigned.total_expense }}</td><td class="num"><strong>{{ report.unassigned.net_income }}</strong></td></tr>

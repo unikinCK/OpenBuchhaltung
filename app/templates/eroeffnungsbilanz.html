@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_journal.html" import account_link %}
 
 {% block title %}Eröffnungsbilanz – OpenBuchhaltung{% endblock %}
 
@@ -17,7 +18,7 @@
         Eröffnungsbuchung erfasst; eine Differenz wird automatisch auf das
         Saldenvortragskonto gebucht
         {% if carryforward_account %}
-          (gefunden: {{ carryforward_account.code }} – {{ carryforward_account.name }}).
+          (gefunden: {{ account_link(carryforward_account.id, carryforward_account.code, carryforward_account.name) }}).
         {% else %}
           — <strong>derzeit ist kein Saldenvortragskonto vorhanden</strong>
           (Kontonummer 9000 oder Name „Saldenvortrag“ unter

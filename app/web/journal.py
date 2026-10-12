@@ -256,6 +256,7 @@ def journal_page():
     limit, offset = pagination_args()
     query, date_from, date_to = search_args()
     partner_filter = request.args.get("partner_id", type=int)
+    account_filter = request.args.get("account_id", type=int)
     status_filter = (request.args.get("status") or "").strip()
     if status_filter not in STATUS_FILTERS:
         status_filter = ""
@@ -277,6 +278,7 @@ def journal_page():
         due_template_ids: set[int] = set()
         overview: dict[int, dict] = {}
         filter_partner = None
+        filter_account = None
         if selected_company_id:
             context = _form_context(session, selected_company_id)
             templates = list_templates(session=session, company_id=selected_company_id)
@@ -312,6 +314,19 @@ def journal_page():
                             )
                         )
                     )
+            if account_filter:
+                filter_account = session.get(Account, account_filter)
+                if filter_account is None or filter_account.company_id != selected_company_id:
+                    filter_account = None
+                    account_filter = None
+                else:
+                    entries_stmt = entries_stmt.where(
+                        JournalEntry.id.in_(
+                            select(JournalEntryLine.journal_entry_id).where(
+                                JournalEntryLine.account_id == account_filter
+                            )
+                        )
+                    )
             if status_filter:
                 entries_stmt = entries_stmt.where(
                     JournalEntry.is_finalized.is_(STATUS_FILTERS[status_filter])
@@ -340,7 +355,12 @@ def journal_page():
         )
 
     filter_args = filter_url_args(
-        query, date_from, date_to, partner_id=partner_filter, status=status_filter
+        query,
+        date_from,
+        date_to,
+        partner_id=partner_filter,
+        account_id=account_filter,
+        status=status_filter,
     )
     return render_template(
         "buchungen.html",
@@ -359,6 +379,8 @@ def journal_page():
         date_to=date_to,
         partner_filter=partner_filter,
         filter_partner=filter_partner,
+        account_filter=account_filter,
+        filter_account=filter_account,
         status_filter=status_filter,
         filter_args=filter_args,
         filters_active=bool(filter_args),
