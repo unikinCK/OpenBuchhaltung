@@ -357,3 +357,70 @@ def controlling_result_report(
         "units": [buckets[unit.id] for unit in units],
         "unassigned": buckets[None],
     }
+
+
+# Filterwert „ohne Einheit“ für die Buchungssuche (entspricht „Nicht zugeordnet“).
+UNASSIGNED_UNIT = "none"
+_UNIT_COLUMNS = {
+    "cost_center": JournalEntryLine.cost_center_id,
+    "profit_center": JournalEntryLine.profit_center_id,
+}
+
+
+def parse_unit_filter(raw: str | None, *, unit_type: str) -> int | str | None:
+    """Filterwert für Kostenstelle/Profitcenter: ID, ``none`` oder leer."""
+    normalized = (raw or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized == UNASSIGNED_UNIT:
+        return UNASSIGNED_UNIT
+    if normalized.isdigit():
+        return int(normalized)
+    raise ControllingError(f"{unit_type}_id must be an integer or '{UNASSIGNED_UNIT}'.")
+
+
+def find_filter_unit(
+    session: Session, *, company_id: int, unit_type: str, unit_id: int
+) -> ControllingUnit | None:
+    """Einheit der Gesellschaft mit passendem Typ (auch inaktiv) oder None."""
+    unit = session.get(ControllingUnit, unit_id)
+    if unit is None or unit.company_id != company_id or unit.unit_type != unit_type:
+        return None
+    return unit
+
+
+def journal_line_filter(
+    *,
+    account_id: int | None = None,
+    cost_center: int | str | None = None,
+    profit_center: int | str | None = None,
+):
+    """Buchungs-IDs mit mindestens einer Zeile, die alle Merkmale zugleich trägt.
+
+    Konto und Einheiten müssen auf derselben Zeile stehen – so entspricht der
+    Treffer genau dem Betrag im Controlling-Bericht. ``none`` sucht wie der
+    Bericht nur Erfolgszeilen (Erlös/Aufwand) ohne Einheit. Ohne Kriterium None.
+    """
+    # Lokal importiert: reports → journal_entries → controlling wäre sonst zirkulär.
+    from app.services.reports import REVENUE_ACCOUNT_TYPES
+
+    conditions = []
+    result_lines_only = False
+    if account_id is not None:
+        conditions.append(JournalEntryLine.account_id == account_id)
+    for unit_type, value in (("cost_center", cost_center), ("profit_center", profit_center)):
+        column = _UNIT_COLUMNS[unit_type]
+        if value == UNASSIGNED_UNIT:
+            conditions.append(column.is_(None))
+            result_lines_only = True
+        elif value is not None:
+            conditions.append(column == value)
+    if not conditions:
+        return None
+    stmt = select(JournalEntryLine.journal_entry_id)
+    if result_lines_only:
+        stmt = stmt.join(Account, Account.id == JournalEntryLine.account_id)
+        conditions.append(
+            Account.account_type.in_([*sorted(REVENUE_ACCOUNT_TYPES), "expense"])
+        )
+    return stmt.where(*conditions)

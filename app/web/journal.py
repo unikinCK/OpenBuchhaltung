@@ -11,6 +11,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from app.services.audit_log import serialize_audit_log_entry
+from app.services.controlling import (
+    UNASSIGNED_UNIT,
+    ControllingError,
+    find_filter_unit,
+    journal_line_filter,
+    parse_unit_filter,
+)
 from app.services.documents import documents_by_journal_entry
 from app.services.journal_entries import (
     CARRYFORWARD_SOURCES,
@@ -257,6 +264,14 @@ def journal_page():
     query, date_from, date_to = search_args()
     partner_filter = request.args.get("partner_id", type=int)
     account_filter = request.args.get("account_id", type=int)
+    unit_filters: dict[str, int | str | None] = {}
+    for unit_type in ("cost_center", "profit_center"):
+        try:
+            unit_filters[unit_type] = parse_unit_filter(
+                request.args.get(f"{unit_type}_id"), unit_type=unit_type
+            )
+        except ControllingError:
+            unit_filters[unit_type] = None
     status_filter = (request.args.get("status") or "").strip()
     if status_filter not in STATUS_FILTERS:
         status_filter = ""
@@ -279,6 +294,10 @@ def journal_page():
         overview: dict[int, dict] = {}
         filter_partner = None
         filter_account = None
+        filter_units: dict[str, ControllingUnit | None] = {
+            "cost_center": None,
+            "profit_center": None,
+        }
         if selected_company_id:
             context = _form_context(session, selected_company_id)
             templates = list_templates(session=session, company_id=selected_company_id)
@@ -319,14 +338,23 @@ def journal_page():
                 if filter_account is None or filter_account.company_id != selected_company_id:
                     filter_account = None
                     account_filter = None
-                else:
-                    entries_stmt = entries_stmt.where(
-                        JournalEntry.id.in_(
-                            select(JournalEntryLine.journal_entry_id).where(
-                                JournalEntryLine.account_id == account_filter
-                            )
-                        )
+            for unit_type, value in unit_filters.items():
+                if isinstance(value, int):
+                    filter_units[unit_type] = find_filter_unit(
+                        session,
+                        company_id=selected_company_id,
+                        unit_type=unit_type,
+                        unit_id=value,
                     )
+                    if filter_units[unit_type] is None:
+                        unit_filters[unit_type] = None
+            line_filter = journal_line_filter(
+                account_id=account_filter,
+                cost_center=unit_filters["cost_center"],
+                profit_center=unit_filters["profit_center"],
+            )
+            if line_filter is not None:
+                entries_stmt = entries_stmt.where(JournalEntry.id.in_(line_filter))
             if status_filter:
                 entries_stmt = entries_stmt.where(
                     JournalEntry.is_finalized.is_(STATUS_FILTERS[status_filter])
@@ -360,6 +388,8 @@ def journal_page():
         date_to,
         partner_id=partner_filter,
         account_id=account_filter,
+        cost_center_id=unit_filters["cost_center"],
+        profit_center_id=unit_filters["profit_center"],
         status=status_filter,
     )
     return render_template(
@@ -381,6 +411,10 @@ def journal_page():
         filter_partner=filter_partner,
         account_filter=account_filter,
         filter_account=filter_account,
+        cost_center_filter=unit_filters["cost_center"],
+        profit_center_filter=unit_filters["profit_center"],
+        filter_units=filter_units,
+        unassigned_unit=UNASSIGNED_UNIT,
         status_filter=status_filter,
         filter_args=filter_args,
         filters_active=bool(filter_args),

@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "_journal.html" import account_link %}
 
 {% block title %}Controlling – OpenBuchhaltung{% endblock %}
 
@@ -64,26 +63,42 @@
       {% endif %}
     </section>
 
+    <section class="card">
+      <h2>Berichtszeitraum</h2>
+      <form method="get" action="{{ url_for('main.controlling_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
+        <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+        <button type="submit" class="secondary">Anwenden</button>
+        {% if period_args %}
+          <a href="{{ url_for('main.controlling_page', company_id=selected_company_id) }}">Gesamter Zeitraum</a>
+        {% endif %}
+      </form>
+      <p class="muted small">Einheiten und Konten in den Berichten führen zu den zugehörigen Buchungen im Journal.</p>
+    </section>
+
     {% for title, report in [("Kostenstellenrechnung", cost_center_report), ("Profitcenter-GuV", profit_center_report)] %}
+      {% set unit_arg = report.unit_type ~ "_id" %}
       <section class="card">
         <h2>{{ title }}</h2>
-        <p><a href="{{ url_for('api.export_controlling_csv', company_id=selected_company_id, unit_type=report.unit_type) }}">Als CSV exportieren</a></p>
+        <p><a href="{{ url_for('api.export_controlling_csv', company_id=selected_company_id, unit_type=report.unit_type, **period_args) }}">Als CSV exportieren</a></p>
         {% if report and report.units %}
           <table>
             <thead><tr><th>Einheit</th><th class="num">Erlöse</th><th class="num">Aufwand</th><th class="num">Ergebnis</th></tr></thead>
             <tbody>
-              {% for bucket in report.units %}
+              {% for bucket in report.units + [report.unassigned] %}
+                {% set unit_value = bucket.unit.id if bucket.unit else unassigned_unit %}
+                {% set unit_args = dict(period_args, company_id=selected_company_id, **{unit_arg: unit_value}) %}
                 <tr>
-                  <td>{{ bucket.unit.code }} – {{ bucket.unit.name }}</td>
+                  <td><a href="{{ url_for('main.journal_page', **unit_args) }}" title="Buchungen anzeigen">{% if bucket.unit %}{{ bucket.unit.code }} – {{ bucket.unit.name }}{% else %}Nicht zugeordnet{% endif %}</a></td>
                   <td class="num">{{ bucket.total_revenue }}</td>
                   <td class="num">{{ bucket.total_expense }}</td>
                   <td class="num"><strong>{{ bucket.net_income }}</strong></td>
                 </tr>
                 {% for account in bucket.accounts %}
-                  <tr class="entry-lines"><td>{{ account_link(account.account_id, account.code, account.name) }}</td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
+                  <tr class="entry-lines"><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
                 {% endfor %}
               {% endfor %}
-              <tr><td>Nicht zugeordnet</td><td class="num">{{ report.unassigned.total_revenue }}</td><td class="num">{{ report.unassigned.total_expense }}</td><td class="num"><strong>{{ report.unassigned.net_income }}</strong></td></tr>
             </tbody>
           </table>
         {% else %}

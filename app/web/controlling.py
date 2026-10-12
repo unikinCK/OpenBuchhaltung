@@ -10,13 +10,21 @@ from sqlalchemy.exc import IntegrityError
 
 from app.services.audit_log import list_audit_log_entries
 from app.services.controlling import (
+    UNASSIGNED_UNIT,
     ControllingError,
     controlling_result_report,
     create_controlling_unit,
     update_controlling_unit,
 )
 from app.web.blueprint import main_bp
-from app.web.helpers import changed_by, company_context, get_session_factory, require_company_access
+from app.web.helpers import (
+    changed_by,
+    company_context,
+    filter_url_args,
+    get_session_factory,
+    require_company_access,
+    search_args,
+)
 from domain.models import ControllingUnit
 
 
@@ -32,6 +40,7 @@ def _form_date(name: str) -> date | None:
 
 @main_bp.get("/controlling")
 def controlling_page():
+    _query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
@@ -59,11 +68,15 @@ def controlling_page():
                 session=session,
                 company_id=selected_company_id,
                 unit_type="cost_center",
+                date_from=date_from,
+                date_to=date_to,
             )
             profit_center_report = controlling_result_report(
                 session=session,
                 company_id=selected_company_id,
                 unit_type="profit_center",
+                date_from=date_from,
+                date_to=date_to,
             )
     return render_template(
         "controlling.html",
@@ -75,6 +88,10 @@ def controlling_page():
         events=events,
         cost_center_report=cost_center_report,
         profit_center_report=profit_center_report,
+        date_from=date_from,
+        date_to=date_to,
+        period_args=filter_url_args(None, date_from, date_to),
+        unassigned_unit=UNASSIGNED_UNIT,
     )
 
 
