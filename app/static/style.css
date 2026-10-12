@@ -988,6 +988,21 @@ tr.entry-lines td {
   color: var(--text-muted);
 }
 
+/* Kontierung je Zeile beim Ergänzen (Buchungsdetail). */
+.line-units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.line-units select {
+  width: auto;
+  max-width: 14rem;
+  font-size: 0.86rem;
+  padding: 0.15rem 0.4rem;
+}
+
 /* Konto mit Link aufs Kontoblatt: unauffällig wie Text, unterstrichen beim Überfahren. */
 a.account-link {
   color: inherit;

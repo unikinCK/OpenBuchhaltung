@@ -106,7 +106,21 @@
               <td>
                 {{ account_link(line.account_id, line.account_code, line.account_name) }}
                 {% if line.subledger %}<br /><span class="muted small">{{ "Debitoren" if line.subledger == "debtor" else "Kreditoren" }}-Sammelkonto (Nebenbuch)</span>{% endif %}
-                {% if line.cost_center_code or line.profit_center_code %}<br /><span class="muted small">{% if line.cost_center_code %}KST {{ line.cost_center_code }}{% endif %}{% if line.cost_center_code and line.profit_center_code %} · {% endif %}{% if line.profit_center_code %}PC {{ line.profit_center_code }}{% endif %}</span>{% endif %}
+                {% if amendable and (has_cost_centers or has_profit_centers) %}
+                  <div class="line-units">
+                    {% for unit_type, short, label in [("cost_center", "KST", "Kostenstelle"), ("profit_center", "PC", "Profitcenter")] %}
+                      {% set unit_choices = line[unit_type ~ "_choices"] %}
+                      {% if unit_choices %}
+                        <select name="line_{{ unit_type }}_{{ line.line_number }}" aria-label="{{ label }} Zeile {{ line.line_number }}" title="{{ label }}">
+                          <option value="">ohne {{ short }}</option>
+                          {% for unit in unit_choices %}
+                            <option value="{{ unit.id }}" {% if unit.id == line[unit_type ~ "_id"] %}selected{% endif %}>{{ short }} {{ unit.code }} – {{ unit.name }}{% if not unit.is_active %} (inaktiv){% endif %}</option>
+                          {% endfor %}
+                        </select>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% elif line.cost_center_code or line.profit_center_code %}<br /><span class="muted small">{% if line.cost_center_code %}KST {{ line.cost_center_code }}{% endif %}{% if line.cost_center_code and line.profit_center_code %} · {% endif %}{% if line.profit_center_code %}PC {{ line.profit_center_code }}{% endif %}</span>{% endif %}
               </td>
               <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount | betrag }}{% endif %}</td>
               <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount | betrag }}{% endif %}</td>
@@ -149,7 +163,7 @@
             <input id="service_date" name="service_date" type="date" value="{{ entry.service_date.isoformat() if entry.service_date else '' }}" />
           </div>
         </div>
-        <p class="hint">Vor der Festschreibung lassen sich Leistungsdatum und Geschäftspartner ergänzen.
+        <p class="hint">Vor der Festschreibung lassen sich Leistungsdatum, Geschäftspartner sowie Kostenstelle und Profitcenter je Zeile ergänzen.
           Beträge, Konten und Buchungsdatum bleiben unverändert; jede Änderung steht mit altem und
           neuem Wert im Audit-Log. Auf Debitoren-/Kreditoren-Sammelkonten bildet der Partner das
           Nebenbuch, auf allen anderen Konten den Partnerbezug der Buchung.</p>
@@ -200,6 +214,11 @@
                     {% if payload.service_date %}Leistungsdatum: {{ payload.service_date.old | datum or "leer" }} → {{ payload.service_date.new | datum or "leer" }}<br />{% endif %}
                     {% for change in payload.partners or [] %}
                       Zeile {{ change.line_number }} ({{ change.account_code }}): {{ partner_names.get(change.old_partner_id, "ohne Partner") }} → {{ partner_names.get(change.new_partner_id, "ohne Partner") }}<br />
+                    {% endfor %}
+                    {% for key, short in [("cost_centers", "Kostenstelle"), ("profit_centers", "Profitcenter")] %}
+                      {% for change in payload[key] or [] %}
+                        Zeile {{ change.line_number }} ({{ change.account_code }}): {{ short }} {{ change.old_code or "leer" }} → {{ change.new_code or "leer" }}<br />
+                      {% endfor %}
                     {% endfor %}
                   {% elif payload.posting_number %}
                     {{ payload.posting_number }}

@@ -8,6 +8,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Kostenstelle und Profitcenter nachträglich zuordnen
+- Neu: Offene Buchungen lassen sich je Zeile um Kostenstelle und Profitcenter ergänzen
+  oder davon befreien – `PATCH /api/v1/journal-entries/<id>` mit
+  `lines[].cost_center_id`/`profit_center_id` (null entfernt), MCP `amend_journal_entry`
+  und Auswahlfelder je Zeile auf der Buchungsdetailseite. Geprüft wird wie beim Buchen
+  (Einheitentyp, aktiv, gültig am Buchungsdatum); Festgeschriebene, stornierte und
+  Vortragsbuchungen bleiben gesperrt. Das Audit-Log (`amended`) hält alte und neue
+  Einheit je Zeile fest (`cost_centers`/`profit_centers`), das Änderungsprotokoll der
+  Detailseite zeigt sie an.
+
 ### Kontoblatt: Buchungen je Konto
 - Neu: Kontoblatt unter `/konten/<id>` – Klick auf ein Konto im Kontenplan, im Journal
   (Buchungssatz), auf der Buchungsdetailseite, in Summen-/Saldenliste, GuV und Bilanz,

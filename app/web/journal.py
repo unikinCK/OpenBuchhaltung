@@ -149,6 +149,8 @@ def entry_overview(session, company_id: int, entry_ids: list[int]) -> dict[int, 
             JournalEntryLine.credit_amount,
             JournalEntryLine.description,
             TaxCode.code.label("tax_code"),
+            JournalEntryLine.cost_center_id,
+            JournalEntryLine.profit_center_id,
             cost_unit.code.label("cost_center_code"),
             profit_unit.code.label("profit_center_code"),
             JournalEntryLine.partner_id,
@@ -186,7 +188,9 @@ def entry_overview(session, company_id: int, entry_ids: list[int]) -> dict[int, 
             "credit_amount": row.credit_amount,
             "description": row.description,
             "tax_code": row.tax_code,
+            "cost_center_id": row.cost_center_id,
             "cost_center_code": row.cost_center_code,
+            "profit_center_id": row.profit_center_id,
             "profit_center_code": row.profit_center_code,
             "partner_id": row.partner_id,
             "partner_number": partner_number,
@@ -670,6 +674,15 @@ def _render_entry_detail(journal_entry_id: int):
             .all()
         )
         tax_accounts = tax_account_ids(session, entry.company_id)
+        units = (
+            session.execute(
+                scoped_select(ControllingUnit, company_id=entry.company_id).order_by(
+                    ControllingUnit.code
+                )
+            )
+            .scalars()
+            .all()
+        )
         lines = []
         for line in overview["lines"]:
             # Steuerzeilen bekommen keine Partnerauswahl, solange sie keinen tragen.
@@ -690,7 +703,32 @@ def _render_entry_detail(journal_entry_id: int):
                             "is_active": partner.is_active,
                         }
                     )
-            lines.append({**line, "partner_editable": editable, "partner_choices": choices})
+            # Kontierung: aktive, am Buchungsdatum gültige Einheiten plus die bisherige.
+            unit_choices = {
+                unit_type: [
+                    unit
+                    for unit in units
+                    if unit.unit_type == unit_type
+                    and (
+                        unit.id == line[f"{unit_type}_id"]
+                        or (
+                            unit.is_active
+                            and (unit.valid_from is None or unit.valid_from <= entry.entry_date)
+                            and (unit.valid_to is None or unit.valid_to >= entry.entry_date)
+                        )
+                    )
+                ]
+                for unit_type in ("cost_center", "profit_center")
+            }
+            lines.append(
+                {
+                    **line,
+                    "partner_editable": editable,
+                    "partner_choices": choices,
+                    "cost_center_choices": unit_choices["cost_center"],
+                    "profit_center_choices": unit_choices["profit_center"],
+                }
+            )
         history = [
             serialize_audit_log_entry(event)
             for event in session.execute(
@@ -718,6 +756,8 @@ def _render_entry_detail(journal_entry_id: int):
             "source_label": SOURCE_LABELS.get(entry.source),
             "all_partners": [partner for partner in partners if partner.is_active],
             "partner_names": {partner.id: partner.name for partner in partners},
+            "has_cost_centers": any(line["cost_center_choices"] for line in lines),
+            "has_profit_centers": any(line["profit_center_choices"] for line in lines),
         }
         return render_template(
             "buchung_detail.html",
@@ -764,15 +804,28 @@ def amend_journal_entry_action(journal_entry_id: int):
         entry = _load_entry(session, journal_entry_id)
         company_id = entry.company_id
         line_partners: dict[int, int | None] = {}
+        line_units: dict[str, dict[int, int | None]] = {"cost_center": {}, "profit_center": {}}
         for line in entry.lines:
             field = f"line_partner_{line.line_number}"
             if field in request.form:
                 raw = request.form.get(field, "").strip()
                 line_partners[line.line_number] = int(raw) if raw.isdigit() else None
-        before = (
-            entry.service_date,
-            {line.line_number: line.partner_id for line in entry.lines},
-        )
+            for unit_type, values in line_units.items():
+                field = f"line_{unit_type}_{line.line_number}"
+                if field in request.form:
+                    raw = request.form.get(field, "").strip()
+                    values[line.line_number] = int(raw) if raw.isdigit() else None
+
+        def snapshot(current: JournalEntry) -> tuple:
+            return (
+                current.service_date,
+                {
+                    line.line_number: (line.partner_id, line.cost_center_id, line.profit_center_id)
+                    for line in current.lines
+                },
+            )
+
+        before = snapshot(entry)
         try:
             entry = amend_journal_entry(
                 session=session,
@@ -780,16 +833,15 @@ def amend_journal_entry_action(journal_entry_id: int):
                 journal_entry_id=journal_entry_id,
                 changed_by=changed_by(),
                 line_partners=line_partners,
+                line_cost_centers=line_units["cost_center"],
+                line_profit_centers=line_units["profit_center"],
                 **options,
             )
         except JournalEntryCreationError as exc:
             flash(str(exc), "error")
             return redirect(_safe_next(detail_url))
         posting_number = entry.posting_number
-        changed = before != (
-            entry.service_date,
-            {line.line_number: line.partner_id for line in entry.lines},
-        )
+        changed = before != snapshot(entry)
 
     if changed:
         flash(f"Buchung {posting_number} wurde ergänzt.", "success")
