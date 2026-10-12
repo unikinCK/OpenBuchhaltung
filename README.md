@@ -29,7 +29,8 @@ können, was gebucht, exportiert und protokolliert wird.
   Geschäftspartner jeder Buchung und filtert danach.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
-  Kostenstellenrechnung und Profitcenter-GuV. Bank-, OCR- und E-Rechnungsbuchungen
+  Kostenstellenrechnung und Profitcenter-GuV mit Sprung zu den zugehörigen Buchungen
+  (Journalfilter je Einheit und Konto). Bank-, OCR- und E-Rechnungsbuchungen
   können direkt kontiert werden; Anlagen und Mitarbeiter tragen optionale
   Standardzuordnungen für ihre automatischen Aufwandsbuchungen.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,
@@ -682,6 +683,21 @@ ebenso (Partner der Buchung, auch bei `PATCH /api/v1/journal-entries/<id>` und
 `partner_id` und liefert je Buchung `partners`. MCP: `list_partners`,
 `get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
 `get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
+
+## Kostenstellen und Profitcenter: zugehörige Buchungen
+
+Das Journal filtert nach Konto, Kostenstelle und Profitcenter. Eine Buchung trifft,
+wenn eine ihrer Zeilen alle gewählten Merkmale zugleich trägt – Konto und Einheit
+müssen also auf derselben Zeile stehen, wie im Controlling-Bericht summiert. „ohne
+Kostenstelle“ bzw. „ohne Profitcenter“ (Filterwert `none`) findet wie die Berichtszeile
+„Nicht zugeordnet“ Erlös- und Aufwandszeilen ohne Einheit. Inaktive Einheiten bleiben
+als Filter wählbar. Auf der Controlling-Seite führen Einheit und Konto jeder
+Berichtszeile direkt zur gefilterten Buchungsliste; der Berichtszeitraum
+(`date_from`/`date_to`) wird dabei und beim CSV-Export übernommen.
+
+API: `GET /api/v1/journal-entries` mit `account_id`, `cost_center_id` und
+`profit_center_id` (ID oder `none`); unbekannte oder fremde Einheiten/Konten ergeben
+404. MCP: `list_journal_entries` mit denselben Parametern.
 
 ## Offene Posten (OPOS)
 

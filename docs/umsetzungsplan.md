@@ -518,8 +518,11 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
      übernehmen die Dimensionen, Gegen-/Verbindlichkeitszeilen bleiben unzugeordnet;
      Lohnaufwand wird je Kontierung getrennt verdichtet. UI, REST, MCP, Audit und
      Migration sind abgedeckt.
-  6. [ ] Folgeausbau: konfigurierbare Vorschlagsregeln für automatische Quellen.
-  7. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
+  6. [x] Buchungs-Drill-down: Journalfilter nach Konto, Kostenstelle und Profitcenter
+     (inkl. „nicht zugeordnet“) in UI, REST und MCP; Berichtszeilen verlinken auf die
+     gefilterte Buchungsliste, Berichtszeitraum auf der Controlling-Seite.
+  7. [ ] Folgeausbau: konfigurierbare Vorschlagsregeln für automatische Quellen.
+  8. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
      Soll-Ist-Auswertungen.
 
 ## Phase 5 – Review-Umsetzung (Stand 2026-09-19)
