@@ -11,11 +11,30 @@
       var template = document.querySelector(button.dataset.template);
       if (!container || !template) return;
       button.addEventListener("click", function () {
-        container.appendChild(template.content.cloneNode(true));
-        var added = container.lastElementChild;
-        if (added) added.querySelectorAll("[data-subledger-account]").forEach(syncPartnerSelect);
+        var fragment = template.content.cloneNode(true);
+        var added = Array.prototype.slice.call(fragment.children);
+        container.appendChild(fragment);
+        added.forEach(function (element) {
+          element.querySelectorAll("[data-subledger-account]").forEach(syncPartnerSelect);
+        });
+        var first = added.length && added[0].querySelector("select, input");
+        if (first) first.focus();
       });
     });
+
+    // Links/Knöpfe, die eine aufklappbare Karte öffnen und dorthin springen:
+    // <a href="#neue-buchung" data-open-details="#neue-buchung">
+    document.querySelectorAll("[data-open-details]").forEach(function (trigger) {
+      trigger.addEventListener("click", function () {
+        var target = document.querySelector(trigger.dataset.openDetails);
+        if (target && target.tagName === "DETAILS") target.open = true;
+      });
+    });
+    openDetailsForHash();
+    window.addEventListener("hashchange", openDetailsForHash);
+
+    setupPartnerPanel();
+    setupPartnerFill();
 
     // Auswahlfelder mit data-autosubmit senden ihr Formular bei Änderung ab.
     document.querySelectorAll("[data-autosubmit]").forEach(function (element) {
@@ -114,26 +133,94 @@
     });
   }
 
-  // Geschäftspartner (Nebenbuch) nur auf Sammelkonten: Die Partnerauswahl einer
-  // Buchungszeile zeigt je nach Sammelkonto nur Kunden bzw. Lieferanten. Das
-  // Feld bleibt aktiv (sonst verschieben sich die Zeilenwerte beim Absenden).
+  // Ein Anker (#id) öffnet die aufklappbare Karte, in der er liegt oder die er meint.
+  function openDetailsForHash() {
+    if (!window.location.hash || window.location.hash.length < 2) return;
+    var target;
+    try {
+      target = document.querySelector(window.location.hash);
+    } catch (error) {
+      return;
+    }
+    if (!target) return;
+    var details = target.tagName === "DETAILS" ? target : target.closest("details");
+    while (details) {
+      details.open = true;
+      details = details.parentElement && details.parentElement.closest("details");
+    }
+  }
+
+  // Geschäftspartner einer Buchungszeile: Auf Debitoren-/Kreditoren-Sammelkonten
+  // (Nebenbuch) zeigt die Auswahl nur Kunden bzw. Lieferanten, auf allen anderen
+  // Konten alle Partner (Partnerbezug). Das Feld bleibt aktiv (sonst verschieben
+  // sich die Zeilenwerte beim Absenden).
   function syncPartnerSelect(accountSelect) {
-    var line = accountSelect.closest(".journal-line");
+    var line = accountSelect.closest(".line-group, .journal-line");
     var partnerSelect = line && line.querySelector("[data-partner-select]");
     if (!partnerSelect) return;
     var selected = accountSelect.options[accountSelect.selectedIndex];
     var subledger = selected ? selected.dataset.subledger : "";
     Array.prototype.forEach.call(partnerSelect.options, function (option) {
       if (!option.value) return;
-      var allowed = subledger === "debtor"
-        ? option.hasAttribute("data-debtor")
-        : subledger === "creditor" && option.hasAttribute("data-creditor");
+      var allowed = !subledger ||
+        (subledger === "debtor" && option.hasAttribute("data-debtor")) ||
+        (subledger === "creditor" && option.hasAttribute("data-creditor"));
       option.hidden = !allowed;
       option.disabled = !allowed;
     });
     var current = partnerSelect.options[partnerSelect.selectedIndex];
     if (current && current.disabled) partnerSelect.value = "";
-    partnerSelect.classList.toggle("is-muted", !subledger);
+  }
+
+  // Journal: „Partner zuordnen“ öffnet einen gemeinsamen Dialog und setzt das
+  // Formularziel auf die gewählte Buchung. Ohne Popover-API bleibt der Link zur
+  // Detailseite.
+  function setupPartnerPanel() {
+    var panel = document.querySelector("[data-partner-panel]");
+    if (!panel || typeof panel.showPopover !== "function") return;
+    var form = panel.querySelector("[data-partner-panel-form]");
+    var title = panel.querySelector("[data-partner-panel-title]");
+    var select = form && form.querySelector("select[name=partner_id]");
+    document.querySelectorAll("[data-assign-partner]").forEach(function (link) {
+      link.addEventListener("click", function (event) {
+        if (!form) return;
+        event.preventDefault();
+        form.action = link.dataset.assignPartner;
+        if (title) {
+          title.textContent = link.dataset.postingNumber + " · " + (link.dataset.description || "");
+        }
+        if (select) select.value = "";
+        panel.showPopover();
+        if (select) select.focus();
+      });
+    });
+  }
+
+  // Buchungsdetail: einen Partner in alle Zeilenauswahlen übernehmen, soweit er
+  // dort zulässig ist (Sammelkonten nur mit passender Rolle).
+  function setupPartnerFill() {
+    var container = document.querySelector("[data-partner-fill]");
+    if (!container) return;
+    var source = container.querySelector("select");
+    var button = container.querySelector("[data-partner-fill-apply]");
+    if (!source || !button) return;
+    button.addEventListener("click", function () {
+      if (!source.value) return;
+      var skipped = 0;
+      document.querySelectorAll("select[data-line-partner]").forEach(function (select) {
+        var option = select.querySelector('option[value="' + source.value + '"]');
+        if (option && !option.disabled) {
+          select.value = source.value;
+        } else {
+          skipped += 1;
+        }
+      });
+      if (skipped) {
+        window.alert(
+          skipped + " Zeile(n) nicht übernommen: Auf Sammelkonten muss die Rolle passen."
+        );
+      }
+    });
   }
 
   document.addEventListener("change", function (event) {

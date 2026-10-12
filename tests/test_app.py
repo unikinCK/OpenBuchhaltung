@@ -226,7 +226,7 @@ def test_can_create_account_via_form(tmp_path):
 
     assert response.status_code == 200
     assert b"Konto wurde angelegt" in response.data
-    assert b"Konten:</strong> 1" in response.data
+    assert "1 Konto im Kontenplan".encode() in response.data
 
 
 def test_duplicate_tenant_or_company_shows_validation_message(tmp_path):
@@ -286,7 +286,7 @@ def test_duplicate_account_code_shows_validation_message(tmp_path):
 
     assert duplicate_response.status_code == 200
     assert b"Konto mit dieser Nummer existiert bereits" in duplicate_response.data
-    assert b"Konten:</strong> 1" in duplicate_response.data
+    assert "1 Konto im Kontenplan".encode() in duplicate_response.data
 
 
 def test_api_create_tenant_with_company(tmp_path):
@@ -504,7 +504,8 @@ def test_journal_entry_form_rejects_locked_period(tmp_path):
 
     assert response.status_code == 200
     assert b"Periode ist gesperrt" in response.data
-    assert b"100.00" in response.data
+    # Nach dem Fehler bleibt die Erfassungsmaske aufgeklappt.
+    assert b'id="neue-buchung" open' in response.data
 
 
 def test_api_create_journal_entry_and_trial_balance(tmp_path):

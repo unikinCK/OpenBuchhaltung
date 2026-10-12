@@ -12,6 +12,7 @@ from app.services.reports import balance_sheet_for_company, income_statement_for
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
+from app.web.journal import entry_overview
 from domain.models import (
     Account,
     BankTransaction,
@@ -69,6 +70,7 @@ def index():
         totals = None
         balance_totals = None
         recent_entries = []
+        recent_overview: dict[int, dict] = {}
         tasks = None
         if selected_company_id:
             stats["accounts"] = _count(
@@ -84,10 +86,13 @@ def index():
                 session.execute(
                     scoped_select(JournalEntry, company_id=selected_company_id)
                     .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
-                    .limit(5)
+                    .limit(8)
                 )
                 .scalars()
                 .all()
+            )
+            recent_overview = entry_overview(
+                session, selected_company_id, [entry.id for entry in recent_entries]
             )
             tasks = open_task_counts(session, selected_company_id)
             totals = income_statement_for_company(
@@ -105,5 +110,6 @@ def index():
         totals=totals,
         balance_totals=balance_totals,
         recent_entries=recent_entries,
+        recent_overview=recent_overview,
         tasks=tasks,
     )

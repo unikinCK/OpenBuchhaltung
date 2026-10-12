@@ -55,12 +55,14 @@ def documents_page():
     limit, offset = pagination_args()
     query, date_from, date_to = search_args()
     preselected_entry_id = request.args.get("journal_entry_id", type=int)
+    unlinked_only = request.args.get("unlinked") == "1"
     session_factory = get_session_factory()
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
 
         documents = []
         documents_total = 0
+        unlinked_total = 0
         journal_entries = []
         journal_entry_labels = {}
         categories = []
@@ -75,6 +77,15 @@ def documents_page():
                 documents_stmt = documents_stmt.where(Document.document_date >= date_from)
             if date_to:
                 documents_stmt = documents_stmt.where(Document.document_date <= date_to)
+            if unlinked_only:
+                documents_stmt = documents_stmt.where(Document.journal_entry_id.is_(None))
+            unlinked_total = session.execute(
+                select(func.count()).select_from(
+                    scoped_select(Document, company_id=selected_company_id)
+                    .where(Document.journal_entry_id.is_(None))
+                    .subquery()
+                )
+            ).scalar_one()
             documents_total = session.execute(
                 select(func.count()).select_from(documents_stmt.subquery())
             ).scalar_one()
@@ -138,7 +149,11 @@ def documents_page():
         q=query,
         date_from=date_from,
         date_to=date_to,
-        filter_args=filter_url_args(query, date_from, date_to),
+        filter_args=filter_url_args(
+            query, date_from, date_to, unlinked="1" if unlinked_only else None
+        ),
+        unlinked_only=unlinked_only,
+        unlinked_total=unlinked_total,
         journal_entries=journal_entries,
         journal_entry_labels=journal_entry_labels,
         categories=categories,

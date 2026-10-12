@@ -17,6 +17,7 @@ from app.web import (  # noqa: F401
     dunning,
     einvoice,
     fixed_assets,
+    formatting,
     income_taxes,
     journal,
     open_banking,

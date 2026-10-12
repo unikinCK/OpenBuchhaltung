@@ -745,13 +745,15 @@ def test_service_date_via_api_mcp_and_ui(tmp_path) -> None:
         assert july.service_date == date(2026, 7, 31)
         july_id = july.id
     journal = client.get("/buchungen", query_string={"company_id": company_id})
-    assert "Leistung 2026-07-31" in journal.get_data(as_text=True)
+    assert "Leistung 31.07.2026" in journal.get_data(as_text=True)
 
+    # Detailseite (auch unter /ergaenzen): Partnerauswahl auf allen Zeilen.
     page = client.get(f"/buchungen/{july_id}/ergaenzen")
     html = page.get_data(as_text=True)
     assert page.status_code == 200
     assert 'name="line_partner_1"' in html
-    assert 'name="line_partner_2"' not in html
+    assert 'name="line_partner_2"' in html
+    assert client.get(f"/buchungen/{july_id}").get_data(as_text=True) == html
     saved = client.post(
         f"/buchungen/{july_id}/ergaenzen",
         data={"service_date": "2026-07-31", "line_partner_1": str(partner_id)},

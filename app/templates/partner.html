@@ -4,115 +4,180 @@
 {% block title %}Geschäftspartner – OpenBuchhaltung{% endblock %}
 
 {% block content %}
-  <h1 class="page-title">Geschäftspartner</h1>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Geschäftspartner</h1>
+      <p class="page-subtitle">Kunden (Debitoren) und Lieferanten (Kreditoren)</p>
+    </div>
+    {% if selected_company_id %}
+      <div class="page-actions">
+        <a class="button" href="#partner-anlegen" data-open-details="#partner-anlegen">+ Partner anlegen</a>
+      </div>
+    {% endif %}
+  </div>
 
   {% if not selected_company_id %}
     <section class="card"><p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p></section>
   {% else %}
-    <section class="card">
-      <h2>Partner anlegen</h2>
-      <p class="muted">Kunden erhalten eine Debitorennummer (10000–69999), Lieferanten eine Kreditorennummer (70000–99999).
-        Ohne Eingabe wird die nächste freie Nummer vergeben. Gebucht wird weiter auf das Sammelkonto (z. B. 1400/1600);
-        der Partner hängt als Nebenbuch an der Buchungszeile.</p>
-      <form method="post" action="{{ url_for('main.create_partner_from_form') }}" class="stacked">
+    <details class="card card-primary" id="partner-anlegen"{% if not total and not filter_args %} open{% endif %}>
+      <summary>Partner anlegen <span class="summary-hint">Nummern werden automatisch vergeben</span></summary>
+      <p class="hint" style="margin-top:0;">Kunden erhalten eine Debitorennummer (10000–69999), Lieferanten eine Kreditorennummer (70000–99999).
+        Ohne Eingabe wird die nächste freie Nummer vergeben. Auf Sammelkonten (z. B. 1400/1600) bildet der Partner das
+        Nebenbuch; bei Direktbuchungen („Aufwand an Bank“) wird er der Buchung als Geschäftspartner zugeordnet.</p>
+      <form method="post" action="{{ url_for('main.create_partner_from_form') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
 
-        <label for="name">Name / Firma</label>
-        <input id="name" name="name" required maxlength="255" />
+        <div class="form-grid">
+          <div class="field field-wide">
+            <label for="name">Name / Firma</label>
+            <input id="name" name="name" required maxlength="255" />
+          </div>
+          <div class="field">
+            <label for="partner_kind">Art</label>
+            <select id="partner_kind" name="partner_kind">
+              <option value="organization">Unternehmen</option>
+              <option value="person">Natürliche Person</option>
+            </select>
+          </div>
+          <div class="field">
+            <span class="field-label">Rolle</span>
+            <div>
+              <label class="check"><input type="checkbox" name="is_customer" value="1" checked /> Kunde (Debitor)</label><br />
+              <label class="check"><input type="checkbox" name="is_supplier" value="1" /> Lieferant (Kreditor)</label>
+            </div>
+          </div>
+        </div>
 
-        <label for="partner_kind">Art</label>
-        <select id="partner_kind" name="partner_kind">
-          <option value="organization">Unternehmen</option>
-          <option value="person">Natürliche Person</option>
-        </select>
-
-        <fieldset>
-          <legend>Rolle</legend>
-          <label class="inline"><input type="checkbox" name="is_customer" value="1" checked /> Kunde (Debitor)</label>
-          <label class="inline"><input type="checkbox" name="is_supplier" value="1" /> Lieferant (Kreditor)</label>
-        </fieldset>
-
-        <details>
-          <summary>Personenkontonummern selbst festlegen</summary>
-          <label for="debtor_number">Debitorennummer</label>
-          <input id="debtor_number" name="debtor_number" inputmode="numeric" placeholder="automatisch" />
-          <label for="creditor_number">Kreditorennummer</label>
-          <input id="creditor_number" name="creditor_number" inputmode="numeric" placeholder="automatisch" />
+        <details class="line-details" style="margin-top:0.75rem;">
+          <summary class="muted small">Personenkontonummern selbst festlegen</summary>
+          <div class="form-grid" style="margin-top:0.5rem;">
+            <div class="field">
+              <label for="debtor_number">Debitorennummer</label>
+              <input id="debtor_number" name="debtor_number" inputmode="numeric" placeholder="automatisch" />
+            </div>
+            <div class="field">
+              <label for="creditor_number">Kreditorennummer</label>
+              <input id="creditor_number" name="creditor_number" inputmode="numeric" placeholder="automatisch" />
+            </div>
+          </div>
         </details>
 
-        <details>
-          <summary>Anschrift, Steuer, Kontakt, Zahlung</summary>
-          <label for="street">Straße und Hausnummer</label>
-          <input id="street" name="street" maxlength="255" />
-          <label for="postal_code">PLZ</label>
-          <input id="postal_code" name="postal_code" maxlength="20" />
-          <label for="city">Ort</label>
-          <input id="city" name="city" maxlength="120" />
-          <label for="country_code">Land (ISO-Code)</label>
-          <input id="country_code" name="country_code" value="DE" maxlength="2" />
-          <label for="vat_id">USt-IdNr</label>
-          <input id="vat_id" name="vat_id" placeholder="z. B. DE123456789" />
-          <label for="tax_number">Steuernummer</label>
-          <input id="tax_number" name="tax_number" maxlength="30" />
-          <label for="contact_person">Ansprechpartner</label>
-          <input id="contact_person" name="contact_person" maxlength="255" />
-          <label for="email">E-Mail</label>
-          <input id="email" name="email" type="email" maxlength="255" />
-          <label for="phone">Telefon</label>
-          <input id="phone" name="phone" maxlength="50" />
-          <label for="payment_term_days">Zahlungsziel (Tage)</label>
-          <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" />
-          <label for="iban">IBAN</label>
-          <input id="iban" name="iban" />
-          <label for="bic">BIC</label>
-          <input id="bic" name="bic" />
-          <label for="notes">Notizen</label>
-          <textarea id="notes" name="notes" rows="2"></textarea>
+        <details class="line-details" style="margin-top:0.5rem;">
+          <summary class="muted small">Anschrift, Steuer, Kontakt, Zahlung</summary>
+          <div class="form-grid" style="margin-top:0.5rem;">
+            <div class="field field-wide">
+              <label for="street">Straße und Hausnummer</label>
+              <input id="street" name="street" maxlength="255" />
+            </div>
+            <div class="field">
+              <label for="postal_code">PLZ</label>
+              <input id="postal_code" name="postal_code" maxlength="20" />
+            </div>
+            <div class="field">
+              <label for="city">Ort</label>
+              <input id="city" name="city" maxlength="120" />
+            </div>
+            <div class="field">
+              <label for="country_code">Land (ISO-Code)</label>
+              <input id="country_code" name="country_code" value="DE" maxlength="2" />
+            </div>
+            <div class="field">
+              <label for="vat_id">USt-IdNr</label>
+              <input id="vat_id" name="vat_id" placeholder="z. B. DE123456789" />
+            </div>
+            <div class="field">
+              <label for="tax_number">Steuernummer</label>
+              <input id="tax_number" name="tax_number" maxlength="30" />
+            </div>
+            <div class="field">
+              <label for="contact_person">Ansprechpartner</label>
+              <input id="contact_person" name="contact_person" maxlength="255" />
+            </div>
+            <div class="field">
+              <label for="email">E-Mail</label>
+              <input id="email" name="email" type="email" maxlength="255" />
+            </div>
+            <div class="field">
+              <label for="phone">Telefon</label>
+              <input id="phone" name="phone" maxlength="50" />
+            </div>
+            <div class="field">
+              <label for="payment_term_days">Zahlungsziel (Tage)</label>
+              <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" />
+            </div>
+            <div class="field">
+              <label for="iban">IBAN</label>
+              <input id="iban" name="iban" />
+            </div>
+            <div class="field">
+              <label for="bic">BIC</label>
+              <input id="bic" name="bic" />
+            </div>
+            <div class="field field-full">
+              <label for="notes">Notizen</label>
+              <textarea id="notes" name="notes" rows="2"></textarea>
+            </div>
+          </div>
         </details>
 
-        <button type="submit">Partner speichern</button>
+        <div class="form-actions">
+          <button type="submit">Partner speichern</button>
+        </div>
       </form>
-    </section>
+    </details>
 
     <section class="card">
-      <h2>Partner <span class="badge"><strong>Anzahl:</strong> {{ total }}</span></h2>
+      <div class="card-header">
+        <h2>Partner <span class="count">{{ total }}</span></h2>
+      </div>
       <form method="get" action="{{ url_for('main.partners_page') }}" class="filter-bar">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Name, Nummer, USt-IdNr, Ort" aria-label="Suchbegriff" />
         <select name="role" aria-label="Rolle">
           <option value="">Kunden und Lieferanten</option>
           <option value="debtor" {% if role == "debtor" %}selected{% endif %}>nur Kunden (Debitoren)</option>
           <option value="creditor" {% if role == "creditor" %}selected{% endif %}>nur Lieferanten (Kreditoren)</option>
         </select>
-        <input type="search" name="q" value="{{ q or '' }}" placeholder="Name, Nummer, USt-IdNr, Ort" aria-label="Suchbegriff" />
-        <label class="inline"><input type="checkbox" name="include_inactive" value="1" {% if include_inactive %}checked{% endif %} /> inaktive zeigen</label>
+        <label class="check"><input type="checkbox" name="include_inactive" value="1" {% if include_inactive %}checked{% endif %} /> inaktive zeigen</label>
         <button type="submit" class="secondary">Filtern</button>
         {% if filter_args %}<a href="{{ url_for('main.partners_page', company_id=selected_company_id) }}">Zurücksetzen</a>{% endif %}
       </form>
       {% if partners %}
         <div class="table-scroll">
-          <table>
+          <table class="data">
             <thead>
               <tr>
+                <th>Name</th>
+                <th>Rolle</th>
                 <th>Debitor</th>
                 <th>Kreditor</th>
-                <th>Name</th>
                 <th>Ort</th>
                 <th>USt-IdNr</th>
                 <th class="num">Zahlungsziel</th>
-                <th>Status</th>
+                <th class="num">Buchungen</th>
               </tr>
             </thead>
             <tbody>
               {% for partner in partners %}
-                <tr>
-                  <td>{{ partner.debtor_number or "–" }}</td>
-                  <td>{{ partner.creditor_number or "–" }}</td>
-                  <td><a href="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}">{{ partner.name }}</a></td>
-                  <td>{{ [partner.postal_code, partner.city] | select | join(" ") or "–" }}</td>
-                  <td>{{ partner.vat_id or "–" }}</td>
+                <tr{% if not partner.is_active %} class="row-muted"{% endif %}>
+                  <td>
+                    <a href="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}"><strong>{{ partner.name }}</strong></a>
+                    {% if not partner.is_active %}<span class="badge">inaktiv</span>{% endif %}
+                  </td>
+                  <td class="nowrap">
+                    {% if partner.debtor_number %}<span class="badge badge-info">Kunde</span>{% endif %}
+                    {% if partner.creditor_number %}<span class="badge badge-warning">Lieferant</span>{% endif %}
+                  </td>
+                  <td class="nowrap">{{ partner.debtor_number or "–" }}</td>
+                  <td class="nowrap">{{ partner.creditor_number or "–" }}</td>
+                  <td>{{ [partner.postal_code, partner.city] | select | join(" ") or "–" }}{% if partner.country_code and partner.country_code != "DE" %} <span class="muted">({{ partner.country_code }})</span>{% endif %}</td>
+                  <td class="nowrap">{{ partner.vat_id or "–" }}</td>
                   <td class="num">{{ partner.payment_term_days ~ " Tage" if partner.payment_term_days is not none else "–" }}</td>
-                  <td>{{ "aktiv" if partner.is_active else "inaktiv" }}</td>
+                  <td class="num">
+                    {% set count = entry_counts.get(partner.id, 0) %}
+                    {% if count %}<a href="{{ url_for('main.journal_page', company_id=selected_company_id, partner_id=partner.id) }}" title="Buchungen dieses Partners im Journal">{{ count }}</a>{% else %}<span class="muted">0</span>{% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -120,7 +185,7 @@
         </div>
         {{ pagination('main.partners_page', total, limit, offset, selected_company_id, extra=filter_args) }}
       {% else %}
-        <p class="muted">Keine Geschäftspartner gefunden.</p>
+        <p class="empty-state">Keine Geschäftspartner gefunden.</p>
       {% endif %}
     </section>
   {% endif %}

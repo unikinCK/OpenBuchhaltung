@@ -45,46 +45,62 @@
             ('main.audit_log_page', 'Audit'),
           ]),
         ] %}
-        <nav>
+        {% set detail_pages = {
+          'main.journal_entry_detail_page': 'main.journal_page',
+          'main.amend_journal_entry_page': 'main.journal_page',
+          'main.partner_detail_page': 'main.partners_page',
+        } %}
+        {% set current_endpoint = detail_pages.get(request.endpoint, request.endpoint) %}
+        <nav class="mainnav" aria-label="Hauptnavigation">
           <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
+             {% if current_endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
           <a href="{{ url_for('main.chat_page', company_id=selected_company_id) }}"
-             {% if request.endpoint == 'main.chat_page' %}class="active"{% endif %}>KI-Chat</a>
+             {% if current_endpoint == 'main.chat_page' %}class="active"{% endif %}>KI-Chat</a>
           {% for group_label, group_items in nav_groups %}
-            {% set group_active = request.endpoint in (group_items | map('first') | list) %}
+            {% set group_active = current_endpoint in (group_items | map('first') | list) %}
             <div class="nav-group{% if group_active %} active{% endif %}">
-              <button type="button" class="nav-group-label" aria-haspopup="true">{{ group_label }} ▾</button>
+              <button type="button" class="nav-group-label" aria-haspopup="true">{{ group_label }} <span aria-hidden="true">▾</span></button>
               <div class="nav-group-menu">
                 {% for endpoint, label in group_items %}
                   <a href="{{ url_for(endpoint) if endpoint == 'main.audit_log_page' else url_for(endpoint, company_id=selected_company_id) }}"
-                     {% if request.endpoint == endpoint %}class="active"{% endif %}>{{ label }}</a>
+                     {% if current_endpoint == endpoint %}class="active"{% endif %}>{{ label }}</a>
                 {% endfor %}
               </div>
             </div>
           {% endfor %}
         </nav>
-        <div class="user-area">
-          <span>{{ session['user']['username'] }} <span class="badge">{{ session['user']['role'] }}</span></span>
-          <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort</a>
-          <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Apps</a>
-          <form method="post" action="{{ url_for('auth.logout') }}">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-            <button type="submit">Logout</button>
-          </form>
+        <div class="nav-group user-menu">
+          <button type="button" class="nav-group-label" aria-haspopup="true" title="Benutzer {{ session['user']['username'] }} ({{ session['user']['role'] }})">
+            <span class="user-avatar" aria-hidden="true">{{ session['user']['username'][:1] | upper }}</span>
+            <span class="user-name">{{ session['user']['username'] }}</span> <span aria-hidden="true">▾</span>
+          </button>
+          <div class="nav-group-menu">
+            <span class="menu-info">Angemeldet als <strong>{{ session['user']['username'] }}</strong> <span class="badge">{{ session['user']['role'] }}</span></span>
+            <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort ändern</a>
+            <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Verbundene Apps</a>
+            <form method="post" action="{{ url_for('auth.logout') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="menu-button">Logout</button>
+            </form>
+          </div>
         </div>
       {% endif %}
     </header>
 
     {% if session.get('user') and companies is defined and companies %}
       <div class="company-bar">
-        <form method="get" action="{{ request.path }}">
-          <label for="company-select">Gesellschaft:</label>
-          <select id="company-select" name="company_id" data-autosubmit>
-            {% for company in companies %}
-              <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
-            {% endfor %}
-          </select>
-        </form>
+        {% if companies | length > 1 %}
+          <form method="get" action="{{ request.path }}">
+            <label for="company-select">Gesellschaft:</label>
+            <select id="company-select" name="company_id" data-autosubmit>
+              {% for company in companies %}
+                <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        {% else %}
+          <span class="company-name"><span class="muted">Gesellschaft:</span> <strong>{{ companies[0].name }}</strong></span>
+        {% endif %}
       </div>
     {% endif %}
 

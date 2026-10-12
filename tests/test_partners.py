@@ -1050,7 +1050,12 @@ def test_partner_api_journal_exports_and_ui(tmp_path: Path) -> None:
     journal_page = client.get(f"/buchungen?company_id={company_id}").get_data(as_text=True)
     assert 'name="line_partner_id"' in journal_page
     assert 'data-subledger="debtor"' in journal_page
-    assert "Partner 10000 Kunde Nord GmbH" in journal_page
+    # Journal: Partner der Buchung als eigene Spalte (Name und Personenkontonummer).
+    assert 'Kunde Nord GmbH <span class="partner-number">10000</span>' in journal_page
+    filtered = client.get(
+        f"/buchungen?company_id={company_id}&partner_id={partner_id}"
+    ).get_data(as_text=True)
+    assert "AR 2026-17" in filtered and "Barverkauf Kunde Nord" in filtered
     accounts_page = client.get(f"/konten?company_id={company_id}").get_data(as_text=True)
     assert "Debitoren-Sammelkonto" in accounts_page
     assert 'value="receivable"' not in accounts_page
