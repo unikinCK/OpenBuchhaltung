@@ -205,7 +205,7 @@
         <select name="account_id" aria-label="Konto">
           <option value="">Alle Konten</option>
           {% for account in accounts %}
-            <option value="{{ account.id }}" {% if account.id == account_filter %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+            <option value="{{ account.id }}" {% if account.id == account_filter %}selected{% endif %}>{{ account.code }} – {{ account.name }}{% if not account.is_active %} (inaktiv){% endif %}</option>
           {% endfor %}
         </select>
         {% for unit_type, label, units, selected in [
@@ -234,6 +234,9 @@
         <button type="submit" class="secondary">Filtern</button>
         {% if filters_active %}
           <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Zurücksetzen</a>
+        {% endif %}
+        {% if filter_account %}
+          <a href="{{ url_for('main.account_detail_page', account_id=filter_account.id) }}">Kontoblatt {{ filter_account.code }} →</a>
         {% endif %}
       </form>
 

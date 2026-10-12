@@ -8,6 +8,20 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Kontoblatt: Buchungen je Konto
+- Neu: Kontoblatt unter `/konten/<id>` – Klick auf ein Konto im Kontenplan, im Journal
+  (Buchungssatz), auf der Buchungsdetailseite, in Summen-/Saldenliste, GuV und Bilanz,
+  auf der Bankseite, in OPOS, Controlling und der Kontenrahmen-Prüfung öffnet die
+  Buchungszeilen des Kontos mit Anfangssaldo, Gegenkonten, Steuercode, Geschäftspartner
+  und laufendem Saldo (S/H). Standard ist das laufende Geschäftsjahr; wählbar sind jedes
+  Geschäftsjahr, der gesamte Zeitraum oder Von/Bis. Saldovorträge erscheinen nicht als
+  Zeile, sondern als Anfangssaldo; Erfolgskonten beginnen je Geschäftsjahr bei null.
+  Kontobearbeitung und Änderungshistorie sind auf der Seite enthalten.
+- Neu: `GET /api/v1/accounts/<id>/ledger` (`fiscal_year_id`, `date_from`, `date_to`,
+  `limit` bis 1000, `offset`) und MCP-Tool `get_account_ledger`.
+- Geändert: Summen-/Saldenliste, GuV und Bilanz liefern je Zeile `account_id` (API, MCP)
+  als Sprungziel fürs Kontoblatt.
+
 ### Buchungen zu Kostenstellen und Profitcentern finden
 - Neu: Journalfilter nach Konto, Kostenstelle und Profitcenter in der Buchungsliste,
   `GET /api/v1/journal-entries` (`account_id`, `cost_center_id`, `profit_center_id`)

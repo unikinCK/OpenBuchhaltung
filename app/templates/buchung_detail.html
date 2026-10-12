@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_journal.html" import partner_chips, entry_status %}
+{% from "_journal.html" import partner_chips, entry_status, account_link %}
 
 {% block title %}Buchung {{ entry.posting_number }} – OpenBuchhaltung{% endblock %}
 
@@ -104,7 +104,7 @@
             <tr>
               <td class="muted">{{ line.line_number }}</td>
               <td>
-                <strong>{{ line.account_code }}</strong> {{ line.account_name }}
+                {{ account_link(line.account_id, line.account_code, line.account_name) }}
                 {% if line.subledger %}<br /><span class="muted small">{{ "Debitoren" if line.subledger == "debtor" else "Kreditoren" }}-Sammelkonto (Nebenbuch)</span>{% endif %}
                 {% if line.cost_center_code or line.profit_center_code %}<br /><span class="muted small">{% if line.cost_center_code %}KST {{ line.cost_center_code }}{% endif %}{% if line.cost_center_code and line.profit_center_code %} · {% endif %}{% if line.profit_center_code %}PC {{ line.profit_center_code }}{% endif %}</span>{% endif %}
               </td>

@@ -34,6 +34,7 @@ EXPECTED_TOOL_NAMES = {
     "check_account_chart",
     "list_accounts",
     "get_account_history",
+    "get_account_ledger",
     "create_controlling_unit",
     "list_controlling_units",
     "update_controlling_unit",
@@ -369,6 +370,24 @@ def test_account_update_and_history_tools_forward_arguments() -> None:
         "GET",
         "/accounts/9/history",
         {"limit": 25},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 333,
+            "method": "tools/call",
+            "params": {
+                "name": "get_account_ledger",
+                "arguments": {"account_id": 9, "fiscal_year_id": 3, "offset": 200},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/accounts/9/ledger",
+        {"fiscal_year_id": 3, "offset": 200},
         None,
     )
 

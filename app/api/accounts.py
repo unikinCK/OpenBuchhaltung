@@ -7,12 +7,20 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.blueprint import api_bp
 from app.api.helpers import (
+    DateArgError,
     api_can_write,
     api_scoped_company,
+    date_arg,
     forbidden,
     get_session_factory,
 )
 from app.auth import current_api_user
+from app.services.account_ledger import (
+    DEFAULT_LEDGER_LIMIT,
+    AccountLedgerError,
+    account_ledger,
+    serialize_account_ledger,
+)
 from app.services.accounts import (
     AccountUpdateError,
     account_history,
@@ -140,6 +148,40 @@ def get_account_history(account_id: int):
             ),
             200,
         )
+
+
+@api_bp.get("/accounts/<int:account_id>/ledger")
+def get_account_ledger(account_id: int):
+    """Kontoblatt: Buchungszeilen des Kontos mit Anfangs- und laufendem Saldo."""
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    fiscal_year_id = request.args.get("fiscal_year_id", type=int)
+    limit = request.args.get("limit", default=DEFAULT_LEDGER_LIMIT, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    if limit is None or offset is None:
+        return jsonify({"error": "limit and offset must be integers."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        account = session.get(Account, account_id)
+        if account is None or api_scoped_company(session, account.company_id) is None:
+            return jsonify({"error": "Account not found."}), 404
+        try:
+            ledger = account_ledger(
+                session=session,
+                account=account,
+                date_from=date_from,
+                date_to=date_to,
+                fiscal_year_id=fiscal_year_id,
+                limit=limit,
+                offset=offset,
+            )
+        except AccountLedgerError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(serialize_account_ledger(ledger)), 200
 
 
 @api_bp.get("/accounts")

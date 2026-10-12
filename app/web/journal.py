@@ -293,6 +293,7 @@ def journal_page():
         due_template_ids: set[int] = set()
         overview: dict[int, dict] = {}
         filter_partner = None
+        filter_account = None
         filter_units: dict[str, ControllingUnit | None] = {
             "cost_center": None,
             "profit_center": None,
@@ -335,6 +336,7 @@ def journal_page():
             if account_filter:
                 filter_account = session.get(Account, account_filter)
                 if filter_account is None or filter_account.company_id != selected_company_id:
+                    filter_account = None
                     account_filter = None
             for unit_type, value in unit_filters.items():
                 if isinstance(value, int):
@@ -408,6 +410,7 @@ def journal_page():
         partner_filter=partner_filter,
         filter_partner=filter_partner,
         account_filter=account_filter,
+        filter_account=filter_account,
         cost_center_filter=unit_filters["cost_center"],
         profit_center_filter=unit_filters["profit_center"],
         filter_units=filter_units,

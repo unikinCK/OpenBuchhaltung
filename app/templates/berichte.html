@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% from "_journal.html" import account_link %}
+
 {% block title %}Berichte – OpenBuchhaltung{% endblock %}
 
 {% block content %}
@@ -10,6 +12,9 @@
       <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
     </section>
   {% else %}
+    {# Kontoblatt passend zum Auswertungszeitraum; ohne Daten wie die SuSa über alle Jahre. #}
+    {% set period_ledger_args = {"date_from": date_from.isoformat(), "date_to": date_to.isoformat() if date_to else none} if date_from else ({"date_to": date_to.isoformat(), "fiscal_year_id": "alle"} if date_to else {"fiscal_year_id": "alle"}) %}
+    {% set as_of_ledger_args = {"date_to": date_to.isoformat(), "fiscal_year_id": "alle"} if date_to else {"fiscal_year_id": "alle"} %}
     <section class="card">
       <h2>Auswertungszeitraum</h2>
       <form method="get" action="{{ url_for('main.reports_page') }}" class="inline-form">
@@ -50,8 +55,8 @@
           <tbody>
             {% for row in trial_balance %}
               <tr>
-                <td>{{ row.code }}</td>
-                <td>{{ row.name }}</td>
+                <td>{{ account_link(row.account_id, row.code, none, period_ledger_args) }}</td>
+                <td><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=row.account_id, **period_ledger_args) }}">{{ row.name }}</a></td>
                 <td class="num">{{ row.debit_total | betrag }}</td>
                 <td class="num">{{ row.credit_total | betrag }}</td>
                 <td class="num{% if row.balance < 0 %} negative{% endif %}">{{ row.balance | betrag }}</td>
@@ -108,11 +113,11 @@
           </thead>
           <tbody>
             {% for row in income_statement.revenues %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, period_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
             <tr><td><strong>Umsätze</strong></td><td class="num"><strong>{{ income_statement.totals.total_revenue | betrag }}</strong></td></tr>
             {% for row in income_statement.expenses %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">−{{ row.amount | betrag }}</td></tr>
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, period_ledger_args) }}</td><td class="num">−{{ row.amount | betrag }}</td></tr>
             {% endfor %}
             <tr><td><strong>Aufwendungen</strong></td><td class="num"><strong>−{{ income_statement.totals.total_expense | betrag }}</strong></td></tr>
             <tr><td><strong>Jahresergebnis</strong></td><td class="num"><strong{% if income_statement.totals.net_income < 0 %} class="negative"{% endif %}>{{ income_statement.totals.net_income | betrag }}</strong></td></tr>
@@ -128,7 +133,7 @@
           </thead>
           <tbody>
             {% for row in balance_sheet.assets %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
             <tr><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets | betrag }}</strong></td></tr>
           </tbody>
@@ -140,7 +145,7 @@
           </thead>
           <tbody>
             {% for row in balance_sheet.liabilities_and_equity %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
             <tr><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity | betrag }}</strong></td></tr>
           </tbody>

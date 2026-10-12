@@ -96,7 +96,7 @@
                   <td class="num"><strong>{{ bucket.net_income }}</strong></td>
                 </tr>
                 {% for account in bucket.accounts %}
-                  <tr class="entry-lines"><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
+                  <tr class="entry-lines"><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
                 {% endfor %}
               {% endfor %}
             </tbody>

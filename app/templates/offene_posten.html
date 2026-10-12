@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_pagination.html" import pagination %}
+{% from "_journal.html" import account_link %}
 {% from "_filters.html" import filter_form %}
 
 {% block title %}Offene Posten – OpenBuchhaltung{% endblock %}
@@ -147,7 +148,7 @@
                 </td>
                 <td>{% if item.item_type == "receivable" %}<span class="badge badge-info">Debitor</span>{% else %}<span class="badge badge-warning">Kreditor</span>{% endif %}</td>
                 <td>{{ item.counterparty or "–" }}</td>
-                <td class="nowrap" title="{{ item.account.name }}">{{ item.account.code }}</td>
+                <td class="nowrap" title="{{ item.account.name }}">{{ account_link(item.account.id, item.account.code) }}</td>
                 <td class="date">
                   {% if item.due_date %}
                     {% if overdue %}<strong class="negative" title="überfällig">{{ item.due_date | datum }}</strong>{% else %}{{ item.due_date | datum }}{% endif %}

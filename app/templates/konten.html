@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% from "_journal.html" import audit_changes %}
+{% from "_journal.html" import audit_changes, account_link %}
 
 {% block title %}Konten – OpenBuchhaltung{% endblock %}
 
@@ -22,7 +22,7 @@
 
   {% macro skr03_target(row) -%}
     {% if row.skr03_status == "occupied" %}
-      belegt durch {{ row.skr03_account.code }} – {{ row.skr03_account.name }}
+      belegt durch {{ account_link(row.skr03_account.account_id, row.skr03_account.code, row.skr03_account.name) }}
     {% elif row.skr03_status == "present" %}
       vorhanden{% if row.skr03_account.name != row.skr03_name %} ({{ row.skr03_account.name }}){% endif %}
     {% else %}
@@ -68,7 +68,7 @@
           <tbody>
             {% for row in chart_check.legacy_skr04_accounts %}
               <tr>
-                <td>{{ row.code }} – {{ row.name }}</td>
+                <td>{{ account_link(row.account_id, row.code, row.name) }}</td>
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
@@ -76,7 +76,7 @@
                 <td>{{ row.skr04_code }} – {{ row.skr04_name }}</td>
                 <td>
                   {% if row.skr04_status == "occupied" %}
-                    belegt durch Altkonto {{ row.skr04_account.code }} – {{ row.skr04_account.name }}
+                    belegt durch Altkonto {{ account_link(row.skr04_account.account_id, row.skr04_account.code, row.skr04_account.name) }}
                   {% elif row.skr04_status == "present" %}
                     vorhanden{% if row.skr04_account.name != row.skr04_name %} ({{ row.skr04_account.name }}){% endif %}
                   {% else %}
@@ -112,7 +112,7 @@
             {% for row in chart_check.foreign_skr04_accounts %}
               <tr>
                 <td>
-                  {{ row.code }} – {{ row.name }}
+                  {{ account_link(row.account_id, row.code, row.name) }}
                   <br /><span class="muted">im SKR03: {{ row.skr03_meaning or "nicht vergeben" }}</span>
                   {% if row.tax_codes %}<br /><strong class="negative">Steuerkonto der Steuercodes {{ row.tax_codes|join(", ") }}</strong>{% endif %}
                 </td>
@@ -153,7 +153,7 @@
             {% for row in chart_check.nonstandard_skr03_accounts %}
               <tr>
                 <td>
-                  {{ row.code }} – {{ row.name }}
+                  {{ account_link(row.account_id, row.code, row.name) }}
                   <br /><span class="muted">im SKR03: {{ row.skr03_meaning }}</span>
                 </td>
                 <td><span class="badge">{{ row.account_type }}</span></td>
@@ -188,7 +188,7 @@
           <tbody>
             {% for row in chart_check.unknown_account_types %}
               <tr>
-                <td>{{ row.code }} – {{ row.name }}</td>
+                <td>{{ account_link(row.account_id, row.code, row.name) }}</td>
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
@@ -313,8 +313,8 @@
             <tbody>
               {% for account in accounts %}
                 <tr{% if not account.is_active %} class="row-muted"{% endif %}>
-                  <td class="nowrap"><strong>{{ account.code }}</strong></td>
-                  <td>{{ account.name }}</td>
+                  <td class="nowrap"><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account.id) }}" title="Kontoblatt {{ account.code }}"><span class="account-code">{{ account.code }}</span></a></td>
+                  <td><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account.id) }}" title="Kontoblatt {{ account.code }}">{{ account.name }}</a></td>
                   <td class="nowrap">
                     <span class="badge" title="{{ account.account_type }}">{{ type_labels.get(account.account_type, account.account_type) }}</span>
                     {% if account.account_type not in valid_account_types %}<br /><strong class="negative">ungültig – fällt aus allen Berichten</strong>{% endif %}

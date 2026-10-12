@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% from "_journal.html" import audit_changes, partner_chips, account_link, saldo %}
+{% from "_pagination.html" import pagination %}
+
+{% block title %}{{ account.code }} {{ account.name }} – Kontoblatt – OpenBuchhaltung{% endblock %}
+
+{% set type_labels = {"asset": "Aktiva", "liability": "Passiva", "equity": "Eigenkapital", "income": "Ertrag", "expense": "Aufwand"} %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.accounts_page', company_id=account.company_id) }}">‹ Kontenplan</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title"><span class="account-code">{{ account.code }}</span> {{ account.name }}</h1>
+      <p class="page-subtitle">
+        <span class="badge" title="{{ account.account_type }}">{{ type_labels.get(account.account_type, account.account_type) }}</span>
+        {% if account.subledger %}<span class="badge badge-info">{{ "Debitoren" if account.subledger == "debtor" else "Kreditoren" }}-Sammelkonto</span>{% endif %}
+        {% if not account.is_active %}<span class="badge">inaktiv</span>{% endif %}
+        <span class="muted">{{ posting_count }} {{ "Buchungszeile" if posting_count == 1 else "Buchungszeilen" }} insgesamt</span>
+      </p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary btn-sm" href="#stammdaten" data-open-details="#stammdaten">Konto bearbeiten</a>
+      <a class="button btn-sm" href="{{ url_for('main.journal_page', company_id=account.company_id, account_id=account.id, date_from=ledger.period.date_from.isoformat() if ledger.period.date_from else none, date_to=ledger.period.date_to.isoformat() if ledger.period.date_to else none) }}">Buchungen im Journal</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <form method="get" action="{{ url_for('main.account_detail_page', account_id=account.id) }}" class="filter-bar">
+      <select name="fiscal_year_id" aria-label="Geschäftsjahr">
+        {% for fiscal_year in fiscal_years %}
+          <option value="{{ fiscal_year.id }}" {% if fiscal_year.id == fiscal_year_id %}selected{% endif %}>Geschäftsjahr {{ fiscal_year.label }}</option>
+        {% endfor %}
+        <option value="{{ all_fiscal_years }}" {% if not fiscal_year_id and not (explicit_date_from or explicit_date_to) %}selected{% endif %}>Gesamter Zeitraum</option>
+        <option value="" {% if not fiscal_year_id and (explicit_date_from or explicit_date_to) %}selected{% endif %}>Eigener Zeitraum (Von/Bis)</option>
+      </select>
+      <input type="date" name="date_from" value="{{ explicit_date_from.isoformat() if explicit_date_from else '' }}" aria-label="Von-Datum" title="Von" />
+      <input type="date" name="date_to" value="{{ explicit_date_to.isoformat() if explicit_date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+      <button type="submit" class="secondary">Anzeigen</button>
+    </form>
+
+    <dl class="meta-grid">
+      <div>
+        <dt>Zeitraum</dt>
+        <dd>
+          {% if ledger.period.date_from or ledger.period.date_to %}
+            {{ ledger.period.date_from | datum if ledger.period.date_from else "Beginn" }} – {{ ledger.period.date_to | datum if ledger.period.date_to else "heute" }}
+          {% else %}gesamter Zeitraum{% endif %}
+          {% if ledger.period.fiscal_year %}<br /><span class="muted small">Geschäftsjahr {{ ledger.period.fiscal_year }}</span>{% endif %}
+        </dd>
+      </div>
+      <div><dt>Anfangssaldo</dt><dd>{{ saldo(ledger.opening_balance) }}</dd></div>
+      <div><dt>Soll / Haben</dt><dd>{{ ledger.totals.debit_total | betrag }} / {{ ledger.totals.credit_total | betrag }}</dd></div>
+      <div><dt>Endsaldo</dt><dd><strong>{{ saldo(ledger.totals.closing_balance) }}</strong></dd></div>
+    </dl>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Kontoblatt <span class="count">{{ ledger.total_lines }}</span></h2>
+    </div>
+    {% if ledger.lines or ledger.opening_balance %}
+      <div class="table-scroll">
+        <table class="data ledger-table">
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Beleg-Nr.</th>
+              <th>Buchungstext</th>
+              <th>Gegenkonto</th>
+              <th class="num">Soll</th>
+              <th class="num">Haben</th>
+              <th class="num">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if offset == 0 and ledger.period.date_from %}
+              <tr class="row-muted">
+                <td class="date">{{ ledger.period.date_from | datum }}</td>
+                <td></td>
+                <td>Anfangssaldo{% if account.account_type in ("asset", "liability", "equity") %} (Saldovortrag){% endif %}</td>
+                <td></td>
+                <td class="num"></td>
+                <td class="num"></td>
+                <td class="num nowrap">{{ saldo(ledger.opening_balance) }}</td>
+              </tr>
+            {% endif %}
+            {% for line in ledger.lines %}
+              <tr>
+                <td class="date">{{ line.entry_date | datum }}</td>
+                <td class="nowrap">
+                  <a class="posting-number" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=line.journal_entry_id) }}">{{ line.posting_number }}</a>
+                  {% if line.is_finalized %}<span class="status-icon" title="Festgeschrieben">🔒</span>{% endif %}
+                </td>
+                <td class="entry-text">
+                  {{ line.description }}
+                  {% if line.line_description and line.line_description != line.description %}<br /><span class="muted small">{{ line.line_description }}</span>{% endif %}
+                  {% if line.tax_code or line.cost_center_code or line.profit_center_code %}
+                    <br /><span class="muted small">{{ [line.tax_code, ("KST " ~ line.cost_center_code) if line.cost_center_code, ("PC " ~ line.profit_center_code) if line.profit_center_code] | select | join(" · ") }}</span>
+                  {% endif %}
+                  {% if line.partner %}{{ partner_chips([line.partner]) }}{% endif %}
+                </td>
+                <td class="col-contra">
+                  {% for contra in line.contra_accounts[:3] %}
+                    {{ account_link(contra.account_id, contra.code, contra.name) }}{% if not loop.last %}<br />{% endif %}
+                  {% else %}<span class="muted">–</span>{% endfor %}
+                  {% if line.contra_accounts | length > 3 %}<br /><span class="muted small">+ {{ line.contra_accounts | length - 3 }} weitere</span>{% endif %}
+                </td>
+                <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount | betrag }}{% endif %}</td>
+                <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount | betrag }}{% endif %}</td>
+                <td class="num nowrap">{{ saldo(line.balance) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Summe Zeitraum</td>
+              <td class="num">{{ ledger.totals.debit_total | betrag }}</td>
+              <td class="num">{{ ledger.totals.credit_total | betrag }}</td>
+              <td class="num nowrap">{{ saldo(ledger.totals.closing_balance) }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {{ pagination('main.account_detail_page', ledger.total_lines, limit, offset, account.company_id, dict(filter_args, account_id=account.id), prev_label='‹ Frühere', next_label='Spätere ›') }}
+      <p class="hint">Saldo = Soll minus Haben (S = Sollsaldo, H = Habensaldo). Saldovorträge stecken im Anfangssaldo; Erfolgskonten beginnen je Geschäftsjahr bei null.</p>
+    {% else %}
+      <p class="empty-state">Keine Buchungen auf diesem Konto im gewählten Zeitraum.</p>
+    {% endif %}
+  </section>
+
+  <details class="card" id="stammdaten">
+    <summary>Konto bearbeiten</summary>
+    <form method="post" action="{{ url_for('main.update_account', account_id=account.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="next" value="detail" />
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="account-name">Kontobezeichnung</label>
+          <input id="account-name" name="name" value="{{ account.name }}" required />
+        </div>
+        <div class="field">
+          <label for="account-active">Status</label>
+          <select id="account-active" name="is_active">
+            <option value="true" {% if account.is_active %}selected{% endif %}>aktiv</option>
+            <option value="false" {% if not account.is_active %}selected{% endif %}>inaktiv</option>
+          </select>
+        </div>
+        {% if account.account_type in ("asset", "liability") %}
+          <div class="field">
+            <label for="account-subledger">Sammelkonto</label>
+            <select id="account-subledger" name="subledger">
+              <option value="">kein Sammelkonto</option>
+              {% if account.account_type == "asset" %}<option value="debtor" {% if account.subledger == "debtor" %}selected{% endif %}>Debitoren</option>{% endif %}
+              {% if account.account_type == "liability" %}<option value="creditor" {% if account.subledger == "creditor" %}selected{% endif %}>Kreditoren</option>{% endif %}
+            </select>
+          </div>
+        {% endif %}
+        {% if account.account_type not in valid_account_types %}
+          <div class="field">
+            <label for="account-type">Kontotyp korrigieren</label>
+            <select id="account-type" name="account_type">
+              <option value="">Kontotyp korrigieren …</option>
+              {% for account_type in valid_account_types %}<option value="{{ account_type }}">{{ account_type }}</option>{% endfor %}
+            </select>
+          </div>
+        {% endif %}
+      </div>
+      <div class="form-actions">
+        <button type="submit">Speichern</button>
+      </div>
+    </form>
+  </details>
+
+  <details class="card" id="historie">
+    <summary>Änderungshistorie <span class="summary-hint">{{ history | length }} Einträge</span></summary>
+    {% if history %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th><th>Änderungen</th></tr></thead>
+          <tbody>
+            {% for event in history %}
+              <tr>
+                <td class="datetime">{{ event.changed_at | datum_zeit }}</td>
+                <td><span class="badge" title="{{ event.action }}">{{ {"created": "angelegt", "updated": "geändert"}.get(event.action, event.action) }}</span></td>
+                <td>{{ event.changed_by }}</td>
+                <td>{{ audit_changes(event.payload, {"name": "Bezeichnung", "is_active": "aktiv", "subledger": "Sammelkonto", "account_type": "Kontoart", "code": "Nummer"}) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Noch keine protokollierten Änderungen.</p>
+    {% endif %}
+  </details>
+{% endblock %}
