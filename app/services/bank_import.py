@@ -991,8 +991,13 @@ def book_transaction(
     description: str | None = None,
     cost_center_id: int | None = None,
     profit_center_id: int | None = None,
+    partner_id: int | None = None,
 ) -> BankTransaction:
-    """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto)."""
+    """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto).
+
+    ``partner_id`` ist der Geschäftspartner der Buchung: Er steht auf Bank- und
+    Gegenkontozeile, nicht auf der Steuerzeile (``apply_entry_partner``).
+    """
     transaction = session.get(BankTransaction, transaction_id)
     if transaction is None:
         raise BankImportError("Bankumsatz nicht gefunden.")
@@ -1074,6 +1079,7 @@ def book_transaction(
             changed_by=changed_by,
             lines=lines,
             expand_tax_lines=False,
+            partner_id=partner_id,
         ),
         commit=False,
     )
@@ -1094,6 +1100,7 @@ def book_transaction(
             "posting_number": entry.posting_number,
             "cost_center_id": cost_center_id,
             "profit_center_id": profit_center_id,
+            "partner_id": partner_id,
         },
     )
     session.commit()

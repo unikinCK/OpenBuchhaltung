@@ -21,7 +21,8 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
-from domain.models import Account, BusinessPartner, Company, JournalEntry, JournalTemplate
+from app.services.partners import PartnerError, validate_partner_assignment
+from domain.models import Account, Company, JournalEntry, JournalTemplate
 
 INTERVALS = ("on_demand", "monthly", "quarterly", "yearly")
 _INTERVAL_MONTHS = {"monthly": 1, "quarterly": 3, "yearly": 12}
@@ -77,13 +78,16 @@ def _normalized_lines(session: Session, company: Company, raw_lines: list) -> li
             if value not in (None, "", 0):
                 line[optional] = int(value)
         if "partner_id" in line:
-            partner = session.get(BusinessPartner, line["partner_id"])
-            if partner is None or partner.company_id != company.id:
-                raise JournalTemplateError(f"Zeile {index}: Geschäftspartner nicht gefunden.")
-            if account.subledger is None:
-                raise JournalTemplateError(
-                    f"Zeile {index}: Ein Geschäftspartner ist nur auf Sammelkonten zulässig."
+            try:
+                validate_partner_assignment(
+                    session=session,
+                    company_id=company.id,
+                    partner_id=line["partner_id"],
+                    account=account,
+                    allow_inactive=True,
                 )
+            except PartnerError as exc:
+                raise JournalTemplateError(f"Zeile {index}: {exc}") from exc
         if raw.get("description"):
             line["description"] = str(raw["description"])[:255]
         lines.append(line)

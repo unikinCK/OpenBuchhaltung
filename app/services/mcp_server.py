@@ -878,7 +878,10 @@ TOOLS: list[ToolSpec] = [
             "Erfasst eine Buchung mit mindestens zwei Zeilen. Soll- und Haben-Summe "
             "müssen ausgeglichen sein. Das Konto je Zeile wird entweder über die interne "
             "'account_id' ODER über die Kontonummer 'account_code' (z. B. '1200') angegeben "
-            "– die Kontonummer wird serverseitig zur ID aufgelöst."
+            "– die Kontonummer wird serverseitig zur ID aufgelöst. 'partner_id' bzw. "
+            "'partner_number' auf oberster Ebene setzt den Geschäftspartner der Buchung "
+            "(z. B. den Lieferanten bei 'Aufwand an Bank') auf alle Zeilen ohne eigenen "
+            "Partner außer Steuerzeilen."
         ),
         input_schema={
             "type": "object",
@@ -901,6 +904,20 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Buchungsstatus, Standard 'posted'.",
                     "default": "posted",
+                },
+                "partner_id": {
+                    "type": "integer",
+                    "description": (
+                        "Optionaler Geschäftspartner der Buchung (siehe list_partners); "
+                        "gilt für alle Zeilen ohne eigenen Partner außer Steuerzeilen."
+                    ),
+                },
+                "partner_number": {
+                    "type": "string",
+                    "description": (
+                        "Alternativ zu partner_id: Debitoren-/Kreditorennummer des "
+                        "Geschäftspartners der Buchung."
+                    ),
                 },
                 "lines": {
                     "type": "array",
@@ -942,8 +959,9 @@ TOOLS: list[ToolSpec] = [
                             "partner_id": {
                                 "type": "integer",
                                 "description": (
-                                    "Optionaler Geschäftspartner (nur auf Debitoren-/"
-                                    "Kreditoren-Sammelkonten)."
+                                    "Optionaler Geschäftspartner der Zeile. Auf Debitoren-/"
+                                    "Kreditoren-Sammelkonten (Nebenbuch) muss die Rolle "
+                                    "passen, auf anderen Konten ist er Partnerbezug."
                                 ),
                             },
                             "partner_number": {
@@ -974,10 +992,12 @@ TOOLS: list[ToolSpec] = [
         name="amend_journal_entry",
         description=(
             "Ergänzt eine offene (nicht festgeschriebene) Buchung: Leistungsdatum setzen "
-            "oder entfernen und Geschäftspartner auf Debitoren-/Kreditoren-Sammelkonto-"
-            "Zeilen zuordnen. Beträge, Konten und Datum bleiben unverändert; jede Änderung "
-            "wird mit altem und neuem Wert protokolliert. Festgeschriebene und stornierte "
-            "Buchungen nur per Storno und Neubuchung korrigieren."
+            "oder entfernen und Geschäftspartner zuordnen – für die ganze Buchung per "
+            "'partner_id'/'partner_number' (alle Zeilen außer Steuerzeilen, null entfernt "
+            "ihn) oder je Zeile über 'lines'. Auf Debitoren-/Kreditoren-Sammelkonten muss "
+            "die Rolle des Partners passen. Beträge, Konten und Datum bleiben unverändert; "
+            "jede Änderung wird mit altem und neuem Wert protokolliert. Festgeschriebene und "
+            "stornierte Buchungen nur per Storno und Neubuchung korrigieren."
         ),
         input_schema={
             "type": "object",
@@ -988,6 +1008,21 @@ TOOLS: list[ToolSpec] = [
                     "description": (
                         "Leistungsdatum JJJJ-MM-TT; null entfernt es, weglassen lässt es "
                         "unverändert."
+                    ),
+                },
+                "partner_id": {
+                    "type": ["integer", "null"],
+                    "description": (
+                        "Geschäftspartner der Buchung für alle Zeilen außer Steuerzeilen "
+                        "(Zeilen aus 'lines' ausgenommen); null entfernt ihn, weglassen "
+                        "lässt die Zuordnung unverändert."
+                    ),
+                },
+                "partner_number": {
+                    "type": "string",
+                    "description": (
+                        "Alternativ zu partner_id: Debitoren-/Kreditorennummer des "
+                        "Geschäftspartners der Buchung."
                     ),
                 },
                 "lines": {
@@ -1023,8 +1058,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="list_journal_entries",
         description=(
-            "Listet Buchungen einer Gesellschaft samt Buchungszeilen. Optional nach "
-            "date_from/date_to, source, is_finalized und limit filtern."
+            "Listet Buchungen einer Gesellschaft samt Buchungszeilen und den "
+            "Geschäftspartnern je Buchung ('partners'). Optional nach date_from/date_to, "
+            "q, source, is_finalized, partner_id und limit filtern."
         ),
         input_schema={
             "type": "object",
@@ -1049,6 +1085,10 @@ TOOLS: list[ToolSpec] = [
                 "is_finalized": {
                     "type": "boolean",
                     "description": "Nur festgeschriebene bzw. offene Buchungen.",
+                },
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Nur Buchungen mit diesem Geschäftspartner (auf einer Zeile).",
                 },
                 "limit": {
                     "type": "integer",
@@ -2272,7 +2312,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="book_bank_transaction",
-        description="Verbucht einen offenen Bankumsatz gegen ein Gegenkonto.",
+        description=(
+            "Verbucht einen offenen Bankumsatz gegen ein Gegenkonto, optional mit dem "
+            "Geschäftspartner der Buchung (Bank- und Gegenkontozeile)."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -2287,6 +2330,18 @@ TOOLS: list[ToolSpec] = [
                 "profit_center_id": {
                     "type": "integer",
                     "description": "Optionales Profitcenter des Gegenkontos.",
+                },
+                "partner_id": {
+                    "type": "integer",
+                    "description": (
+                        "Optionaler Geschäftspartner der Buchung (z. B. der Lieferant einer "
+                        "Kartenzahlung); bei einem Sammelkonto als Gegenkonto muss die Rolle "
+                        "passen."
+                    ),
+                },
+                "partner_number": {
+                    "type": "string",
+                    "description": "Alternativ zu partner_id: Debitoren-/Kreditorennummer.",
                 },
             },
             "required": ["transaction_id", "contra_account_id"],

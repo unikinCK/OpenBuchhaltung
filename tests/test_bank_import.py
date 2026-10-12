@@ -27,6 +27,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.partners import create_partner
 from app.services.tax_codes import ensure_default_tax_codes
 from domain.models import (
     Account,
@@ -793,6 +794,54 @@ def test_book_transaction_with_tax_code_splits_gross(session: Session) -> None:
     assert all(line.profit_center_id == profit_center.id for line in lines[1:])
 
 
+def test_book_transaction_with_partner_skips_tax_line(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    ensure_default_tax_codes(session=session, company=company)
+    landlord = create_partner(
+        session=session, company=company, changed_by="t", name="Vermieter GmbH", is_supplier=True
+    )
+    session.commit()
+    vst19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "VSt19")
+    ).scalar_one()
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+
+    booked = book_transaction(
+        session=session,
+        transaction_id=outgoing.id,
+        contra_account_id=rent.id,
+        tax_code_id=vst19.id,
+        partner_id=landlord.id,
+        changed_by="tester",
+    )
+
+    lines = session.execute(
+        select(JournalEntryLine)
+        .where(JournalEntryLine.journal_entry_id == booked.journal_entry_id)
+        .order_by(JournalEntryLine.line_number)
+    ).scalars().all()
+    assert [(line.account_id, line.partner_id) for line in lines] == [
+        (bank.id, landlord.id),
+        (rent.id, landlord.id),
+        (vst19.vat_account_id, None),
+    ]
+    audit = session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "bank_transaction", AuditLog.action == "booked"
+        )
+    ).scalar_one()
+    assert audit.payload["partner_id"] == landlord.id
+
+
 def test_net_from_gross_edge_cases() -> None:
     assert net_from_gross(Decimal("119.00"), Decimal("19.00")) == (
         Decimal("100.00"),
@@ -1041,14 +1090,34 @@ def test_bank_api_import_list_match_and_book_flow(tmp_path):
     assert match_response.status_code == 200
     assert match_response.get_json()["status"] == "matched"
 
+    landlord = client.post(
+        "/api/v1/partners",
+        json={"company_id": 1, "name": "Vermieter GmbH", "is_supplier": True},
+    ).get_json()
+    unknown_partner = client.post(
+        f"/api/v1/bank-transactions/{outgoing['id']}/book",
+        json={"contra_account_id": rent_id, "partner_number": "79999"},
+    )
+    assert unknown_partner.status_code == 422
     book_response = client.post(
         f"/api/v1/bank-transactions/{outgoing['id']}/book",
-        json={"contra_account_id": rent_id, "description": "Miete Juli"},
+        json={
+            "contra_account_id": rent_id,
+            "description": "Miete Juli",
+            "partner_number": landlord["creditor_number"],
+        },
     )
     assert book_response.status_code == 201
     booked = book_response.get_json()
     assert booked["status"] == "booked"
     assert booked["journal_entry_id"] is not None
+    # Der Partner der Buchung steht auf Bank- und Gegenkontozeile.
+    entries = client.get(
+        "/api/v1/journal-entries",
+        query_string={"company_id": 1, "partner_id": landlord["id"]},
+    ).get_json()["entries"]
+    assert [entry["id"] for entry in entries] == [booked["journal_entry_id"]]
+    assert {line["partner_id"] for line in entries[0]["lines"]} == {landlord["id"]}
 
 
 def test_bank_transaction_reassign_via_api(tmp_path):

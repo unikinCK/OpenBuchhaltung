@@ -53,6 +53,7 @@ from domain.models import (
     FiscalYear,
     JournalEntry,
     JournalEntryLine,
+    TaxCode,
     Tenant,
     User,
 )
@@ -297,27 +298,33 @@ def test_partner_only_on_matching_collective_account(session: Session) -> None:
         _sale(session, company, accounts, amount="5.00", partner_number="19999")
     session.rollback()
 
-    with pytest.raises(JournalEntryCreationError, match="kein Debitoren-/Kreditoren-Sammelkonto"):
-        create_journal_entry(
-            session=session,
-            payload=JournalEntryInput(
-                company_id=company.id,
-                entry_date=date(2026, 3, 1),
-                description="Partner auf Erlöskonto",
-                status="posted",
-                changed_by="t",
-                lines=[
-                    JournalLineInput(accounts["1200"].id, Decimal("5.00"), Decimal("0.00")),
-                    JournalLineInput(
-                        accounts["8400"].id,
-                        Decimal("0.00"),
-                        Decimal("5.00"),
-                        partner_id=customer.id,
-                    ),
-                ],
-            ),
-        )
-    session.rollback()
+    # Außerhalb der Sammelkonten ist der Partner Partnerbezug ohne Rollenbindung
+    # (ADR-002, Nachtrag 2026-10-12): z. B. ein Lieferant auf „Aufwand an Bank“.
+    direct = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 3, 1),
+            description="Kartenzahlung Lieferant",
+            status="posted",
+            changed_by="t",
+            lines=[
+                JournalLineInput(
+                    accounts["4200"].id,
+                    Decimal("5.00"),
+                    Decimal("0.00"),
+                    partner_id=supplier.id,
+                ),
+                JournalLineInput(
+                    accounts["1200"].id,
+                    Decimal("0.00"),
+                    Decimal("5.00"),
+                    partner_id=customer.id,
+                ),
+            ],
+        ),
+    )
+    assert {line.partner_id for line in direct.lines} == {supplier.id, customer.id}
 
     other_company, _ = _seed(session, name="Fremd GmbH")
     foreign = create_partner(
@@ -525,6 +532,7 @@ def test_year_end_carryforward_keeps_partner_balances(session: Session) -> None:
     session.commit()
     _sale(session, company, accounts, amount="119.00", partner_id=first.id)
     _sale(session, company, accounts, amount="238.00", partner_id=second.id)
+    # Partner der Buchung: auch die Bankzeile trägt ihn (Partnerbezug).
     create_journal_entry(
         session=session,
         payload=JournalEntryInput(
@@ -535,13 +543,9 @@ def test_year_end_carryforward_keeps_partner_balances(session: Session) -> None:
             changed_by="t",
             lines=[
                 JournalLineInput(accounts["1200"].id, Decimal("100.00"), Decimal("0.00")),
-                JournalLineInput(
-                    accounts["1400"].id,
-                    Decimal("0.00"),
-                    Decimal("100.00"),
-                    partner_id=second.id,
-                ),
+                JournalLineInput(accounts["1400"].id, Decimal("0.00"), Decimal("100.00")),
             ],
+            partner_id=second.id,
         ),
     )
     # Inzwischen deaktivierte Partner werden trotzdem vorgetragen.
@@ -564,6 +568,123 @@ def test_year_end_carryforward_keeps_partner_balances(session: Session) -> None:
         first.id: Decimal("119.00"),
         second.id: Decimal("138.00"),
     }
+    # Außerhalb der Sammelkonten wird je Konto vorgetragen, nicht je Partner.
+    bank_lines = (
+        session.execute(
+            select(JournalEntryLine).where(
+                JournalEntryLine.journal_entry_id == result.opening_balance_entry.id,
+                JournalEntryLine.account_id == accounts["1200"].id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(line.partner_id, line.debit_amount) for line in bank_lines] == [
+        (None, Decimal("100.00"))
+    ]
+
+
+def test_entry_partner_applies_to_all_lines_except_tax_lines(session: Session) -> None:
+    company, accounts = _seed(session)
+    vat = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1576",
+        name="Abziehbare Vorsteuer 19 %",
+        account_type="asset",
+    )
+    session.add(vat)
+    session.flush()
+    tax_code = TaxCode(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="VSt19",
+        rate=Decimal("19.00"),
+        kind="input",
+        vat_account_id=vat.id,
+    )
+    session.add(tax_code)
+    supplier = create_partner(
+        session=session, company=company, changed_by="t", name="Lieferant", is_supplier=True
+    )
+    landlord = create_partner(
+        session=session, company=company, changed_by="t", name="Vermieter", is_supplier=True
+    )
+    customer = create_partner(
+        session=session, company=company, changed_by="t", name="Kunde", is_customer=True
+    )
+    session.commit()
+
+    def book(description, lines, **entry_partner):
+        return create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                entry_date=date(2026, 3, 1),
+                description=description,
+                status="posted",
+                changed_by="t",
+                lines=lines,
+                **entry_partner,
+            ),
+        )
+
+    # Aufwand mit Steuercode an Bank: Partner auf Aufwand und Bank, nicht auf der VSt.
+    card = book(
+        "Kartenzahlung",
+        [
+            JournalLineInput(
+                accounts["4200"].id, Decimal("100.00"), Decimal("0.00"), tax_code_id=tax_code.id
+            ),
+            JournalLineInput(accounts["1200"].id, Decimal("0.00"), Decimal("119.00")),
+        ],
+        partner_number=supplier.creditor_number,
+    )
+    assert {line.account_id: line.partner_id for line in card.lines} == {
+        accounts["4200"].id: supplier.id,
+        vat.id: None,
+        accounts["1200"].id: supplier.id,
+    }
+
+    # Eigene Zeilenpartner bleiben; explizite Steuerzeilen bleiben ohne Partner.
+    rent = book(
+        "Miete",
+        [
+            JournalLineInput(
+                accounts["4200"].id, Decimal("100.00"), Decimal("0.00"), partner_id=landlord.id
+            ),
+            JournalLineInput(vat.id, Decimal("19.00"), Decimal("0.00")),
+            JournalLineInput(accounts["1600"].id, Decimal("0.00"), Decimal("119.00")),
+        ],
+        partner_id=supplier.id,
+    )
+    assert [line.partner_id for line in sorted(rent.lines, key=lambda line: line.line_number)] == [
+        landlord.id,
+        None,
+        supplier.id,
+    ]
+
+    # Auf dem Sammelkonto muss die Rolle des Partners der Buchung passen.
+    with pytest.raises(JournalEntryCreationError, match="Kunde ist kein Lieferant"):
+        book(
+            "Falsche Rolle",
+            [
+                JournalLineInput(accounts["4200"].id, Decimal("10.00"), Decimal("0.00")),
+                JournalLineInput(accounts["1600"].id, Decimal("0.00"), Decimal("10.00")),
+            ],
+            partner_id=customer.id,
+        )
+    session.rollback()
+    with pytest.raises(JournalEntryCreationError, match="nicht gefunden"):
+        book(
+            "Unbekannt",
+            [
+                JournalLineInput(accounts["4200"].id, Decimal("10.00"), Decimal("0.00")),
+                JournalLineInput(accounts["1200"].id, Decimal("0.00"), Decimal("10.00")),
+            ],
+            partner_number="79999",
+        )
+    session.rollback()
 
 
 def test_opening_balance_and_templates_carry_partner(session: Session) -> None:
@@ -601,15 +722,30 @@ def test_opening_balance_and_templates_carry_partner(session: Session) -> None:
     booked, _ = book_template(session=session, template_id=template.id, changed_by="t")
     assert customer.id in {line.partner_id for line in booked.lines}
 
-    with pytest.raises(JournalTemplateError, match="Sammelkonten"):
+    # Partnerbezug auf dem Erlöskonto ist zulässig, auf dem Sammelkonto gilt die Rolle.
+    create_template(
+        session=session,
+        company_id=company.id,
+        name="Barverkauf",
+        description="Partner auf Erlöskonto",
+        lines=[
+            {"account_id": accounts["1200"].id, "debit": "50.00"},
+            {"account_id": accounts["8400"].id, "credit": "50.00", "partner_id": customer.id},
+        ],
+        changed_by="t",
+    )
+    supplier = create_partner(
+        session=session, company=company, changed_by="t", name="Lieferant", is_supplier=True
+    )
+    with pytest.raises(JournalTemplateError, match="Zeile 1: Lieferant ist kein Kunde"):
         create_template(
             session=session,
             company_id=company.id,
             name="Falsch",
-            description="Partner auf Erlöskonto",
+            description="Lieferant auf Debitoren-Sammelkonto",
             lines=[
-                {"account_id": accounts["1200"].id, "debit": "50.00"},
-                {"account_id": accounts["8400"].id, "credit": "50.00", "partner_id": customer.id},
+                {"account_id": accounts["1400"].id, "debit": "50.00", "partner_id": supplier.id},
+                {"account_id": accounts["8400"].id, "credit": "50.00"},
             ],
             changed_by="t",
         )
@@ -824,25 +960,49 @@ def test_partner_api_journal_exports_and_ui(tmp_path: Path) -> None:
         },
     )
     assert booking.status_code == 201, booking.get_json()
+    # Partner der Buchung (oberste Ebene) gilt auch ohne Sammelkonto-Zeile.
+    cash_sale = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": company_id,
+            "entry_date": "2026-05-05",
+            "description": "Barverkauf Kunde Nord",
+            "partner_number": "10000",
+            "lines": [
+                {"account_code": "1200", "debit_amount": "1.00"},
+                {"account_code": "8400", "credit_amount": "1.00"},
+            ],
+        },
+    )
+    assert cash_sale.status_code == 201, cash_sale.get_json()
     rejected = client.post(
         "/api/v1/journal-entries",
         json={
             "company_id": company_id,
             "entry_date": "2026-05-04",
-            "description": "Partner auf Erlöskonto",
+            "description": "Lieferant auf Debitoren-Sammelkonto",
             "lines": [
-                {"account_code": "1200", "debit_amount": "1.00"},
-                {"account_code": "8400", "credit_amount": "1.00", "partner_id": partner_id},
+                {"account_code": "1400", "debit_amount": "1.00", "partner_number": "70000"},
+                {"account_code": "8400", "credit_amount": "1.00"},
             ],
         },
     )
     assert rejected.status_code == 422
 
     entries = client.get(
-        "/api/v1/journal-entries", query_string={"company_id": company_id}
+        "/api/v1/journal-entries",
+        query_string={"company_id": company_id, "partner_id": partner_id},
     ).get_json()["entries"]
+    assert [entry["description"] for entry in entries] == [
+        "Barverkauf Kunde Nord",
+        "AR 2026-17",
+    ]
+    assert entries[0]["partners"] == [
+        {"id": partner_id, "name": "Kunde Nord GmbH", "number": "10000"}
+    ]
+    assert {line["partner_id"] for line in entries[0]["lines"]} == {partner_id}
     receivable_line = next(
-        line for line in entries[0]["lines"] if line["account_code"] == "1400"
+        line for line in entries[1]["lines"] if line["account_code"] == "1400"
     )
     assert receivable_line["partner_id"] == partner_id
     assert receivable_line["partner_number"] == "10000"

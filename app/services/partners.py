@@ -650,18 +650,20 @@ def validate_partner_assignment(
     account: Account,
     allow_inactive: bool = False,
 ) -> BusinessPartner | None:
-    """Prüft einen Partner an einer Buchungszeile (Sammelkonto, Rolle, Status)."""
+    """Prüft einen Partner an einer Buchungszeile (Gesellschaft, Rolle, Status).
+
+    Auf Debitoren-/Kreditoren-Sammelkonten bildet der Partner das Nebenbuch; dort
+    muss seine Rolle zur Kontoseite passen. Auf allen anderen Konten ist er ein
+    reiner Partnerbezug (z. B. „Aufwand an Bank“ bei Direktzahlung) ohne
+    Rollenbindung – Nebenbuchsalden und Personenkonten entstehen nur auf
+    Sammelkonten (ADR-002, Nachtrag 2026-10-12).
+    """
     if partner_id is None:
         return None
     partner = session.get(BusinessPartner, partner_id)
     if partner is None or partner.company_id != company_id:
         raise PartnerError("Geschäftspartner für Buchungszeile nicht gefunden.")
-    if account.subledger is None:
-        raise PartnerError(
-            f"Konto {account.code} ist kein Debitoren-/Kreditoren-Sammelkonto; "
-            "ein Geschäftspartner ist nur auf Sammelkonten zulässig."
-        )
-    if getattr(partner, NUMBER_FIELDS[account.subledger]) is None:
+    if account.subledger is not None and getattr(partner, NUMBER_FIELDS[account.subledger]) is None:
         side = "Debitoren" if account.subledger == SUBLEDGER_DEBTOR else "Kreditoren"
         raise PartnerError(
             f"{partner.name} ist kein {ROLE_LABELS[account.subledger]} und kann nicht auf "

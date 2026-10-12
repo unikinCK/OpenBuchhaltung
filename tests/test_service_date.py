@@ -423,16 +423,31 @@ def test_amend_open_entry_sets_service_date_and_partner_with_audit(session: Sess
         len(session.execute(select(AuditLog).where(AuditLog.action == "amended")).all()) == 1
     )
 
-    # Partner nur auf Sammelkonten, Leistungsdatum lässt sich wieder entfernen.
-    with pytest.raises(JournalEntryCreationError, match="Zeile 2"):
+    # Der Partner der Buchung gilt für alle Zeilen; auf dem Sammelkonto muss die
+    # Rolle passen. Das Leistungsdatum lässt sich wieder entfernen.
+    supplier = create_partner(
+        session=session, company=company, changed_by="t", name="Lieferant", is_supplier=True
+    )
+    session.commit()
+    with pytest.raises(JournalEntryCreationError, match="Zeile 1: Lieferant ist kein Kunde"):
         amend_journal_entry(
             session=session,
             company_id=company.id,
             journal_entry_id=entry.id,
             changed_by="pruefer",
-            line_partners={2: customer.id},
+            partner_id=supplier.id,
         )
     session.rollback()
+    whole = amend_journal_entry(
+        session=session,
+        company_id=company.id,
+        journal_entry_id=entry.id,
+        changed_by="pruefer",
+        partner_id=customer.id,
+    )
+    assert [line.partner_id for line in whole.lines] == [customer.id, customer.id]
+    zm_q2 = compute_zm(session=session, company_id=company.id, date_from=Q2[0], date_to=Q2[1])
+    assert [(row["vat_id"], row["amount_euro"]) for row in zm_q2.rows] == [("CZ60751983", "9418")]
     cleared = amend_journal_entry(
         session=session,
         company_id=company.id,
@@ -671,13 +686,31 @@ def test_service_date_via_api_mcp_and_ui(tmp_path) -> None:
     assert cleared.get_json()["service_date"] is None
     wrong_line = client.patch(
         f"/api/v1/journal-entries/{entry_id}",
-        json={"lines": [{"line_number": 2, "partner_id": partner_id}]},
+        json={"lines": [{"line_number": 3, "partner_id": partner_id}]},
     )
     assert wrong_line.status_code == 422
+    # Partner der Buchung auf oberster Ebene: alle Zeilen, null entfernt ihn wieder.
+    whole = client.patch(
+        f"/api/v1/journal-entries/{entry_id}", json={"partner_number": debtor_number}
+    ).get_json()
+    assert [line["partner_id"] for line in whole["lines"]] == [partner_id, partner_id]
+    assert whole["partners"] == [{"id": partner_id, "name": "Wera Werk s.r.o.", "number": "10000"}]
+    removed = client.patch(f"/api/v1/journal-entries/{entry_id}", json={"partner_id": None})
+    assert [line["partner_id"] for line in removed.get_json()["lines"]] == [None, None]
+    unknown = client.patch(f"/api/v1/journal-entries/{entry_id}", json={"partner_number": "19999"})
+    assert unknown.status_code == 422
     assert client.patch("/api/v1/journal-entries/999999", json={}).status_code == 404
 
     tools = {tool.name: tool for tool in TOOLS}
     assert "service_date" in tools["create_journal_entry"].input_schema["properties"]
+    # Partner der Buchung in allen Werkzeugen rund um Buchungen.
+    for tool_name in (
+        "create_journal_entry",
+        "amend_journal_entry",
+        "list_journal_entries",
+        "book_bank_transaction",
+    ):
+        assert "partner_id" in tools[tool_name].input_schema["properties"], tool_name
     amend_tool = tools["amend_journal_entry"]
     assert (amend_tool.http_method, amend_tool.path) == (
         "PATCH",

@@ -352,11 +352,14 @@ def _create_opening_balance_entry(
     regulär angelegt.
     """
     # Sammelkonten werden je Geschäftspartner vorgetragen, damit die
-    # Nebenbuchsalden (Debitoren/Kreditoren) im Folgejahr erhalten bleiben.
+    # Nebenbuchsalden (Debitoren/Kreditoren) im Folgejahr erhalten bleiben. Auf
+    # allen anderen Konten ist der Partner nur Partnerbezug der Buchung; dort
+    # wird je Konto vorgetragen.
     rows = session.execute(
         select(
             Account.id,
             Account.code,
+            Account.subledger,
             JournalEntryLine.partner_id,
             func.coalesce(func.sum(JournalEntryLine.debit_amount), 0),
             func.coalesce(func.sum(JournalEntryLine.credit_amount), 0),
@@ -369,15 +372,22 @@ def _create_opening_balance_entry(
             JournalEntry.source != SOURCE_CARRYFORWARD,
             Account.account_type.in_(BALANCE_SHEET_ACCOUNT_TYPES),
         )
-        .group_by(Account.id, Account.code, JournalEntryLine.partner_id)
-        .order_by(Account.code, JournalEntryLine.partner_id)
+        .group_by(Account.id, Account.code, Account.subledger, JournalEntryLine.partner_id)
     ).all()
+    totals: dict[tuple[str, int, int | None], list[Decimal]] = {}
+    for account_id, code, subledger, partner_id, debit_total, credit_total in rows:
+        key = (code, account_id, partner_id if subledger is not None else None)
+        sums = totals.setdefault(key, [Decimal("0.00"), Decimal("0.00")])
+        sums[0] += Decimal(debit_total)
+        sums[1] += Decimal(credit_total)
 
     zero = Decimal("0.00")
     lines: list[JournalLineInput] = []
     total = zero
-    for account_id, _code, partner_id, debit_total, credit_total in rows:
-        saldo = (Decimal(debit_total) - Decimal(credit_total)).quantize(zero)
+    for (_code, account_id, partner_id), (debit_total, credit_total) in sorted(
+        totals.items(), key=lambda item: (item[0][0], item[0][1], item[0][2] or 0)
+    ):
+        saldo = (debit_total - credit_total).quantize(zero)
         if saldo == zero:
             continue
         lines.append(

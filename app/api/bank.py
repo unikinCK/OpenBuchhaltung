@@ -43,7 +43,7 @@ from app.services.bank_rules import (
     serialize_rule,
     set_rule_active,
 )
-from app.services.journal_entries import JournalEntryCreationError
+from app.services.journal_entries import JournalEntryCreationError, resolve_partner_reference
 from app.services.scoping import scoped_select
 from domain.models import Account, BankBookingRule, BankTransaction, JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -730,9 +730,13 @@ def book_bank_transaction_via_api(transaction_id: int):
             if payload.get("profit_center_id") not in (None, "")
             else None
         )
+        partner_id = (
+            int(payload["partner_id"]) if payload.get("partner_id") not in (None, "") else None
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "contra_account_id must be an integer."}), 400
     description = (payload.get("description") or "").strip() or None
+    partner_number = str(payload.get("partner_number") or "").strip() or None
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -740,6 +744,12 @@ def book_bank_transaction_via_api(transaction_id: int):
         if transaction is None or api_scoped_company(session, transaction.company_id) is None:
             return jsonify({"error": "Bank transaction not found."}), 404
         try:
+            partner_id = resolve_partner_reference(
+                session=session,
+                company_id=transaction.company_id,
+                partner_id=partner_id,
+                partner_number=partner_number,
+            )
             transaction = book_transaction(
                 session=session,
                 transaction_id=transaction.id,
@@ -748,6 +758,7 @@ def book_bank_transaction_via_api(transaction_id: int):
                 description=description,
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                partner_id=partner_id,
                 changed_by=_api_changed_by(),
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
