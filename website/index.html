@@ -95,7 +95,7 @@
           <p class="hero-lead">
             OpenBuchhaltung ist eine webbasierte Buchhaltung für GmbH, UG und gGmbH: doppelte
             Buchführung nach HGB, Umsatzsteuer mit ELSTER-Anbindung, DATEV-Export und Bankabruf,
-            dazu eine offene API und ein MCP-Server für KI-Assistenten. Jede Aktion wird
+            dazu eine offene API und ein MCP-Server für KI-Assistenten. Jede Änderung wird
             protokolliert, festgeschriebene Buchungen werden versiegelt, und der Quellcode liegt
             offen auf GitHub.
           </p>
@@ -560,7 +560,7 @@
             </div>
             <div>
               <dt>Verkettetes Audit-Log</dt>
-              <dd>Jede Aktion landet unveränderlich im Audit-Log, je Mandant über Sequenznummer und Hash verkettet. Ein Kettenanker erkennt auch eine gekürzte Historie.</dd>
+              <dd>Jede Änderung landet unveränderlich im Audit-Log, je Mandant über Sequenznummer und Hash verkettet. Ein Kettenanker erkennt auch eine gekürzte Historie.</dd>
             </div>
             <div>
               <dt>Perioden und Jahresabschluss</dt>
@@ -638,7 +638,7 @@ Geprüft: 26 festgeschriebene Buchungen, 0 Belege, 131 Audit-Einträge.
           </div>
           <div class="interface">
             <h3>KI-Chat in der Oberfläche</h3>
-            <p>Der Assistent liest Konten, Buchungen und Berichte. Schreibende Aktionen schlägt er nur vor, ausgeführt wird erst nach Bestätigung. Bank-, ELSTER- und Benutzerfunktionen bleiben gesperrt.</p>
+            <p>Der Assistent liest Konten, Buchungen und Berichte. Schreibende Aktionen schlägt er nur vor, ausgeführt wird erst nach Bestätigung. Bankzugänge, SEPA, ELSTER und die Benutzerverwaltung bleiben gesperrt.</p>
           </div>
           <div class="interface">
             <h3>Eigenes Modell wählen</h3>
@@ -760,7 +760,7 @@ Geprüft: 26 festgeschriebene Buchungen, 0 Belege, 131 Audit-Einträge.
             <ul class="checklist">
               <li><strong>Rollen</strong> Admin, Buchhalter, Prüfer und Support, Mandantentrennung bis in die API</li>
               <li><strong>Härtung</strong> mit CSRF-Schutz, Login-Rate-Limit, sicheren Sessions und Security-Headern</li>
-              <li><strong>Bankzugang:</strong> PIN und TAN werden nie gespeichert, Sitzungen und API-Schlüssel nur verschlüsselt</li>
+              <li><strong>Bankzugang:</strong> PIN und TAN werden nie gespeichert, Bank-Sitzungen und KI-Schlüssel nur verschlüsselt</li>
               <li><strong>Uploads</strong> nur als PDF, JPG oder PNG mit Prüfung der Dateisignatur</li>
               <li><strong>Sicherheitsereignisse</strong> wie Logins und Token-Rotation im Log und in der Hashkette</li>
             </ul>
