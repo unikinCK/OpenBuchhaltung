@@ -5,9 +5,11 @@ Der Abgleich läuft in drei Stufen:
 1. **Belegdaten gewinnen**: Der gespeicherte Beleg wird erneut durch die
    OCR-Pipeline (:func:`app.services.receipt_ocr.analyze_document`) geschickt,
    um Bruttobetrag, Datum, Lieferant usw. zu erhalten.
-2. **Kandidaten finden** (regelbasiert): Buchungen der Gesellschaft ohne
-   Belegverknüpfung, deren Zeilenbetrag zum Bruttobetrag passt (bzw. die
-   jüngsten unverknüpften Buchungen, wenn kein Betrag erkannt wurde).
+2. **Kandidaten finden** (regelbasiert): Buchungen der Gesellschaft, deren
+   Zeilenbetrag zum Bruttobetrag passt (bzw. die jüngsten Buchungen, wenn kein
+   Betrag erkannt wurde). Buchungen ohne Beleg stehen vorn; Buchungen mit
+   bereits verknüpften Belegen bleiben Kandidaten, weil eine Buchung mehrere
+   Belege haben kann (z. B. Rechnung und Zahlungsbeleg).
 3. **Entscheiden**: Ist ein LLM-Endpoint konfiguriert, wählt das LLM aus den
    Kandidaten die passende Buchung (oder keine) und begründet die Wahl.
    Ohne LLM entscheidet die Regel "eindeutiger Betragstreffer". Ohne Treffer
@@ -30,7 +32,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
@@ -62,6 +64,11 @@ from domain.models import (
 logger = logging.getLogger(__name__)
 
 _CENT = Decimal("0.01")
+
+# Höchster Abstand (Tage) zwischen Belegdatum und Buchungsdatum, bei dem ein
+# Beleg regelbasiert einer Buchung zugeordnet wird, die schon Belege hat
+# (z. B. Zahlungsbeleg nach Rechnung mit Zahlungsziel).
+ADDITIONAL_RECEIPT_MAX_DAYS = 60
 
 STATUS_OPEN = "offen"
 STATUS_APPROVED = "freigegeben"
@@ -115,34 +122,50 @@ def find_candidate_entries(
     gross_amount: Decimal | None,
     limit: int = 15,
 ) -> list[JournalEntry]:
-    """Unverknüpfte Buchungen der Gesellschaft, die als Match in Frage kommen.
+    """Buchungen der Gesellschaft, die als Match in Frage kommen.
 
     Mit erkanntem Bruttobetrag zählen nur Buchungen mit einer Zeile in dieser
-    Höhe; ohne Betrag werden die jüngsten unverknüpften Buchungen geliefert,
-    damit ein LLM anhand von Text/Datum entscheiden kann. Stornobuchungen
-    werden übersprungen.
+    Höhe; ohne Betrag werden die jüngsten Buchungen geliefert, damit ein LLM
+    anhand von Text/Datum entscheiden kann. Buchungen ohne Beleg stehen vorn,
+    Buchungen mit Belegen folgen (weiterer Beleg zur selben Buchung).
+    Stornobuchungen werden übersprungen.
     """
     linked = select(Document.journal_entry_id).where(Document.journal_entry_id.is_not(None))
+    has_documents = case((JournalEntry.id.in_(linked), 1), else_=0)
     stmt = select(JournalEntry).where(
         JournalEntry.company_id == company_id,
-        JournalEntry.id.not_in(linked),
         JournalEntry.reversal_of_id.is_(None),
     )
     if gross_amount is not None and gross_amount > 0:
-        stmt = (
-            stmt.join(
-                JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id
+        # IN-Subquery statt JOIN + DISTINCT: PostgreSQL verlangt bei DISTINCT,
+        # dass ORDER-BY-Ausdrücke (hier has_documents) in der Auswahl stehen.
+        matching_lines = select(JournalEntryLine.journal_entry_id).where(
+            or_(
+                JournalEntryLine.debit_amount == gross_amount,
+                JournalEntryLine.credit_amount == gross_amount,
             )
-            .where(
-                or_(
-                    JournalEntryLine.debit_amount == gross_amount,
-                    JournalEntryLine.credit_amount == gross_amount,
-                )
-            )
-            .distinct()
         )
-    stmt = stmt.order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).limit(limit)
+        stmt = stmt.where(JournalEntry.id.in_(matching_lines))
+    stmt = stmt.order_by(
+        has_documents, JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+    ).limit(limit)
     return session.execute(stmt).scalars().all()
+
+
+def linked_document_counts(session: Session, journal_entry_ids: list[int]) -> dict[int, int]:
+    """Anzahl aktueller, bereits verknüpfter Belege je Buchung."""
+    if not journal_entry_ids:
+        return {}
+    return dict(
+        session.execute(
+            select(Document.journal_entry_id, func.count())
+            .where(
+                Document.journal_entry_id.in_(journal_entry_ids),
+                Document.is_current.is_(True),
+            )
+            .group_by(Document.journal_entry_id)
+        ).all()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +178,10 @@ _MATCH_INSTRUCTION = (
     "extrahierten Daten und eine Kandidatenliste von Buchungen. Wähle die "
     "Buchung, die denselben Geschäftsvorfall abbildet (Betrag, Datum nahe "
     "beieinander, Lieferant/Verwendungszweck passend), oder keine, wenn "
-    "nichts überzeugend passt. Antworte ausschließlich mit einem JSON-Objekt "
+    "nichts überzeugend passt. Eine Buchung kann mehrere Belege haben "
+    "(z. B. Rechnung und Zahlungsbeleg): Kandidaten mit vorhandene_belege > 0 "
+    "sind nur zu wählen, wenn der Beleg eindeutig denselben Vorgang ergänzt; "
+    "sonst Buchungen ohne Beleg bevorzugen. Antworte ausschließlich mit einem JSON-Objekt "
     'mit exakt diesen Feldern: {"journal_entry_id": number|null, '
     '"confidence": "hoch"|"mittel"|"niedrig", "reason": string}. '
     "reason ist eine kurze deutsche Begründung."
@@ -177,7 +203,10 @@ def _receipt_summary(extraction: ReceiptExtraction) -> str:
     return json.dumps(fields, ensure_ascii=False)
 
 
-def _candidate_summary(candidates: list[JournalEntry]) -> str:
+def _candidate_summary(
+    candidates: list[JournalEntry], document_counts: dict[int, int] | None = None
+) -> str:
+    counts = document_counts or {}
     rows = [
         {
             "journal_entry_id": entry.id,
@@ -185,6 +214,7 @@ def _candidate_summary(candidates: list[JournalEntry]) -> str:
             "datum": entry.entry_date.isoformat(),
             "text": entry.description,
             "brutto": str(entry_gross_total(entry)),
+            "vorhandene_belege": counts.get(entry.id, 0),
         }
         for entry in candidates
     ]
@@ -198,12 +228,13 @@ def choose_match_llm(
     endpoint_url: str,
     model: str,
     api_key: str | None = None,
+    document_counts: dict[int, int] | None = None,
 ) -> MatchDecision:
     """Lässt ein LLM aus den Kandidaten die passende Buchung wählen (oder keine)."""
     user_text = (
         f"Belegdaten: {_receipt_summary(extraction)}\n"
         f"Belegtext (Auszug):\n{extraction.raw_text[:4000]}\n\n"
-        f"Kandidaten-Buchungen: {_candidate_summary(candidates)}"
+        f"Kandidaten-Buchungen: {_candidate_summary(candidates, document_counts)}"
     )
     payload = {
         "model": model,
@@ -255,9 +286,18 @@ def choose_match_llm(
 
 
 def choose_match_rule_based(
-    *, extraction: ReceiptExtraction, candidates: list[JournalEntry]
+    *,
+    extraction: ReceiptExtraction,
+    candidates: list[JournalEntry],
+    document_counts: dict[int, int] | None = None,
 ) -> MatchDecision:
-    """Regelbasierte Entscheidung: eindeutiger Betragstreffer gewinnt."""
+    """Regelbasierte Entscheidung: eindeutiger Betragstreffer gewinnt.
+
+    Buchungen ohne Beleg haben Vorrang. Passen nur Buchungen, die schon Belege
+    haben, wird der Beleg als weiterer Nachweis zur zeitlich nächsten Buchung
+    vorgeschlagen – aber nur mit bekanntem Belegdatum und höchstens
+    :data:`ADDITIONAL_RECEIPT_MAX_DAYS` Tagen Abstand.
+    """
     if extraction.gross_amount is None or extraction.gross_amount <= 0 or not candidates:
         return MatchDecision(
             journal_entry_id=None,
@@ -265,6 +305,13 @@ def choose_match_rule_based(
             reason="Keine Buchung mit passendem Betrag gefunden.",
             llm_used=False,
         )
+    counts = document_counts or {}
+    without_documents = [entry for entry in candidates if not counts.get(entry.id)]
+    if not without_documents:
+        return _choose_additional_receipt(
+            extraction=extraction, candidates=candidates, counts=counts
+        )
+    candidates = without_documents
     best = candidates[0]
     if len(candidates) == 1:
         return MatchDecision(
@@ -288,6 +335,52 @@ def choose_match_rule_based(
         reason=(
             f"{len(candidates)} Buchungen mit Betrag {extraction.gross_amount} gefunden; "
             f"{best.posting_number} liegt dem Belegdatum am nächsten. Bitte prüfen."
+        ),
+        llm_used=False,
+    )
+
+
+def _choose_additional_receipt(
+    *,
+    extraction: ReceiptExtraction,
+    candidates: list[JournalEntry],
+    counts: dict[int, int],
+) -> MatchDecision:
+    """Betrag passt nur zu Buchungen mit Belegen: weiterer Beleg zur nächsten Buchung."""
+    if extraction.invoice_date is None:
+        return MatchDecision(
+            journal_entry_id=None,
+            confidence="niedrig",
+            reason=(
+                f"Betrag {extraction.gross_amount} passt nur zu Buchungen, die bereits "
+                "Belege haben; ohne erkanntes Belegdatum keine Zuordnung."
+            ),
+            llm_used=False,
+        )
+    best = min(
+        candidates,
+        key=lambda entry: abs((entry.entry_date - extraction.invoice_date).days),
+    )
+    distance = abs((best.entry_date - extraction.invoice_date).days)
+    if distance > ADDITIONAL_RECEIPT_MAX_DAYS:
+        return MatchDecision(
+            journal_entry_id=None,
+            confidence="niedrig",
+            reason=(
+                f"Betrag {extraction.gross_amount} passt nur zu Buchungen mit "
+                f"vorhandenen Belegen, die nächste ({best.posting_number}) liegt "
+                f"{distance} Tage vom Belegdatum entfernt."
+            ),
+            llm_used=False,
+        )
+    existing = counts.get(best.id, 0)
+    return MatchDecision(
+        journal_entry_id=best.id,
+        confidence="niedrig",
+        reason=(
+            f"Betrag {extraction.gross_amount} stimmt mit Buchung {best.posting_number} "
+            f"überein, die bereits {existing} Beleg(e) hat – als weiterer Beleg "
+            "(z. B. Zahlungsbeleg) vorgeschlagen. Bitte prüfen."
         ),
         llm_used=False,
     )
@@ -366,6 +459,7 @@ def create_match_suggestion(
     candidates = find_candidate_entries(
         session=session, company_id=company.id, gross_amount=extraction.gross_amount
     )
+    document_counts = linked_document_counts(session, [entry.id for entry in candidates])
 
     decision: MatchDecision
     if llm_endpoint and candidates:
@@ -376,12 +470,17 @@ def create_match_suggestion(
                 endpoint_url=llm_endpoint,
                 model=llm_model,
                 api_key=llm_api_key,
+                document_counts=document_counts,
             )
         except ReceiptLLMError as exc:
-            decision = choose_match_rule_based(extraction=extraction, candidates=candidates)
+            decision = choose_match_rule_based(
+                extraction=extraction, candidates=candidates, document_counts=document_counts
+            )
             decision.reason = f"{decision.reason} (LLM-Abgleich nicht möglich: {exc})"
     else:
-        decision = choose_match_rule_based(extraction=extraction, candidates=candidates)
+        decision = choose_match_rule_based(
+            extraction=extraction, candidates=candidates, document_counts=document_counts
+        )
 
     suggestion_type = TYPE_MATCH if decision.journal_entry_id is not None else TYPE_NEW_BOOKING
     if suggestion_type == TYPE_NEW_BOOKING and not extraction.has_booking_basis:

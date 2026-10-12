@@ -19,6 +19,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
+from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
     EInvoiceExportError,
@@ -177,10 +178,14 @@ def einvoice_book_action():
         target_path.write_bytes(xml_bytes)
         metadata = document_file_metadata(xml_bytes)
 
+        invoice_category = find_document_category_by_name(
+            session=session, company_id=company.id, name="Rechnung"
+        )
         document = Document(
             tenant_id=company.tenant_id,
             company_id=company.id,
             journal_entry_id=entry.id,
+            category_id=invoice_category.id if invoice_category else None,
             file_name=safe_name,
             storage_key=str(target_path),
             mime_type=uploaded_file.mimetype or "application/xml",

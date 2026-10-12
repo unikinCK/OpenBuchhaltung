@@ -1402,7 +1402,8 @@ TOOLS: list[ToolSpec] = [
         name="list_documents",
         description=(
             "Listet Belege einer Gesellschaft, optional gefiltert nach Buchung, "
-            "Dateiname (q) und Belegdatum."
+            "Belegkategorie, Dateiname (q) und Belegdatum. Eine Buchung kann "
+            "mehrere Belege haben (z. B. Rechnung und Zahlungsbeleg)."
         ),
         input_schema={
             "type": "object",
@@ -1411,6 +1412,10 @@ TOOLS: list[ToolSpec] = [
                 "journal_entry_id": {
                     "type": "integer",
                     "description": "Optional: nur Belege zu dieser Buchung.",
+                },
+                "category_id": {
+                    "type": "integer",
+                    "description": "Optional: nur Belege dieser Belegkategorie.",
                 },
                 "q": {"type": "string", "description": "Volltextsuche im Dateinamen."},
                 "date_from": {
@@ -1455,7 +1460,16 @@ TOOLS: list[ToolSpec] = [
                 },
                 "journal_entry_id": {
                     "type": "integer",
-                    "description": "Optional: direkt mit dieser Buchung verknüpfen.",
+                    "description": (
+                        "Optional: direkt mit dieser Buchung verknüpfen (auch wenn "
+                        "die Buchung schon Belege hat)."
+                    ),
+                },
+                "category_id": {
+                    "type": "integer",
+                    "description": (
+                        "Optional: aktive Belegkategorie (siehe list_document_categories)."
+                    ),
                 },
             },
             "required": [
@@ -1475,7 +1489,7 @@ TOOLS: list[ToolSpec] = [
         name="link_document",
         description=(
             "Verknüpft einen Beleg mit einer Buchung. journal_entry_id=null entfernt "
-            "die Verknüpfung."
+            "die Verknüpfung. Eine Buchung kann mehrere Belege haben."
         ),
         input_schema={
             "type": "object",
@@ -1491,6 +1505,89 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/documents/{document_id}/link",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_document_category",
+        description=(
+            "Ordnet einem Beleg eine Belegkategorie zu (z. B. Rechnung, Gutschrift, "
+            "Zahlungsbeleg). category_id=null entfernt die Kategorie."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "integer", "description": "ID des Belegs."},
+                "category_id": {
+                    "type": ["integer", "null"],
+                    "description": "ID einer aktiven Belegkategorie oder null.",
+                },
+            },
+            "required": ["document_id", "category_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/documents/{document_id}/category",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_document_categories",
+        description=(
+            "Listet die Belegkategorien einer Gesellschaft (Standard: Rechnung, "
+            "Gutschrift, Zahlungsbeleg, Bewirtungsbeleg, Zahlungsanweisung sowie "
+            "eigene Ergänzungen)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Kategorien liefern (Standard: true).",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/document-categories",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_document_category",
+        description=(
+            "Ergänzt eine eigene Belegkategorie (nur Admin und Buchhalter). "
+            "Namen sind je Gesellschaft eindeutig."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "name": {"type": "string", "description": "Name der Kategorie (max. 80 Zeichen)."},
+            },
+            "required": ["company_id", "name"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/document-categories",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_document_category_active",
+        description=(
+            "Aktiviert oder deaktiviert eine Belegkategorie. Deaktivierte Kategorien "
+            "sind für neue Zuordnungen gesperrt; bestehende Belege behalten sie."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "category_id": {"type": "integer", "description": "ID der Kategorie."},
+                "is_active": {"type": "boolean", "description": "true = aktiv."},
+            },
+            "required": ["category_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/document-categories/{category_id}/active",
         arg_location="json",
     ),
     ToolSpec(

@@ -8,6 +8,29 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Belegkategorien und mehrere Belege je Buchung
+- Neu: Belegkategorien je Gesellschaft mit der Vorauswahl Rechnung, Gutschrift,
+  Zahlungsbeleg, Bewirtungsbeleg und Zahlungsanweisung (Migration `20261012_0047` legt sie
+  für bestehende Gesellschaften an, neue Gesellschaften erhalten sie beim Anlegen).
+  Admin und Buchhalter können eigene Kategorien ergänzen und Kategorien deaktivieren;
+  bestehende Belege behalten deaktivierte Kategorien. Kategorie beim Upload und
+  nachträglich wählbar, jede Zuordnung im Audit-Log. E-Rechnungs-Importe erhalten
+  automatisch „Rechnung“.
+- Neu: API `GET/POST /api/v1/document-categories`,
+  `POST /api/v1/document-categories/<id>/active`, `POST /api/v1/documents/<id>/category`,
+  `category_id` bei Upload und als Filter der Belegliste; MCP-Tools
+  `list_document_categories`, `create_document_category`, `set_document_category_active`,
+  `set_document_category`.
+- Neu: Die Buchungsliste zeigt alle Belege einer Buchung mit Kategorie und Download-Link;
+  „+ weiterer Beleg“ öffnet den Upload mit vorausgewählter Buchung. `GET
+  /api/v1/journal-entries` liefert je Buchung die verknüpften Belege.
+- Geändert: Der Belegabgleich berücksichtigt auch Buchungen, die schon Belege haben
+  (nachrangig nach Buchungen ohne Beleg). Passen nur solche Buchungen, schlägt die
+  Regel den Beleg als weiteren Nachweis zur nächstgelegenen Buchung vor (höchstens
+  60 Tage Abstand zum Belegdatum); das LLM sieht die Anzahl vorhandener Belege.
+- Neu: Der Prüferexport enthält den Datensatz `document_categories`; der Belegindex führt
+  `category_id`.
+
 ### Weitere Domains für die öffentliche Instanz
 - Neu: `PUBLIC_DOMAIN_ALIASES` im nginx-Overlay macht dieselbe Instanz unter weiteren
   Domains erreichbar, ohne Umleitung und je Domain mit eigenem Let's-Encrypt-Zertifikat

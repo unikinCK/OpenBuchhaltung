@@ -20,6 +20,7 @@ from app.auth import (
     password_policy_error,
     unlock_user_login,
 )
+from app.services.document_categories import ensure_default_document_categories
 from app.services.fints_institutes import (
     FinTSInstituteError,
     fints_institute_list_status,
@@ -124,6 +125,8 @@ def create_tenant_and_company():
         session.add_all([tenant, company])
 
         try:
+            session.flush()
+            ensure_default_document_categories(session=session, company=company)
             session.commit()
         except IntegrityError:
             session.rollback()

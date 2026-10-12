@@ -22,6 +22,15 @@ from app.api.helpers import (
 )
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
+from app.services.document_categories import (
+    DocumentCategoryError,
+    assign_document_category,
+    create_document_category,
+    document_category_dict,
+    list_document_categories,
+    resolve_document_category,
+    set_document_category_active,
+)
 from app.services.documents import (
     DOCUMENT_SIGNATURE_PROBE_BYTES,
     document_content_error_code,
@@ -30,7 +39,7 @@ from app.services.documents import (
 )
 from app.services.scoping import scoped_select
 from app.web.helpers import ALLOWED_DOCUMENT_EXTENSIONS, ALLOWED_DOCUMENT_MIME_TYPES
-from domain.models import Document, JournalEntry
+from domain.models import Document, DocumentCategory, JournalEntry
 
 
 def _api_changed_by() -> str:
@@ -43,6 +52,8 @@ def _document_dict(document: Document) -> dict[str, object]:
         "tenant_id": document.tenant_id,
         "company_id": document.company_id,
         "journal_entry_id": document.journal_entry_id,
+        "category_id": document.category_id,
+        "category_name": document.category.name if document.category else None,
         "file_name": document.file_name,
         "mime_type": document.mime_type,
         "file_sha256": document.file_sha256,
@@ -93,6 +104,7 @@ def _load_upload_payload():
             {
                 "company_id": request.form.get("company_id", type=int),
                 "journal_entry_id": request.form.get("journal_entry_id", type=int),
+                "category_id": request.form.get("category_id", type=int),
                 "document_date": request.form.get("document_date"),
                 "file_name": file_name,
                 "mime_type": uploaded_file.mimetype or "application/octet-stream",
@@ -115,6 +127,7 @@ def _load_upload_payload():
         {
             "company_id": payload.get("company_id"),
             "journal_entry_id": payload.get("journal_entry_id"),
+            "category_id": payload.get("category_id"),
             "document_date": payload.get("document_date"),
             "file_name": file_name,
             "mime_type": payload.get("mime_type") or "application/octet-stream",
@@ -131,6 +144,7 @@ def list_documents_via_api():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
     journal_entry_id = request.args.get("journal_entry_id", type=int)
+    category_id = request.args.get("category_id", type=int)
     query = (request.args.get("q") or "").strip() or None
     try:
         date_from = date_arg("date_from")
@@ -147,6 +161,8 @@ def list_documents_via_api():
         )
         if journal_entry_id is not None:
             stmt = stmt.where(Document.journal_entry_id == journal_entry_id)
+        if category_id is not None:
+            stmt = stmt.where(Document.category_id == category_id)
         if query:
             stmt = stmt.where(Document.file_name.ilike(f"%{query}%"))
         if date_from is not None:
@@ -196,6 +212,12 @@ def upload_document_via_api():
     except (TypeError, ValueError):
         return jsonify({"error": "journal_entry_id must be an integer or null."}), 400
 
+    raw_category_id = upload["category_id"]
+    try:
+        category_id = int(raw_category_id) if raw_category_id else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "category_id must be an integer or null."}), 400
+
     try:
         document_date = date.fromisoformat(str(upload["document_date"] or ""))
     except ValueError:
@@ -213,6 +235,13 @@ def upload_document_via_api():
             if linked_entry is None or linked_entry.company_id != company.id:
                 return jsonify({"error": "Journal entry not found."}), 404
 
+        try:
+            category = resolve_document_category(
+                session=session, company_id=company.id, category_id=category_id
+            )
+        except DocumentCategoryError as exc:
+            return jsonify({"error": str(exc)}), 422
+
         unique_name = f"{uuid4().hex}_{file_name}"
         company_dir = (
             Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
@@ -228,6 +257,7 @@ def upload_document_via_api():
             tenant_id=company.tenant_id,
             company_id=company.id,
             journal_entry_id=linked_entry.id if linked_entry else None,
+            category_id=category.id if category else None,
             file_name=file_name,
             storage_key=str(target_path),
             mime_type=mime_type,
@@ -248,6 +278,7 @@ def upload_document_via_api():
             payload={
                 "file_name": document.file_name,
                 "journal_entry_id": document.journal_entry_id,
+                "category_id": document.category_id,
                 "mime_type": document.mime_type,
                 "file_sha256": document.file_sha256,
                 "file_size_bytes": document.file_size_bytes,
@@ -303,6 +334,116 @@ def link_document_via_api(document_id: int):
         return jsonify(_document_dict(document)), 200
 
 
+@api_bp.post("/documents/<int:document_id>/category")
+def categorize_document_via_api(document_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    category_id = payload.get("category_id")
+    if category_id is not None:
+        try:
+            category_id = int(category_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "category_id must be an integer or null."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None or api_scoped_company(session, document.company_id) is None:
+            return jsonify({"error": "Document not found."}), 404
+        try:
+            assign_document_category(
+                session=session,
+                document=document,
+                category_id=category_id,
+                changed_by=_api_changed_by(),
+            )
+        except DocumentCategoryError as exc:
+            return jsonify({"error": str(exc)}), 422
+        session.commit()
+        return jsonify(_document_dict(document)), 200
+
+
+@api_bp.get("/document-categories")
+def list_document_categories_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    include_inactive = request.args.get("include_inactive", "1").lower() not in {"0", "false"}
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        categories = list_document_categories(
+            session=session, company_id=company_id, include_inactive=include_inactive
+        )
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "categories": [document_category_dict(category) for category in categories],
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.post("/document-categories")
+def create_document_category_via_api():
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            category = create_document_category(
+                session=session,
+                company=company,
+                name=str(payload.get("name") or ""),
+                changed_by=_api_changed_by(),
+            )
+        except DocumentCategoryError as exc:
+            return jsonify({"error": str(exc)}), 422
+        session.commit()
+        return jsonify(document_category_dict(category)), 201
+
+
+@api_bp.post("/document-categories/<int:category_id>/active")
+def set_document_category_active_via_api(category_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    is_active = payload.get("is_active")
+    if not isinstance(is_active, bool):
+        return jsonify({"error": "is_active must be a boolean."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        category = session.get(DocumentCategory, category_id)
+        if category is None or api_scoped_company(session, category.company_id) is None:
+            return jsonify({"error": "Document category not found."}), 404
+        set_document_category_active(
+            session=session,
+            category=category,
+            is_active=is_active,
+            changed_by=_api_changed_by(),
+        )
+        session.commit()
+        return jsonify(document_category_dict(category)), 200
+
+
 @api_bp.post("/documents/<int:document_id>/replace")
 def replace_document_via_api(document_id: int):
     if not api_can_write():
@@ -346,6 +487,7 @@ def replace_document_via_api(document_id: int):
             tenant_id=previous.tenant_id,
             company_id=previous.company_id,
             journal_entry_id=previous.journal_entry_id,
+            category_id=previous.category_id,
             file_name=file_name,
             storage_key=str(target_path),
             mime_type=mime_type,
