@@ -1040,13 +1040,16 @@ Zeitraum; in der ZM heben sich Buchung und Storno ohne Partner im selben Zeitrau
 und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
 Istversteuerung bildet OpenBuchhaltung nicht ab.
 
-**Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum und
-Geschäftspartner (auf Sammelkonten mit passender Rolle) nachtragen: auf der
-Detailseite der Buchung (Beleg-Nr. im Journal anklicken) oder per **Partner
-zuordnen** in der Journal-Liste; API `PATCH /api/v1/journal-entries/<id>` mit
-`service_date` (null entfernt es), `partner_id`/`partner_number` für die ganze Buchung
-(alle Zeilen außer Steuerzeilen, null entfernt den Partner) und/oder
-`lines: [{"line_number": 1, "partner_id": …}]`, MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
+**Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum,
+Geschäftspartner (auf Sammelkonten mit passender Rolle) sowie Kostenstelle und
+Profitcenter je Zeile nachtragen: auf der Detailseite der Buchung (Beleg-Nr. im
+Journal anklicken) oder per **Partner zuordnen** in der Journal-Liste; API `PATCH
+/api/v1/journal-entries/<id>` mit `service_date` (null entfernt es),
+`partner_id`/`partner_number` für die ganze Buchung (alle Zeilen außer Steuerzeilen,
+null entfernt den Partner) und/oder `lines: [{"line_number": 1, "partner_id": …,
+"cost_center_id": …, "profit_center_id": …}]` (fehlende Felder bleiben unverändert,
+null entfernt den Wert; Einheiten müssen wie beim Buchen aktiv und am Buchungsdatum
+gültig sein), MCP `amend_journal_entry`. Beträge, Konten und Datum bleiben
 unverändert; jede Änderung steht mit altem und neuem Wert im Audit-Log (`amended`).
 Festgeschriebene und stornierte Buchungen (das festgeschriebene Storno spiegelt den
 alten Stand), gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt die Funktion

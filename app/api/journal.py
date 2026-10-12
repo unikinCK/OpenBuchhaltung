@@ -412,12 +412,21 @@ def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
 
 
-def _amend_line_partners(session, company_id: int, raw_lines) -> tuple[dict, list]:
-    """Zeilennummer → Partner-ID aus ``lines`` (``partner_id`` oder ``partner_number``)."""
+AMEND_LINE_FIELDS = ("partner_id", "partner_number", "cost_center_id", "profit_center_id")
+
+
+def _amend_lines(session, company_id: int, raw_lines) -> tuple[dict, dict, list]:
+    """Änderungen je Zeile aus ``lines``.
+
+    Liefert Zeilennummer → Partner-ID (``partner_id`` oder ``partner_number``),
+    die Kontierung je Einheitentyp (``cost_center_id``/``profit_center_id``) und
+    Fehler. Fehlende Felder bleiben unverändert, ``null`` entfernt den Wert.
+    """
     line_partners: dict[int, int | None] = {}
+    line_units: dict[str, dict[int, int | None]] = {"cost_center": {}, "profit_center": {}}
     errors = []
     if not isinstance(raw_lines, list):
-        return {}, [{"field": "lines", "message": "lines must be a list."}]
+        return {}, line_units, [{"field": "lines", "message": "lines must be a list."}]
     for idx, line in enumerate(raw_lines):
         field = f"lines[{idx}]"
         if not isinstance(line, dict):
@@ -428,6 +437,30 @@ def _amend_line_partners(session, company_id: int, raw_lines) -> tuple[dict, lis
         except (TypeError, ValueError):
             errors.append({"field": f"{field}.line_number", "message": "line_number is required."})
             continue
+        if not any(key in line for key in AMEND_LINE_FIELDS):
+            errors.append(
+                {
+                    "field": field,
+                    "message": (
+                        "partner_id, partner_number, cost_center_id or profit_center_id "
+                        "required (null entfernt den Wert)."
+                    ),
+                }
+            )
+            continue
+        for unit_type in ("cost_center", "profit_center"):
+            key = f"{unit_type}_id"
+            if key not in line:
+                continue
+            raw_unit = line.get(key)
+            try:
+                line_units[unit_type][line_number] = (
+                    int(raw_unit) if raw_unit not in (None, "") else None
+                )
+            except (TypeError, ValueError):
+                errors.append(
+                    {"field": f"{field}.{key}", "message": f"{key} must be an integer or null."}
+                )
         raw_number = line.get("partner_number")
         if raw_number not in (None, ""):
             partner = find_partner_by_number(
@@ -450,19 +483,13 @@ def _amend_line_partners(session, company_id: int, raw_lines) -> tuple[dict, lis
                 errors.append(
                     {"field": f"{field}.partner_id", "message": "partner_id must be an integer."}
                 )
-        else:
-            errors.append(
-                {
-                    "field": field,
-                    "message": "partner_id (null entfernt den Partner) or partner_number required.",
-                }
-            )
-    return line_partners, errors
+    return line_partners, line_units, errors
 
 
 @api_bp.patch("/journal-entries/<int:journal_entry_id>")
 def amend_journal_entry_via_api(journal_entry_id: int):
-    """Offene Buchung ergänzen: Leistungsdatum und Geschäftspartner (Buchung/Zeile)."""
+    """Offene Buchung ergänzen: Leistungsdatum, Geschäftspartner (Buchung/Zeile) sowie
+    Kostenstelle und Profitcenter je Zeile."""
     if not api_can_write():
         return forbidden()
 
@@ -494,7 +521,7 @@ def amend_journal_entry_via_api(journal_entry_id: int):
         entry = session.get(JournalEntry, journal_entry_id)
         if entry is None or api_scoped_company(session, entry.company_id) is None:
             return jsonify({"error": "Journal entry not found."}), 404
-        line_partners, errors = _amend_line_partners(
+        line_partners, line_units, errors = _amend_lines(
             session, entry.company_id, payload.get("lines") or []
         )
         raw_number = payload.get("partner_number")
@@ -528,6 +555,8 @@ def amend_journal_entry_via_api(journal_entry_id: int):
                 journal_entry_id=journal_entry_id,
                 changed_by=_api_changed_by(),
                 line_partners=line_partners,
+                line_cost_centers=line_units["cost_center"],
+                line_profit_centers=line_units["profit_center"],
                 **options,
             )
         except JournalEntryCreationError as exc:

@@ -1044,8 +1044,11 @@ TOOLS: list[ToolSpec] = [
             "Ergänzt eine offene (nicht festgeschriebene) Buchung: Leistungsdatum setzen "
             "oder entfernen und Geschäftspartner zuordnen – für die ganze Buchung per "
             "'partner_id'/'partner_number' (alle Zeilen außer Steuerzeilen, null entfernt "
-            "ihn) oder je Zeile über 'lines'. Auf Debitoren-/Kreditoren-Sammelkonten muss "
-            "die Rolle des Partners passen. Beträge, Konten und Datum bleiben unverändert; "
+            "ihn) oder je Zeile über 'lines'. Über 'lines' auch Kostenstelle und "
+            "Profitcenter je Zeile setzen oder entfernen (cost_center_id/profit_center_id, "
+            "IDs aus list_controlling_units; aktiv und am Buchungsdatum gültig). Auf "
+            "Debitoren-/Kreditoren-Sammelkonten muss die Rolle des Partners passen. "
+            "Beträge, Konten und Datum bleiben unverändert; "
             "jede Änderung wird mit altem und neuem Wert protokolliert. Festgeschriebene und "
             "stornierte Buchungen nur per Storno und Neubuchung korrigieren."
         ),
@@ -1078,7 +1081,9 @@ TOOLS: list[ToolSpec] = [
                 "lines": {
                     "type": "array",
                     "description": (
-                        "Partner je Buchungszeile (Zeilennummer aus list_journal_entries)."
+                        "Änderungen je Buchungszeile (Zeilennummer aus list_journal_entries): "
+                        "Partner, Kostenstelle, Profitcenter. Nicht angegebene Felder "
+                        "bleiben unverändert."
                     ),
                     "items": {
                         "type": "object",
@@ -1091,6 +1096,14 @@ TOOLS: list[ToolSpec] = [
                             "partner_number": {
                                 "type": "string",
                                 "description": "Alternativ: Debitoren-/Kreditorennummer.",
+                            },
+                            "cost_center_id": {
+                                "type": ["integer", "null"],
+                                "description": "Kostenstelle der Zeile; null entfernt sie.",
+                            },
+                            "profit_center_id": {
+                                "type": ["integer", "null"],
+                                "description": "Profitcenter der Zeile; null entfernt es.",
                             },
                         },
                         "required": ["line_number"],

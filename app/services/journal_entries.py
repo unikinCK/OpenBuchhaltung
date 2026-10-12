@@ -25,6 +25,7 @@ from domain.models import (
     BankTransaction,
     BusinessPartner,
     Company,
+    ControllingUnit,
     DepreciationEntry,
     FiscalYear,
     FixedAsset,
@@ -1124,15 +1125,19 @@ def amend_journal_entry(
     service_date: date | None | object = KEEP_SERVICE_DATE,
     line_partners: dict[int, int | None] | None = None,
     partner_id: int | None | object = KEEP_PARTNER,
+    line_cost_centers: dict[int, int | None] | None = None,
+    line_profit_centers: dict[int, int | None] | None = None,
 ) -> JournalEntry:
-    """Ergänzt eine offene Buchung um Leistungsdatum und Geschäftspartner.
+    """Ergänzt eine offene Buchung um Leistungsdatum, Geschäftspartner und Kontierung.
 
     Vor der Festschreibung dürfen Buchungen berichtigt werden (GoBD, Katalog
     BOOK-001); jede Änderung steht mit altem und neuem Wert im Audit-Log.
     Beträge, Konten und Buchungsdatum bleiben unberührt. Partner gelten wie beim
     Buchen (``line_partners``: Zeilennummer → Partner-ID, None entfernt den
     Partner); ``partner_id`` setzt den Partner der Buchung auf alle übrigen Zeilen
-    außer Steuerzeilen (None entfernt ihn dort). Festgeschriebene, stornierte und
+    außer Steuerzeilen (None entfernt ihn dort). ``line_cost_centers`` und
+    ``line_profit_centers`` (Zeilennummer → Einheit-ID, None entfernt sie) prüfen die
+    Einheit wie beim Buchen (aktiv, gültig am Buchungsdatum). Festgeschriebene, stornierte und
     Vortragsbuchungen, gesperrte Perioden und abgeschlossene Geschäftsjahre lehnt
     die Funktion ab – das festgeschriebene Storno spiegelt den alten Stand, ein
     Nachtrag am Original verschöbe Partnersaldo und Meldezeitraum.
@@ -1221,6 +1226,46 @@ def amend_journal_entry(
         line.partner_id = line_partner_id
     if line_changes:
         changes["partners"] = line_changes
+
+    for unit_type, requested_units in (
+        ("cost_center", line_cost_centers),
+        ("profit_center", line_profit_centers),
+    ):
+        unit_changes = []
+        for line_number, unit_id in sorted((requested_units or {}).items()):
+            line = lines_by_number.get(line_number)
+            if line is None:
+                raise JournalEntryCreationError(
+                    f"Buchung {entry.posting_number} hat keine Zeile {line_number}."
+                )
+            field = f"{unit_type}_id"
+            old_id = getattr(line, field)
+            if unit_id == old_id:
+                continue
+            try:
+                unit = validate_controlling_assignment(
+                    session=session,
+                    company_id=entry.company_id,
+                    entry_date=entry.entry_date,
+                    unit_id=unit_id,
+                    expected_type=unit_type,
+                )
+            except ControllingError as exc:
+                raise JournalEntryCreationError(f"Zeile {line_number}: {exc}") from exc
+            old_unit = session.get(ControllingUnit, old_id) if old_id is not None else None
+            unit_changes.append(
+                {
+                    "line_number": line_number,
+                    "account_code": session.get(Account, line.account_id).code,
+                    "old_id": old_id,
+                    "old_code": old_unit.code if old_unit else None,
+                    "new_id": unit_id,
+                    "new_code": unit.code if unit else None,
+                }
+            )
+            setattr(line, field, unit_id)
+        if unit_changes:
+            changes[f"{unit_type}s"] = unit_changes
 
     if not changes:
         return entry
