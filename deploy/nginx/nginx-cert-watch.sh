@@ -1,27 +1,46 @@
 #!/bin/sh
-# nginx-Entrypoint-Hook des nginx-Overlays: wartet auf das (Platzhalter-)Zertifikat
-# vom certbot-Service und lädt nginx neu, sobald sich das Zertifikat ändert
-# (erstes Let's-Encrypt-Zertifikat, Erneuerungen).
+# nginx-Entrypoint-Hook des nginx-Overlays: wartet auf die (Platzhalter-)Zertifikate
+# vom certbot-Service und lädt nginx neu, sobald sich ein Zertifikat ändert
+# (erstes Let's-Encrypt-Zertifikat, Erneuerungen). Mit dem Webseiten-Overlay
+# (WEBSITE_DOMAIN) gehört das Zertifikat der Projekt-Webseite dazu.
 set -eu
 
-CERT="/etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem"
+CERTS="/etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem"
+if [ -n "${WEBSITE_DOMAIN:-}" ]; then
+  CERTS="${CERTS} /etc/letsencrypt/live/${WEBSITE_DOMAIN}/fullchain.pem"
+fi
 
-i=0
-until [ -f "${CERT}" ]; do
-  i=$((i + 1))
-  if [ "${i}" -gt 120 ]; then
-    echo "$0: kein Zertifikat unter ${CERT} — läuft der certbot-Service?" >&2
-    exit 1
-  fi
-  sleep 1
+for cert in ${CERTS}; do
+  i=0
+  until [ -f "${cert}" ]; do
+    i=$((i + 1))
+    if [ "${i}" -gt 120 ]; then
+      echo "$0: kein Zertifikat unter ${cert} — läuft der certbot-Service?" >&2
+      exit 1
+    fi
+    sleep 1
+  done
 done
 
+all_present() {
+  for cert in ${CERTS}; do
+    [ -f "${cert}" ] || return 1
+  done
+}
+
+# Änderungszeitpunkte aller Zertifikate in einer Zeile.
+stamps() {
+  for cert in ${CERTS}; do
+    stat -L -c %Y "${cert}" 2>/dev/null || echo 0
+  done | tr '\n' ' '
+}
+
 (
-  last="$(stat -L -c %Y "${CERT}" 2>/dev/null || echo 0)"
+  last="$(stamps)"
   while :; do
     sleep 60
-    now="$(stat -L -c %Y "${CERT}" 2>/dev/null || echo "${last}")"
-    if [ "${now}" != "${last}" ] && [ -f "${CERT}" ]; then
+    now="$(stamps)"
+    if [ "${now}" != "${last}" ] && all_present; then
       echo "$0: Zertifikat geändert — nginx -s reload"
       nginx -s reload || true
       last="${now}"

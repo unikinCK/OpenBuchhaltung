@@ -38,7 +38,9 @@ services:
       # Nur diese Variablen ersetzen — nginx-Variablen wie $host bleiben unberührt.
       NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|NGINX_CLIENT_MAX_BODY_SIZE)$$
     volumes:
-      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      # Einzeln eingebunden: website.conf.template bringt nur das Webseiten-Overlay
+      # (docker-compose.website.yml) mit.
+      - ./deploy/nginx/templates/default.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ./deploy/nginx/nginx-cert-watch.sh:/docker-entrypoint.d/05-cert-watch.sh:ro
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot:ro

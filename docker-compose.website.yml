@@ -1,0 +1,29 @@
+# Overlay: Projekt-Webseite (website/) als statische Seite über den nginx des
+# nginx-Overlays, unter einer eigenen Domain mit eigenem Let's-Encrypt-Zertifikat.
+#
+# Unter WEBSITE_DOMAIN liefert nginx die Dateien aus website/ aus, www.WEBSITE_DOMAIN
+# leitet dorthin um. Die Instanz unter PUBLIC_DOMAIN bleibt unverändert.
+#
+# Einrichtung (setzt docker-compose.nginx.yml voraus):
+#   1. .env: COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml:docker-compose.website.yml
+#            WEBSITE_DOMAIN=openbuchhaltung.de
+#   2. DNS: A-Record für WEBSITE_DOMAIN und www.WEBSITE_DOMAIN (oder CNAME) auf die
+#      öffentliche IP, wie bei PUBLIC_DOMAIN
+#   3. docker compose up -d --force-recreate certbot nginx
+#
+# Die Dateien kommen per Bind-Mount aus dem Checkout: Ein `git pull` (oder
+# ./redeploy.sh) aktualisiert die Seite ohne Neustart von nginx. Das Zertifikat holt
+# certbot wie beim nginx-Overlay selbst; sofort versuchen:
+#   docker compose exec certbot sh /opt/certbot.sh obtain
+services:
+  nginx:
+    environment:
+      WEBSITE_DOMAIN: ${WEBSITE_DOMAIN:?WEBSITE_DOMAIN must be set}
+      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|NGINX_CLIENT_MAX_BODY_SIZE|WEBSITE_DOMAIN)$$
+    volumes:
+      - ./deploy/nginx/templates/website.conf.template:/etc/nginx/templates/website.conf.template:ro
+      - ./website:/usr/share/nginx/website:ro
+
+  certbot:
+    environment:
+      WEBSITE_DOMAIN: ${WEBSITE_DOMAIN:?WEBSITE_DOMAIN must be set}

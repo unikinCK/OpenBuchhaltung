@@ -91,6 +91,8 @@ Wichtig zur Einordnung:
 
 ## Planung & Dokumentation
 
+- Projekt-Webseite: <https://openbuchhaltung.de> (Quelle `website/`, Auslieferung siehe
+  [Projekt-Webseite über denselben nginx](#https-zugang-für-claude-desktop-custom-connectoren))
 - Umsetzungsplan: `docs/umsetzungsplan.md`
 - Compliance-Dokumente: `docs/compliance/`
 - Architekturentscheidungen: `docs/adr/`
@@ -419,6 +421,7 @@ inaktiv.
 | `NGINX_HTTP_BIND`, `NGINX_HTTPS_BIND` | `80`, `443` | Host-Bindung von nginx für HTTP (ACME-Challenge, Umleitung) und HTTPS, z. B. `8080` oder `192.168.0.10:443`. |
 | `NGINX_CLIENT_MAX_BODY_SIZE` | `20m` | Maximale Request-Größe an nginx (≥ `DOCUMENT_MAX_UPLOAD_BYTES`). |
 | `CERTBOT_EMAIL`, `CERTBOT_STAGING` | –, `0` | Kontakt für Let's Encrypt; `1` = Test-CA (keine Rate-Limits, nicht vertrauenswürdig). |
+| `WEBSITE_DOMAIN` | – | Domain der Projekt-Webseite (`website/`) im Webseiten-Overlay `docker-compose.website.yml`; `www.<Domain>` leitet dorthin um. |
 | `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`; `COMPOSE_FILE` auch aus der `.env`, mehrere Dateien mit `:` getrennt. |
 
 ## Login & Benutzer
@@ -1629,6 +1632,23 @@ docker compose exec certbot certbot certificates
 Mehrere Instanzen auf einem Host brauchen getrennte Verzeichnisse (eigener Checkout,
 eigene `.env`) — der Compose-Projektname folgt dem Verzeichnisnamen, Volumes und
 Container sind damit getrennt.
+
+**Projekt-Webseite über denselben nginx.** Die statische Webseite unter `website/`
+(<https://openbuchhaltung.de>) liefert das zusätzliche Overlay
+`docker-compose.website.yml` unter einer eigenen Domain aus: eigenes
+Let's-Encrypt-Zertifikat für `WEBSITE_DOMAIN` und `www.WEBSITE_DOMAIN` (www leitet um),
+strenge Content-Security-Policy, keine Zugriffsprotokolle. Die Instanz unter
+`PUBLIC_DOMAIN` bleibt unverändert.
+
+```dotenv
+COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml:docker-compose.website.yml
+WEBSITE_DOMAIN=openbuchhaltung.de
+```
+
+DNS-Records für Domain und `www` auf dieselbe IP wie `PUBLIC_DOMAIN`, dann
+`docker compose up -d --force-recreate certbot nginx`. Die Dateien kommen per
+Bind-Mount aus dem Checkout; ein `git pull` aktualisiert die Seite ohne Neustart.
+Lokal ansehen: `python3 -m http.server 8020 --directory website`.
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
 hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.
