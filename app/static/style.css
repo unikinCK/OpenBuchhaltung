@@ -1415,6 +1415,17 @@ fieldset {
   }
 }
 
+@media (max-width: 680px) {
+  /* Marke und Benutzermenü oben, Navigation darunter über die volle Breite. */
+  .topbar .brand {
+    flex: 1;
+  }
+  .topbar nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+
 @media (max-width: 480px) {
   .journal-line {
     grid-template-columns: 1fr;
@@ -1437,6 +1448,61 @@ fieldset {
   details.card {
     padding: 0.9rem 1rem;
   }
+}
+
+/* Zweispaltige Formulare mit Feld im Label (Lohn) */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.grid-2 > label,
+form.stacked .grid-2 > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.grid-2 > label input,
+.grid-2 > label select {
+  width: 100%;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+/* Listeneinträge (z. B. Lohnläufe) und Aktionszeilen (Anlagen) */
+.list-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.list-item > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+details.line-details > summary {
+  cursor: pointer;
+  margin: 0.25rem 0;
 }
 
 /* Nur für Screenreader sichtbar */
