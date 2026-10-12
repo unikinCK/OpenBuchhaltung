@@ -26,6 +26,19 @@ is_dummy() {
   [ -f "$(live_dir "$1")/.dummy" ]
 }
 
+# Die Instanz-Zertifikate wählt nginx per SNI über eine Variable; die lädt der
+# Worker-Prozess (Benutzer nginx, GID 101 im nginx-Image) statt des root-Masters.
+# Daher Lesezugriff über die Gruppe — der Worker hält die Schlüssel ohnehin im Speicher.
+# Nach jedem Ausstellen und Erneuern, denn certbot legt neue Schlüssel mit 0600 an.
+NGINX_GID=101
+share_with_nginx() {
+  for dir in /etc/letsencrypt/live /etc/letsencrypt/archive; do
+    [ -d "${dir}" ] || continue
+    chgrp -R "${NGINX_GID}" "${dir}"
+    chmod -R g+rX "${dir}"
+  done
+}
+
 # Selbstsigniertes Zertifikat, damit nginx vor dem ersten echten Zertifikat startet.
 dummy_cert() {
   live="$(live_dir "$1")"
@@ -84,6 +97,7 @@ if [ "${1:-}" = "obtain" ]; then
   if [ -n "${WEBSITE_DOMAIN:-}" ]; then
     obtain_website || status=1
   fi
+  share_with_nginx
   exit "${status}"
 fi
 
@@ -95,6 +109,7 @@ done
 if [ -n "${WEBSITE_DOMAIN:-}" ]; then
   dummy_cert "${WEBSITE_DOMAIN}"
 fi
+share_with_nginx
 while :; do
   # Höchstens ein Versuch je Stunde und Zertifikat — Let's Encrypt erlaubt
   # 5 Fehlversuche je Domain und Stunde.
@@ -109,6 +124,7 @@ while :; do
   fi
   # Erneuert nur echte Zertifikate; Platzhalter haben keine Renewal-Konfiguration.
   certbot renew --webroot -w "${WEBROOT}" --quiet || true
+  share_with_nginx
   if [ "${pending}" = "1" ]; then
     wait_for=1h
   else

@@ -14,6 +14,9 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   (nginx wählt es per SNI, certbot holt und erneuert es, der Reload-Hook überwacht es).
 - Der OAuth-Hinweis des MCP-Servers im 401 folgt der aufgerufenen Domain statt fest
   `PUBLIC_DOMAIN` (`MCP_PUBLIC_URL` bleibt als Override).
+- Fix: certbot gibt Zertifikate und Schlüssel für die Gruppe des nginx-Workers frei
+  (nach Platzhaltern, Ausstellen und jeder Erneuerung). Per SNI gewählte Zertifikate
+  lädt der Worker statt des root-Masters; ohne Leserecht scheiterte der TLS-Handshake.
 
 ### Projekt-Webseite
 - Neu: statische Projekt-Webseite unter `website/` für openbuchhaltung.de: Funktionen,
