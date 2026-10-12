@@ -702,6 +702,23 @@ button[disabled] {
   text-align: center;
 }
 
+.journal-lines-table td.col-more button {
+  margin: 0;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.3rem;
+}
+
+.journal-lines-table td.col-more button:hover {
+  color: var(--error-text);
+}
+
+.line-totals {
+  margin: 0.35rem 0 0.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .journal-lines-table tr.line-extra td {
   padding-top: 0;
   padding-bottom: 0.6rem;

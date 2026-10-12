@@ -8,6 +8,39 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Übersichtlichere Oberfläche und Geschäftspartner an jeder Buchung
+- Geändert: Geschäftspartner sind auf allen Buchungszeilen zulässig (ADR-002, Nachtrag
+  2026-10-12). Auf Debitoren-/Kreditoren-Sammelkonten bildet der Partner weiter das
+  Nebenbuch (Rollenprüfung, Saldovortrag je Partner), auf allen anderen Konten ist er
+  Partnerbezug ohne Rollenbindung – z. B. der Lieferant einer Direktbuchung „Aufwand an
+  Bank“. Der Saldovortrag trennt nur Sammelkonten nach Partner. Kein Schema- und kein
+  Hashwechsel (der Partner je Zeile ist seit Hashversion 3 versiegelt).
+- Neu: Partner der Buchung (`partner_id`/`partner_number` auf oberster Ebene) beim
+  Buchen (`POST /api/v1/journal-entries`, Buchungsmaske), Ergänzen (`PATCH
+  /api/v1/journal-entries/<id>`) und Verbuchen von Bankumsätzen (`POST
+  /api/v1/bank-transactions/<id>/book`, Buchungsdialog der Bankseite): gilt für alle
+  Zeilen ohne eigenen Partner außer Steuerzeilen. `GET /api/v1/journal-entries` filtert
+  nach `partner_id` und liefert je Buchung `partners`; MCP-Tools `create_journal_entry`,
+  `amend_journal_entry`, `list_journal_entries` und `book_bank_transaction` entsprechend
+  erweitert. Vorlagen prüfen die Partnerrolle nur noch auf Sammelkonten.
+- Neu: Journal mit einer Zeile je Buchung – Geschäftspartner als eigene Spalte,
+  Kontierung „Soll an Haben“, Betrag, Gegenseite laut Bank als Hinweis; Filter nach
+  Partner und Status; „Partner zuordnen“ ordnet offenen Buchungen direkt aus der Liste
+  einen Partner zu. Die Erfassungsmaske ist eingeklappt, kennt den Partner der Buchung
+  und nimmt Beträge auch im deutschen Format (1.190,00) an.
+- Neu: Detailseite je Buchung (`/buchungen/<id>`, auch unter `/ergaenzen`) mit Zeilen,
+  Partner je Zeile („Partner für alle Zeilen übernehmen“), Leistungsdatum, Belegen,
+  Bankumsatz, Änderungsprotokoll, Festschreiben und Stornieren.
+- Neu: Partnerseite mit Übersicht, Buchungen des Partners und lesbarer Änderungshistorie;
+  Partnerliste mit Rollen und Anzahl der Buchungen (Link ins gefilterte Journal).
+- Geändert: Oberfläche aufgeräumt – Kopfzeile in einer Zeile mit Benutzermenü, deutsche
+  Beträge und Datumsangaben, Seitenkopf mit Aktionen, eingeklappte Formulare und
+  Werkzeuge, Dialoge statt Formularstapeln in Tabellenzeilen. Bank: Umsätze zuerst,
+  Buchen im Dialog inklusive Partner und Buchungstext; Konten mit Suche und Filter;
+  Belege mit Filter „nur ohne Buchung“; OPOS mit Überfälligkeits-Kennzeichen; UStVA mit
+  eingeklappter ELSTER-Konfiguration; Dashboard, Anlagen und Berichte im deutschen
+  Zahlenformat.
+
 ### Belegkategorien und mehrere Belege je Buchung
 - Neu: Belegkategorien je Gesellschaft mit der Vorauswahl Rechnung, Gutschrift,
   Zahlungsbeleg, Bewirtungsbeleg und Zahlungsanweisung (Migration `20261012_0047` legt sie

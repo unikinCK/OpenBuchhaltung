@@ -612,6 +612,10 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         sich um Leistungsdatum und Partner ergänzen (Audit-Log) in UI/API/MCP
         (Migration `20261009_0044`). Offen: Leistungsdatum in E-Rechnung,
         Beleg-OCR und Vorlagen.
+  - [x] Geschäftspartner an jeder Buchung *(2026-10-12, ADR-002 Nachtrag)*: Partnerbezug
+        auf allen Buchungszeilen (Nebenbuch weiter nur auf Sammelkonten), Partner der
+        Buchung beim Buchen, Ergänzen und in der Bankbuchung, Journal mit Partner-Spalte,
+        Partnerfilter und „Partner zuordnen“, Partnerseite mit Buchungen; UI/API/MCP.
   - [ ] Kunden-/Lieferantenstamm, PR 2–4: OPOS/Zahllauf/Mahnwesen am Partner,
         Partnerkonto und Saldenliste, Partnererkennung in automatischen
         Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.
@@ -619,6 +623,15 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
       Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit
       WJ-Bezug, Liquidität, Fälligkeiten (U6).
+  - [x] Übersichtlichere Oberfläche, Teil 1 *(2026-10-12)*: Jinja-Filter für Beträge,
+        Datum und Steuersatz (U2 in Journal, Buchungsdetail, Dashboard, Bank, OPOS,
+        Belege, Partner, Konten, Anlagen, Berichte; deutsche Beträge in der
+        Buchungsmaske); Kopfzeile mit Benutzermenü, eingeklappte Formulare, Dialoge per
+        Popover-API statt Formularstapeln (U7 Bank-Tabelle), Kontoarten auf Deutsch;
+        Buchungsdetailseite; Buchungsmaske mit Live-Summe Soll/Haben inkl. Steuer, Zeile
+        entfernen, leere Zusatzzeilen blockieren nicht mehr (U3 teilweise);
+        Bestätigung beim Einzel-Festschreiben (U4 teilweise). Offen: U2 in den übrigen
+        Seiten und Formularen, U1, Combobox für Konten (U3), U5, U6, U8.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
       Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
 

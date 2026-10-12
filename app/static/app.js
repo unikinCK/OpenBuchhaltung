@@ -35,6 +35,7 @@
 
     setupPartnerPanel();
     setupPartnerFill();
+    setupLineTotals();
 
     // Auswahlfelder mit data-autosubmit senden ihr Formular bei Änderung ab.
     document.querySelectorAll("[data-autosubmit]").forEach(function (element) {
@@ -170,6 +171,59 @@
     });
     var current = partnerSelect.options[partnerSelect.selectedIndex];
     if (current && current.disabled) partnerSelect.value = "";
+  }
+
+  // Buchungsmaske: Summe Soll/Haben inklusive automatischer Steuerzeilen live
+  // anzeigen und Zeilen entfernen (mindestens zwei bleiben stehen).
+  function parseAmount(raw) {
+    var text = (raw || "").replace(/[\s€]/g, "");
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var value = parseFloat(text);
+    return isNaN(value) ? 0 : value;
+  }
+
+  function formatAmount(value) {
+    return value.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function setupLineTotals() {
+    var output = document.querySelector("[data-line-totals]");
+    var table = output && document.querySelector("#journal-lines");
+    if (!output || !table) return;
+
+    function update() {
+      var debit = 0;
+      var credit = 0;
+      table.querySelectorAll("tbody.line-group").forEach(function (group) {
+        var amount = parseAmount((group.querySelector("[name=line_amount]") || {}).value);
+        var side = (group.querySelector("[name=line_side]") || {}).value;
+        var tax = group.querySelector("[name=line_tax_code_id]");
+        var option = tax && tax.options[tax.selectedIndex];
+        var rate = option && option.dataset.rate ? parseFloat(option.dataset.rate) : 0;
+        var total = amount + Math.round(amount * rate) / 100;
+        if (side === "credit") credit += total; else debit += total;
+      });
+      var difference = Math.round((debit - credit) * 100) / 100;
+      output.textContent = "Soll " + formatAmount(debit) + " · Haben " + formatAmount(credit) +
+        (difference === 0 ? " · ausgeglichen" : " · Differenz " + formatAmount(difference));
+      output.classList.toggle("negative", difference !== 0);
+    }
+
+    table.addEventListener("input", update);
+    table.addEventListener("change", update);
+    table.addEventListener("click", function (event) {
+      var button = event.target.closest && event.target.closest("[data-remove-line]");
+      if (!button) return;
+      var groups = table.querySelectorAll("tbody.line-group");
+      var group = button.closest("tbody.line-group");
+      if (group && groups.length > 2) {
+        group.remove();
+        update();
+      }
+    });
+    var addButton = document.querySelector('[data-add-row="#journal-lines"]');
+    if (addButton) addButton.addEventListener("click", update);
+    update();
   }
 
   // Journal: „Partner zuordnen“ öffnet einen gemeinsamen Dialog und setzt das

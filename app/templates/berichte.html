@@ -37,7 +37,7 @@
     <section class="card">
       <h2>Summen- und Saldenliste</h2>
       {% if trial_balance %}
-        <table>
+        <table class="data">
           <thead>
             <tr>
               <th>Konto</th>
@@ -52,9 +52,9 @@
               <tr>
                 <td>{{ row.code }}</td>
                 <td>{{ row.name }}</td>
-                <td class="num">{{ row.debit_total }}</td>
-                <td class="num">{{ row.credit_total }}</td>
-                <td class="num">{{ row.balance }}</td>
+                <td class="num">{{ row.debit_total | betrag }}</td>
+                <td class="num">{{ row.credit_total | betrag }}</td>
+                <td class="num{% if row.balance < 0 %} negative{% endif %}">{{ row.balance | betrag }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -108,14 +108,14 @@
           </thead>
           <tbody>
             {% for row in income_statement.revenues %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Umsätze</strong></td><td class="num"><strong>{{ income_statement.totals.total_revenue }}</strong></td></tr>
+            <tr><td><strong>Umsätze</strong></td><td class="num"><strong>{{ income_statement.totals.total_revenue | betrag }}</strong></td></tr>
             {% for row in income_statement.expenses %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">−{{ row.amount }}</td></tr>
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">−{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Aufwendungen</strong></td><td class="num"><strong>−{{ income_statement.totals.total_expense }}</strong></td></tr>
-            <tr><td><strong>Jahresergebnis</strong></td><td class="num"><strong>{{ income_statement.totals.net_income }}</strong></td></tr>
+            <tr><td><strong>Aufwendungen</strong></td><td class="num"><strong>−{{ income_statement.totals.total_expense | betrag }}</strong></td></tr>
+            <tr><td><strong>Jahresergebnis</strong></td><td class="num"><strong{% if income_statement.totals.net_income < 0 %} class="negative"{% endif %}>{{ income_statement.totals.net_income | betrag }}</strong></td></tr>
           </tbody>
         </table>
       </section>
@@ -128,9 +128,9 @@
           </thead>
           <tbody>
             {% for row in balance_sheet.assets %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets }}</strong></td></tr>
+            <tr><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets | betrag }}</strong></td></tr>
           </tbody>
         </table>
         <br />
@@ -140,9 +140,9 @@
           </thead>
           <tbody>
             {% for row in balance_sheet.liabilities_and_equity %}
-              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount }}</td></tr>
+              <tr><td>{{ row.code }} {{ row.name }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity }}</strong></td></tr>
+            <tr><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity | betrag }}</strong></td></tr>
           </tbody>
         </table>
         <p>
@@ -150,7 +150,7 @@
           {% if balance_sheet.totals.is_balanced %}
             <strong>Ja</strong>
           {% else %}
-            <strong class="negative">Nein</strong> (Differenz: {{ balance_sheet.totals.difference }})
+            <strong class="negative">Nein</strong> (Differenz: {{ balance_sheet.totals.difference | betrag }})
           {% endif %}
         </p>
       </section>
