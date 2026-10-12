@@ -418,6 +418,7 @@ inaktiv.
 | `MCP_DOMAIN` | – | Öffentliche Domain des Caddy-Proxys vor dem MCP-Server. |
 | `MCP_PORT` | `8090` | Host-Port des MCP-Servers im Produktions-Stack (an `127.0.0.1` gebunden). |
 | `PUBLIC_DOMAIN` | – | Öffentliche Domain des nginx-Overlays (`docker-compose.nginx.yml`). |
+| `PUBLIC_DOMAIN_ALIASES` | – | Weitere Domains derselben Instanz im nginx-Overlay, durch Leerzeichen getrennt; jede mit eigenem Zertifikat, ohne Umleitung. |
 | `NGINX_HTTP_BIND`, `NGINX_HTTPS_BIND` | `80`, `443` | Host-Bindung von nginx für HTTP (ACME-Challenge, Umleitung) und HTTPS, z. B. `8080` oder `192.168.0.10:443`. |
 | `NGINX_CLIENT_MAX_BODY_SIZE` | `20m` | Maximale Request-Größe an nginx (≥ `DOCUMENT_MAX_UPLOAD_BYTES`). |
 | `CERTBOT_EMAIL`, `CERTBOT_STAGING` | –, `0` | Kontakt für Let's Encrypt; `1` = Test-CA (keine Rate-Limits, nicht vertrauenswürdig). |
@@ -1627,6 +1628,17 @@ Erneuerung: certbot prüft alle 12 Stunden. Sofort versuchen bzw. Status prüfen
 ```bash
 docker compose exec certbot sh /opt/certbot.sh obtain
 docker compose exec certbot certbot certificates
+```
+
+**Weitere Domains für dieselbe Instanz.** `PUBLIC_DOMAIN_ALIASES` (durch Leerzeichen
+getrennt) macht die Instanz zusätzlich unter weiteren Namen erreichbar — ohne Umleitung,
+jede Domain mit eigenem Let's-Encrypt-Zertifikat (nginx wählt es per SNI). Der
+OAuth-Hinweis des MCP-Servers folgt der aufgerufenen Domain; Logins (Cookies) gelten je
+Domain. DNS-Record anlegen, dann `docker compose up -d --force-recreate certbot nginx`.
+
+```dotenv
+PUBLIC_DOMAIN=buchhaltung.example.com
+PUBLIC_DOMAIN_ALIASES=buchhaltung.example.org
 ```
 
 Mehrere Instanzen auf einem Host brauchen getrennte Verzeichnisse (eigener Checkout,

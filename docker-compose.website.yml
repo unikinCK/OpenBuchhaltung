@@ -19,7 +19,7 @@ services:
   nginx:
     environment:
       WEBSITE_DOMAIN: ${WEBSITE_DOMAIN:?WEBSITE_DOMAIN must be set}
-      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|NGINX_CLIENT_MAX_BODY_SIZE|WEBSITE_DOMAIN)$$
+      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|PUBLIC_DOMAIN_ALIASES|NGINX_CLIENT_MAX_BODY_SIZE|WEBSITE_DOMAIN)$$
     volumes:
       - ./deploy/nginx/templates/website.conf.template:/etc/nginx/templates/website.conf.template:ro
       - ./website:/usr/share/nginx/website:ro

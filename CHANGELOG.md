@@ -8,6 +8,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Weitere Domains für die öffentliche Instanz
+- Neu: `PUBLIC_DOMAIN_ALIASES` im nginx-Overlay macht dieselbe Instanz unter weiteren
+  Domains erreichbar, ohne Umleitung und je Domain mit eigenem Let's-Encrypt-Zertifikat
+  (nginx wählt es per SNI, certbot holt und erneuert es, der Reload-Hook überwacht es).
+- Der OAuth-Hinweis des MCP-Servers im 401 folgt der aufgerufenen Domain statt fest
+  `PUBLIC_DOMAIN` (`MCP_PUBLIC_URL` bleibt als Override).
+
 ### Projekt-Webseite
 - Neu: statische Projekt-Webseite unter `website/` für openbuchhaltung.de: Funktionen,
   Ablauf vom Beleg bis zur Meldung, Aufnahmen der Demo-Instanz, Umsatzsteuer und DATEV,

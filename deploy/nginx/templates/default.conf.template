@@ -1,6 +1,8 @@
 # nginx-Reverse-Proxy für eine öffentliche OpenBuchhaltung-Instanz
-# (docker-compose.nginx.yml). ${PUBLIC_DOMAIN} und ${NGINX_CLIENT_MAX_BODY_SIZE}
-# ersetzt das nginx-Image beim Start (envsubst), alle anderen $-Variablen sind nginx-eigene.
+# (docker-compose.nginx.yml). ${PUBLIC_DOMAIN}, ${PUBLIC_DOMAIN_ALIASES} und
+# ${NGINX_CLIENT_MAX_BODY_SIZE} ersetzt das nginx-Image beim Start (envsubst), alle
+# anderen $-Variablen sind nginx-eigene. Weitere Domains der Instanz
+# (PUBLIC_DOMAIN_ALIASES) liefern dieselbe Instanz aus, jede mit eigenem Zertifikat.
 
 server_tokens off;
 
@@ -35,6 +37,20 @@ server {
     }
 }
 
+# Bekannte Instanz-Domains bleiben beim Wechsel auf HTTPS auf ihrem Namen.
+server {
+    listen 80;
+    server_name ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
 # Unbekannte Hostnamen (Scans auf die IP) per TLS-Handshake abweisen.
 server {
     listen 443 ssl default_server;
@@ -45,10 +61,15 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${PUBLIC_DOMAIN};
+    server_name ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES};
 
-    ssl_certificate     /etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_DOMAIN}/privkey.pem;
+    # Je Domain das eigene Zertifikat (certbot legt es unter ihrem Namen ab). Andere
+    # Namen erreichen diesen Block nicht: der default_server oben lehnt sie ab.
+    ssl_certificate     /etc/letsencrypt/live/$ssl_server_name/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$ssl_server_name/privkey.pem;
+    # Ohne Cache läse nginx die Dateien bei jedem Handshake; Änderungen (Erneuerung)
+    # erkennt er nach spätestens einer Minute.
+    ssl_certificate_cache max=16 valid=1m;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;

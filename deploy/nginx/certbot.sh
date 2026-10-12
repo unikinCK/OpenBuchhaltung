@@ -7,12 +7,16 @@
 #
 # Umgebung: PUBLIC_DOMAIN (Pflicht), CERTBOT_EMAIL (Kontakt für Ablaufwarnungen),
 #           CERTBOT_STAGING=1 (Test-CA, keine Rate-Limits, Browser warnt),
+#           PUBLIC_DOMAIN_ALIASES (weitere Domains der Instanz, durch Leerzeichen
+#           getrennt): je Domain ein eigenes Zertifikat,
 #           WEBSITE_DOMAIN (Projekt-Webseite, docker-compose.website.yml): zweites
 #           Zertifikat für die Domain und www.<Domain>.
 set -eu
 
 : "${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set}"
 WEBROOT=/var/www/certbot
+# Instanz-Domains: jede bekommt ein eigenes Zertifikat (keine Umleitung zwischen ihnen).
+INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-}"
 
 live_dir() {
   echo "/etc/letsencrypt/live/$1"
@@ -74,7 +78,9 @@ obtain_website() {
 
 if [ "${1:-}" = "obtain" ]; then
   status=0
-  obtain "${PUBLIC_DOMAIN}" || status=1
+  for domain in ${INSTANCE_DOMAINS}; do
+    obtain "${domain}" || status=1
+  done
   if [ -n "${WEBSITE_DOMAIN:-}" ]; then
     obtain_website || status=1
   fi
@@ -83,7 +89,9 @@ fi
 
 trap 'exit 0' TERM INT
 mkdir -p "${WEBROOT}"
-dummy_cert "${PUBLIC_DOMAIN}"
+for domain in ${INSTANCE_DOMAINS}; do
+  dummy_cert "${domain}"
+done
 if [ -n "${WEBSITE_DOMAIN:-}" ]; then
   dummy_cert "${WEBSITE_DOMAIN}"
 fi
@@ -91,9 +99,11 @@ while :; do
   # Höchstens ein Versuch je Stunde und Zertifikat — Let's Encrypt erlaubt
   # 5 Fehlversuche je Domain und Stunde.
   pending=0
-  if is_dummy "${PUBLIC_DOMAIN}"; then
-    obtain "${PUBLIC_DOMAIN}" || pending=1
-  fi
+  for domain in ${INSTANCE_DOMAINS}; do
+    if is_dummy "${domain}"; then
+      obtain "${domain}" || pending=1
+    fi
+  done
   if [ -n "${WEBSITE_DOMAIN:-}" ] && is_dummy "${WEBSITE_DOMAIN}"; then
     obtain_website || pending=1
   fi

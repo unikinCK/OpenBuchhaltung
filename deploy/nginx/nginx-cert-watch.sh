@@ -1,11 +1,15 @@
 #!/bin/sh
 # nginx-Entrypoint-Hook des nginx-Overlays: wartet auf die (Platzhalter-)Zertifikate
 # vom certbot-Service und lädt nginx neu, sobald sich ein Zertifikat ändert
-# (erstes Let's-Encrypt-Zertifikat, Erneuerungen). Mit dem Webseiten-Overlay
-# (WEBSITE_DOMAIN) gehört das Zertifikat der Projekt-Webseite dazu.
+# (erstes Let's-Encrypt-Zertifikat, Erneuerungen). Dazu gehören die Zertifikate der
+# weiteren Instanz-Domains (PUBLIC_DOMAIN_ALIASES) und mit dem Webseiten-Overlay
+# (WEBSITE_DOMAIN) das der Projekt-Webseite.
 set -eu
 
-CERTS="/etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem"
+CERTS=""
+for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-}; do
+  CERTS="${CERTS} /etc/letsencrypt/live/${domain}/fullchain.pem"
+done
 if [ -n "${WEBSITE_DOMAIN:-}" ]; then
   CERTS="${CERTS} /etc/letsencrypt/live/${WEBSITE_DOMAIN}/fullchain.pem"
 fi
