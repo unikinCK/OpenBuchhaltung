@@ -75,5 +75,11 @@ def test_certbot_and_reload_hook_handle_every_instance_domain():
     assert 'INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-}"' in certbot
     # Platzhalter, erstes Zertifikat und `obtain` laufen über alle Instanz-Domains.
     assert certbot.count("for domain in ${INSTANCE_DOMAINS}; do") == 3
+    # Variablen-Zertifikate lädt der nginx-Worker: Gruppe nginx muss lesen dürfen,
+    # nach Platzhaltern, nach `obtain` und nach jeder Erneuerung.
+    assert "NGINX_GID=101" in certbot
+    assert certbot.count("share_with_nginx\n") == 3
+    renew = certbot.split('certbot renew --webroot -w "${WEBROOT}" --quiet || true', 1)[1]
+    assert renew.lstrip().startswith("share_with_nginx")
     hook = (PROJECT_ROOT / "deploy" / "nginx" / "nginx-cert-watch.sh").read_text(encoding="utf-8")
     assert "for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-}; do" in hook
