@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, true
 from sqlalchemy.orm import Session, aliased
 
 from app.services.audit_log import log_audit_event, serialize_audit_log_entry
@@ -15,6 +15,8 @@ from domain.models import (
     AuditLog,
     Company,
     ControllingUnit,
+    DepreciationEntry,
+    FixedAsset,
     JournalEntry,
     JournalEntryLine,
 )
@@ -239,6 +241,128 @@ def controlling_unit_history(
     return [serialize_audit_log_entry(entry) for entry in entries]
 
 
+def _empty_investments() -> dict[str, Any]:
+    return {
+        "accounts": [],
+        "acquisition_cost": Decimal("0.00"),
+        "depreciation": Decimal("0.00"),
+        "book_value": Decimal("0.00"),
+    }
+
+
+def _investment_figures(
+    *,
+    session: Session,
+    company_id: int,
+    dimension_column,
+    date_from: date | None,
+    date_to: date | None,
+) -> dict[int, dict[str, Any]]:
+    """Investitionen je Einheit: Anschaffungswert, AfA und Buchwert je Anlagekonto.
+
+    Anschaffungswert = kontierte Zeilen auf Bestandskonten (Aktiva) bis zum Ende des
+    Berichtszeitraums, ohne Abschreibungsbuchungen. Abschreibungen (planmäßig,
+    außerplanmäßig, Restbuchwert beim Abgang) stammen aus der Anlagenbuchhaltung: Die
+    Einheit trägt dort die Aufwandszeile, die Minderung des Anlagekontos nicht – das
+    Anlagekonto liefert daher das Anlagegut. Stornos zählen über ``reversal_of_id``
+    mit. AfA im Zeitraum, Buchwert = Anschaffungswert − kumulierte AfA zum Stichtag.
+    """
+    depreciation_entry_ids = select(DepreciationEntry.journal_entry_id).where(
+        DepreciationEntry.company_id == company_id,
+        DepreciationEntry.journal_entry_id.is_not(None),
+    )
+    cost_stmt = (
+        select(
+            dimension_column.label("unit_id"),
+            Account.id.label("account_id"),
+            Account.code.label("account_code"),
+            Account.name.label("account_name"),
+            func.coalesce(
+                func.sum(JournalEntryLine.debit_amount - JournalEntryLine.credit_amount), 0
+            ).label("amount"),
+        )
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .join(Account, Account.id == JournalEntryLine.account_id)
+        .where(
+            JournalEntry.company_id == company_id,
+            Account.account_type == "asset",
+            dimension_column.is_not(None),
+            JournalEntry.id.not_in(depreciation_entry_ids),
+            func.coalesce(JournalEntry.reversal_of_id, 0).not_in(depreciation_entry_ids),
+        )
+        .group_by(dimension_column, Account.id, Account.code, Account.name)
+    )
+
+    asset_account = aliased(Account)
+    expense_account = aliased(Account)
+    in_period = JournalEntry.entry_date >= date_from if date_from is not None else true()
+    line_amount = JournalEntryLine.debit_amount - JournalEntryLine.credit_amount
+    depreciation_stmt = (
+        select(
+            dimension_column.label("unit_id"),
+            asset_account.id.label("account_id"),
+            asset_account.code.label("account_code"),
+            asset_account.name.label("account_name"),
+            func.coalesce(func.sum(line_amount), 0).label("cumulative"),
+            func.coalesce(
+                func.sum(case((in_period, line_amount), else_=0)), 0
+            ).label("in_period"),
+        )
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .join(
+            DepreciationEntry,
+            DepreciationEntry.journal_entry_id
+            == func.coalesce(JournalEntry.reversal_of_id, JournalEntry.id),
+        )
+        .join(FixedAsset, FixedAsset.id == DepreciationEntry.fixed_asset_id)
+        .join(asset_account, asset_account.id == FixedAsset.asset_account_id)
+        .join(expense_account, expense_account.id == JournalEntryLine.account_id)
+        .where(
+            JournalEntry.company_id == company_id,
+            expense_account.account_type != "asset",
+            dimension_column.is_not(None),
+        )
+        .group_by(dimension_column, asset_account.id, asset_account.code, asset_account.name)
+    )
+    if date_to is not None:
+        cost_stmt = cost_stmt.where(JournalEntry.entry_date <= date_to)
+        depreciation_stmt = depreciation_stmt.where(JournalEntry.entry_date <= date_to)
+
+    rows: dict[int, dict[int, dict[str, Any]]] = {}
+
+    def account_row(unit_id: int, row) -> dict[str, Any]:
+        return rows.setdefault(unit_id, {}).setdefault(
+            row.account_id,
+            {
+                "account_id": row.account_id,
+                "code": row.account_code,
+                "name": row.account_name,
+                "acquisition_cost": Decimal("0.00"),
+                "depreciation": Decimal("0.00"),
+                "accumulated_depreciation": Decimal("0.00"),
+            },
+        )
+
+    for row in session.execute(cost_stmt):
+        account_row(row.unit_id, row)["acquisition_cost"] += Decimal(row.amount)
+    for row in session.execute(depreciation_stmt):
+        target = account_row(row.unit_id, row)
+        target["depreciation"] += Decimal(row.in_period)
+        target["accumulated_depreciation"] += Decimal(row.cumulative)
+
+    result: dict[int, dict[str, Any]] = {}
+    for unit_id, accounts in rows.items():
+        investments = _empty_investments()
+        for account in sorted(accounts.values(), key=lambda item: item["code"]):
+            accumulated = account.pop("accumulated_depreciation")
+            account["book_value"] = account["acquisition_cost"] - accumulated
+            investments["accounts"].append(account)
+            for key in ("acquisition_cost", "depreciation", "book_value"):
+                investments[key] += account[key]
+        result[unit_id] = investments
+    return result
+
+
 def controlling_result_report(
     *,
     session: Session,
@@ -346,6 +470,19 @@ def controlling_result_report(
         else:
             bucket["total_expense"] += amount
         bucket["net_income"] = bucket["total_revenue"] - bucket["total_expense"]
+
+    investments = _investment_figures(
+        session=session,
+        company_id=company_id,
+        dimension_column=dimension_column,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    for unit_id, bucket in buckets.items():
+        if unit_id is not None:
+            bucket["investments"] = investments.get(unit_id) or _empty_investments()
+    # Ohne Einheit lassen sich Bestandskonten nicht sinnvoll als Investition lesen.
+    buckets[None]["investments"] = None
 
     return {
         "company_id": company_id,
