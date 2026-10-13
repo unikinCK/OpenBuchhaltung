@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Tabellen nach jeder Spalte sortieren
+- Neu: Ein Klick auf einen Spaltenkopf sortiert die Tabelle auf- bzw. absteigend (▲/▼).
+  Die paginierten Listen – Journal, Bankumsätze, Belege, Geschäftspartner, Offene
+  Posten und Kontoblatt – sortiert der Server über `?sort=<Spalte>&dir=asc|desc` über
+  alle Seiten hinweg; Blättern und Filter behalten die Sortierung. Alle übrigen
+  Tabellen sortieren im Browser (Datum, deutsche Beträge und Kontonummern numerisch,
+  leere Werte am Ende); ein dritter Klick stellt die ursprüngliche Reihenfolge her.
+  Summenzeilen und der Anfangssaldo bleiben stehen; GuV, Steuerberechnung,
+  Mahnschreiben und Eingabetabellen bleiben unsortiert.
+- Neu: Kontoblatt sortierbar per `GET /api/v1/accounts/<id>/ledger?sort=&dir=` und MCP
+  `get_account_ledger` (`sort`: date, number, text, contra, debit, credit, balance).
+  Der Saldo je Zeile bleibt der chronologisch laufende.
+
 ### Kostenstelle und Profitcenter nachträglich zuordnen
 - Neu: Offene Buchungen lassen sich je Zeile um Kostenstelle und Profitcenter ergänzen
   oder davon befreien – `PATCH /api/v1/journal-entries/<id>` mit

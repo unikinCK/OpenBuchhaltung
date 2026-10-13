@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
 
 {% block title %}Geschäftspartner – OpenBuchhaltung{% endblock %}
 
@@ -133,6 +133,7 @@
       </div>
       <form method="get" action="{{ url_for('main.partners_page') }}" class="filter-bar">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        {{ sort_hidden(sort) }}
         <input type="search" name="q" value="{{ q or '' }}" placeholder="Name, Nummer, USt-IdNr, Ort" aria-label="Suchbegriff" />
         <select name="role" aria-label="Rolle">
           <option value="">Kunden und Lieferanten</option>
@@ -145,17 +146,17 @@
       </form>
       {% if partners %}
         <div class="table-scroll">
-          <table class="data">
+          <table class="data" {{ sort_attrs(sort) }}>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Rolle</th>
-                <th>Debitor</th>
-                <th>Kreditor</th>
-                <th>Ort</th>
-                <th>USt-IdNr</th>
-                <th class="num">Zahlungsziel</th>
-                <th class="num">Buchungen</th>
+                <th data-sort-key="name">Name</th>
+                <th data-sort-key="role">Rolle</th>
+                <th data-sort-key="debtor">Debitor</th>
+                <th data-sort-key="creditor">Kreditor</th>
+                <th data-sort-key="city">Ort</th>
+                <th data-sort-key="vat_id">USt-IdNr</th>
+                <th class="num" data-sort-key="payment_terms">Zahlungsziel</th>
+                <th class="num" data-sort-key="entries">Buchungen</th>
               </tr>
             </thead>
             <tbody>
@@ -183,7 +184,7 @@
             </tbody>
           </table>
         </div>
-        {{ pagination('main.partners_page', total, limit, offset, selected_company_id, extra=filter_args) }}
+        {{ pagination('main.partners_page', total, limit, offset, selected_company_id, extra=dict(filter_args, **sort.url_args)) }}
       {% else %}
         <p class="empty-state">Keine Geschäftspartner gefunden.</p>
       {% endif %}

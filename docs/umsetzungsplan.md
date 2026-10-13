@@ -641,6 +641,14 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Saldo je Geschäftsjahr oder Zeitraum; REST `GET /api/v1/accounts/<id>/ledger`,
         MCP `get_account_ledger`; Berichte liefern `account_id` je Zeile (behebt
         „API ohne UI: Kontoblatt“ aus dem Review).
+  - [x] Tabellen nach jeder Spalte sortieren *(2026-10-13)*: Klick auf den Spaltenkopf
+        sortiert auf-/absteigend; paginierte Listen (Journal, Bank, Belege, Partner,
+        OPOS, Kontoblatt) serverseitig über `?sort=&dir=` mit Erhalt beim Blättern und
+        Filtern, alle übrigen Tabellen im Browser (dritter Klick stellt die
+        Ursprungsreihenfolge her). Kontoblatt-Sortierung auch per REST/MCP; der Saldo je
+        Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
+        und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
+        Listen-Endpunkte in REST/MCP.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
       Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
 

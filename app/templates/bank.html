@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs %}
 {% from "_journal.html" import partner_chips, account_link %}
 {% from "_filters.html" import filter_form %}
 
@@ -76,18 +76,18 @@
         </div>
       </div>
       {{ filter_form('main.bank_page', selected_company_id, q, date_from, date_to,
-                     extra={'status': status_filter} if status_filter else {},
+                     extra=dict({'status': status_filter} if status_filter else {}, **sort.url_args),
                      placeholder="Verwendungszweck, Gegenseite, Referenz") }}
       {% if transactions %}
         <div class="table-scroll">
-          <table class="data">
+          <table class="data" {{ sort_attrs(sort) }}>
             <thead>
               <tr>
-                <th>Datum</th>
-                <th>Konto</th>
-                <th>Gegenseite und Verwendungszweck</th>
-                <th class="num">Betrag</th>
-                <th>Status</th>
+                <th data-sort-key="date">Datum</th>
+                <th data-sort-key="account">Konto</th>
+                <th data-sort-key="counterparty">Gegenseite und Verwendungszweck</th>
+                <th class="num" data-sort-key="amount">Betrag</th>
+                <th data-sort-key="status">Status</th>
                 <th class="actions"></th>
               </tr>
             </thead>
@@ -137,7 +137,7 @@
           </table>
         </div>
         {{ pagination('main.bank_page', transactions_total, limit, offset, selected_company_id,
-                      extra=filter_args) }}
+                      extra=dict(filter_args, **sort.url_args)) }}
 
         {% for tx in transactions if tx.status == 'open' or bank_accounts | length > 1 %}
           {% set rule = rule_by_tx.get(tx.id) %}

@@ -61,6 +61,7 @@ from app.web.helpers import (
     pagination_args,
     require_company_access,
     search_args,
+    sort_args,
 )
 from app.web.journal import entry_overview
 from domain.models import (
@@ -76,10 +77,32 @@ from domain.models import (
 )
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
+BANK_SORT_COLUMNS = ("date", "account", "counterparty", "amount", "status")
+
+
+def _bank_sort_expressions(key: str) -> tuple:
+    if key == "account":
+        return (
+            select(Account.code)
+            .where(Account.id == BankTransaction.bank_account_id)
+            .scalar_subquery(),
+        )
+    if key == "counterparty":
+        return (
+            func.lower(func.nullif(func.trim(BankTransaction.counterparty), "")),
+            func.lower(BankTransaction.purpose),
+        )
+    if key == "amount":
+        return (BankTransaction.amount,)
+    if key == "status":
+        return (BankTransaction.status,)
+    return (BankTransaction.booking_date,)
+
 
 @main_bp.get("/bank")
 def bank_page():
     limit, offset = pagination_args()
+    sort = sort_args(BANK_SORT_COLUMNS, "date", descending=True)
     status_filter = (request.args.get("status") or "").strip() or None
     query, date_from, date_to = search_args()
     session_factory = get_session_factory()
@@ -163,7 +186,10 @@ def bank_page():
             transactions = (
                 session.execute(
                     transactions_stmt.order_by(
-                        BankTransaction.booking_date.desc(), BankTransaction.id.desc()
+                        *sort.order_by(
+                            *_bank_sort_expressions(sort.key),
+                            tiebreak=(BankTransaction.booking_date, BankTransaction.id),
+                        )
                     )
                     .limit(limit)
                     .offset(offset)
@@ -251,6 +277,7 @@ def bank_page():
         date_from=date_from,
         date_to=date_to,
         filter_args=filter_url_args(query, date_from, date_to, status=status_filter),
+        sort=sort,
         suggestions_by_tx=suggestions_by_tx,
         transfer_by_tx=transfer_by_tx,
         geldtransit_account=geldtransit_account,

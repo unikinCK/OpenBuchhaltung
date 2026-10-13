@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
 {% from "_journal.html" import partner_chips, posting_record %}
 
 {% block title %}Buchungen – OpenBuchhaltung{% endblock %}
@@ -136,7 +136,7 @@
 
         <h3 class="form-section-title">Buchungszeilen <span class="muted small">(mindestens zwei)</span></h3>
         <div class="table-scroll">
-          <table class="journal-lines-table" id="journal-lines">
+          <table class="journal-lines-table" id="journal-lines" data-no-sort>
             <thead>
               <tr>
                 <th>Konto</th>
@@ -190,6 +190,7 @@
       </div>
       <form method="get" action="{{ url_for('main.journal_page') }}" class="filter-bar">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        {{ sort_hidden(sort) }}
         <input type="search" name="q" value="{{ q or '' }}" placeholder="Buchungstext oder Beleg-Nr." aria-label="Suchbegriff" />
         <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
         <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
@@ -242,15 +243,15 @@
 
       {% if journal_entries %}
         <div class="table-scroll">
-          <table class="data journal-table">
+          <table class="data journal-table" {{ sort_attrs(sort) }}>
             <thead>
               <tr>
-                <th>Beleg-Nr.</th>
-                <th>Datum</th>
-                <th>Buchungstext</th>
-                <th>Geschäftspartner</th>
-                <th>Kontierung <span class="th-hint">Soll an Haben</span></th>
-                <th class="num">Betrag</th>
+                <th data-sort-key="number">Beleg-Nr.</th>
+                <th data-sort-key="date">Datum</th>
+                <th data-sort-key="text">Buchungstext</th>
+                <th data-sort-key="partner">Geschäftspartner</th>
+                <th data-sort-key="posting">Kontierung <span class="th-hint">Soll an Haben</span></th>
+                <th class="num" data-sort-key="amount">Betrag</th>
               </tr>
             </thead>
             <tbody>
@@ -301,7 +302,7 @@
           </table>
         </div>
         {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id,
-                      extra=filter_args) }}
+                      extra=dict(filter_args, **sort.url_args)) }}
       {% elif filters_active %}
         <p class="empty-state">Keine Buchungen zu diesen Filtern. <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Filter zurücksetzen</a></p>
       {% else %}

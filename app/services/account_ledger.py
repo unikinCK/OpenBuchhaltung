@@ -33,6 +33,8 @@ from domain.models import (
 ZERO = Decimal("0.00")
 DEFAULT_LEDGER_LIMIT = 200
 MAX_LEDGER_LIMIT = 1000
+# Spalten, nach denen das Kontoblatt außer chronologisch sortiert werden kann.
+LEDGER_SORT_COLUMNS = ("date", "number", "text", "contra", "debit", "credit", "balance")
 
 
 class AccountLedgerError(ValueError):
@@ -154,6 +156,72 @@ def _contra_accounts(
     return result
 
 
+def _running_balances(session: Session, line_ids_stmt, opening: Decimal) -> dict[int, Decimal]:
+    """Laufender Saldo je Zeile in chronologischer Reihenfolge (alle Zeilen des Zeitraums)."""
+    balances: dict[int, Decimal] = {}
+    balance = opening
+    rows = session.execute(
+        select(JournalEntryLine.id, JournalEntryLine.debit_amount, JournalEntryLine.credit_amount)
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .where(JournalEntryLine.id.in_(line_ids_stmt))
+        .order_by(*_ORDER)
+    ).all()
+    for line_id, debit, credit in rows:
+        balance += debit - credit
+        balances[line_id] = balance
+    return balances
+
+
+def _sorted_page_ids(
+    session: Session,
+    account: Account,
+    line_ids_stmt,
+    balances: dict[int, Decimal],
+    *,
+    sort: str,
+    descending: bool,
+    limit: int,
+    offset: int,
+) -> list[int]:
+    """Zeilen-IDs der Seite in der gewünschten Spaltensortierung."""
+    if sort == "balance":
+        ordered = sorted(balances, key=lambda line_id: balances[line_id], reverse=descending)
+        return ordered[offset : offset + limit]
+    contra = aliased(JournalEntryLine)
+    expressions = {
+        "date": (JournalEntry.entry_date,),
+        "number": (JournalEntry.posting_number,),
+        "text": (func.lower(JournalEntry.description),),
+        # Erstes Gegenkonto (kleinste Kontonummer der übrigen Zeilen der Buchung).
+        "contra": (
+            select(func.min(Account.code))
+            .join(contra, contra.account_id == Account.id)
+            .where(
+                contra.journal_entry_id == JournalEntryLine.journal_entry_id,
+                contra.account_id != account.id,
+            )
+            .scalar_subquery(),
+        ),
+        "debit": (JournalEntryLine.debit_amount,),
+        "credit": (JournalEntryLine.credit_amount,),
+    }[sort]
+    order = [
+        (expression.desc() if descending else expression.asc()).nulls_last()
+        for expression in expressions
+    ]
+    order += [column.desc() if descending else column.asc() for column in _ORDER]
+    return list(
+        session.execute(
+            select(JournalEntryLine.id)
+            .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+            .where(JournalEntryLine.id.in_(line_ids_stmt))
+            .order_by(*order)
+            .limit(limit)
+            .offset(offset)
+        ).scalars()
+    )
+
+
 def account_ledger(
     *,
     session: Session,
@@ -163,12 +231,18 @@ def account_ledger(
     fiscal_year_id: int | None = None,
     limit: int = DEFAULT_LEDGER_LIMIT,
     offset: int = 0,
+    sort: str | None = None,
+    descending: bool = False,
 ) -> dict[str, Any]:
     """Kontoblatt eines Kontos, chronologisch, mit laufendem Saldo je Zeile.
 
     ``limit``/``offset`` blättern durch die Zeilen; der laufende Saldo berücksichtigt
-    auch die Zeilen vor der angezeigten Seite.
+    auch die Zeilen vor der angezeigten Seite. ``sort`` (eine der
+    ``LEDGER_SORT_COLUMNS``) ordnet die Zeilen anders; der Saldo je Zeile bleibt
+    der chronologisch laufende.
     """
+    if sort is not None and sort not in LEDGER_SORT_COLUMNS:
+        raise AccountLedgerError(f"sort muss eine von {', '.join(LEDGER_SORT_COLUMNS)} sein.")
     ledger_range = resolve_ledger_range(
         session=session,
         account=account,
@@ -182,13 +256,30 @@ def account_ledger(
     opening = opening_balance(session=session, account=account, date_from=ledger_range.date_from)
     line_ids = _ordered_lines(account, ledger_range)
     total, debit_total, credit_total = _sums(session, line_ids)
-    _, debit_before, credit_before = (
-        _sums(session, line_ids.order_by(*_ORDER).limit(offset)) if offset else (0, ZERO, ZERO)
-    )
+    custom_order = sort is not None and (sort, descending) != ("date", False)
+    balances: dict[int, Decimal] = {}
+    page_ids: list[int] = []
+    if custom_order:
+        balances = _running_balances(session, line_ids, opening)
+        page_ids = _sorted_page_ids(
+            session,
+            account,
+            line_ids,
+            balances,
+            sort=sort,
+            descending=descending,
+            limit=limit,
+            offset=offset,
+        )
+        debit_before = credit_before = ZERO
+    else:
+        _, debit_before, credit_before = (
+            _sums(session, line_ids.order_by(*_ORDER).limit(offset)) if offset else (0, ZERO, ZERO)
+        )
 
     cost_unit = aliased(ControllingUnit)
     profit_unit = aliased(ControllingUnit)
-    rows = session.execute(
+    rows_stmt = (
         select(
             JournalEntryLine,
             JournalEntry,
@@ -202,11 +293,20 @@ def account_ledger(
         .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
         .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
         .outerjoin(BusinessPartner, BusinessPartner.id == JournalEntryLine.partner_id)
-        .where(JournalEntryLine.id.in_(line_ids))
-        .order_by(*_ORDER)
-        .limit(limit)
-        .offset(offset)
-    ).all()
+    )
+    if custom_order:
+        position = {line_id: index for index, line_id in enumerate(page_ids)}
+        rows = sorted(
+            session.execute(rows_stmt.where(JournalEntryLine.id.in_(page_ids))).all(),
+            key=lambda row: position[row[0].id],
+        )
+    else:
+        rows = session.execute(
+            rows_stmt.where(JournalEntryLine.id.in_(line_ids))
+            .order_by(*_ORDER)
+            .limit(limit)
+            .offset(offset)
+        ).all()
     contras = _contra_accounts(
         session, account.id, sorted({entry.id for _, entry, *_ in rows})
     )
@@ -214,7 +314,10 @@ def account_ledger(
     balance = opening + debit_before - credit_before
     lines: list[dict[str, Any]] = []
     for line, entry, tax_code, cost_center, profit_center, partner in rows:
-        balance += line.debit_amount - line.credit_amount
+        if custom_order:
+            balance = balances[line.id]
+        else:
+            balance += line.debit_amount - line.credit_amount
         side = "debit" if line.debit_amount > 0 else "credit"
         lines.append(
             {

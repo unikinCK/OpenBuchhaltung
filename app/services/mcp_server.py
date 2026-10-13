@@ -642,7 +642,9 @@ TOOLS: list[ToolSpec] = [
             "(positiv = Sollsaldo). Zeitraum per fiscal_year_id und/oder date_from/date_to; "
             "Saldovorträge erscheinen nicht als Zeilen, sondern stecken im Anfangssaldo. "
             "Die Konto-ID liefern list_accounts sowie Summen-/Saldenliste, GuV und Bilanz "
-            "(account_id). Bei mehr als limit Zeilen mit offset weiterblättern."
+            "(account_id). Bei mehr als limit Zeilen mit offset weiterblättern. Mit sort/dir "
+            "lassen sich die Zeilen nach einer Spalte ordnen; balance bleibt dabei der "
+            "chronologisch laufende Saldo."
         ),
         input_schema={
             "type": "object",
@@ -669,6 +671,16 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Zeilen überspringen (Blättern).",
                     "default": 0,
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["date", "number", "text", "contra", "debit", "credit", "balance"],
+                    "description": "Sortierspalte (Standard: chronologisch).",
+                },
+                "dir": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "description": "Sortierrichtung (Standard: asc).",
                 },
             },
             "required": ["account_id"],

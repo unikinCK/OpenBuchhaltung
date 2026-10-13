@@ -163,6 +163,10 @@ def get_account_ledger(account_id: int):
     offset = request.args.get("offset", default=0, type=int)
     if limit is None or offset is None:
         return jsonify({"error": "limit and offset must be integers."}), 400
+    sort = (request.args.get("sort") or "").strip() or None
+    direction = (request.args.get("dir") or "asc").strip().lower()
+    if direction not in {"asc", "desc"}:
+        return jsonify({"error": "dir must be asc or desc."}), 400
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -178,6 +182,8 @@ def get_account_ledger(account_id: int):
                 fiscal_year_id=fiscal_year_id,
                 limit=limit,
                 offset=offset,
+                sort=sort,
+                descending=direction == "desc",
             )
         except AccountLedgerError as exc:
             return jsonify({"error": str(exc)}), 400

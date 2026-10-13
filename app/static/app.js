@@ -59,7 +59,183 @@
     });
 
     document.querySelectorAll("[data-fints-lookup]").forEach(setupFintsLookup);
+
+    document.querySelectorAll("table").forEach(setupTableSort);
   });
+
+  // Tabellen nach jeder Spalte sortieren (Klick auf den Spaltenkopf).
+  // Standard: im Browser, Reihenfolge aufsteigend → absteigend → ursprünglich.
+  // <table data-sort-server data-sort="date" data-sort-dir="desc">: paginierte
+  // Listen sortiert der Server über ?sort=<data-sort-key>&dir=asc|desc.
+  // <table data-no-sort>, <th data-no-sort>: nicht sortierbar.
+  // <tr data-sort-child>: gehört zur Zeile davor; <tr data-sort-fixed>: bleibt
+  // stehen (vor den übrigen Zeilen oben, sonst unten – z. B. Anfangssaldo, Summe).
+  // <td data-sort-value="…">: Sortierwert statt des angezeigten Texts.
+  var collator = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
+
+  function setupTableSort(table) {
+    if (table.hasAttribute("data-no-sort") || !table.tHead || !table.tBodies.length) return;
+    if (table.tBodies.length > 1) return; // Zeilengruppen (Buchungszeilen-Eingabe)
+    var headerRow = table.tHead.rows[table.tHead.rows.length - 1];
+    if (!headerRow) return;
+    var server = table.hasAttribute("data-sort-server");
+    var column = 0;
+    Array.prototype.forEach.call(headerRow.cells, function (th) {
+      var index = column;
+      column += th.colSpan || 1;
+      var key = th.dataset.sortKey;
+      if (th.hasAttribute("data-no-sort") || !th.textContent.trim()) return;
+      if (server ? !key : th.colSpan > 1) return;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "th-sort";
+      while (th.firstChild) button.appendChild(th.firstChild);
+      th.appendChild(button);
+      th.classList.add("sortable");
+      if (server) {
+        if (table.dataset.sort === key) {
+          th.setAttribute("aria-sort", table.dataset.sortDir === "desc" ? "descending" : "ascending");
+        }
+        button.addEventListener("click", function () {
+          var url = new URL(window.location.href);
+          var current = th.getAttribute("aria-sort");
+          url.searchParams.set("sort", key);
+          url.searchParams.set("dir", current === "ascending" ? "desc" : "asc");
+          url.searchParams.delete("offset");
+          url.hash = "";
+          window.location.assign(url.toString());
+        });
+      } else {
+        button.addEventListener("click", function () {
+          sortTableBy(table, headerRow, th, index);
+        });
+      }
+    });
+  }
+
+  function sortTableBy(table, headerRow, th, index) {
+    var tbody = table.tBodies[0];
+    var groups = rowGroups(tbody);
+    if (!groups.rows.length) return;
+    var state = th.getAttribute("aria-sort");
+    var next = state === "ascending" ? "descending" : state === "descending" ? null : "ascending";
+    Array.prototype.forEach.call(headerRow.cells, function (cell) {
+      cell.removeAttribute("aria-sort");
+    });
+    var ordered = groups.rows.slice();
+    if (next) {
+      var keys = columnKeys(ordered, index);
+      var direction = next === "ascending" ? 1 : -1;
+      ordered.sort(function (a, b) {
+        var ka = keys.get(a);
+        var kb = keys.get(b);
+        // Leere Zellen stehen immer am Ende.
+        if (ka === null || kb === null) {
+          return ka === kb ? a.position - b.position : ka === null ? 1 : -1;
+        }
+        var result = typeof ka === "number" ? ka - kb : collator.compare(ka, kb);
+        return result * direction || a.position - b.position;
+      });
+      th.setAttribute("aria-sort", next);
+    } else {
+      ordered.sort(function (a, b) {
+        return a.position - b.position;
+      });
+    }
+    var fragment = document.createDocumentFragment();
+    groups.top.concat(ordered, groups.bottom).forEach(function (group) {
+      group.rows.forEach(function (row) {
+        fragment.appendChild(row);
+      });
+    });
+    tbody.appendChild(fragment);
+  }
+
+  // Zeilengruppen in Ursprungsreihenfolge (beim ersten Sortieren gemerkt).
+  function rowGroups(tbody) {
+    var rows = Array.prototype.slice.call(tbody.rows);
+    if (rows.length && !rows[0].dataset.sortPosition) {
+      rows.forEach(function (row, position) {
+        row.dataset.sortPosition = String(position);
+      });
+    }
+    rows.sort(function (a, b) {
+      return a.dataset.sortPosition - b.dataset.sortPosition;
+    });
+    var result = { top: [], rows: [], bottom: [] };
+    var current = null;
+    rows.forEach(function (row) {
+      if (row.hasAttribute("data-sort-child") && current) {
+        current.rows.push(row);
+        return;
+      }
+      current = { rows: [row], position: Number(row.dataset.sortPosition) };
+      var lone = row.cells.length === 1 && row.cells[0].colSpan > 1;
+      if (row.hasAttribute("data-sort-fixed") || lone) {
+        (result.rows.length ? result.bottom : result.top).push(current);
+      } else {
+        result.rows.push(current);
+      }
+    });
+    return result;
+  }
+
+  function cellAt(row, index) {
+    var column = 0;
+    for (var i = 0; i < row.cells.length; i++) {
+      var cell = row.cells[i];
+      if (index < column + (cell.colSpan || 1)) return column === index ? cell : null;
+      column += cell.colSpan || 1;
+    }
+    return null;
+  }
+
+  // Sortierschlüssel je Gruppe: Zahl (Datum, Betrag) oder Text, leer = null.
+  // Eine Spalte gilt nur als numerisch, wenn alle nichtleeren Werte es sind.
+  function columnKeys(groups, index) {
+    var raw = groups.map(function (group) {
+      var cell = cellAt(group.rows[0], index);
+      if (!cell) return "";
+      if (cell.dataset.sortValue !== undefined) return cell.dataset.sortValue.trim();
+      return cell.textContent.replace(/\s+/g, " ").trim();
+    });
+    var parsed = raw.map(parseSortValue);
+    var numeric = parsed.every(function (value, i) {
+      return value !== null || isEmptyText(raw[i]);
+    });
+    var keys = new Map();
+    groups.forEach(function (group, i) {
+      if (isEmptyText(raw[i])) keys.set(group, null);
+      else keys.set(group, numeric ? parsed[i] : raw[i]);
+    });
+    return keys;
+  }
+
+  function isEmptyText(text) {
+    return text === "" || text === "–" || text === "-" || text === "—";
+  }
+
+  function parseSortValue(text) {
+    // Datum (TT.MM.JJJJ [HH:MM]) oder ISO-Datum am Anfang der Zelle.
+    var match = /^(\d{2})\.(\d{2})\.(\d{4})(?:,? (\d{2}):(\d{2}))?/.exec(text);
+    if (match) {
+      return Number(match[3] + match[2] + match[1] + (match[4] || "00") + (match[5] || "00"));
+    }
+    match = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(text);
+    if (match) {
+      return Number(match[1] + match[2] + match[3] + (match[4] || "00") + (match[5] || "00"));
+    }
+    // Betrag/Zahl mit optionaler Einheit: 1.234,56 € · -12,5 % · 30 Tage · 19.00
+    match = /^([+\-−]?)\s*([\d.]+(?:,\d+)?)\s*(?:€|EUR|%|Tage?)?$/.exec(text);
+    if (!match) return null;
+    var digits = match[2];
+    if (digits.indexOf(",") >= 0 || /^\d{1,3}(\.\d{3})+$/.test(digits)) {
+      digits = digits.replace(/\./g, "").replace(",", ".");
+    }
+    var number = Number(digits);
+    if (isNaN(number)) return null;
+    return match[1] && match[1] !== "+" ? -number : number;
+  }
 
   // FinTS-Bankzugang: BLZ in der importierten Bankenliste nachschlagen und die
   // PIN/TAN-URL vorschlagen (überschreibt keine von Hand eingetragene URL).

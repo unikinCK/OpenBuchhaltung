@@ -43,6 +43,7 @@ from app.web.helpers import (
     pagination_args,
     require_company_access,
     search_args,
+    sort_args,
 )
 from domain.models import Document, DocumentCategory, JournalEntry
 
@@ -50,9 +51,33 @@ from domain.models import Document, DocumentCategory, JournalEntry
 LINK_SELECT_LIMIT = 200
 
 
+DOCUMENT_SORT_COLUMNS = ("name", "category", "date", "entry", "uploaded")
+
+
+def _document_sort_expressions(key: str) -> tuple:
+    if key == "name":
+        return (func.lower(Document.file_name),)
+    if key == "category":
+        return (
+            select(func.lower(DocumentCategory.name))
+            .where(DocumentCategory.id == Document.category_id)
+            .scalar_subquery(),
+        )
+    if key == "entry":
+        return (
+            select(JournalEntry.posting_number)
+            .where(JournalEntry.id == Document.journal_entry_id)
+            .scalar_subquery(),
+        )
+    if key == "uploaded":
+        return (Document.uploaded_at,)
+    return (Document.document_date,)
+
+
 @main_bp.get("/belege")
 def documents_page():
     limit, offset = pagination_args()
+    sort = sort_args(DOCUMENT_SORT_COLUMNS, "date", descending=True)
     query, date_from, date_to = search_args()
     preselected_entry_id = request.args.get("journal_entry_id", type=int)
     unlinked_only = request.args.get("unlinked") == "1"
@@ -92,7 +117,10 @@ def documents_page():
             documents = (
                 session.execute(
                     documents_stmt.order_by(
-                        Document.document_date.desc(), Document.uploaded_at.desc()
+                        *sort.order_by(
+                            *_document_sort_expressions(sort.key),
+                            tiebreak=(Document.uploaded_at, Document.id),
+                        )
                     )
                     .limit(limit)
                     .offset(offset)
@@ -152,6 +180,7 @@ def documents_page():
         filter_args=filter_url_args(
             query, date_from, date_to, unlinked="1" if unlinked_only else None
         ),
+        sort=sort,
         unlinked_only=unlinked_only,
         unlinked_total=unlinked_total,
         journal_entries=journal_entries,
