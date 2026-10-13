@@ -79,6 +79,7 @@ EXPECTED_TOOL_NAMES = {
     "list_payroll_runs",
     "post_payroll_run",
     "get_trial_balance",
+    "get_dashboard",
     "get_income_statement",
     "get_balance_sheet",
     "export_trial_balance_csv",

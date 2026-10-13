@@ -5,7 +5,9 @@ Umgesetzt nach der MCP-Autorisierungsspezifikation:
 * Discovery: Protected Resource Metadata (RFC 9728) unter
   ``/.well-known/oauth-protected-resource[/mcp]`` und Authorization Server Metadata
   (RFC 8414) unter ``/.well-known/oauth-authorization-server``.
-* Dynamic Client Registration (RFC 7591): ``POST /oauth/register``.
+* Dynamic Client Registration (RFC 7591): ``POST /oauth/register``. Native Apps (z. B.
+  die iOS-App) registrieren ein Private-Use-URI-Schema in Reverse-Domain-Form als
+  Redirect (RFC 8252, Abschnitt 7.1), etwa ``de.openbuchhaltung.app:/oauth/callback``.
 * Authorization-Code-Flow mit PKCE (nur ``S256``): ``/oauth/authorize`` verlangt die
   normale UI-Anmeldung und eine ausdrückliche Zustimmung des Benutzers.
 * Token-Endpunkt ``POST /oauth/token`` (``authorization_code``, ``refresh_token`` mit
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -57,6 +60,9 @@ AUTHORIZATION_CODE_SECONDS = 600
 ACCESS_TOKEN_PREFIX = "obo_"
 REFRESH_TOKEN_PREFIX = "obr_"
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+# Private-Use-URI-Schema nativer Apps: Reverse-Domain-Name mit mindestens einem Punkt
+# (RFC 8252, Abschnitt 7.1); schließt http/https/javascript/data/file aus.
+NATIVE_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+$")
 
 
 def _utcnow() -> datetime:
@@ -154,20 +160,40 @@ def _allowed_redirect_hosts() -> set[str]:
     return {host.strip().lower() for host in raw.split(",") if host.strip()}
 
 
+def native_redirect_scheme(uri: str) -> str | None:
+    """Das Private-Use-Schema einer nativen App (RFC 8252) oder ``None``."""
+    scheme = urlsplit(uri).scheme
+    return scheme if NATIVE_SCHEME_RE.match(scheme) else None
+
+
 def redirect_uri_error(uri: str) -> str | None:
-    """Prüft eine Redirect-URI: HTTPS (oder HTTP auf Loopback), kein Fragment."""
+    """Prüft eine Redirect-URI: HTTPS (oder HTTP auf Loopback) oder das Private-Use-Schema
+    einer nativen App, jeweils ohne Fragment.
+
+    ``OAUTH_ALLOWED_REDIRECT_HOSTS`` beschränkt Hosts und – über ihren Namen, etwa
+    ``de.openbuchhaltung.app`` – auch App-Schemata.
+    """
     if not isinstance(uri, str) or not uri or len(uri) > 2000:
         return "redirect_uri fehlt oder ist zu lang."
     parts = urlsplit(uri)
     host = (parts.hostname or "").lower()
     if parts.fragment:
         return "redirect_uri darf kein Fragment enthalten."
+    native_scheme = native_redirect_scheme(uri)
+    if native_scheme:
+        allowed = _allowed_redirect_hosts()
+        if allowed and native_scheme not in allowed:
+            return f"App-Schema {native_scheme} ist nicht freigegeben."
+        return None
     if parts.scheme == "https" and host:
         pass
     elif parts.scheme == "http" and host in LOOPBACK_HOSTS:
         pass
     else:
-        return "redirect_uri muss HTTPS verwenden (HTTP nur für localhost)."
+        return (
+            "redirect_uri muss HTTPS verwenden (HTTP nur für localhost) oder ein "
+            "App-Schema in Reverse-Domain-Form (z. B. de.openbuchhaltung.app:/callback)."
+        )
     allowed = _allowed_redirect_hosts()
     if allowed and host not in allowed and host not in LOOPBACK_HOSTS:
         return f"Redirect-Host {host} ist nicht freigegeben."
@@ -300,8 +326,12 @@ def _validate_authorization_request(db_session, params: dict[str, str]):
 
 def _consent_csp(redirect_uri: str) -> str:
     """CSP der Zustimmungsseite: form-action muss den Redirect zum Client erlauben."""
-    parts = urlsplit(redirect_uri)
-    origin = f"{parts.scheme}://{parts.netloc}"
+    native_scheme = native_redirect_scheme(redirect_uri)
+    if native_scheme:
+        origin = f"{native_scheme}:"
+    else:
+        parts = urlsplit(redirect_uri)
+        origin = f"{parts.scheme}://{parts.netloc}"
     return (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
@@ -339,6 +369,7 @@ def authorize_form():
             params=params,
             client_name=client_name,
             redirect_host=urlsplit(params["redirect_uri"]).hostname,
+            native_scheme=native_redirect_scheme(params["redirect_uri"]),
             user=current_user(),
             companies=[],
             selected_company_id=None,

@@ -412,7 +412,7 @@ inaktiv.
 | `OAUTH_ISSUER` | – | Aussteller-URL; leer = aus der Anfrage (hinter dem Proxy `https://<Domain>`). |
 | `OAUTH_ACCESS_TOKEN_SECONDS` | `3600` | Laufzeit der Access-Tokens. |
 | `OAUTH_REFRESH_TOKEN_DAYS` | `30` | Laufzeit der Refresh-Tokens (rotieren bei jeder Erneuerung). |
-| `OAUTH_ALLOWED_REDIRECT_HOSTS` | – | Erlaubte Redirect-Hosts bei der Registrierung (z. B. `chatgpt.com,claude.ai`); leer = alle HTTPS-Hosts und localhost. |
+| `OAUTH_ALLOWED_REDIRECT_HOSTS` | – | Erlaubte Redirect-Hosts und App-Schemata bei der Registrierung (z. B. `chatgpt.com,claude.ai,de.openbuchhaltung.app`); leer = alle HTTPS-Hosts, localhost und App-Schemata in Reverse-Domain-Form. |
 
 **Docker Compose und Skripte**
 
@@ -1126,6 +1126,10 @@ Basis-Endpunkte:
 - `GET /api/v1/trial-balance` — optional `date_from`/`date_to` (JJJJ-MM-TT)
 - `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
 - `GET /api/v1/balance-sheet` — optional `date_to` (Stichtag; Alias `as_of`)
+- `GET /api/v1/dashboard` — kompakte Übersicht (Startbildschirm der iOS-App): offene
+  Aufgaben, Bankstände je Bankkonto (Buchsaldo, Auszugssumme, offene Umsätze, letzter
+  Buchungstag), Ergebnis des laufenden Geschäftsjahres bis `as_of` (Standard heute) und
+  Bilanzsumme; MCP `get_dashboard`
 
 Bank & FinTS:
 
@@ -1626,7 +1630,16 @@ Verbundene Apps sieht und widerruft jeder Benutzer unter **Apps** in der Kopfzei
 `POST /api/v1/oauth/grants/<id>/revoke` und per MCP-Tool `list_oauth_grants` /
 `revoke_oauth_grant`. Deaktivierte Benutzer verlieren den Zugriff sofort. Mit
 `OAUTH_ALLOWED_REDIRECT_HOSTS=chatgpt.com,claude.ai` lässt sich die Registrierung auf
-bekannte Clients beschränken. Hinter dem nginx-Overlay ist nichts weiter zu konfigurieren:
+bekannte Clients beschränken.
+
+**Native Apps (iOS-App).** Native Clients melden sich über denselben Ablauf an
+(RFC 8252): Sie registrieren als Redirect ein eigenes URI-Schema in
+Reverse-Domain-Form, etwa `de.openbuchhaltung.app:/oauth/callback`, und öffnen die
+Anmeldung im System-Browser (`ASWebAuthenticationSession`). Schemata ohne Punkt
+(`myapp:`) sowie `javascript:`, `data:` und `file:` werden abgelehnt; PKCE bleibt Pflicht.
+Ist `OAUTH_ALLOWED_REDIRECT_HOSTS` gesetzt, muss das Schema dort mit aufgeführt sein
+(`chatgpt.com,claude.ai,de.openbuchhaltung.app`). Die Zustimmungsseite nennt dann die App
+statt eines Hosts. Die Tokens gelten für REST-API und MCP gleichermaßen. Hinter dem nginx-Overlay ist nichts weiter zu konfigurieren:
 `/.well-known/*` und `/oauth/*` gehen an die App, `/mcp` an den MCP-Server.
 
 ### HTTPS-Zugang für Claude-Desktop-Custom-Connectoren

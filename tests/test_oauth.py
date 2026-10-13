@@ -193,6 +193,70 @@ def test_register_respects_allowed_redirect_hosts(tmp_path):
     assert other.status_code == 400
 
 
+APP_REDIRECT = "de.openbuchhaltung.app:/oauth/callback"
+
+
+def test_register_accepts_native_app_scheme(tmp_path):
+    client = _client(_create_app(tmp_path))
+    registered = _register(client, client_name="OpenBuchhaltung iOS", redirect_uris=[APP_REDIRECT])
+    assert registered["redirect_uris"] == [APP_REDIRECT]
+    assert "client_secret" not in registered
+
+    for bad in (
+        "myapp:/callback",  # kein Reverse-Domain-Schema
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:text/html,x",
+        "de.openbuchhaltung.app:/callback#frag",
+    ):
+        response = client.post("/oauth/register", json={"redirect_uris": [bad]})
+        assert response.status_code == 400, bad
+
+
+def test_native_app_scheme_respects_allowlist(tmp_path):
+    restricted = _client(_create_app(tmp_path, OAUTH_ALLOWED_REDIRECT_HOSTS="chatgpt.com"))
+    rejected = restricted.post("/oauth/register", json={"redirect_uris": [APP_REDIRECT]})
+    assert rejected.status_code == 400
+    assert "de.openbuchhaltung.app" in rejected.get_json()["error_description"]
+
+    (tmp_path / "zwei").mkdir()
+    allowed = _client(
+        _create_app(
+            tmp_path / "zwei", OAUTH_ALLOWED_REDIRECT_HOSTS="chatgpt.com,de.openbuchhaltung.app"
+        )
+    )
+    _register(allowed, redirect_uris=[APP_REDIRECT])
+
+
+def test_native_app_flow_redirects_back_into_app(tmp_path):
+    app = _create_app(tmp_path)
+    user_id = _seed_user(app)
+    client = _client(app)
+    _login(client)
+    registered = _register(client, client_name="OpenBuchhaltung iOS", redirect_uris=[APP_REDIRECT])
+    params = _authorize_params(registered["client_id"], redirect_uri=APP_REDIRECT, scope="")
+
+    consent = client.get("/oauth/authorize", query_string=params, base_url=BASE)
+    assert consent.status_code == 200
+    assert "zurück in die App" in consent.get_data(as_text=True)
+    assert "form-action 'self' de.openbuchhaltung.app:" in consent.headers[
+        "Content-Security-Policy"
+    ]
+
+    decision = client.post(
+        "/oauth/authorize", data={**params, "decision": "allow"}, base_url=BASE
+    )
+    assert decision.status_code == 302
+    location = decision.headers["Location"]
+    assert location.startswith(APP_REDIRECT + "?")
+    code = parse_qs(urlsplit(location).query)["code"][0]
+
+    tokens = _exchange(client, registered["client_id"], code, redirect_uri=APP_REDIRECT)
+    assert tokens.status_code == 200, tokens.get_json()
+    me = _whoami(app, tokens.get_json()["access_token"])
+    assert me.status_code == 200 and me.get_json()["user"]["id"] == user_id
+
+
 # --- Autorisierung --------------------------------------------------------------------
 
 

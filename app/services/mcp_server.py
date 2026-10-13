@@ -1422,6 +1422,31 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_dashboard",
+        description=(
+            "Kompakte Übersicht einer Gesellschaft: offene Aufgaben (unverbuchte "
+            "Bankumsätze, unverknüpfte Belege, überfällige OPOS, offene "
+            "Abgleich-Vorschläge, fällige Vorlagen), Bankstände je Bankkonto, "
+            "Ergebnis des laufenden Geschäftsjahres bis as_of (Format JJJJ-MM-TT, "
+            "optional; Standard heute) und Bilanzsumme."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "as_of": {
+                    "type": "string",
+                    "description": "Stichtag (JJJJ-MM-TT), optional; Standard heute.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/dashboard",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_income_statement",
         description=(
             "Liefert die Gewinn- und Verlustrechnung (GuV) einer Gesellschaft, optional für "
