@@ -8,6 +8,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Server-Vorarbeit für die iOS-App (ADR-003)
+- Neu: `GET /api/v1/dashboard` und MCP `get_dashboard` liefern die Übersicht für den
+  Startbildschirm und die Widgets der App: offene Aufgaben, Bankstände je Bankkonto
+  (Buchsaldo, Auszugssumme, offene Umsätze, letzter Buchungstag), Ergebnis des
+  laufenden Geschäftsjahres bis `as_of` und Bilanzsumme. Die Dashboard-Seite nutzt
+  denselben Service (`app/services/dashboard.py`).
+- Neu: Der OAuth-Server akzeptiert Redirects nativer Apps über ein eigenes URI-Schema in
+  Reverse-Domain-Form (RFC 8252, z. B. `de.openbuchhaltung.app:/oauth/callback`).
+  Die Zustimmungsseite nennt die App, die CSP erlaubt das Schema als `form-action`.
+  `OAUTH_ALLOWED_REDIRECT_HOSTS` beschränkt auch App-Schemata.
+- Doku: ADR-003 „Native iOS-Begleit-App“ und Phase 6 im Umsetzungsplan.
+
 ### Investitionen in Kostenstellen- und Profitcenter-Bericht
 - Neu: Der Controlling-Bericht zeigt je Einheit zusätzlich Anschaffungswert,
   Abschreibung und Buchwert. Bisher zählten nur Erlös- und Aufwandskonten – Einheiten,

@@ -177,10 +177,41 @@ def test_dashboard_shows_open_task_tiles(tmp_path):
     assert "Überfällige offene Posten" in page
     # Ein offener Umsatz ist verbucht? Nein: beide offen; ein OPOS überfällig.
     with app.extensions["db_session_factory"]() as session:
-        from app.web.dashboard import open_task_counts
+        from app.services.dashboard import open_task_counts
 
         tasks = open_task_counts(session, company_id)
     assert tasks["open_bank_transactions"] == 2
     assert tasks["overdue_open_items"] == 1
     assert tasks["unlinked_documents"] == 0
     assert tasks["pending_match_suggestions"] == 0
+
+
+def test_dashboard_api_summarizes_tasks_banks_and_result(tmp_path):
+    app = _create_app(tmp_path)
+    company_id = _seed(app)
+    client = _login(app)
+
+    response = client.get(f"/api/v1/dashboard?company_id={company_id}&as_of=2026-07-31")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["as_of"] == "2026-07-31"
+    assert body["tasks"]["open_bank_transactions"] == 2
+    assert body["tasks"]["overdue_open_items"] == 1
+
+    [bank] = body["bank_accounts"]
+    assert bank["account_code"] == "1200"
+    assert bank["book_balance"] == "-49.00"
+    assert bank["statement_total"] == "-644.00"
+    assert bank["open_transactions"] == 2
+    assert bank["latest_booking_date"] == "2026-07-06"
+
+    assert body["income_statement"]["total_expense"] == "49.00"
+    assert body["income_statement"]["net_income"] == "-49.00"
+    assert set(body["balance_sheet"]) == {"total_assets", "total_liabilities_and_equity"}
+
+    before = client.get(f"/api/v1/dashboard?company_id={company_id}&as_of=2026-07-05")
+    assert before.get_json()["income_statement"]["total_expense"] == "0.00"
+
+    assert client.get("/api/v1/dashboard").status_code == 400
+    assert client.get(f"/api/v1/dashboard?company_id={company_id}&as_of=x").status_code == 400
+    assert client.get("/api/v1/dashboard?company_id=999").status_code == 404

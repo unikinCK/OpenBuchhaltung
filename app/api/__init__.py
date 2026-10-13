@@ -12,6 +12,7 @@ from app.api import (  # noqa: F401
     bank,
     chat,
     controlling,
+    dashboard,
     documents,
     einvoice,
     elster,

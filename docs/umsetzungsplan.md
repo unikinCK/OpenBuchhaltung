@@ -652,6 +652,40 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
       Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
 
+## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
+
+Grundlage: `docs/adr/ADR-003-ios-begleit-app.md`. Native Begleit-App (SwiftUI, eigenes
+Repository `openbuchhaltung-ios`) über die REST-API, KI lokal zuerst (auf dem Gerät,
+dann selbst betriebener Modellserver).
+
+- [x] **Server-Vorarbeit I** *(2026-10-13)*: `GET /api/v1/dashboard` und MCP
+      `get_dashboard` (offene Aufgaben, Bankstände je Bankkonto, Ergebnis des laufenden
+      Geschäftsjahres, Bilanzsumme; gemeinsamer Service mit der Dashboard-Seite).
+      OAuth-Redirects nativer Apps über ein Private-Use-URI-Schema in
+      Reverse-Domain-Form (RFC 8252, `de.openbuchhaltung.app:/oauth/callback`), auch
+      über `OAUTH_ALLOWED_REDIRECT_HOSTS` beschränkbar. Den Amazon-PDF-Fix der
+      Belegextraktion (pypdf, Bereinigung der NUL-Bytes) gab es bereits.
+- [ ] **Server-Vorarbeit II – Push**: Geräteregistrierung `POST/DELETE /api/v1/devices`
+      (UI/API/MCP, Audit), Benachrichtigungsereignisse (neue Umsätze, TAN nötig,
+      überfällige OPOS, Fristen, ELSTER-Status), zentrales Push-Relay
+      `push.openbuchhaltung.de` mit signierten Instanzanfragen und neutralen Texten.
+- [ ] **Server-Vorarbeit III – Mobile Belege**: Upload mit Hash vom Gerät,
+      Erfassungszeitpunkt und Quelle (`mobile_scan`/`share_extension`), Hash-Prüfung,
+      Verfahrensdokumentation „mobiles Erfassen“.
+- [ ] **Demo-Instanz**: öffentliche Instanz mit Demodaten, die nachts zurückgesetzt
+      werden, für den Demo-Modus der App und die App-Review.
+- [ ] **App-MVP (TestFlight)**: Anmeldung mit mehreren Instanzen, Beleg-Scanner, Share
+      Extension, Inbox, Übersicht; Test mit Pilotnutzern.
+- [ ] **Lokale KI**: `/responses`-kompatibler Modellserver auf eigener Hardware,
+      Benchmark der Belegextraktion gegen Cloud-Modelle, Warteschlange und
+      Fallback-Regeln, Betriebsdoku.
+- [ ] **Selbstregistrierung** (optional): Mandantenanlage ohne Admin, Kontolöschung mit
+      Datenexport (Apple 5.1.1(v)).
+- [ ] **App-Store-Start**: Store-Texte und Keywords, Screenshots, Datenschutzangaben,
+      Smart App Banner auf der Website.
+- [ ] **App 1.x**: Push, TAN/Open Banking, Freigaben mit Face ID, Widgets, Bewirtungs- und
+      Reisebelege; danach App Intents und KI auf dem Gerät (Foundation Models).
+
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)
 2. **Datenmodell v0** inkl. ER-Diagramm

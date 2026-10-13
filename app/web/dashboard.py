@@ -2,62 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date
-
 from flask import render_template
-from sqlalchemy import func, select
 
-from app.services.journal_templates import due_templates
+from app.services.dashboard import count_rows as _count
+from app.services.dashboard import open_task_counts
 from app.services.reports import balance_sheet_for_company, income_statement_for_company
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
 from app.web.journal import entry_overview
-from domain.models import (
-    Account,
-    BankTransaction,
-    Document,
-    JournalEntry,
-    OpenItem,
-    ReceiptMatchSuggestion,
-)
-
-
-def _count(session, stmt) -> int:
-    return session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-
-
-def open_task_counts(session, company_id: int) -> dict[str, int]:
-    """Offene Aufgaben einer Gesellschaft für die Dashboard-Kacheln."""
-    return {
-        "open_bank_transactions": _count(
-            session,
-            scoped_select(BankTransaction, company_id=company_id).where(
-                BankTransaction.status == "open"
-            ),
-        ),
-        "unlinked_documents": _count(
-            session,
-            scoped_select(Document, company_id=company_id).where(
-                Document.journal_entry_id.is_(None)
-            ),
-        ),
-        "overdue_open_items": _count(
-            session,
-            scoped_select(OpenItem, company_id=company_id).where(
-                OpenItem.status == "open",
-                OpenItem.due_date.is_not(None),
-                OpenItem.due_date < date.today(),
-            ),
-        ),
-        "pending_match_suggestions": _count(
-            session,
-            scoped_select(ReceiptMatchSuggestion, company_id=company_id).where(
-                ReceiptMatchSuggestion.status == "offen"
-            ),
-        ),
-        "due_templates": len(due_templates(session=session, company_id=company_id)),
-    }
+from domain.models import Account, Document, JournalEntry
 
 
 @main_bp.get("/")
