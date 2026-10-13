@@ -176,6 +176,11 @@ EXPECTED_TOOL_NAMES = {
     "change_own_password",
     "list_oauth_grants",
     "revoke_oauth_grant",
+    "get_push_status",
+    "list_push_devices",
+    "update_push_device",
+    "revoke_push_device",
+    "send_push_test",
 }
 
 

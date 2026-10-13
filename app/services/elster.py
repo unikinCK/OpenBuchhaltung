@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.push import notify_elster_submission
 from app.services.vat_returns import (
     VAT_RETURN_KIND_ANNUAL,
     vat_return_display_name,
@@ -568,6 +569,14 @@ def _record_submission(
             "transfer_ticket": submission.transfer_ticket,
         },
     )
+    if status in {"transmitted", "failed"}:
+        notify_elster_submission(
+            session,
+            company_id=submission.company_id,
+            document=vat_return_display_name(vat_return.period_label),
+            period_label=vat_return.period_label,
+            status=status,
+        )
     return submission
 
 

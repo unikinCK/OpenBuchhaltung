@@ -85,6 +85,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         OAUTH_ACCESS_TOKEN_SECONDS=int(os.environ.get("OAUTH_ACCESS_TOKEN_SECONDS", "3600")),
         OAUTH_REFRESH_TOKEN_DAYS=int(os.environ.get("OAUTH_REFRESH_TOKEN_DAYS", "30")),
         OAUTH_ALLOWED_REDIRECT_HOSTS=os.environ.get("OAUTH_ALLOWED_REDIRECT_HOSTS", ""),
+        # Push-Mitteilungen an die iOS-App über ein zentrales Relay (leer = aus);
+        # Zustellung durch den Dispatcher `flask push-dispatch` (Compose-Profil push).
+        PUSH_RELAY_URL=os.environ.get("PUSH_RELAY_URL", ""),
+        PUSH_RELAY_TOKEN=os.environ.get("PUSH_RELAY_TOKEN", ""),
+        PUSH_DIGEST_HOUR=int(os.environ.get("PUSH_DIGEST_HOUR", "8")),
+        PUSH_DISPATCH_INTERVAL_SECONDS=int(
+            os.environ.get("PUSH_DISPATCH_INTERVAL_SECONDS", "30")
+        ),
         DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
         DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
         DOCUMENT_MIN_UPLOAD_BYTES=document_min_upload_bytes,

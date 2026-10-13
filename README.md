@@ -414,6 +414,15 @@ inaktiv.
 | `OAUTH_REFRESH_TOKEN_DAYS` | `30` | Laufzeit der Refresh-Tokens (rotieren bei jeder Erneuerung). |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | – | Erlaubte Redirect-Hosts und App-Schemata bei der Registrierung (z. B. `chatgpt.com,claude.ai,de.openbuchhaltung.app`); leer = alle HTTPS-Hosts, localhost und App-Schemata in Reverse-Domain-Form. |
 
+**Push-Mitteilungen (iOS-App)**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `PUSH_RELAY_URL` | – | Basis-URL des Push-Relays; leer = keine Push-Mitteilungen (es entstehen auch keine Einträge in der Warteschlange). |
+| `PUSH_RELAY_TOKEN` | – | Instanzschlüssel, mit dem sich die Instanz beim Relay ausweist (Bearer). |
+| `PUSH_DIGEST_HOUR` | `8` | Ab dieser Stunde (Europe/Berlin) geht die tägliche Zusammenfassung überfälliger offener Posten raus. |
+| `PUSH_DISPATCH_INTERVAL_SECONDS` | `30` | Abstand der Durchläufe des Dispatchers `flask push-dispatch` (mindestens 5). |
+
 **Docker Compose und Skripte**
 
 | Variable | Default | Wirkung |
@@ -422,7 +431,7 @@ inaktiv.
 | `APP_PORT` | `8000` | Host-Port der App im Produktions-Stack (an `127.0.0.1` gebunden). |
 | `APP_BIND_HOST` | `127.0.0.1` | Bind-Adresse der UI im Entwicklungs-Stack (`0.0.0.0` = im Netz erreichbar). |
 | `GUNICORN_WORKERS` | `2` | gunicorn-Worker im Produktions-Stack. |
-| `COMPOSE_PROFILES` | – | Dauerhaft aktive Profile (`mcp`, `proxy`, `dev-tools`). |
+| `COMPOSE_PROFILES` | – | Dauerhaft aktive Profile (`mcp`, `proxy`, `push`, `dev-tools`). |
 | `MCP_DOMAIN` | – | Öffentliche Domain des Caddy-Proxys vor dem MCP-Server. |
 | `MCP_PORT` | `8090` | Host-Port des MCP-Servers im Produktions-Stack (an `127.0.0.1` gebunden). |
 | `PUBLIC_DOMAIN` | – | Öffentliche Domain des nginx-Overlays (`docker-compose.nginx.yml`). |
@@ -1772,6 +1781,65 @@ Beispiel-Eintrag für einen MCP-Client (`claude_desktop_config.json`):
   }
 }
 ```
+
+## Push-Mitteilungen (iOS-App)
+
+Die iOS-App (ADR-003) meldet ihr Gerät bei der Instanz an und erhält Push-Mitteilungen
+über ein zentrales **Push-Relay**. Nur das Relay hält den APNs-Schlüssel von Apple;
+selbst betriebene Instanzen brauchen keinen eigenen Apple-Account.
+
+**Ereignisse** (je Gerät abonnierbar):
+
+| Schlüssel | Auslöser | Text (Beispiel) |
+|---|---|---|
+| `bank_transactions` | Neue Bankumsätze aus Datei-Import, FinTS oder Open Banking | „3 neue Bankumsätze“ |
+| `elster_submission` | ELSTER-Übermittlung einer UStVA/USt-Jahreserklärung erfolgreich oder fehlgeschlagen | „UStVA 2026-09 an ELSTER übermittelt“ |
+| `overdue_open_items` | Täglich ab `PUSH_DIGEST_HOUR`, wenn offene Posten überfällig sind | „2 überfällige offene Posten“ |
+
+Mitteilungen gehen an alle aktiven Geräte aktiver Benutzer mit Zugriff auf die
+Gesellschaft (Benutzer des Mandanten und globale Benutzer). Die Texte nennen nur Anzahlen
+bzw. den Meldezeitraum, keine Beträge, Gesellschafts- oder Partnernamen. Der Datenteil
+enthält `event`, `company_id` und `server_url`, damit die App die Mitteilung zuordnen und
+lokal anreichern kann.
+
+**Ablauf:** Ereignisse legen Einträge in der Ausgangswarteschlange (`push_notification`)
+an, und zwar in derselben Transaktion wie die auslösende Änderung. Der Dispatcher
+`flask push-dispatch` (Compose-Dienst `push`, Profil `push`) übergibt sie alle
+`PUSH_DISPATCH_INTERVAL_SECONDS` an das Relay. Nicht zustellbare Einträge versucht er
+bis zu fünfmal, nach 24 Stunden verwirft er sie. Erledigte Einträge löscht er nach
+30 Tagen. Meldet das Relay ein Gerät als abgemeldet (`invalid_token`), wird es
+widerrufen.
+
+```bash
+# .env: PUSH_RELAY_URL=https://push.example.org, PUSH_RELAY_TOKEN=<Instanzschlüssel>
+COMPOSE_PROFILES=push docker compose -f docker-compose.production.yml up -d push
+```
+
+**Relay-Protokoll v1:** `POST <PUSH_RELAY_URL>/v1/notifications` mit
+`Authorization: Bearer <PUSH_RELAY_TOKEN>`. Der Body enthält
+`{"notifications": [{"id", "device_token", "environment", "title", "body", "category",
+"thread_id", "data"}]}`. Das Relay antwortet mit
+`{"results": [{"id", "status": "sent" | "invalid_token" | "error", "error"}]}`.
+
+**Schnittstellen:**
+
+- `GET /api/v1/push/status`: ob ein Relay konfiguriert ist, dazu die verfügbaren
+  Ereignisse (MCP `get_push_status`).
+- `POST /api/v1/devices`: Gerät registrieren oder aktualisieren, nur mit
+  Benutzer-Token (z. B. OAuth aus der App). Body: `device_token` (hexadezimales
+  APNs-Token), `environment` (`production`/`sandbox`), `device_name`, `app_version`,
+  `server_url`, `events` (ohne Angabe: alle). Meldet sich auf demselben Gerät ein anderer
+  Benutzer an, geht das Gerät auf ihn über.
+- `GET /api/v1/devices`: eigene Geräte, als globaler Admin alle (MCP
+  `list_push_devices`).
+- `PATCH /api/v1/devices/<id>`: Ereignisse oder Namen ändern (MCP
+  `update_push_device`).
+- `POST /api/v1/devices/<id>/revoke`: Gerät widerrufen (MCP `revoke_push_device`).
+- `POST /api/v1/devices/<id>/test`: Testmitteilung (MCP `send_push_test`).
+
+In der Weboberfläche stehen die Geräte unter **Apps** in der Kopfzeile, mit
+Ereignisauswahl, Testmitteilung und Widerruf. Registrierung, Änderung und Widerruf
+landen als Sicherheitsereignis im Audit-Log. Im KI-Chat sind die Push-Tools gesperrt.
 
 ## Kontenrahmenimport (SKR03/SKR04)
 

@@ -415,6 +415,97 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="get_push_status",
+        description=(
+            "Status der Push-Mitteilungen an Mobilgeräte (iOS-App): ob ein Push-Relay "
+            "konfiguriert ist und welche Ereignisse abonniert werden können."
+        ),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/push/status",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="list_push_devices",
+        description=(
+            "Listet für Push-Mitteilungen registrierte Mobilgeräte: eigene, als globaler "
+            "Admin alle. include_inactive zeigt auch widerrufene. Registriert werden Geräte "
+            "nur von der App selbst (POST /api/v1/devices)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch widerrufene Geräte anzeigen.",
+                }
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/devices",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="update_push_device",
+        description=(
+            "Ändert die abonnierten Ereignisse (Schlüssel aus get_push_status) und/oder "
+            "den Namen eines Mobilgeräts."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "integer", "description": "ID aus list_push_devices."},
+                "events": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Abonnierte Ereignisse, z. B. ['bank_transactions'].",
+                },
+                "device_name": {"type": "string", "description": "Anzeigename des Geräts."},
+            },
+            "required": ["device_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/devices/{device_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="revoke_push_device",
+        description=(
+            "Widerruft ein Mobilgerät: keine Push-Mitteilungen mehr, offene werden verworfen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "integer", "description": "ID aus list_push_devices."}
+            },
+            "required": ["device_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/devices/{device_id}/revoke",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="send_push_test",
+        description=(
+            "Stellt eine Testmitteilung für ein Mobilgerät in die Warteschlange; der "
+            "Dispatcher übergibt sie an das Push-Relay."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "integer", "description": "ID aus list_push_devices."}
+            },
+            "required": ["device_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/devices/{device_id}/test",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="unlock_user_login",
         description=(
             "Hebt die Login-Sperre eines Benutzers auf (Rate-Limit nach zu vielen "

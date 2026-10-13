@@ -31,6 +31,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.push import notify_bank_transactions
 from app.services.standard_accounts import GELDTRANSIT, find_standard_account
 from domain.models import (
     Account,
@@ -242,6 +243,7 @@ def import_bank_items(
                 "errors": report.error_rows,
             },
         )
+        notify_bank_transactions(session, company_id=company.id, count=report.imported_rows)
         session.commit()
     except IntegrityError as exc:
         # Paralleler Import derselben Datei: der Unique-Constraint auf

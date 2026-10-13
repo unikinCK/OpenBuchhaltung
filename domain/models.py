@@ -1482,6 +1482,69 @@ class OAuthGrant(Base):
     user: Mapped[User] = relationship()
 
 
+class PushDevice(Base):
+    """Mobilgerät eines Benutzers für Push-Mitteilungen (z. B. die iOS-App).
+
+    ``device_token`` ist das APNs-Gerätetoken; es identifiziert das Gerät gegenüber dem
+    Push-Relay und wird nicht als Geheimnis behandelt. ``events`` listet die
+    abonnierten Ereignisse, ``server_url`` die Adresse, unter der die App diese Instanz
+    kennt (wird in jeder Mitteilung mitgeschickt). Ein Widerruf setzt ``revoked_at``.
+    """
+
+    __tablename__ = "push_device"
+    __table_args__ = (Index("ix_push_device_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False, default="ios")
+    device_token: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, default="production")
+    device_name: Mapped[str | None] = mapped_column(String(100))
+    app_version: Mapped[str | None] = mapped_column(String(40))
+    server_url: Mapped[str | None] = mapped_column(String(500))
+    events: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
+
+
+class PushNotification(Base):
+    """Ausgangswarteschlange der Push-Mitteilungen (eine Zeile je Gerät und Ereignis).
+
+    Ereignisse legen Zeilen in der Transaktion der auslösenden Änderung an; der
+    Dispatcher (``flask push-dispatch``) übergibt sie an das Push-Relay. Texte sind
+    bewusst neutral (Anzahl statt Beträge oder Namen).
+    """
+
+    __tablename__ = "push_notification"
+    __table_args__ = (
+        Index("ix_push_notification_status", "status", "id"),
+        Index("ix_push_notification_company_event", "company_id", "event", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("push_device.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int | None] = mapped_column(ForeignKey("company.id", ondelete="CASCADE"))
+    event: Mapped[str] = mapped_column(String(40), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    body: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    device: Mapped[PushDevice] = relationship()
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (

@@ -38,7 +38,7 @@ Modellserver.
 | Stufe | Funktionen |
 |---|---|
 | **MVP** | Beleg-Scanner (VisionKit, Texterkennung auf dem Gerät, SHA-256 auf dem Gerät), Share Extension für PDFs aus Mail/Safari/Dateien, Inbox (unverbuchte Umsätze und Abgleich-Vorschläge per Wischgeste annehmen oder ablehnen), Übersicht über `GET /api/v1/dashboard`, Wechsel zwischen Instanzen und Gesellschaften |
-| **1.x** | Push-Mitteilungen (neue Umsätze, TAN nötig, überfällige OPOS, Fristen UStVA/ZM, ELSTER-Status), TAN- und Open-Banking-Ablauf am Gerät, Freigaben mit Face ID (SEPA-Zahllauf, Lohnlauf, Festschreibung), Widgets (Bankstände, Liquidität, USt-Zahllast), Bewirtungs- und Reisebelege mit Pflichtangaben |
+| **1.x** | Push-Mitteilungen (neue Umsätze, überfällige OPOS, ELSTER-Status; später Fristen UStVA/ZM), TAN- und Open-Banking-Ablauf am Gerät, Freigaben mit Face ID (SEPA-Zahllauf, Lohnlauf, Festschreibung), Widgets (Bankstände, Liquidität, USt-Zahllast), Bewirtungs- und Reisebelege mit Pflichtangaben |
 | **Später** | App Intents, Siri und Kurzbefehle („Kontostand Geschäftskonto?“), KI-Chat mit Bestätigung vor Aktionen, Erfassung ohne Netz mit Warteschlange |
 
 **Bewusst nicht in der App:** Buchungserfassung mit mehreren Zeilen, Kontenrahmen,
@@ -53,11 +53,13 @@ Jahresabschluss, Lohn-Stammdaten, Steuererklärungen.
   Inbox kommen aus den vorhandenen Listen-Endpunkten (`bank-transactions?status=open`,
   `receipt-match-suggestions`).
 - **Push-Relay:** Selbst betriebene Instanzen können den APNs-Schlüssel nicht selbst
-  halten. Ein zentraler Relay-Dienst (Vorbild Nextcloud) nimmt von Instanzen signierte
-  Ereignisse entgegen. Er stellt nur einen neutralen Hinweistext zu, etwa „3 neue
-  Bankumsätze“, ohne Beträge oder Namen. Die App holt die Details selbst. Instanzen
-  melden Geräte über einen neuen Endpunkt `POST /api/v1/devices` an, mit Audit-Eintrag
-  und Widerruf. Mitteilungen bleiben abschaltbar, die App funktioniert auch ohne sie.
+  halten. Ein zentraler Relay-Dienst (Vorbild Nextcloud) nimmt Mitteilungen von
+  Instanzen entgegen, die sich mit einem Instanzschlüssel ausweisen. Er stellt nur
+  einen neutralen Hinweistext zu, etwa „3 neue Bankumsätze“, ohne Beträge oder Namen.
+  Die App holt die Details selbst. Instanzen melden Geräte über einen neuen Endpunkt
+  `POST /api/v1/devices` an, mit Audit-Eintrag und Widerruf. Mitteilungen bleiben
+  abschaltbar, die App funktioniert auch ohne sie. Instanzseitig umgesetzt:
+  Ausgangswarteschlange, Dispatcher, Relay-Protokoll v1 (README, „Push-Mitteilungen“).
 - **Mobile Belegerfassung und GoBD:** Erfassungszeitpunkt, Quelle und der auf dem Gerät
   berechnete Hash werden mit dem Beleg gespeichert. Der Server prüft den Hash beim
   Upload. Die Verfahrensdokumentation wird um „mobiles Erfassen/ersetzendes Scannen“

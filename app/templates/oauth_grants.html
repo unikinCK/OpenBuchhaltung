@@ -3,7 +3,7 @@
 {% block title %}Verbundene Apps – OpenBuchhaltung{% endblock %}
 
 {% block content %}
-  <h1 class="page-title">Verbundene Apps</h1>
+  <h1 class="page-title">Verbundene Apps und Geräte</h1>
 
   <section class="card">
     <p class="muted">Anwendungen, denen per OAuth Zugriff erlaubt wurde (z. B. ChatGPT- oder
@@ -43,6 +43,60 @@
       </table>
     {% else %}
       <p>Keine aktiven Verbindungen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Mobilgeräte</h2>
+    <p class="muted">Geräte, die sich über die iOS-App für Push-Mitteilungen angemeldet haben.
+      Mitteilungen nennen nur Anzahlen, keine Beträge oder Namen.
+      {% if not push.enabled %}<strong>Auf dieser Instanz ist kein Push-Relay konfiguriert
+      (<code>PUSH_RELAY_URL</code>); es werden keine Mitteilungen versendet.</strong>{% endif %}</p>
+    {% if devices %}
+      <table>
+        <thead>
+          <tr>
+            <th>Gerät</th>
+            {% if show_all %}<th>Benutzer</th>{% endif %}
+            <th>Mitteilungen</th>
+            <th>Zuletzt gesehen</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for device in devices %}
+            <tr>
+              <td>{{ device.device_name or "Unbenanntes Gerät" }}
+                <div class="muted">…{{ device.token_suffix }}{% if device.environment == "sandbox" %} · Sandbox{% endif %}{% if device.app_version %} · App {{ device.app_version }}{% endif %}</div></td>
+              {% if show_all %}<td>{{ device.username }}</td>{% endif %}
+              <td>
+                <form method="post" action="{{ url_for('auth.update_push_device_events', device_id=device.id) }}" class="stacked">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  {% for event in push.events %}
+                    <label><input type="checkbox" name="events" value="{{ event.key }}"{% if event.key in device.events %} checked{% endif %} /> {{ event.label }}</label>
+                  {% endfor %}
+                  <button type="submit" class="secondary">Speichern</button>
+                </form>
+              </td>
+              <td>{{ device.last_seen_at[:16] | replace("T", " ") if device.last_seen_at else "–" }}</td>
+              <td>
+                {% if push.enabled %}
+                  <form method="post" action="{{ url_for('auth.send_push_device_test', device_id=device.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit" class="secondary">Test senden</button>
+                  </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('auth.revoke_push_device', device_id=device.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="secondary">Widerrufen</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Keine Mobilgeräte registriert.</p>
     {% endif %}
   </section>
 {% endblock %}

@@ -665,10 +665,17 @@ dann selbst betriebener Modellserver).
       Reverse-Domain-Form (RFC 8252, `de.openbuchhaltung.app:/oauth/callback`), auch
       über `OAUTH_ALLOWED_REDIRECT_HOSTS` beschränkbar. Den Amazon-PDF-Fix der
       Belegextraktion (pypdf, Bereinigung der NUL-Bytes) gab es bereits.
-- [ ] **Server-Vorarbeit II – Push**: Geräteregistrierung `POST/DELETE /api/v1/devices`
-      (UI/API/MCP, Audit), Benachrichtigungsereignisse (neue Umsätze, TAN nötig,
-      überfällige OPOS, Fristen, ELSTER-Status), zentrales Push-Relay
-      `push.openbuchhaltung.de` mit signierten Instanzanfragen und neutralen Texten.
+- [x] **Server-Vorarbeit II – Push (Instanz)** *(2026-10-13)*: Geräteregistrierung
+      `POST /api/v1/devices` mit Ereignisauswahl, Test und Widerruf in UI/API/MCP (Audit,
+      im Chat gesperrt). Ereignisse: neue Bankumsätze, ELSTER-Ergebnis, tägliche
+      Zusammenfassung überfälliger OPOS. Ausgangswarteschlange in der Transaktion des
+      Ereignisses, Dispatcher `flask push-dispatch` (Compose-Profil `push`),
+      Relay-Protokoll v1, neutrale Texte. FinTS-„TAN nötig“ entfällt: Abrufe starten
+      interaktiv, und pushTAN-Apps melden sich selbst.
+- [ ] **Push-Relay**: eigenständiger Dienst mit APNs-Anbindung (HTTP/2, Token-Auth),
+      Instanzschlüssel, Rate-Limit, ohne Speicherung von Inhalten.
+- [ ] **Fristen-Mitteilungen**: Voranmeldungszeitraum und Dauerfristverlängerung je
+      Gesellschaft modellieren, danach Erinnerung vor UStVA/ZM-Fristen.
 - [ ] **Server-Vorarbeit III – Mobile Belege**: Upload mit Hash vom Gerät,
       Erfassungszeitpunkt und Quelle (`mobile_scan`/`share_extension`), Hash-Prüfung,
       Verfahrensdokumentation „mobiles Erfassen“.
