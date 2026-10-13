@@ -17,6 +17,7 @@ from app.services.account_chart_import import (
 )
 from app.services.account_ledger import (
     DEFAULT_LEDGER_LIMIT,
+    LEDGER_SORT_COLUMNS,
     MAX_LEDGER_LIMIT,
     AccountLedgerError,
     account_ledger,
@@ -38,6 +39,7 @@ from app.web.helpers import (
     pagination_args,
     require_company_access,
     search_args,
+    sort_args,
 )
 from domain.models import Account, FiscalYear, JournalEntry, JournalEntryLine
 
@@ -118,6 +120,7 @@ def _default_fiscal_year(fiscal_years: list[FiscalYear]) -> FiscalYear | None:
 def account_detail_page(account_id: int):
     """Kontoblatt: Buchungen eines Kontos mit Anfangs- und laufendem Saldo."""
     limit, offset = pagination_args(default=DEFAULT_LEDGER_LIMIT, maximum=MAX_LEDGER_LIMIT)
+    sort = sort_args(LEDGER_SORT_COLUMNS, "date")
     _, date_from, date_to = search_args()
     fiscal_year_raw = (request.args.get("fiscal_year_id") or "").strip()
     session_factory = get_session_factory()
@@ -151,6 +154,8 @@ def account_detail_page(account_id: int):
                 fiscal_year_id=fiscal_year_id,
                 limit=limit,
                 offset=offset,
+                sort=sort.key,
+                descending=sort.descending,
             )
         except AccountLedgerError as exc:
             flash(str(exc), "error")
@@ -188,6 +193,7 @@ def account_detail_page(account_id: int):
         posting_count=posting_count,
         history=history,
         filter_args=filter_args,
+        sort=sort,
         limit=limit,
         offset=offset,
         valid_account_types=ACCOUNT_TYPES,

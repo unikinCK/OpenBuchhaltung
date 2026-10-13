@@ -54,6 +54,7 @@ from app.web.helpers import (
     parse_form_amount,
     require_company_access,
     search_args,
+    sort_args,
 )
 from domain.models import (
     Account,
@@ -262,9 +263,38 @@ def _safe_next(default: str) -> str:
     return default
 
 
+JOURNAL_SORT_COLUMNS = ("number", "date", "text", "partner", "posting", "amount")
+
+
+def _journal_sort_expressions(key: str) -> tuple:
+    """Sortierausdrücke je Journal-Spalte (abgeleitete Spalten als Unterabfrage)."""
+    lines = select(JournalEntryLine).where(JournalEntryLine.journal_entry_id == JournalEntry.id)
+    if key == "number":
+        return (JournalEntry.posting_number,)
+    if key == "text":
+        return (func.lower(JournalEntry.description),)
+    if key == "partner":
+        return (
+            lines.join(BusinessPartner, BusinessPartner.id == JournalEntryLine.partner_id)
+            .with_only_columns(func.min(func.lower(BusinessPartner.name)))
+            .scalar_subquery(),
+        )
+    if key == "posting":
+        return (
+            lines.join(Account, Account.id == JournalEntryLine.account_id)
+            .where(JournalEntryLine.debit_amount > 0)
+            .with_only_columns(func.min(Account.code))
+            .scalar_subquery(),
+        )
+    if key == "amount":
+        return (lines.with_only_columns(func.sum(JournalEntryLine.debit_amount)).scalar_subquery(),)
+    return (JournalEntry.entry_date,)
+
+
 @main_bp.get("/buchungen")
 def journal_page():
     limit, offset = pagination_args()
+    sort = sort_args(JOURNAL_SORT_COLUMNS, "date", descending=True)
     query, date_from, date_to = search_args()
     partner_filter = request.args.get("partner_id", type=int)
     account_filter = request.args.get("account_id", type=int)
@@ -369,7 +399,10 @@ def journal_page():
             journal_entries = (
                 session.execute(
                     entries_stmt.order_by(
-                        JournalEntry.entry_date.desc(), JournalEntry.id.desc()
+                        *sort.order_by(
+                            *_journal_sort_expressions(sort.key),
+                            tiebreak=(JournalEntry.entry_date, JournalEntry.id),
+                        )
                     )
                     .limit(limit)
                     .offset(offset)
@@ -422,6 +455,7 @@ def journal_page():
         status_filter=status_filter,
         filter_args=filter_args,
         filters_active=bool(filter_args),
+        sort=sort,
         overview=overview,
         documents_by_entry=documents_by_entry,
         reversed_by_entry=reversed_by_entry,

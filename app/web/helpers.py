@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -75,6 +77,51 @@ def pagination_args(
     limit = default if limit is None else max(1, min(limit, maximum))
     offset = max(0, request.args.get("offset", type=int) or 0)
     return limit, offset
+
+
+@dataclass(frozen=True)
+class SortState:
+    """Spaltensortierung einer paginierten Liste (``?sort=<Spalte>&dir=asc|desc``)."""
+
+    key: str
+    descending: bool
+    explicit: bool = False
+
+    @property
+    def direction(self) -> str:
+        return "desc" if self.descending else "asc"
+
+    @property
+    def url_args(self) -> dict[str, str]:
+        """Für Paginierungs- und Filterlinks; leer, solange die Standardsortierung gilt."""
+        return {"sort": self.key, "dir": self.direction} if self.explicit else {}
+
+    def order_by(self, *expressions, tiebreak=(), then=()) -> list:
+        """ORDER-BY-Klauseln in Sortierrichtung, danach ``tiebreak`` (ebenfalls in
+        Sortierrichtung) und ``then`` (unverändert) für eine stabile Reihenfolge.
+        Leere Werte stehen in beiden Richtungen am Ende."""
+        clauses = [
+            (expression.desc() if self.descending else expression.asc()).nulls_last()
+            for expression in expressions
+        ]
+        clauses += [
+            expression.desc() if self.descending else expression.asc() for expression in tiebreak
+        ]
+        return [*clauses, *then]
+
+    def sort_list(self, items: list, key) -> list:
+        """Sortiert bereits geladene Zeilen; ``None``-Schlüssel stehen am Ende."""
+        present = [item for item in items if key(item) is not None]
+        missing = [item for item in items if key(item) is None]
+        return sorted(present, key=key, reverse=self.descending) + missing
+
+
+def sort_args(columns: Iterable[str], default: str, *, descending: bool = False) -> SortState:
+    """Sortierspalte aus der Query; unbekannte Spalten fallen auf ``default`` zurück."""
+    key = (request.args.get("sort") or "").strip()
+    if key not in columns:
+        return SortState(key=default, descending=descending)
+    return SortState(key=key, descending=request.args.get("dir") == "desc", explicit=True)
 
 
 def search_args() -> tuple[str | None, date | None, date | None]:

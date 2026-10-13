@@ -10,6 +10,7 @@ Nachher-Snapshot protokolliert; Bankdaten nur über ``set_partner_bank_details``
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -588,7 +589,9 @@ def list_partners(
     include_inactive: bool = False,
     limit: int = 100,
     offset: int = 0,
+    order_by: Sequence[Any] | None = None,
 ) -> tuple[list[BusinessPartner], int]:
+    """Partner einer Firma; ``order_by`` ersetzt die Standardsortierung nach Name."""
     stmt = select(BusinessPartner).where(BusinessPartner.company_id == company_id)
     if role == SUBLEDGER_DEBTOR:
         stmt = stmt.where(BusinessPartner.debtor_number.is_not(None))
@@ -612,7 +615,9 @@ def list_partners(
     total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
     partners = (
         session.execute(
-            stmt.order_by(BusinessPartner.name, BusinessPartner.id).limit(limit).offset(offset)
+            stmt.order_by(*(order_by or (BusinessPartner.name, BusinessPartner.id)))
+            .limit(limit)
+            .offset(offset)
         )
         .scalars()
         .all()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from flask import abort, flash, redirect, render_template, request, url_for
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.services.partners import (
     PartnerError,
@@ -23,6 +23,7 @@ from app.web.helpers import (
     get_session_factory,
     pagination_args,
     require_company_access,
+    sort_args,
 )
 from app.web.journal import entry_overview
 from domain.models import SUBLEDGER_TYPES, BusinessPartner, JournalEntry, JournalEntryLine
@@ -84,9 +85,61 @@ def _flash_hints(hints: list[str]) -> None:
         flash(f"Hinweis: {hint}", "warning")
 
 
+PARTNER_SORT_COLUMNS = (
+    "name",
+    "role",
+    "debtor",
+    "creditor",
+    "city",
+    "vat_id",
+    "payment_terms",
+    "entries",
+)
+
+
+def _blank_as_null(column):
+    return func.nullif(func.trim(column), "")
+
+
+def _partner_sort_expressions(key: str) -> tuple:
+    if key == "role":
+        # Wie angezeigt: Kunde, Kunde + Lieferant, Lieferant, ohne Rolle.
+        has_debtor = BusinessPartner.debtor_number.is_not(None)
+        has_creditor = BusinessPartner.creditor_number.is_not(None)
+        return (
+            case(
+                (has_debtor & has_creditor, 2),
+                (has_debtor, 1),
+                (has_creditor, 3),
+                else_=None,
+            ),
+        )
+    if key == "debtor":
+        return (_blank_as_null(BusinessPartner.debtor_number),)
+    if key == "creditor":
+        return (_blank_as_null(BusinessPartner.creditor_number),)
+    if key == "city":
+        return (
+            func.lower(_blank_as_null(BusinessPartner.city)),
+            BusinessPartner.postal_code,
+        )
+    if key == "vat_id":
+        return (_blank_as_null(BusinessPartner.vat_id),)
+    if key == "payment_terms":
+        return (BusinessPartner.payment_term_days,)
+    if key == "entries":
+        return (
+            select(func.count(func.distinct(JournalEntryLine.journal_entry_id)))
+            .where(JournalEntryLine.partner_id == BusinessPartner.id)
+            .scalar_subquery(),
+        )
+    return (func.lower(BusinessPartner.name),)
+
+
 @main_bp.get("/partner")
 def partners_page():
     limit, offset = pagination_args()
+    sort = sort_args(PARTNER_SORT_COLUMNS, "name")
     role = (request.args.get("role") or "").strip() or None
     if role not in SUBLEDGER_TYPES:
         role = None
@@ -107,6 +160,10 @@ def partners_page():
                 include_inactive=include_inactive,
                 limit=limit,
                 offset=offset,
+                order_by=sort.order_by(
+                    *_partner_sort_expressions(sort.key),
+                    then=(func.lower(BusinessPartner.name), BusinessPartner.id),
+                ),
             )
             entry_counts = _entry_counts(session, [partner.id for partner in partners])
     filter_args = {
@@ -131,6 +188,7 @@ def partners_page():
         q=query,
         include_inactive=include_inactive,
         filter_args=filter_args,
+        sort=sort,
     )
 
 

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_journal.html" import audit_changes, partner_chips, account_link, saldo %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
 
 {% block title %}{{ account.code }} {{ account.name }} – Kontoblatt – OpenBuchhaltung{% endblock %}
 
@@ -26,6 +26,7 @@
 
   <section class="card">
     <form method="get" action="{{ url_for('main.account_detail_page', account_id=account.id) }}" class="filter-bar">
+      {{ sort_hidden(sort) }}
       <select name="fiscal_year_id" aria-label="Geschäftsjahr">
         {% for fiscal_year in fiscal_years %}
           <option value="{{ fiscal_year.id }}" {% if fiscal_year.id == fiscal_year_id %}selected{% endif %}>Geschäftsjahr {{ fiscal_year.label }}</option>
@@ -60,21 +61,21 @@
     </div>
     {% if ledger.lines or ledger.opening_balance %}
       <div class="table-scroll">
-        <table class="data ledger-table">
+        <table class="data ledger-table" {{ sort_attrs(sort) }}>
           <thead>
             <tr>
-              <th>Datum</th>
-              <th>Beleg-Nr.</th>
-              <th>Buchungstext</th>
-              <th>Gegenkonto</th>
-              <th class="num">Soll</th>
-              <th class="num">Haben</th>
-              <th class="num">Saldo</th>
+              <th data-sort-key="date">Datum</th>
+              <th data-sort-key="number">Beleg-Nr.</th>
+              <th data-sort-key="text">Buchungstext</th>
+              <th data-sort-key="contra">Gegenkonto</th>
+              <th class="num" data-sort-key="debit">Soll</th>
+              <th class="num" data-sort-key="credit">Haben</th>
+              <th class="num" data-sort-key="balance">Saldo</th>
             </tr>
           </thead>
           <tbody>
             {% if offset == 0 and ledger.period.date_from %}
-              <tr class="row-muted">
+              <tr class="row-muted" data-sort-fixed>
                 <td class="date">{{ ledger.period.date_from | datum }}</td>
                 <td></td>
                 <td>Anfangssaldo{% if account.account_type in ("asset", "liability", "equity") %} (Saldovortrag){% endif %}</td>
@@ -121,7 +122,11 @@
           </tfoot>
         </table>
       </div>
-      {{ pagination('main.account_detail_page', ledger.total_lines, limit, offset, account.company_id, dict(filter_args, account_id=account.id), prev_label='‹ Frühere', next_label='Spätere ›') }}
+      {% if sort.explicit %}
+        {{ pagination('main.account_detail_page', ledger.total_lines, limit, offset, account.company_id, dict(filter_args, account_id=account.id, **sort.url_args), prev_label='‹ Zurück', next_label='Weiter ›') }}
+      {% else %}
+        {{ pagination('main.account_detail_page', ledger.total_lines, limit, offset, account.company_id, dict(filter_args, account_id=account.id), prev_label='‹ Frühere', next_label='Spätere ›') }}
+      {% endif %}
       <p class="hint">Saldo = Soll minus Haben (S = Sollsaldo, H = Habensaldo). Saldovorträge stecken im Anfangssaldo; Erfolgskonten beginnen je Geschäftsjahr bei null.</p>
     {% else %}
       <p class="empty-state">Keine Buchungen auf diesem Konto im gewählten Zeitraum.</p>

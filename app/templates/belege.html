@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
 
 {% block title %}Belege – OpenBuchhaltung{% endblock %}
 
@@ -68,6 +68,7 @@
       </div>
       <form method="get" action="{{ url_for('main.documents_page') }}" class="filter-bar">
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        {{ sort_hidden(sort) }}
         <input type="search" name="q" value="{{ q or '' }}" placeholder="Dateiname" aria-label="Suchbegriff" />
         <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
         <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
@@ -77,14 +78,14 @@
       </form>
       {% if documents %}
         <div class="table-scroll">
-          <table class="data">
+          <table class="data" {{ sort_attrs(sort) }}>
             <thead>
               <tr>
-                <th>Beleg</th>
-                <th>Kategorie</th>
-                <th>Belegdatum</th>
-                <th>Buchung</th>
-                <th>Hochgeladen</th>
+                <th data-sort-key="name">Beleg</th>
+                <th data-sort-key="category">Kategorie</th>
+                <th data-sort-key="date">Belegdatum</th>
+                <th data-sort-key="entry">Buchung</th>
+                <th data-sort-key="uploaded">Hochgeladen</th>
                 <th class="actions"></th>
               </tr>
             </thead>
@@ -162,7 +163,7 @@
           </table>
         </div>
         {{ pagination('main.documents_page', documents_total, limit, offset, selected_company_id,
-                      extra=filter_args) }}
+                      extra=dict(filter_args, **sort.url_args)) }}
       {% elif filter_args %}
         <p class="empty-state">Keine Belege zu diesen Filtern.</p>
       {% else %}

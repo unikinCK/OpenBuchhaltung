@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_pagination.html" import pagination %}
+{% from "_pagination.html" import pagination, sort_attrs %}
 {% from "_journal.html" import account_link %}
 {% from "_filters.html" import filter_form %}
 
@@ -116,23 +116,23 @@
     </div>
     {% if selected_company_id %}
       {{ filter_form('main.open_items_page', selected_company_id, q, date_from, date_to,
-                     extra={'include_settled': 1} if include_settled else {},
+                     extra=dict({'include_settled': 1} if include_settled else {}, **sort.url_args),
                      placeholder="Referenz oder Gegenpartei") }}
     {% endif %}
 
     {% if open_items %}
       <div class="table-scroll">
-        <table class="data">
+        <table class="data" {{ sort_attrs(sort) }}>
           <thead>
             <tr>
-              <th>Referenz</th>
-              <th>Typ</th>
-              <th>Gegenseite</th>
-              <th>Konto</th>
-              <th>Fällig</th>
-              <th class="num">Original</th>
-              <th class="num">Offen</th>
-              <th>Status</th>
+              <th data-sort-key="reference">Referenz</th>
+              <th data-sort-key="type">Typ</th>
+              <th data-sort-key="counterparty">Gegenseite</th>
+              <th data-sort-key="account">Konto</th>
+              <th data-sort-key="due">Fällig</th>
+              <th class="num" data-sort-key="original">Original</th>
+              <th class="num" data-sort-key="open">Offen</th>
+              <th data-sort-key="status">Status</th>
               <th class="actions"></th>
             </tr>
           </thead>
@@ -216,7 +216,7 @@
         </table>
       </div>
       {{ pagination('main.open_items_page', open_items_total, limit, offset, selected_company_id,
-                    extra=filter_args) }}
+                    extra=dict(filter_args, **sort.url_args)) }}
     {% else %}
       <p class="empty-state">Keine offenen Posten vorhanden.</p>
     {% endif %}

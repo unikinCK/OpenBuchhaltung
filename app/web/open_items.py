@@ -24,6 +24,7 @@ from app.web.helpers import (
     pagination_args,
     require_company_access,
     search_args,
+    sort_args,
 )
 from domain.models import Account, BankTransaction, JournalEntry, OpenItem
 
@@ -31,9 +32,54 @@ from domain.models import Account, BankTransaction, JournalEntry, OpenItem
 LINK_SELECT_LIMIT = 200
 
 
+OPEN_ITEM_SORT_COLUMNS = (
+    "reference",
+    "type",
+    "counterparty",
+    "account",
+    "due",
+    "original",
+    "open",
+    "status",
+)
+
+
+def _open_item_sort_key(key: str, today: date):
+    def text(value: str | None) -> str | None:
+        return (value or "").strip().lower() or None
+
+    if key == "reference":
+        return lambda item: text(item.reference)
+    if key == "type":
+        return lambda item: 0 if item.item_type == "receivable" else 1  # Debitor, Kreditor
+    if key == "counterparty":
+        return lambda item: text(item.counterparty)
+    if key == "account":
+        return lambda item: item.account.code
+    if key == "due":
+        return lambda item: item.due_date
+    if key == "original":
+        return lambda item: item.original_amount
+    if key == "open":
+        return lambda item: item.open_amount
+
+    # Status wie angezeigt: überfällig, offen, ausgeglichen; darin nach Fälligkeit.
+    def status(item):
+        if item.status != "open":
+            rank = 2
+        elif item.due_date and item.due_date < today:
+            rank = 0
+        else:
+            rank = 1
+        return (rank, item.due_date or date.max)
+
+    return status
+
+
 @main_bp.get("/offene-posten")
 def open_items_page():
     limit, offset = pagination_args()
+    sort = sort_args(OPEN_ITEM_SORT_COLUMNS, "status")
     query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -97,6 +143,8 @@ def open_items_page():
     if date_to:
         open_items = [item for item in open_items if item.entry_date <= date_to]
 
+    if sort.explicit:
+        open_items = sort.sort_list(open_items, _open_item_sort_key(sort.key, date.today()))
     open_items_total = len(open_items)
     open_items = open_items[offset : offset + limit]
 
@@ -118,6 +166,7 @@ def open_items_page():
             query, date_from, date_to, include_settled=1 if include_settled else None
         ),
         include_settled=include_settled,
+        sort=sort,
         totals=totals,
         today=date.today().isoformat(),
     )

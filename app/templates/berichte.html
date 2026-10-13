@@ -107,7 +107,7 @@
     <div class="report-grid">
       <section class="card">
         <h2>GuV</h2>
-        <table>
+        <table data-no-sort>
           <thead>
             <tr><th>Position</th><th class="num">Betrag</th></tr>
           </thead>
@@ -135,7 +135,7 @@
             {% for row in balance_sheet.assets %}
               <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets | betrag }}</strong></td></tr>
+            <tr data-sort-fixed><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets | betrag }}</strong></td></tr>
           </tbody>
         </table>
         <br />
@@ -147,7 +147,7 @@
             {% for row in balance_sheet.liabilities_and_equity %}
               <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
             {% endfor %}
-            <tr><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity | betrag }}</strong></td></tr>
+            <tr data-sort-fixed><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity | betrag }}</strong></td></tr>
           </tbody>
         </table>
         <p>
