@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Investitionen in Kostenstellen- und Profitcenter-Bericht
+- Neu: Der Controlling-Bericht zeigt je Einheit zusätzlich Anschaffungswert,
+  Abschreibung und Buchwert. Bisher zählten nur Erlös- und Aufwandskonten – Einheiten,
+  die (wie beim Breitbandausbau) nur auf Anlagekonten wie „Anlagen im Bau“ kontiert
+  sind, standen deshalb überall auf 0,00. Anschaffungswert und Buchwert gelten zum
+  Ende des Berichtszeitraums, die Abschreibung (planmäßig, außerplanmäßig,
+  Restbuchwert beim Abgang aus der Anlagenbuchhaltung, Stornos eingerechnet) für den
+  Zeitraum; Aufschlüsselung je Anlagekonto.
+- `GET /api/v1/controlling-report` und MCP `get_controlling_report` liefern je Einheit
+  `investments` (`acquisition_cost`, `depreciation`, `book_value`, `accounts`);
+  der CSV-Export (`export_controlling_csv`) hat die Spalten `acquisition_cost`,
+  `depreciation`, `book_value` und `total_*` angehängt.
+
 ### Tabellen nach jeder Spalte sortieren
 - Neu: Ein Klick auf einen Spaltenkopf sortiert die Tabelle auf- bzw. absteigend (▲/▼).
   Die paginierten Listen – Journal, Bankumsätze, Belege, Geschäftspartner, Offene

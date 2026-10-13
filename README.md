@@ -30,7 +30,8 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
   Kostenstellenrechnung und Profitcenter-GuV mit Sprung zu den zugehörigen Buchungen
-  (Journalfilter je Einheit und Konto). Bank-, OCR- und E-Rechnungsbuchungen
+  (Journalfilter je Einheit und Konto), dazu Investitionen je Einheit
+  (Anschaffungswert, Abschreibung, Buchwert). Bank-, OCR- und E-Rechnungsbuchungen
   können direkt kontiert werden; Anlagen und Mitarbeiter tragen optionale
   Standardzuordnungen für ihre automatischen Aufwandsbuchungen.
 - **Deutsche Praxis:** SKR03/SKR04-Import, Umsatzsteuer-/Vorsteuerlogik,

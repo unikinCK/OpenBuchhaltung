@@ -217,26 +217,41 @@ def export_controlling_csv():
             "total_revenue",
             "total_expense",
             "net_income",
+            "acquisition_cost",
+            "depreciation",
+            "book_value",
+            "total_acquisition_cost",
+            "total_depreciation",
+            "total_book_value",
         ]
     )
     for bucket in [*report["units"], report["unassigned"]]:
         unit = bucket["unit"] or {}
-        account_rows = bucket["accounts"] or [None]
-        for account in account_rows:
-            writer.writerow(
-                [
-                    unit_type,
-                    unit.get("code", ""),
-                    unit.get("name", "Nicht zugeordnet"),
-                    account["code"] if account else "",
-                    account["name"] if account else "",
-                    account["account_type"] if account else "",
-                    account["amount"] if account else "",
-                    bucket["total_revenue"],
-                    bucket["total_expense"],
-                    bucket["net_income"],
-                ]
-            )
+        investments = bucket["investments"] or {}
+        totals = [
+            bucket["total_revenue"],
+            bucket["total_expense"],
+            bucket["net_income"],
+        ]
+        investment_totals = [
+            investments.get("acquisition_cost", ""),
+            investments.get("depreciation", ""),
+            investments.get("book_value", ""),
+        ]
+        prefix = [unit_type, unit.get("code", ""), unit.get("name", "Nicht zugeordnet")]
+        account_rows = [
+            [account["code"], account["name"], account["account_type"], account["amount"]]
+            + totals
+            + ["", "", ""]
+            for account in bucket["accounts"]
+        ] + [
+            [account["code"], account["name"], "asset", ""]
+            + totals
+            + [account["acquisition_cost"], account["depreciation"], account["book_value"]]
+            for account in investments.get("accounts", [])
+        ]
+        for row in account_rows or [["", "", "", "", *totals, "", "", ""]]:
+            writer.writerow([*prefix, *row, *investment_totals])
     file_name = f"controlling-{unit_type}-{company_id}-{date.today().isoformat()}.csv"
     return Response(
         csv_buffer.getvalue(),

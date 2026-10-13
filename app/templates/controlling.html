@@ -75,6 +75,7 @@
         {% endif %}
       </form>
       <p class="muted small">Einheiten und Konten in den Berichten führen zu den zugehörigen Buchungen im Journal.</p>
+      <p class="muted small">Erlöse, Aufwand, Ergebnis und Abschreibung gelten für den Berichtszeitraum; Anschaffungswert und Buchwert sind der Stand am Ende des Zeitraums (kontierte Bestandskonten, z. B. Anlagen im Bau). Abschreibungen stammen aus der Anlagenbuchhaltung.</p>
     </section>
 
     {% for title, report in [("Kostenstellenrechnung", cost_center_report), ("Profitcenter-GuV", profit_center_report)] %}
@@ -84,7 +85,7 @@
         <p><a href="{{ url_for('api.export_controlling_csv', company_id=selected_company_id, unit_type=report.unit_type, **period_args) }}">Als CSV exportieren</a></p>
         {% if report and report.units %}
           <table>
-            <thead><tr><th>Einheit</th><th class="num">Erlöse</th><th class="num">Aufwand</th><th class="num">Ergebnis</th></tr></thead>
+            <thead><tr><th>Einheit</th><th class="num">Erlöse</th><th class="num">Aufwand</th><th class="num">Ergebnis</th><th class="num" title="Kontierte Zugänge auf Bestandskonten bis zum Ende des Berichtszeitraums">Anschaffungswert</th><th class="num" title="Abschreibungen der Anlagenbuchhaltung im Berichtszeitraum">Abschreibung</th><th class="num" title="Anschaffungswert abzüglich aller Abschreibungen bis zum Ende des Berichtszeitraums">Buchwert</th></tr></thead>
             <tbody>
               {% for bucket in report.units + [report.unassigned] %}
                 {% set unit_value = bucket.unit.id if bucket.unit else unassigned_unit %}
@@ -94,9 +95,19 @@
                   <td class="num">{{ bucket.total_revenue }}</td>
                   <td class="num">{{ bucket.total_expense }}</td>
                   <td class="num"><strong>{{ bucket.net_income }}</strong></td>
+                  {% if bucket.investments %}
+                    <td class="num">{{ bucket.investments.acquisition_cost }}</td>
+                    <td class="num">{{ bucket.investments.depreciation }}</td>
+                    <td class="num"><strong>{{ bucket.investments.book_value }}</strong></td>
+                  {% else %}
+                    <td class="num muted">–</td><td class="num muted">–</td><td class="num muted">–</td>
+                  {% endif %}
                 </tr>
                 {% for account in bucket.accounts %}
-                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td></tr>
+                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td><td colspan="3"></td></tr>
+                {% endfor %}
+                {% for account in (bucket.investments.accounts if bucket.investments else []) %}
+                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="3"></td><td class="num">{{ account.acquisition_cost }}</td><td class="num">{{ account.depreciation }}</td><td class="num">{{ account.book_value }}</td></tr>
                 {% endfor %}
               {% endfor %}
             </tbody>

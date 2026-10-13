@@ -481,3 +481,141 @@ def test_journal_entries_filter_by_controlling_units(tmp_path: Path) -> None:
         f"/controlling?company_id={company_id}&date_from=2027-01-01"
     ).get_data(as_text=True)
     assert "250.00" not in empty_period
+
+
+def test_controlling_report_shows_investments_with_depreciation(tmp_path: Path) -> None:
+    """Kontierte Bestandskonten: Anschaffungswert, AfA im Zeitraum, Buchwert zum Stichtag."""
+    _, client = _app_and_client(tmp_path)
+    company_id = _seed_company_and_accounts(client)
+    for code, name, account_type in (
+        ("0400", "Maschinen", "asset"),
+        ("0700", "Anlagen im Bau", "asset"),
+        ("1600", "Verbindlichkeiten aLuL", "liability"),
+        ("4830", "Abschreibungen", "expense"),
+    ):
+        response = client.post(
+            "/api/v1/accounts",
+            json={
+                "company_id": company_id,
+                "code": code,
+                "name": name,
+                "account_type": account_type,
+            },
+        )
+        assert response.status_code == 201
+    accounts = client.get(f"/api/v1/accounts?company_id={company_id}").get_json()["accounts"]
+    account_ids = {account["code"]: account["id"] for account in accounts}
+    cost_center = _create_unit(client, company_id, "cost_center", "K100", "Tiefbau")
+    _create_unit(client, company_id, "cost_center", "K200", "Leer")
+
+    for entry_date, account_code, amount in (
+        ("2026-01-05", "0400", "12000.00"),
+        ("2026-03-01", "0700", "5000.00"),
+    ):
+        booking = client.post(
+            "/api/v1/journal-entries",
+            json={
+                "company_id": company_id,
+                "entry_date": entry_date,
+                "description": f"Zugang {account_code}",
+                "lines": [
+                    {
+                        "account_id": account_ids[account_code],
+                        "debit_amount": amount,
+                        "cost_center_id": cost_center["id"],
+                    },
+                    {"account_id": account_ids["1600"], "credit_amount": amount},
+                ],
+            },
+        )
+        assert booking.status_code == 201
+
+    asset = client.post(
+        "/api/v1/fixed-assets",
+        json={
+            "company_id": company_id,
+            "asset_number": "A-1",
+            "name": "Bagger",
+            "acquisition_date": "2026-01-01",
+            "acquisition_cost": "12000.00",
+            "method": "linear",
+            "useful_life_months": 60,
+            "asset_account_id": account_ids["0400"],
+            "depreciation_account_id": account_ids["4830"],
+            "cost_center_id": cost_center["id"],
+        },
+    )
+    assert asset.status_code == 201
+    depreciation = client.post(
+        f"/api/v1/fixed-assets/{asset.get_json()['id']}/depreciation",
+        json={"fiscal_year": 2026},
+    )
+    assert depreciation.status_code == 201
+
+    def report(query: str = "") -> dict:
+        response = client.get(
+            f"/api/v1/controlling-report?company_id={company_id}&unit_type=cost_center{query}"
+        )
+        assert response.status_code == 200
+        return response.get_json()
+
+    full = report()
+    unit = full["units"][0]
+    assert unit["total_expense"] == "2400.00"
+    investments = unit["investments"]
+    assert (
+        investments["acquisition_cost"],
+        investments["depreciation"],
+        investments["book_value"],
+    ) == ("17000.00", "2400.00", "14600.00")
+    assert [
+        (row["code"], row["acquisition_cost"], row["depreciation"], row["book_value"])
+        for row in investments["accounts"]
+    ] == [
+        ("0400", "12000.00", "2400.00", "9600.00"),
+        ("0700", "5000.00", "0.00", "5000.00"),
+    ]
+    assert full["units"][1]["investments"]["book_value"] == "0.00"
+    assert full["unassigned"]["investments"] is None
+
+    # Stichtag vor der AfA: voller Anschaffungswert, keine Abschreibung.
+    mid_year = report("&date_to=2026-06-30")["units"][0]["investments"]
+    assert (mid_year["acquisition_cost"], mid_year["depreciation"], mid_year["book_value"]) == (
+        "17000.00",
+        "0.00",
+        "17000.00",
+    )
+    # Zeitraum nach der AfA: keine AfA im Zeitraum, Buchwert berücksichtigt sie trotzdem.
+    next_year = report("&date_from=2027-01-01")["units"][0]["investments"]
+    assert (next_year["acquisition_cost"], next_year["depreciation"], next_year["book_value"]) == (
+        "17000.00",
+        "0.00",
+        "14600.00",
+    )
+
+    csv_response = client.get(
+        f"/api/v1/exports/controlling.csv?company_id={company_id}&unit_type=cost_center"
+    )
+    assert csv_response.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(csv_response.data.decode())))
+    machine_row = next(row for row in rows if row["account_code"] == "0400")
+    assert machine_row["acquisition_cost"] == "12000.00"
+    assert machine_row["book_value"] == "9600.00"
+    assert machine_row["total_book_value"] == "14600.00"
+
+    page = client.get(f"/controlling?company_id={company_id}")
+    assert page.status_code == 200
+    assert "Anschaffungswert".encode() in page.data
+    assert b"14600.00" in page.data
+
+    # Storno der AfA-Buchung hebt die Abschreibung wieder auf.
+    reversal = client.post(
+        f"/api/v1/journal-entries/{depreciation.get_json()['journal_entry_id']}/reverse",
+        json={"reversal_date": "2026-12-31"},
+    )
+    assert reversal.status_code == 201
+    reversed_investments = report()["units"][0]["investments"]
+    assert (reversed_investments["depreciation"], reversed_investments["book_value"]) == (
+        "0.00",
+        "17000.00",
+    )

@@ -777,7 +777,10 @@ TOOLS: list[ToolSpec] = [
         name="get_controlling_report",
         description=(
             "Liefert Kostenstellenrechnung oder Profitcenter-GuV (Summen je Einheit und "
-            "Konto). Die einzelnen Buchungen dazu liefert list_journal_entries mit "
+            "Konto). Je Einheit zusätzlich 'investments': kontierte Bestandskonten "
+            "(z. B. Anlagen im Bau) mit acquisition_cost und book_value zum Ende des "
+            "Zeitraums sowie depreciation (AfA der Anlagenbuchhaltung im Zeitraum). Die "
+            "einzelnen Buchungen dazu liefert list_journal_entries mit "
             "cost_center_id/profit_center_id (und account_id), 'none' für nicht zugeordnet."
         ),
         input_schema={
@@ -800,7 +803,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="export_controlling_csv",
-        description="Exportiert Kostenstellenrechnung oder Profitcenter-GuV als CSV.",
+        description=(
+            "Exportiert Kostenstellenrechnung oder Profitcenter-GuV als CSV, inklusive "
+            "Anschaffungswert, Abschreibung und Buchwert der kontierten Bestandskonten."
+        ),
         input_schema={
             "type": "object",
             "properties": {
