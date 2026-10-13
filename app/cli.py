@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -318,6 +319,35 @@ def register_cli_commands(app: Flask) -> None:
 
         click.echo(f"API-Token für {username}: {token}")
         click.echo("Dieses Token wird nur einmal angezeigt.")
+
+    @app.cli.command("push-dispatch")
+    @click.option("--once", is_flag=True, help="Nur einen Durchlauf statt Dauerbetrieb.")
+    def push_dispatch(once: bool):
+        """Stellt Push-Mitteilungen über das Push-Relay zu (Dauerbetrieb im Compose-Dienst push)."""
+        import time
+
+        from app.services.push import push_enabled, run_dispatch_cycle
+
+        if not push_enabled(app.config):
+            raise click.ClickException("PUSH_RELAY_URL ist nicht gesetzt.")
+        interval = max(5, int(app.config.get("PUSH_DISPATCH_INTERVAL_SECONDS") or 30))
+        session_factory = app.extensions["db_session_factory"]
+        while True:
+            with session_factory() as session:
+                try:
+                    counts = run_dispatch_cycle(session, config=app.config)
+                except Exception:  # Dauerbetrieb: Fehler protokollieren, weiterlaufen
+                    session.rollback()
+                    logging.getLogger(__name__).exception("Push-Dispatch fehlgeschlagen")
+                    counts = None
+            if counts and any(counts.values()):
+                click.echo(
+                    "push-dispatch: "
+                    + ", ".join(f"{key}={value}" for key, value in counts.items())
+                )
+            if once:
+                return
+            time.sleep(interval)
 
     @app.cli.command("seed-demo")
     def seed_demo():

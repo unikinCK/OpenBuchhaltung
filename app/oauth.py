@@ -643,7 +643,10 @@ def grant_dict(grant: OAuthGrant) -> dict[str, Any]:
         "client_id": grant.client.client_id,
         "client_name": grant.client.client_name,
         "redirect_hosts": sorted(
-            {urlsplit(uri).hostname or "" for uri in grant.client.redirect_uris}
+            {
+                native_redirect_scheme(uri) or urlsplit(uri).hostname or ""
+                for uri in grant.client.redirect_uris
+            }
         ),
         "user_id": grant.user_id,
         "username": grant.user.username,

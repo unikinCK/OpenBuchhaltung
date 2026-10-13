@@ -510,18 +510,78 @@ def change_password():
 @login_required
 def oauth_grants_page():
     from app.oauth import list_grants
+    from app.services.push import list_devices, push_status
 
     user = current_user()
     show_all = user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
     with _get_session_factory()() as db_session:
         grants = list_grants(db_session, user_id=None if show_all else user["id"])
+        devices = list_devices(db_session, user_id=None if show_all else user["id"])
     return render_template(
         "oauth_grants.html",
         grants=grants,
+        devices=devices,
+        push=push_status(),
         show_all=show_all,
         companies=[],
         selected_company_id=None,
     )
+
+
+def _managed_push_device(db_session, device_id: int):
+    from domain.models import PushDevice
+
+    user = current_user()
+    may_manage_all = user["role"] == ROLE_ADMIN and user.get("tenant_id") is None
+    device = db_session.get(PushDevice, device_id)
+    if device is None or (device.user_id != user["id"] and not may_manage_all):
+        abort(404)
+    return device
+
+
+@auth_bp.post("/apps/geraete/<int:device_id>/ereignisse")
+@login_required
+def update_push_device_events(device_id: int):
+    from app.services.push import EVENTS, update_device
+
+    events = [event for event in request.form.getlist("events") if event in EVENTS]
+    with _get_session_factory()() as db_session:
+        device = _managed_push_device(db_session, device_id)
+        update_device(db_session, device, actor=current_user()["username"], events=events)
+        db_session.commit()
+    flash("Mitteilungen für das Gerät wurden gespeichert.", "success")
+    return redirect(url_for("auth.oauth_grants_page"))
+
+
+@auth_bp.post("/apps/geraete/<int:device_id>/test")
+@login_required
+def send_push_device_test(device_id: int):
+    from app.services.push import PushError, enqueue_test_notification
+
+    with _get_session_factory()() as db_session:
+        device = _managed_push_device(db_session, device_id)
+        try:
+            enqueue_test_notification(db_session, device)
+        except PushError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("auth.oauth_grants_page"))
+        db_session.commit()
+    flash("Testmitteilung ist unterwegs.", "success")
+    return redirect(url_for("auth.oauth_grants_page"))
+
+
+@auth_bp.post("/apps/geraete/<int:device_id>/widerrufen")
+@login_required
+def revoke_push_device(device_id: int):
+    from app.services.push import revoke_device
+
+    with _get_session_factory()() as db_session:
+        device = _managed_push_device(db_session, device_id)
+        if device.revoked_at is None:
+            revoke_device(db_session, device, actor=current_user()["username"])
+            db_session.commit()
+    flash("Gerät wurde widerrufen.", "success")
+    return redirect(url_for("auth.oauth_grants_page"))
 
 
 @auth_bp.post("/apps/<int:grant_id>/revoke")

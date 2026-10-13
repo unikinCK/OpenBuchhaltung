@@ -8,6 +8,26 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Push-Mitteilungen für die iOS-App (Instanz-Seite)
+- Neu: Mobilgeräte registrieren sich für Push-Mitteilungen
+  (`POST /api/v1/devices`, nur mit Benutzer-Token) und wählen Ereignisse: neue
+  Bankumsätze (Datei-Import, FinTS, Open Banking), ELSTER-Übermittlung erfolgreich oder
+  fehlgeschlagen, tägliche Zusammenfassung überfälliger offener Posten.
+- Ereignisse legen Mitteilungen in einer Ausgangswarteschlange an, und zwar in derselben
+  Transaktion wie die auslösende Änderung (Migration `20261013_0048`, Tabellen
+  `push_device` und `push_notification`). Der Dispatcher `flask push-dispatch`
+  (Compose-Dienst `push`, Profil `push`) übergibt sie an ein zentrales Push-Relay
+  (Protokoll v1, siehe README). Er versucht bis zu fünfmal, verwirft Einträge nach
+  24 Stunden und widerruft abgemeldete Geräte automatisch.
+- Texte nennen nur Anzahlen bzw. den Meldezeitraum, keine Beträge oder Namen.
+- Geräte verwalten in UI (**Apps**: Ereignisse, Testmitteilung, Widerruf), REST und
+  MCP (`get_push_status`, `list_push_devices`, `update_push_device`,
+  `revoke_push_device`, `send_push_test`); im KI-Chat gesperrt.
+- Neue Variablen: `PUSH_RELAY_URL`, `PUSH_RELAY_TOKEN`, `PUSH_DIGEST_HOUR`,
+  `PUSH_DISPATCH_INTERVAL_SECONDS`. Ohne `PUSH_RELAY_URL` bleibt alles aus.
+- Behoben: Die Liste der verbundenen Apps zeigt bei nativen Apps das App-Schema statt
+  eines leeren Weiterleitungsziels.
+
 ### Server-Vorarbeit für die iOS-App (ADR-003)
 - Neu: `GET /api/v1/dashboard` und MCP `get_dashboard` liefern die Übersicht für den
   Startbildschirm und die Widgets der App: offene Aufgaben, Bankstände je Bankkonto

@@ -73,8 +73,8 @@ CHAT_TOOL_NAMES = {
 
 # Tool-Familien, die im Chat grundsätzlich nicht verfügbar sind: Benutzer-/
 # Token-/Passwortverwaltung, ELSTER-Übermittlung, SEPA-Zahlläufe, FinTS
-# (PIN/TAN), Open Banking (Bank-Zustimmung). Sie sind entweder zu privilegiert
-# oder verarbeiten Geheimnisse.
+# (PIN/TAN), Open Banking (Bank-Zustimmung), Mobilgeräte für Push-Mitteilungen.
+# Sie sind entweder zu privilegiert oder verarbeiten Geheimnisse.
 CHAT_BLOCKED_TOOL_KEYWORDS = (
     "user",
     "token",
@@ -84,6 +84,7 @@ CHAT_BLOCKED_TOOL_KEYWORDS = (
     "open_banking",
     "elster",
     "sepa",
+    "push",
 )
 # Bankdaten (Zahlungsempfänger) nie per Chat ändern: eine präparierte Rechnung
 # könnte sonst eine Lieferanten-IBAN umbiegen.

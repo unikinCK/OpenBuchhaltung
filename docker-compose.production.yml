@@ -115,6 +115,31 @@ services:
       app:
         condition: service_healthy
 
+  # Zustellung der Push-Mitteilungen an die iOS-App (ADR-003): ein einzelner Prozess
+  # liest die Ausgangswarteschlange und übergibt sie an das Push-Relay. Braucht
+  # PUSH_RELAY_URL/PUSH_RELAY_TOKEN in der .env; Start mit `--profile push`.
+  push:
+    profiles: ["push"]
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    command: ["flask", "--app", "run", "push-dispatch"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      DATABASE_URL: postgresql+psycopg://openbuchhaltung:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/openbuchhaltung
+      DB_AUTO_MIGRATE: "0"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+    depends_on:
+      app:
+        condition: service_healthy
+
   caddy:
     image: caddy:2
     profiles: ["proxy"]
