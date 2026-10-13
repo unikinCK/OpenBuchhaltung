@@ -423,6 +423,19 @@ inaktiv.
 | `PUSH_DIGEST_HOUR` | `8` | Ab dieser Stunde (Europe/Berlin) geht die tägliche Zusammenfassung überfälliger offener Posten raus. |
 | `PUSH_DISPATCH_INTERVAL_SECONDS` | `30` | Abstand der Durchläufe des Dispatchers `flask push-dispatch` (mindestens 5). |
 
+**Push-Relay** (nur auf dem Relay-Host, `docker-compose.push-relay.yml`)
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `RELAY_INSTANCE_KEYS` | – | Zugelassene Instanzen als `name:sha256` (kommagetrennt), erzeugt mit `python -m push_relay new-instance-key <name>`. Pflicht. |
+| `RELAY_APNS_MODE` | `apns` | `apns` = Zustellung an Apple; `dry-run` = Trockenlauf ohne Apple-Account (jede Mitteilung gilt als zugestellt). |
+| `RELAY_APNS_KEY_PATH` | `./secrets/apns_key.p8` | Pfad zum APNs-Schlüssel (`.p8`) auf dem Host; im Trockenlauf genügt eine leere Datei. |
+| `RELAY_APNS_KEY_ID` | – | Key-ID des APNs-Schlüssels (Apple Developer → Keys). |
+| `RELAY_APNS_TEAM_ID` | – | Team-ID des Apple-Developer-Accounts. |
+| `RELAY_APNS_TOPIC` | `de.openbuchhaltung.app` | Bundle-ID der App. |
+| `RELAY_RATE_LIMIT_PER_MINUTE` | `600` | Mitteilungen je Instanz und Minute; darüber `rate_limited` (die Instanz versucht es erneut). |
+| `RELAY_PORT` | `8095` | Host-Port des Relays (an `127.0.0.1` gebunden, davor ein HTTPS-Proxy). |
+
 **Docker Compose und Skripte**
 
 | Variable | Default | Wirkung |
@@ -1815,7 +1828,7 @@ widerrufen.
 COMPOSE_PROFILES=push docker compose -f docker-compose.production.yml up -d push
 ```
 
-**Relay-Protokoll v1:** `POST <PUSH_RELAY_URL>/v1/notifications` mit
+**Relay-Protokoll v1** (Relay-Betrieb siehe „Push-Relay betreiben“): `POST <PUSH_RELAY_URL>/v1/notifications` mit
 `Authorization: Bearer <PUSH_RELAY_TOKEN>`. Der Body enthält
 `{"notifications": [{"id", "device_token", "environment", "title", "body", "category",
 "thread_id", "data"}]}`. Das Relay antwortet mit
@@ -1840,6 +1853,37 @@ COMPOSE_PROFILES=push docker compose -f docker-compose.production.yml up -d push
 In der Weboberfläche stehen die Geräte unter **Apps** in der Kopfzeile, mit
 Ereignisauswahl, Testmitteilung und Widerruf. Registrierung, Änderung und Widerruf
 landen als Sicherheitsereignis im Audit-Log. Im KI-Chat sind die Push-Tools gesperrt.
+
+### Push-Relay betreiben
+
+Das Relay (`push_relay/`, eigenes Image) nimmt Mitteilungen von Instanzen entgegen und
+stellt sie über APNs zu, per HTTP/2 mit ES256-Provider-Token, das nach 50 Minuten
+erneuert wird. Es speichert nichts: Inhalte und Gerätetokens gehen nur durch. Das Log
+enthält je Anfrage nur Instanz, Anzahl und Ergebnis. Instanzen weisen sich mit einem
+Schlüssel aus, von dem das Relay nur den SHA-256-Hash kennt. Es läuft mit genau einem
+Worker, weil das Rate-Limit je Instanz im Prozess liegt.
+
+```bash
+# 1. Instanzschlüssel erzeugen (je Instanz): Schlüssel → .env der Instanz
+#    (PUSH_RELAY_TOKEN), Hash-Eintrag → RELAY_INSTANCE_KEYS des Relays
+mkdir -p secrets && touch secrets/apns_key.p8
+docker compose -f docker-compose.push-relay.yml run --rm relay python -m push_relay new-instance-key webbox
+# 2. APNs-Schlüssel ablegen (Apple Developer → Keys → Apple Push Notifications service)
+cp AuthKey_XXXXXXXXXX.p8 secrets/apns_key.p8
+# 3. Starten (vor Apple-Account: RELAY_APNS_MODE=dry-run und leere secrets/apns_key.p8)
+docker compose -f docker-compose.push-relay.yml up -d --build
+```
+
+Davor gehört ein HTTPS-Reverse-Proxy (z. B. `push.<Domain>` → `127.0.0.1:8095`). Die
+Instanzen tragen dessen URL als `PUSH_RELAY_URL` ein. Antworten von Apple werden so
+umgesetzt:
+
+- `200` → `sent`
+- `410 Unregistered` → `invalid_token`, die Instanz widerruft das Gerät
+- abgelaufenes Provider-Token → einmal mit neuem Token wiederholen
+- alles andere → `error` mit Apples Grund, die Instanz versucht es erneut
+
+`GET /health` meldet Modus und Anzahl der Instanzen.
 
 ## Kontenrahmenimport (SKR03/SKR04)
 
