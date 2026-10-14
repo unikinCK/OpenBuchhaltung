@@ -8,6 +8,17 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Buchungsvorschlag je Bankumsatz
+- Neu: Offene Bankumsätze bekommen einen Buchungsvorschlag aus passender Regel, aus
+  einem Eigenübertrag (Geldtransit) oder „wie zuletzt“ aus der letzten Bankbuchung
+  derselben Gegenseite mit gleichem Vorzeichen (Gegenkonto, Steuercode, Kontierung,
+  Partner).
+- Die Bank-Seite belegt den Buchungsdialog damit vor und zeigt den Hinweis
+  „Wie zuletzt“.
+- `GET /api/v1/bank-transactions?include_suggestions=1` und MCP
+  `list_bank_transactions` liefern je offenem Umsatz `booking_proposal`. Regel-Treffer
+  waren bisher nur in der Weboberfläche sichtbar.
+
 ### Mobile Belegerfassung (Server-Vorarbeit III)
 - Neu: Belege speichern ihren Erfassungsweg (`capture_source`: web, api, einvoice,
   mobile_scan, mobile_share), bei mobiler Erfassung zusätzlich Aufnahmezeitpunkt und

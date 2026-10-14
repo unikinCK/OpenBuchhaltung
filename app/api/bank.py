@@ -35,6 +35,7 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
+from app.services.bank_proposals import booking_proposals
 from app.services.bank_rules import (
     BankRuleError,
     apply_rules,
@@ -311,6 +312,11 @@ def list_bank_transactions_via_api():
             if include_suggestions
             else None
         )
+        proposals_by_tx = (
+            booking_proposals(session=session, transactions=transactions)
+            if include_suggestions
+            else {}
+        )
         payload = []
         for transaction in transactions:
             transaction_payload = _transaction_dict(transaction)
@@ -322,6 +328,10 @@ def list_bank_transactions_via_api():
                 counterpart = transfer_by_tx.get(transaction.id)
                 transaction_payload["transfer_counterpart_id"] = (
                     counterpart.id if counterpart else None
+                )
+                proposal = proposals_by_tx.get(transaction.id)
+                transaction_payload["booking_proposal"] = (
+                    proposal.as_dict() if proposal else None
                 )
             payload.append(transaction_payload)
 
