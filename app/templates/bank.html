@@ -96,6 +96,7 @@
                 {% set bank_account = bank_accounts_by_id.get(tx.bank_account_id) %}
                 {% set rule = rule_by_tx.get(tx.id) %}
                 {% set transfer = transfer_by_tx.get(tx.id) %}
+                {% set proposal = proposal_by_tx.get(tx.id) %}
                 {% set linked = entry_info.get(tx.journal_entry_id) if tx.journal_entry_id else none %}
                 <tr>
                   <td class="date">{{ tx.booking_date | datum }}</td>
@@ -103,8 +104,9 @@
                   <td>
                     <strong>{{ tx.counterparty or "–" }}</strong><br />
                     <span class="muted small">{{ tx.purpose }}</span>
-                    {% if tx.status == 'open' and (rule or transfer) %}
+                    {% if tx.status == 'open' and (rule or transfer or proposal) %}
                       <div class="entry-meta small">
+                        {% if proposal and proposal.source == 'history' %}<span class="badge badge-info">Wie zuletzt</span> <span class="muted">→ {{ account_link(proposal.contra_account.id, proposal.contra_account.code) }}{% if proposal.tax_code %} ({{ proposal.tax_code.code }}){% endif %}</span>{% endif %}
                         {% if rule %}<span class="badge badge-info">Regel</span> <span class="muted">„{{ rule.pattern }}“ → {{ account_link(rule.contra_account.id, rule.contra_account.code) }}</span>{% endif %}
                         {% if transfer %}<span class="badge badge-info">Eigenübertrag?</span> <span class="muted">Gegenstück am {{ transfer.booking_date | datum }}</span>{% endif %}
                       </div>
@@ -142,6 +144,7 @@
         {% for tx in transactions if tx.status == 'open' or bank_accounts | length > 1 %}
           {% set rule = rule_by_tx.get(tx.id) %}
           {% set transfer = transfer_by_tx.get(tx.id) %}
+          {% set proposal = proposal_by_tx.get(tx.id) %}
           {% set suggestions = suggestions_by_tx.get(tx.id, []) %}
           <div popover id="tx-panel-{{ tx.id }}" class="panel">
             <div class="panel-header">
@@ -194,8 +197,7 @@
                         <option value="">Gegenkonto wählen</option>
                         {% for account in contra_accounts if account.is_active %}
                           <option value="{{ account.id }}"
-                            {% if rule and account.id == rule.contra_account_id %}selected
-                            {% elif not rule and transfer and geldtransit_account and account.id == geldtransit_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                            {% if proposal and account.id == proposal.contra_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
                         {% endfor %}
                       </select>
                     </div>
@@ -205,7 +207,7 @@
                         <option value="">Ohne Steuer</option>
                         {% for tax_code in tax_codes %}
                           <option value="{{ tax_code.id }}"
-                            {% if rule and tax_code.id == rule.tax_code_id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
+                            {% if proposal and proposal.tax_code and tax_code.id == proposal.tax_code.id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
                         {% endfor %}
                       </select>
                     </div>
@@ -213,7 +215,7 @@
                       <label for="partner-{{ tx.id }}">Geschäftspartner</label>
                       <select id="partner-{{ tx.id }}" name="partner_id">
                         <option value="">Ohne Partner</option>
-                        {% for partner in partners %}<option value="{{ partner.id }}">{{ partner.name }}</option>{% endfor %}
+                        {% for partner in partners %}<option value="{{ partner.id }}"{% if proposal and partner.id == proposal.partner_id %} selected{% endif %}>{{ partner.name }}</option>{% endfor %}
                       </select>
                     </div>
                     {% if cost_centers %}
@@ -222,7 +224,7 @@
                         <select id="cc-{{ tx.id }}" name="cost_center_id">
                           <option value="">Ohne Kostenstelle</option>
                           {% for unit in cost_centers %}
-                            <option value="{{ unit.id }}">KSt {{ unit.code }} – {{ unit.name }}</option>
+                            <option value="{{ unit.id }}"{% if proposal and unit.id == proposal.cost_center_id %} selected{% endif %}>KSt {{ unit.code }} – {{ unit.name }}</option>
                           {% endfor %}
                         </select>
                       </div>
@@ -233,7 +235,7 @@
                         <select id="pc-{{ tx.id }}" name="profit_center_id">
                           <option value="">Ohne Profitcenter</option>
                           {% for unit in profit_centers %}
-                            <option value="{{ unit.id }}">PC {{ unit.code }} – {{ unit.name }}</option>
+                            <option value="{{ unit.id }}"{% if proposal and unit.id == proposal.profit_center_id %} selected{% endif %}>PC {{ unit.code }} – {{ unit.name }}</option>
                           {% endfor %}
                         </select>
                       </div>

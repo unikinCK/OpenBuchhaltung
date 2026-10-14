@@ -657,6 +657,16 @@ nicht ab, sondern stehen im Ergebnisbericht. API:
 `POST /bank-booking-rules/apply`; MCP: `list/create_bank_booking_rule`,
 `set_bank_booking_rule_active`, `apply_bank_booking_rules`.
 
+**Buchungsvorschlag „wie zuletzt“:** Ohne passende Regel schlägt die Bank-Seite für
+einen offenen Umsatz Gegenkonto, Steuercode, Kontierung und Geschäftspartner der
+letzten Bankbuchung derselben Gegenseite vor (ohne Gegenseite: gleicher
+Verwendungszweck; nur gleiches Vorzeichen). Das gilt nicht, wenn die frühere Buchung
+mehrere Gegenkontozeilen hatte. Reihenfolge: Regel vor Eigenübertrag (Geldtransit) vor
+Historie. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
+`list_bank_transactions`) liefert den Vorschlag je offenem Umsatz als
+`booking_proposal` mit `source` (`rule`, `transfer`, `history`), Gegenkonto, Steuercode,
+Kostenstelle, Profitcenter und Partner. Die iOS-App bucht damit mit einem Tipp.
+
 **Saldenabgleich:** Die Bank-Seite zeigt je Bankkonto den Buchsaldo
 (Soll − Haben aller Buchungszeilen) neben der Summe der importierten
 Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so

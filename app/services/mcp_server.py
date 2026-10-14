@@ -2276,7 +2276,10 @@ TOOLS: list[ToolSpec] = [
                         "erkennt außerdem Übertrage zwischen eigenen Bankkonten "
                         "(transfer_counterpart_id) und liefert das Geldtransit-Konto "
                         "(geldtransit_account_id) — solche Übertrage gegen Geldtransit "
-                        "buchen, nie direkt gegen das andere Bankkonto."
+                        "buchen, nie direkt gegen das andere Bankkonto. booking_proposal "
+                        "je offenem Umsatz: Gegenkonto, Steuercode, Kontierung und "
+                        "Partner aus Regel (source=rule), Geldtransit (transfer) oder der "
+                        "letzten Buchung derselben Gegenseite (history)."
                     ),
                 },
                 "limit": {

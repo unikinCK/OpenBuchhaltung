@@ -20,6 +20,7 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
+from app.services.bank_proposals import booking_proposals
 from app.services.bank_rules import (
     BankRuleError,
     apply_rules,
@@ -125,6 +126,7 @@ def bank_page():
         reconciliation = []
         booking_rules = []
         rule_by_tx = {}
+        proposal_by_tx = {}
         partners = []
         open_count = 0
         entry_info: dict[int, dict] = {}
@@ -220,6 +222,7 @@ def bank_page():
             )
             booking_rules = list_rules(session=session, company_id=selected_company_id)
             rule_by_tx = match_rules_for(session=session, transactions=transactions)
+            proposal_by_tx = booking_proposals(session=session, transactions=transactions)
             partners = (
                 session.execute(
                     scoped_select(BusinessPartner, company_id=selected_company_id)
@@ -284,6 +287,7 @@ def bank_page():
         reconciliation=reconciliation,
         booking_rules=booking_rules,
         rule_by_tx=rule_by_tx,
+        proposal_by_tx=proposal_by_tx,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,
