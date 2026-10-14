@@ -69,7 +69,7 @@
         <tbody>
           {% for entry in entries %}
             <tr>
-              <td>{{ entry.changed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+              <td>{{ entry.changed_at | datum_zeit(seconds=True) }}</td>
               <td>{{ entry.company_id or "–" }}</td>
               <td>{{ entry.entity_type }}</td>
               <td>{{ entry.entity_id }}</td>

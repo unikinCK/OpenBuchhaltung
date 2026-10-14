@@ -450,10 +450,19 @@ def test_connected_apps_page_lists_and_revokes(tmp_path):
     _registered, tokens = _tokens(app)
     client = _client(app)
     _login(client)
+    with app.extensions["db_session_factory"]() as session:
+        grant = session.execute(select(OAuthGrant)).scalar_one()
+        grant.created_at = datetime(2026, 1, 15, 15, 42, tzinfo=timezone.utc)
+        grant.last_used_at = datetime(2026, 7, 3, 15, 42, tzinfo=timezone.utc)
+        session.commit()
 
     page = client.get("/auth/apps", base_url=BASE)
     assert page.status_code == 200
-    assert "ChatGPT" in page.get_data(as_text=True)
+    html = page.get_data(as_text=True)
+    assert "ChatGPT" in html
+    # Zeitpunkte in deutscher Ortszeit (Winter: UTC+1, Sommer: UTC+2).
+    assert "15.01.2026 16:42" in html
+    assert "03.07.2026 17:42" in html
 
     with app.extensions["db_session_factory"]() as session:
         grant_id = session.execute(select(OAuthGrant.id)).scalar_one()
