@@ -8,6 +8,20 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Öffentliche Demo-Instanz
+- Neu: `DEMO_MODE` für eine öffentliche Demo (z. B. demo.openbuchhaltung.de):
+  - Banner „Demo-Instanz“ und vorbelegter Login `demo`/`demo1234`
+  - gesperrt (UI und API, Antwort 403): Benutzer- und Mandantenverwaltung,
+    Passwortänderung, KI-Zugang je Benutzer, FinTS/Open Banking, ELSTER-Übermittlung
+- Neu: `flask demo-reset` leert Datenbank und Uploads und spielt die Demo-Daten neu ein;
+  `--loop` wiederholt das täglich zu `DEMO_RESET_TIME`. PostgreSQL wird per `TRUNCATE`
+  geleert (die GoBD-Trigger sperren einzelne Löschungen; das Schema bleibt erhalten),
+  SQLite neu migriert. Compose-Overlay `docker-compose.demo.yml` mit Dienst `demo-reset`.
+- `seed-demo` legt zusätzlich Alltag an: gebuchte und offene Bankumsätze mit
+  Buchungsvorschlägen („wie zuletzt“, Regel „Google Ads“), einen überfälligen offenen
+  Posten und einen Beleg ohne Buchung. Die Demo-Logik liegt jetzt in
+  `app/services/demo.py`.
+
 ### Buchungsvorschlag je Bankumsatz
 - Neu: Offene Bankumsätze bekommen einen Buchungsvorschlag aus passender Regel, aus
   einem Eigenübertrag (Geldtransit) oder „wie zuletzt“ aus der letzten Bankbuchung

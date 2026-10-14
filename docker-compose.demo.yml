@@ -1,0 +1,45 @@
+# Öffentliche Demo-Instanz (z. B. demo.openbuchhaltung.de) als Overlay auf den
+# Produktions-Stack. Am einfachsten in einem eigenen Checkout mit eigener .env
+# (eigene Datenbank, eigenes APP_PORT), z. B. ~/openbuchhaltung-demo:
+#
+#   export COMPOSE_FILE=docker-compose.production.yml:docker-compose.demo.yml
+#   docker compose -p obh-demo run --rm demo-reset flask --app run demo-reset  # einmalig
+#   docker compose -p obh-demo up -d --build
+#
+# DEMO_MODE zeigt ein Banner, belegt den Login (demo/demo1234) vor und sperrt
+# Benutzerverwaltung, KI-Schlüssel, Bankverbindungen und ELSTER-Übermittlung.
+# Der Dienst demo-reset leert die Datenbank täglich zu DEMO_RESET_TIME (Europe/Berlin)
+# und spielt die Demo-Daten neu ein.
+services:
+  app:
+    environment:
+      DEMO_MODE: "1"
+      DEMO_RESET_TIME: ${DEMO_RESET_TIME:-03:30}
+      # Öffentliche Uploads klein halten.
+      DOCUMENT_MAX_UPLOAD_BYTES: ${DOCUMENT_MAX_UPLOAD_BYTES:-5242880}
+
+  demo-reset:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    command: ["flask", "--app", "run", "demo-reset", "--loop"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      DATABASE_URL: postgresql+psycopg://openbuchhaltung:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/openbuchhaltung
+      # Der Reset-Dienst legt das Schema bei leerer Datenbank selbst an.
+      DB_AUTO_MIGRATE: "1"
+      DEMO_MODE: "1"
+      DEMO_RESET_TIME: ${DEMO_RESET_TIME:-03:30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Gleiches Upload-Verzeichnis wie die App, damit der Reset auch Belege leert.
+      - app_data:/app/instance
+    depends_on:
+      db:
+        condition: service_healthy

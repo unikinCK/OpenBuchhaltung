@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 import click
@@ -23,23 +21,16 @@ from app.services.account_chart_import import import_account_chart_file
 from app.services.audit_export import verify_audit_export_package
 from app.services.audit_log import verify_audit_log_integrity
 from app.services.compliance_integrity import verify_compliance_integrity
-from app.services.document_categories import ensure_default_document_categories
-from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
-from app.services.journal_entries import (
-    JournalEntryInput,
-    JournalLineInput,
-    create_journal_entry,
+from app.services.demo import (
+    DEMO_USERS,
+    PUBLIC_DEMO_USERS,
+    reset_demo_database,
+    seed_demo_activity,
+    seed_demo_data,
 )
-from app.services.partners import create_partner
+from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.security_events import record_security_event
-from app.services.tax_codes import ensure_default_tax_codes
 from domain.models import (
-    Account,
-    BusinessPartner,
-    Company,
-    JournalEntry,
-    TaxCode,
-    Tenant,
     User,
 )
 
@@ -49,24 +40,6 @@ BUNDLED_CHART_FILES = {
     "skr04": PROJECT_ROOT / "data" / "kontenrahmen" / "skr04.csv",
 }
 
-DEMO_TENANT_NAME = "Demo Mandant"
-DEMO_COMPANY_NAME = "Demo GmbH"
-DEMO_USERS = (
-    # (username, password, role, tenant-gebunden)
-    ("admin", "admin123", ROLE_ADMIN, False),
-    ("buchhalter", "buchhalter123", ROLE_BUCHHALTER, True),
-    ("pruefer", "pruefer123", ROLE_PRUEFER, True),
-    ("support", "support123", ROLE_SUPPORT, False),
-)
-# Demo-Geschäftspartner: (Name, Kunde, Lieferant, Ort, Zahlungsziel in Tagen)
-DEMO_PARTNERS = (
-    ("Beratungskunde Nord GmbH", True, False, "Hamburg", 14),
-    ("Handelshaus Süd AG", True, False, "München", 30),
-    ("Agentur West UG", True, True, "Köln", 14),
-    ("Büro & Raum Vermietung KG", False, True, "Berlin", 0),
-    ("IT-Service Ost GmbH", False, True, "Leipzig", 14),
-    ("Stadtwerke Musterstadt", False, True, "Musterstadt", 14),
-)
 CLI_ACTOR = "cli"
 
 
@@ -352,196 +325,60 @@ def register_cli_commands(app: Flask) -> None:
     @app.cli.command("seed-demo")
     def seed_demo():
         """Legt Demo-Mandant, SKR03-Konten, Steuercodes, Benutzer und Buchungen an (idempotent)."""
-        if _is_production_app(app):
+        if _is_production_app(app) and not app.config.get("DEMO_MODE"):
             raise click.ClickException(
                 "seed-demo legt Demo-Benutzer mit bekannten Passwörtern an und ist in "
                 "Produktion (APP_ENV ist keine Entwicklungsumgebung) nicht erlaubt."
             )
         session_factory = app.extensions["db_session_factory"]
         with session_factory() as session:
-            tenant = session.execute(
-                select(Tenant).where(Tenant.name == DEMO_TENANT_NAME)
-            ).scalar_one_or_none()
-            if tenant is None:
-                tenant = Tenant(name=DEMO_TENANT_NAME)
-                session.add(tenant)
-                session.flush()
-                click.echo(f"Mandant '{DEMO_TENANT_NAME}' angelegt.")
-
-            company = session.execute(
-                select(Company).where(
-                    Company.tenant_id == tenant.id, Company.name == DEMO_COMPANY_NAME
-                )
-            ).scalar_one_or_none()
-            if company is None:
-                company = Company(name=DEMO_COMPANY_NAME, currency_code="EUR", tenant=tenant)
-                session.add(company)
-                session.flush()
-                click.echo(f"Gesellschaft '{DEMO_COMPANY_NAME}' angelegt.")
-            session.commit()
-
-            report = import_account_chart_file(
-                session=session,
-                company_id=company.id,
-                csv_path=BUNDLED_CHART_FILES["skr03"],
+            company = seed_demo_data(
+                session,
+                users=PUBLIC_DEMO_USERS if app.config.get("DEMO_MODE") else DEMO_USERS,
+                echo=click.echo,
             )
-            click.echo(
-                f"SKR03: {report.imported_rows} Konten importiert, "
-                f"{report.duplicate_rows} übersprungen."
+            seed_demo_activity(
+                session,
+                company,
+                upload_dir=Path(app.config["DOCUMENT_UPLOAD_DIR"]),
+                echo=click.echo,
             )
-
-            created_tax_codes = ensure_default_tax_codes(session=session, company=company)
-            session.commit()
-            click.echo(f"Steuercodes: {created_tax_codes} neu angelegt.")
-
-            created_categories = ensure_default_document_categories(
-                session=session, company=company
-            )
-            session.commit()
-            click.echo(f"Belegkategorien: {created_categories} neu angelegt.")
-
-            has_partners = (
-                session.execute(
-                    select(BusinessPartner.id).where(BusinessPartner.company_id == company.id)
-                ).first()
-                is not None
-            )
-            if not has_partners:
-                for name, is_customer, is_supplier, city, term in DEMO_PARTNERS:
-                    create_partner(
-                        session=session,
-                        company=company,
-                        changed_by="seed-demo",
-                        name=name,
-                        is_customer=is_customer,
-                        is_supplier=is_supplier,
-                        city=city,
-                        payment_term_days=term,
-                    )
-                session.commit()
-                click.echo(f"Geschäftspartner: {len(DEMO_PARTNERS)} angelegt.")
-
-            for username, password, role, tenant_bound in DEMO_USERS:
-                existing = session.execute(
-                    select(User).where(User.username == username)
-                ).scalar_one_or_none()
-                if existing is not None:
-                    continue
-                session.add(
-                    User(
-                        username=username,
-                        password_hash=hash_password(password),
-                        role=role,
-                        tenant_id=tenant.id if tenant_bound else None,
-                    )
-                )
-                click.echo(f"Benutzer '{username}' ({role}) angelegt, Passwort: {password}")
-            session.commit()
-
-            has_entries = (
-                session.execute(
-                    select(JournalEntry.id).where(JournalEntry.company_id == company.id)
-                ).first()
-                is not None
-            )
-            if has_entries:
-                click.echo("Beispielbuchungen übersprungen (Buchungen vorhanden).")
-                return
-
-            def account_id(code: str) -> int:
-                account = session.execute(
-                    select(Account).where(Account.company_id == company.id, Account.code == code)
-                ).scalar_one()
-                return account.id
-
-            def partner_id(name: str) -> int:
-                return session.execute(
-                    select(BusinessPartner.id).where(
-                        BusinessPartner.company_id == company.id, BusinessPartner.name == name
-                    )
-                ).scalar_one()
-
-            def tax_code_id(code: str) -> int:
-                tax_code = session.execute(
-                    select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == code)
-                ).scalar_one()
-                return tax_code.id
-
-            today = date.today()
-            zero = Decimal("0.00")
-            demo_entries = [
-                JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=today.replace(day=1),
-                    description="Privateinlage Startkapital",
-                    status="posted",
-                    changed_by="seed-demo",
-                    lines=[
-                        JournalLineInput(account_id("1200"), Decimal("25000.00"), zero),
-                        JournalLineInput(account_id("1890"), zero, Decimal("25000.00")),
-                    ],
-                ),
-                JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=today.replace(day=2),
-                    description="Ausgangsrechnung Beratung (netto 1.000 € + 19 % USt)",
-                    status="posted",
-                    changed_by="seed-demo",
-                    lines=[
-                        JournalLineInput(
-                            account_id("1400"),
-                            Decimal("1190.00"),
-                            zero,
-                            partner_id=partner_id("Beratungskunde Nord GmbH"),
-                        ),
-                        JournalLineInput(
-                            account_id("8400"),
-                            zero,
-                            Decimal("1000.00"),
-                            tax_code_id=tax_code_id("USt19"),
-                        ),
-                    ],
-                ),
-                JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=today.replace(day=3),
-                    description="Eingangsrechnung Büromiete (netto 500 € + 19 % VSt)",
-                    status="posted",
-                    changed_by="seed-demo",
-                    lines=[
-                        JournalLineInput(
-                            account_id("4200"),
-                            Decimal("500.00"),
-                            zero,
-                            tax_code_id=tax_code_id("VSt19"),
-                        ),
-                        JournalLineInput(
-                            account_id("1600"),
-                            zero,
-                            Decimal("595.00"),
-                            partner_id=partner_id("Büro & Raum Vermietung KG"),
-                        ),
-                    ],
-                ),
-                JournalEntryInput(
-                    company_id=company.id,
-                    entry_date=today.replace(day=4),
-                    description="Zahlungseingang Ausgangsrechnung",
-                    status="posted",
-                    changed_by="seed-demo",
-                    lines=[
-                        JournalLineInput(account_id("1200"), Decimal("1190.00"), zero),
-                        JournalLineInput(
-                            account_id("1400"),
-                            zero,
-                            Decimal("1190.00"),
-                            partner_id=partner_id("Beratungskunde Nord GmbH"),
-                        ),
-                    ],
-                ),
-            ]
-            for entry_input in demo_entries:
-                entry = create_journal_entry(session=session, payload=entry_input)
-                click.echo(f"Buchung {entry.posting_number}: {entry.description}")
-
         click.echo("Demo-Daten sind bereit. Login z. B. mit buchhalter/buchhalter123.")
+
+    @app.cli.command("demo-reset")
+    @click.option("--loop", is_flag=True, help="Dauerbetrieb: täglich zu DEMO_RESET_TIME.")
+    def demo_reset(loop: bool):
+        """Leert die Datenbank vollständig und spielt die Demo-Daten neu ein."""
+        if not app.config.get("DEMO_MODE") and _is_production_app(app):
+            raise click.ClickException(
+                "demo-reset löscht alle Daten und ist nur mit DEMO_MODE=1 oder in einer "
+                "Entwicklungsumgebung erlaubt."
+            )
+        import time
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        session_factory = app.extensions["db_session_factory"]
+        upload_dir = Path(app.config["DOCUMENT_UPLOAD_DIR"])
+        public = bool(app.config.get("DEMO_MODE"))
+
+        def run_reset() -> None:
+            reset_demo_database(session_factory, upload_dir=upload_dir, public=public,
+                                echo=click.echo)
+
+        if not loop:
+            run_reset()
+            return
+        zone = ZoneInfo("Europe/Berlin")
+        hour, minute = (int(part) for part in str(app.config["DEMO_RESET_TIME"]).split(":"))
+        while True:
+            now = datetime.now(zone)
+            due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if due <= now:
+                due += timedelta(days=1)
+            click.echo(f"Nächster Demo-Reset: {due:%d.%m.%Y %H:%M}")
+            time.sleep((due - now).total_seconds())
+            try:
+                run_reset()
+            except Exception:  # Dauerbetrieb: Fehler protokollieren, morgen erneut
+                logging.getLogger(__name__).exception("Demo-Reset fehlgeschlagen")

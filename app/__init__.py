@@ -13,6 +13,7 @@ from .api import api_bp
 from .auth import auth_bp, ensure_csrf_token
 from .cli import register_cli_commands
 from .db import auto_migrate_enabled, create_session_factory, running_from_cli
+from .demo_mode import register_demo_mode
 from .logging_config import configure_logging, init_request_id
 from .oauth import oauth_bp
 from .version import get_commit, get_version
@@ -81,6 +82,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         DATABASE_URL=os.environ.get("DATABASE_URL"),
         # OAuth 2.1 für MCP-Connectoren (ChatGPT, Claude): Discovery, DCR, Login-Flow.
         OAUTH_ENABLED=_env_flag("OAUTH_ENABLED") is not False,
+        # Öffentliche Demo-Instanz: Banner, vorbelegter Login, gesperrte Bereiche
+        # (Benutzer, KI-Schlüssel, Bankverbindungen, ELSTER) und täglicher Reset
+        # (`flask demo-reset --loop`, Compose-Overlay docker-compose.demo.yml).
+        DEMO_MODE=bool(_env_flag("DEMO_MODE")),
+        DEMO_RESET_TIME=os.environ.get("DEMO_RESET_TIME", "03:30"),
         OAUTH_ISSUER=os.environ.get("OAUTH_ISSUER"),
         OAUTH_ACCESS_TOKEN_SECONDS=int(os.environ.get("OAUTH_ACCESS_TOKEN_SECONDS", "3600")),
         OAUTH_REFRESH_TOKEN_DAYS=int(os.environ.get("OAUTH_REFRESH_TOKEN_DAYS", "30")),
@@ -224,6 +230,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(oauth_bp)
     register_cli_commands(app)
     init_request_id(app)
+    register_demo_mode(app)
 
     @app.context_processor
     def _inject_csrf_token():

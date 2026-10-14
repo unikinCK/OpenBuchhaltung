@@ -118,7 +118,8 @@ Wichtig zur Einordnung:
    ```bash
    export APP_ENV=development
    ```
-4. Demo-Daten anlegen (Mandant, SKR03, Steuercodes, Benutzer, Beispielbuchungen)
+4. Demo-Daten anlegen (Mandant, SKR03, Steuercodes, Benutzer, Beispielbuchungen sowie
+   Bankumsätze mit Buchungsvorschlägen, offene Posten und ein Beleg)
    ```bash
    flask --app run.py seed-demo
    ```
@@ -414,6 +415,13 @@ inaktiv.
 | `OAUTH_REFRESH_TOKEN_DAYS` | `30` | Laufzeit der Refresh-Tokens (rotieren bei jeder Erneuerung). |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | – | Erlaubte Redirect-Hosts und App-Schemata bei der Registrierung (z. B. `chatgpt.com,claude.ai,de.openbuchhaltung.app`); leer = alle HTTPS-Hosts, localhost und App-Schemata in Reverse-Domain-Form. |
 
+**Demo-Instanz**
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `DEMO_MODE` | `0` | Öffentliche Demo: Banner, vorbelegter Login `demo`/`demo1234`, gesperrt sind Benutzer-/Mandantenverwaltung, Passwortänderung, KI-Schlüssel, FinTS/Open Banking und ELSTER-Übermittlung; erlaubt `seed-demo`/`demo-reset` in Produktion. |
+| `DEMO_RESET_TIME` | `03:30` | Uhrzeit (Europe/Berlin) des täglichen Resets durch `flask demo-reset --loop`. |
+
 **Push-Mitteilungen (iOS-App)**
 
 | Variable | Default | Wirkung |
@@ -473,6 +481,31 @@ flask --app run.py create-user --username maria --role Buchhalter --tenant-id 1
 ```
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
+
+### Öffentliche Demo-Instanz
+
+Für Interessierte, den Demo-Modus der iOS-App und den Testzugang der App-Review läuft
+eine eigene Instanz mit `DEMO_MODE=1` (Overlay `docker-compose.demo.yml`, eigener Checkout
+mit eigener `.env` und Datenbank):
+
+```bash
+export COMPOSE_FILE=docker-compose.production.yml:docker-compose.demo.yml
+docker compose -p obh-demo run --rm demo-reset flask --app run demo-reset   # einmalig
+docker compose -p obh-demo up -d --build
+```
+
+- **Daten:** Demo GmbH mit SKR03, Partnern und Beispielbuchungen, dazu gebuchte und offene
+  Bankumsätze (Vorschläge „wie zuletzt“ und per Regel „Google Ads“), ein überfälliger
+  offener Posten und ein Beleg ohne Buchung. Angemeldet wird mit `demo`/`demo1234`
+  (Buchhalter des Demo-Mandanten); Admin-Konten gibt es dort nicht.
+- **Zurücksetzen:** Der Dienst `demo-reset` (`flask demo-reset --loop`) leert täglich
+  zu `DEMO_RESET_TIME` Datenbank und Uploads und spielt die Daten neu ein. PostgreSQL wird
+  per `TRUNCATE` geleert, weil die GoBD-Trigger einzelne Löschungen verhindern; das Schema
+  bleibt, laufende App-Prozesse arbeiten weiter. `flask demo-reset` ohne `--loop` setzt
+  sofort zurück. Der Befehl verweigert den Dienst ohne `DEMO_MODE` in Produktion.
+- **Gesperrt** (Schreibzugriffe, UI und API): Benutzer- und Mandantenverwaltung,
+  Passwortänderung, KI-Zugang je Benutzer, FinTS/Open Banking, ELSTER-Übermittlung. Das
+  Banner bittet darum, keine echten Belege hochzuladen; Uploads sind auf 5 MB begrenzt.
 
 **Passwort ändern:** Jeder angemeldete Benutzer kann sein Passwort über
 **Passwort** in der Kopfzeile (`/auth/password`, aktuelles Passwort erforderlich)

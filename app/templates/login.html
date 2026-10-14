@@ -6,14 +6,19 @@
   <div class="login-wrapper">
     <div class="login-card">
       <h2>Anmelden</h2>
-      <p class="muted">Bitte melden Sie sich mit Ihren Zugangsdaten an.</p>
+      {% if demo_mode %}
+        <p class="callout">Demo-Zugang: Benutzer <strong>{{ demo_login.username }}</strong>,
+          Passwort <strong>{{ demo_login.password }}</strong> (bereits eingetragen).</p>
+      {% else %}
+        <p class="muted">Bitte melden Sie sich mit Ihren Zugangsdaten an.</p>
+      {% endif %}
       <form method="post" action="{{ url_for('auth.login', next=request.args.get('next', '')) }}" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <label for="username">Benutzername</label>
-        <input id="username" name="username" autocomplete="username" required autofocus />
+        <input id="username" name="username" autocomplete="username" required autofocus{% if demo_mode %} value="{{ demo_login.username }}"{% endif %} />
 
         <label for="password">Passwort</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <input id="password" name="password" type="password" autocomplete="current-password" required{% if demo_mode %} value="{{ demo_login.password }}"{% endif %} />
 
         <button type="submit">Anmelden</button>
       </form>

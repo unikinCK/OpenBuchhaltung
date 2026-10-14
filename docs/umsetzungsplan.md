@@ -684,8 +684,11 @@ dann selbst betriebener Modellserver).
       Gerät mit Prüfung beim Upload, idempotenter Upload bei gleichem Inhalt
       (Dokumente und OCR-Vorschlag), Anzeige, Audit, Prüferexport,
       Verfahrensdokumentation „Mobile Erfassung“.
-- [ ] **Demo-Instanz**: öffentliche Instanz mit Demodaten, die nachts zurückgesetzt
-      werden, für den Demo-Modus der App und die App-Review.
+- [x] **Demo-Instanz** *(2026-10-14)*: `DEMO_MODE` (Banner, vorbelegter Login
+      `demo`/`demo1234`, Sperre für Benutzer, KI-Schlüssel, Bankverbindungen, ELSTER),
+      `flask demo-reset [--loop]` mit täglichem Reset (PostgreSQL per `TRUNCATE`),
+      Overlay `docker-compose.demo.yml`, erweiterte Demo-Daten; „Demo ausprobieren“ in
+      der App. Offen: Betrieb unter einer öffentlichen Domain (Deploy auf Ansage).
 - [ ] **App-MVP (TestFlight)**: Anmeldung mit mehreren Instanzen, Beleg-Scanner, Share
       Extension, Inbox, Übersicht; Test mit Pilotnutzern.
   - [x] App 0.1 *(2026-10-14, eigenes Repository `openbuchhaltung-ios`)*: OAuth-Login an
