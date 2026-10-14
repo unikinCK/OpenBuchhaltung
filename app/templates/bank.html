@@ -384,7 +384,7 @@
                 {% if fints_institute_status.count %}
                   <input id="fints_url" name="fints_url" type="url" list="fints_url_options" placeholder="leer lassen = automatisch aus der FinTS-Bankenliste" />
                   <datalist id="fints_url_options"></datalist>
-                  <span class="hint">FinTS-Bankenliste: {{ fints_institute_status.with_url }} Einträge mit PIN/TAN-Zugang{% if fints_institute_status.imported_at %}, importiert am {{ fints_institute_status.imported_at.strftime('%d.%m.%Y') }}{% endif %}. Es sind nur URLs aus der Liste zulässig.</span>
+                  <span class="hint">FinTS-Bankenliste: {{ fints_institute_status.with_url }} Einträge mit PIN/TAN-Zugang{% if fints_institute_status.imported_at %}, importiert am {{ fints_institute_status.imported_at | datum }}{% endif %}. Es sind nur URLs aus der Liste zulässig.</span>
                 {% else %}
                   <input id="fints_url" name="fints_url" type="url" placeholder="https://banking-xy.s-fints-pt-xy.de/fints30" required />
                   <span class="hint">Keine FinTS-Bankenliste importiert — die URL steht in der Bankenliste der Deutschen Kreditwirtschaft oder bei der Bank. Ein Administrator kann die Liste unter Verwaltung importieren.</span>
@@ -436,7 +436,7 @@
                   <td>{{ conn.iban or "–" }}</td>
                   <td>
                     {% if status == "authorized" %}
-                      gültig bis {{ conn.consent_valid_until.strftime('%d.%m.%Y') if conn.consent_valid_until else "–" }}
+                      gültig bis {{ conn.consent_valid_until | datum if conn.consent_valid_until else "–" }}
                     {% elif status == "expired" %}
                       <strong>abgelaufen</strong>
                     {% else %}
@@ -455,7 +455,7 @@
                         <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
                         <button type="submit" class="secondary">Umsätze abrufen</button>
                       </form>
-                      {% if conn.last_synced_to %}<span class="muted small">zuletzt bis {{ conn.last_synced_to.strftime('%d.%m.%Y') }}</span>{% endif %}
+                      {% if conn.last_synced_to %}<span class="muted small">zuletzt bis {{ conn.last_synced_to | datum }}</span>{% endif %}
                     {% else %}
                       <span class="muted">erst nach Zustimmung</span>
                     {% endif %}

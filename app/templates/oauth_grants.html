@@ -28,9 +28,9 @@
               <td>{{ grant.client_name }}</td>
               <td>{{ grant.redirect_hosts | join(", ") }}</td>
               {% if show_all %}<td>{{ grant.username }}</td>{% endif %}
-              <td>{{ grant.created_at[:16] | replace("T", " ") if grant.created_at }}</td>
-              <td>{{ grant.last_used_at[:16] | replace("T", " ") if grant.last_used_at else "–" }}</td>
-              <td>{{ grant.expires_at[:10] if grant.expires_at else "–" }}</td>
+              <td>{{ grant.created_at | datum_zeit }}</td>
+              <td>{{ grant.last_used_at | datum_zeit if grant.last_used_at else "–" }}</td>
+              <td>{{ grant.expires_at | datum if grant.expires_at else "–" }}</td>
               <td>
                 <form method="post" action="{{ url_for('auth.revoke_oauth_grant', grant_id=grant.id) }}" class="inline-form">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -78,7 +78,7 @@
                   <button type="submit" class="secondary">Speichern</button>
                 </form>
               </td>
-              <td>{{ device.last_seen_at[:16] | replace("T", " ") if device.last_seen_at else "–" }}</td>
+              <td>{{ device.last_seen_at | datum_zeit if device.last_seen_at else "–" }}</td>
               <td>
                 {% if push.enabled %}
                   <form method="post" action="{{ url_for('auth.send_push_device_test', device_id=device.id) }}" class="inline-form">
