@@ -135,7 +135,7 @@
                 <td>{{ item.status }}</td>
                 <td class="num">{{ item.calculation.calculation.tax_total }}</td>
                 <td class="num">{{ item.calculation.calculation.payable }}</td>
-                <td>{{ item.created_at.strftime("%Y-%m-%d %H:%M") }} ({{ item.created_by }})</td>
+                <td>{{ item.created_at | datum_zeit }} ({{ item.created_by }})</td>
               </tr>
             {% endfor %}
           </tbody>

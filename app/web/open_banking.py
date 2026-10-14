@@ -24,6 +24,7 @@ from app.services.open_banking import (
     sync_open_banking_transactions,
 )
 from app.web.blueprint import main_bp
+from app.web.formatting import format_date
 from app.web.helpers import changed_by, get_session_factory, require_company_access
 from domain.models import OpenBankingConnection
 
@@ -176,7 +177,7 @@ def open_banking_callback():
             flash(str(exc), "error")
             return _bank_page(company_id)
         valid_until = connection.consent_valid_until
-        suffix = f" (gültig bis {valid_until:%d.%m.%Y})" if valid_until else ""
+        suffix = f" (gültig bis {format_date(valid_until)})" if valid_until else ""
         flash(f"Bank-Zustimmung für „{connection.name}“ erteilt{suffix}.", "success")
     return _bank_page(company_id)
 

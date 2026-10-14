@@ -239,7 +239,7 @@
   <section class="card" id="fints-bankenliste">
     <h2>FinTS-Bankenliste</h2>
     {% if fints_institute_status.count %}
-      <p>{{ fints_institute_status.count }} Einträge, davon {{ fints_institute_status.with_url }} mit PIN/TAN-URL{% if fints_institute_status.imported_at %} — importiert am {{ fints_institute_status.imported_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}.</p>
+      <p>{{ fints_institute_status.count }} Einträge, davon {{ fints_institute_status.with_url }} mit PIN/TAN-URL{% if fints_institute_status.imported_at %} — importiert am {{ fints_institute_status.imported_at | datum_zeit }}{% endif %}.</p>
       <p class="muted">Beim Anlegen eines FinTS-Bankzugangs wird die URL per BLZ vorgeschlagen; zulässig sind nur URLs aus dieser Liste.</p>
     {% else %}
       <p class="muted">Keine Bankenliste importiert. FinTS-URLs werden von Hand eingetragen und nur auf https und öffentliche Hosts geprüft.</p>

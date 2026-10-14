@@ -8,6 +8,17 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Zeitangaben in deutscher Ortszeit
+- Behoben: Die Oberfläche zeigte gespeicherte Zeitpunkte (UTC) unverändert an, ein um
+  17:42 MESZ aufgenommener Beleg erschien als 15:42. Die Filter `datum_zeit` und
+  `datum` rechnen Zeitpunkte jetzt nach Europe/Berlin um (Sommer- und Winterzeit);
+  naive Werte aus SQLite gelten als UTC, reine Datumswerte bleiben unverändert.
+- Einheitlich über die Filter statt eigener `strftime`-/ISO-Ausschnitte: Belegabgleich,
+  Audit-Log, Controlling-Historie, UStVA-/Ertragsteuer-Übermittlungen, OAuth-Zugriffe
+  und Push-Geräte, FinTS-Bankenliste, Open-Banking-Zustimmung. Audit-Log und
+  Controlling zeigen dabei das deutsche Format mit Sekunden.
+- Gespeicherte Werte, API-Ausgaben (ISO mit UTC) und Exporte bleiben unverändert.
+
 ### Mobile Belegerfassung (Server-Vorarbeit III)
 - Neu: Belege speichern ihren Erfassungsweg (`capture_source`: web, api, einvoice,
   mobile_scan, mobile_share), bei mobiler Erfassung zusätzlich Aufnahmezeitpunkt und

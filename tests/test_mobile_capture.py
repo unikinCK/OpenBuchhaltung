@@ -247,7 +247,8 @@ def test_web_upload_sets_source_and_list_shows_label(tmp_path):
 
     page = client.get(f"/belege?company_id={company_id}").get_data(as_text=True)
     assert "iOS-Scan" in page and "Weboberfläche" in page
-    assert "auf iPhone 17 Pro" in page
+    # Aufnahme 18:15 MESZ wird als UTC gespeichert, aber in Ortszeit angezeigt.
+    assert "Aufgenommen 13.10.2026 18:15 auf iPhone 17 Pro" in page
 
 
 def test_capture_fields_are_documented_for_export_and_mcp():

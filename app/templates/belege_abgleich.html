@@ -32,7 +32,7 @@
                 <tr>
                   <td>{{ document.file_name }}</td>
                   <td>{{ document.document_date.isoformat() if document.document_date else '–' }}</td>
-                  <td>{{ document.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                  <td>{{ document.uploaded_at | datum_zeit }}</td>
                   <td>
                     <form method="post" action="{{ url_for('main.receipt_matching_suggest') }}">
                       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -211,7 +211,7 @@
                 <td><span class="badge">{{ suggestion.status }}</span></td>
                 <td>{{ entry.posting_number if entry else '–' }}</td>
                 <td>{{ suggestion.decided_by or '–' }}</td>
-                <td>{{ suggestion.decided_at.strftime('%Y-%m-%d %H:%M') if suggestion.decided_at else '–' }}</td>
+                <td>{{ suggestion.decided_at | datum_zeit if suggestion.decided_at else '–' }}</td>
               </tr>
             {% endfor %}
           </tbody>

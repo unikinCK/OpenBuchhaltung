@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -30,9 +30,32 @@ def test_display_formats() -> None:
     assert format_amount(None) == ""
     assert format_date(date(2026, 9, 30)) == "30.09.2026"
     assert format_date("2026-09-30") == "30.09.2026"
-    assert format_datetime(datetime(2026, 10, 9, 9, 51)) == "09.10.2026 09:51"
+    assert format_datetime(datetime(2026, 10, 9, 9, 51)) == "09.10.2026 11:51"
     assert format_rate(Decimal("19.00")) == "19"
     assert format_rate(Decimal("10.70")) == "10,7"
+
+
+def test_datetimes_are_shown_in_german_local_time() -> None:
+    # Sommerzeit (MESZ, UTC+2): naive Werte aus SQLite gelten als UTC.
+    assert format_datetime(datetime(2026, 7, 3, 15, 42)) == "03.07.2026 17:42"
+    assert format_datetime(datetime(2026, 7, 3, 15, 42, tzinfo=timezone.utc)) == "03.07.2026 17:42"
+    # Winterzeit (MEZ, UTC+1).
+    assert format_datetime(datetime(2026, 1, 15, 15, 42)) == "15.01.2026 16:42"
+    # Zeitumstellung am 25.10.2026: 00:30 UTC = 02:30 MESZ, 01:30 UTC = 02:30 MEZ.
+    assert format_datetime(datetime(2026, 10, 25, 0, 30)) == "25.10.2026 02:30"
+    assert format_datetime(datetime(2026, 10, 25, 1, 30)) == "25.10.2026 02:30"
+    # Aware Werte anderer Zonen werden umgerechnet, ISO-Strings (API/OAuth) ebenso.
+    new_york = timezone(timedelta(hours=-4))
+    assert format_datetime(datetime(2026, 7, 3, 11, 42, tzinfo=new_york)) == "03.07.2026 17:42"
+    assert format_datetime("2026-12-31T23:30:00+00:00") == "01.01.2027 00:30"
+    assert format_datetime(datetime(2026, 7, 3, 15, 42, 7), seconds=True) == "03.07.2026 17:42:07"
+    # Reine Datumswerte bleiben unverändert.
+    assert format_datetime(date(2026, 7, 3)) == "03.07.2026"
+    assert format_datetime("2026-07-03") == "03.07.2026"
+    assert format_datetime(None) == ""
+    # Auch als reines Datum zählt der Kalendertag der Ortszeit.
+    assert format_date(datetime(2026, 12, 31, 23, 30, tzinfo=timezone.utc)) == "01.01.2027"
+    assert format_date("2026-12-31") == "31.12.2026"
 
 
 def test_form_amounts_accept_german_and_technical_format() -> None:

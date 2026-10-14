@@ -125,7 +125,7 @@
           <thead><tr><th>Zeitpunkt</th><th>ID</th><th>Aktion</th><th>Benutzer</th><th>Vorher</th><th>Nachher</th></tr></thead>
           <tbody>
             {% for event in events %}
-              <tr><td>{{ event.changed_at.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ event.entity_id }}</td><td>{{ event.action }}</td><td>{{ event.changed_by }}</td><td><code>{{ event.payload.before if event.payload else '–' }}</code></td><td><code>{{ event.payload.after if event.payload else '–' }}</code></td></tr>
+              <tr><td>{{ event.changed_at | datum_zeit(seconds=True) }}</td><td>{{ event.entity_id }}</td><td>{{ event.action }}</td><td>{{ event.changed_by }}</td><td><code>{{ event.payload.before if event.payload else '–' }}</code></td><td><code>{{ event.payload.after if event.payload else '–' }}</code></td></tr>
             {% endfor %}
           </tbody>
         </table>
