@@ -1,0 +1,6 @@
+# Abhängigkeiten des Push-Relays (eigenes Image, siehe push_relay/Dockerfile).
+Flask==3.1.0
+cryptography==50.0.2
+gunicorn==23.0.0
+httpx[http2]==0.28.1
+h2==4.4.1

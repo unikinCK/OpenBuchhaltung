@@ -672,8 +672,11 @@ dann selbst betriebener Modellserver).
       Ereignisses, Dispatcher `flask push-dispatch` (Compose-Profil `push`),
       Relay-Protokoll v1, neutrale Texte. FinTS-„TAN nötig“ entfällt: Abrufe starten
       interaktiv, und pushTAN-Apps melden sich selbst.
-- [ ] **Push-Relay**: eigenständiger Dienst mit APNs-Anbindung (HTTP/2, Token-Auth),
-      Instanzschlüssel, Rate-Limit, ohne Speicherung von Inhalten.
+- [x] **Push-Relay** *(2026-10-13)*: eigenständiger Dienst `push_relay/` mit
+      APNs-Anbindung (HTTP/2, ES256-Provider-Token), Instanzschlüsseln (nur Hash),
+      Rate-Limit je Instanz, Eingabeprüfung, ohne Speicherung von Inhalten; Trockenlauf
+      ohne Apple-Account. Offen: Apple-Developer-Account (APNs-Schlüssel, Team-ID),
+      HTTPS-Veröffentlichung und erste Zustellung an ein echtes Gerät.
 - [ ] **Fristen-Mitteilungen**: Voranmeldungszeitraum und Dauerfristverlängerung je
       Gesellschaft modellieren, danach Erinnerung vor UStVA/ZM-Fristen.
 - [ ] **Server-Vorarbeit III – Mobile Belege**: Upload mit Hash vom Gerät,

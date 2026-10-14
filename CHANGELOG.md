@@ -8,6 +8,22 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Push-Relay
+- Neu: eigenständiger Dienst `push_relay/` mit eigenem Image (`push_relay/Dockerfile`)
+  und `docker-compose.push-relay.yml`. Er nimmt Mitteilungen der Instanzen über
+  Protokoll v1 an und stellt sie per HTTP/2 an APNs zu (ES256-Provider-Token aus dem
+  `.p8`-Schlüssel, Erneuerung nach 50 Minuten, einmalige Wiederholung bei abgelaufenem
+  Token). Apples `410 Unregistered` meldet er als `invalid_token`.
+- Instanzen weisen sich mit einem Schlüssel aus, von dem das Relay nur den SHA-256-Hash
+  kennt (`python -m push_relay new-instance-key <name>`). Rate-Limit je Instanz,
+  Prüfung jedes Eintrags (Token, Umgebung, Längen, 4-KB-Grenze von APNs).
+- Das Relay speichert nichts und protokolliert keine Inhalte.
+- Trockenlauf `RELAY_APNS_MODE=dry-run` für den Betrieb vor dem Apple-Account.
+- Neue Variablen (nur Relay-Host): `RELAY_INSTANCE_KEYS`, `RELAY_APNS_MODE`,
+  `RELAY_APNS_KEY_PATH`, `RELAY_APNS_KEY_ID`, `RELAY_APNS_TEAM_ID`, `RELAY_APNS_TOPIC`,
+  `RELAY_RATE_LIMIT_PER_MINUTE`, `RELAY_PORT`. Für die Relay-Tests ist `httpx[http2]`
+  neu in `requirements-dev.txt`.
+
 ### Push-Mitteilungen für die iOS-App (Instanz-Seite)
 - Neu: Mobilgeräte registrieren sich für Push-Mitteilungen
   (`POST /api/v1/devices`, nur mit Benutzer-Token) und wählen Ereignisse: neue

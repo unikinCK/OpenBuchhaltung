@@ -10,3 +10,4 @@ __pycache__/
 instance/
 .claude/
 backups/
+secrets/
