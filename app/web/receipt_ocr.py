@@ -168,6 +168,7 @@ def receipt_ocr_suggest():
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
             document_date=document_date,
+            capture_source="web",
         )
         session.add(document)
         session.flush()

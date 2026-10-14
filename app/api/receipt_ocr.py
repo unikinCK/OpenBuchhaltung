@@ -13,6 +13,7 @@ from flask import current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
+from app.api.documents import CAPTURE_FIELDS, upload_capture
 from app.api.helpers import (
     api_can_write,
     api_scoped_company,
@@ -26,6 +27,7 @@ from app.services.documents import (
     DOCUMENT_SIGNATURE_PROBE_BYTES,
     document_content_error_code,
     document_file_metadata,
+    find_current_document_by_hash,
 )
 from app.services.incoming_invoice import IncomingInvoiceError, book_incoming_invoice
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
@@ -95,6 +97,7 @@ def _load_upload_payload():
             "file_name": secure_filename((payload.get("file_name") or "").strip()),
             "mime_type": payload.get("mime_type") or "application/octet-stream",
             "content": content,
+            **{field: payload.get(field) for field in CAPTURE_FIELDS},
         },
         None,
         None,
@@ -150,12 +153,32 @@ def create_receipt_ocr_suggestion_via_api():
     validation_error = _validate_upload(file_name=file_name, mime_type=mime_type, content=content)
     if validation_error:
         return jsonify({"error": validation_error}), 422
+    metadata = document_file_metadata(content)
+    capture, error_response, status_code = upload_capture(upload, metadata.file_sha256)
+    if error_response is not None:
+        return error_response, status_code
 
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
+        if capture.client_sha256:
+            existing = find_current_document_by_hash(
+                session, company_id=company.id, file_sha256=metadata.file_sha256
+            )
+            if existing is not None:
+                # Erneut gesendeter Beleg: kein zweiter Beleg, kein zweiter Vorschlag.
+                return (
+                    jsonify(
+                        {
+                            "error": "Dieser Beleg ist bereits erfasst.",
+                            "duplicate": True,
+                            "document_id": existing.id,
+                        }
+                    ),
+                    409,
+                )
 
         unique_name = f"{uuid4().hex}_{file_name}"
         company_dir = (
@@ -166,7 +189,6 @@ def create_receipt_ocr_suggestion_via_api():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(content)
-        metadata = document_file_metadata(content)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -177,6 +199,9 @@ def create_receipt_ocr_suggestion_via_api():
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
             document_date=document_date,
+            capture_source=capture.source,
+            captured_at=capture.captured_at,
+            capture_device=capture.device,
         )
         session.add(document)
         session.flush()
@@ -189,7 +214,14 @@ def create_receipt_ocr_suggestion_via_api():
             entity_id=str(document.id),
             action="uploaded",
             changed_by=_api_changed_by(),
-            payload={"file_name": document.file_name, "mime_type": document.mime_type},
+            payload={
+                "file_name": document.file_name,
+                "mime_type": document.mime_type,
+                "file_sha256": document.file_sha256,
+                "capture_source": capture.source,
+                "capture_device": capture.device,
+                "client_hash_verified": capture.client_sha256 is not None,
+            },
         )
         session.commit()
 

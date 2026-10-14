@@ -192,6 +192,7 @@ def einvoice_book_action():
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
             document_date=invoice.issue_date,
+            capture_source="einvoice",
         )
         session.add(document)
         session.flush()

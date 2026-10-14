@@ -8,6 +8,22 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Mobile Belegerfassung (Server-Vorarbeit III)
+- Neu: Belege speichern ihren Erfassungsweg (`capture_source`: web, api, einvoice,
+  mobile_scan, mobile_share), bei mobiler Erfassung zusätzlich Aufnahmezeitpunkt und
+  Gerät (`captured_at`, `capture_device`; Migration `20261014_0049`). Altbelege bleiben
+  ohne Angabe.
+- `POST /api/v1/documents` und `POST /api/v1/receipt-ocr/suggestions` sowie die
+  MCP-Tools `upload_document`/`create_receipt_ocr_suggestion` nehmen diese Angaben und
+  den auf dem Gerät berechneten `client_sha256` an. Weicht der Hash ab, wird nichts
+  gespeichert (422).
+- Ein erneut gesendeter Beleg mit gleichem Inhalt erzeugt kein Duplikat: Der Upload
+  liefert den vorhandenen Beleg mit `duplicate: true`, der OCR-Vorschlag antwortet
+  mit 409.
+- Belegliste zeigt den Erfassungsweg. Audit-Log und Prüferexport enthalten die
+  Erfassungsangaben. Die Verfahrensdokumentation hat einen neuen Abschnitt
+  „Mobile Erfassung“ (inkl. Hinweis zum ersetzenden Scannen).
+
 ### Push-Relay
 - Neu: eigenständiger Dienst `push_relay/` mit eigenem Image (`push_relay/Dockerfile`)
   und `docker-compose.push-relay.yml`. Er nimmt Mitteilungen der Instanzen über

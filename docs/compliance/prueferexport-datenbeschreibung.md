@@ -112,3 +112,8 @@ Dateieigenschaften. Bei vor Einführung des Belegdatums angelegten Altdaten kann
 deaktivierter Belegeinbettung sind die Prüfwerte `null`; bei angeforderter, aber
 fehlender Datei ist `file_missing=true` und die gemeinsame Integritätsprüfung
 schlägt fehl.
+
+`capture_source` nennt den Erfassungsweg (`web`, `api`, `einvoice`, `mobile_scan`,
+`mobile_share`). Bei mobiler Erfassung stehen `captured_at` (Aufnahmezeitpunkt auf
+dem Gerät, UTC) und `capture_device` daneben. Vor Einführung dieser Felder erfasste
+Belege haben keinen Erfassungsweg; auch hier wird nichts nachträglich ergänzt.

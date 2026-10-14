@@ -183,6 +183,12 @@ FIELD_DESCRIPTIONS = {
     "file_sha256": "Beim Eingang gespeicherter SHA-256-Hash der Originaldatei.",
     "file_size_bytes": "Beim Eingang gespeicherte Dateigröße in Bytes.",
     "document_date": "Fachliches Datum des Belegs, getrennt vom Erfassungszeitpunkt.",
+    "capture_source": (
+        "Erfassungsweg des Belegs: web, api, einvoice, mobile_scan (Scan in der iOS-App), "
+        "mobile_share (aus einer anderen App geteilt); leer = vor Einführung erfasst."
+    ),
+    "captured_at": "Aufnahmezeitpunkt auf dem Gerät bei mobiler Erfassung (UTC).",
+    "capture_device": "Gerätebezeichnung bei mobiler Erfassung.",
     "category_id": "Zugeordnete Belegkategorie (siehe document_categories).",
     "archive_path": "Relativer Pfad der Originaldatei innerhalb des ZIP-Pakets.",
     "archived_file_sha256": "Beim Export berechneter SHA-256-Hash der Originaldatei.",

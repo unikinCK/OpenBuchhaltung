@@ -33,8 +33,11 @@ from app.services.document_categories import (
 )
 from app.services.documents import (
     DOCUMENT_SIGNATURE_PROBE_BYTES,
+    DocumentCaptureError,
     document_content_error_code,
     document_file_metadata,
+    find_current_document_by_hash,
+    parse_document_capture,
     verify_document_file,
 )
 from app.services.scoping import scoped_select
@@ -65,7 +68,18 @@ def _document_dict(document: Document) -> dict[str, object]:
         "document_date": document.document_date.isoformat() if document.document_date else None,
         "delete_protected": True,
         "uploaded_at": document.uploaded_at.isoformat(),
+        "capture_source": document.capture_source,
+        "captured_at": _iso_utc(document.captured_at),
+        "capture_device": document.capture_device,
     }
+
+
+def _iso_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:  # SQLite liefert naive Zeitstempel (UTC)
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
 
 
 DOCUMENT_CONTENT_ERROR_MESSAGES = {
@@ -93,6 +107,39 @@ def _validate_document_file(*, file_name: str, mime_type: str, content: bytes) -
     return None
 
 
+CAPTURE_FIELDS = ("capture_source", "captured_at", "capture_device", "client_sha256")
+
+
+def upload_capture(upload: dict, file_sha256: str):
+    """Erfassungsangaben eines Uploads prüfen; liefert (capture, Fehlerantwort, Status).
+
+    Weicht ``client_sha256`` vom Hash der empfangenen Datei ab, ist bei der Übertragung
+    etwas verloren gegangen: nichts speichern, das Gerät sendet erneut (422).
+    """
+    try:
+        capture = parse_document_capture(
+            source=upload.get("capture_source"),
+            captured_at=upload.get("captured_at"),
+            device=upload.get("capture_device"),
+            client_sha256=upload.get("client_sha256"),
+        )
+    except DocumentCaptureError as exc:
+        return None, jsonify({"error": str(exc)}), 400
+    if capture.client_sha256 and capture.client_sha256 != file_sha256:
+        return (
+            None,
+            jsonify(
+                {
+                    "error": "client_sha256 does not match the received file.",
+                    "client_sha256": capture.client_sha256,
+                    "file_sha256": file_sha256,
+                }
+            ),
+            422,
+        )
+    return capture, None, None
+
+
 def _load_upload_payload():
     if request.files:
         uploaded_file = request.files.get("document_file")
@@ -109,6 +156,7 @@ def _load_upload_payload():
                 "file_name": file_name,
                 "mime_type": uploaded_file.mimetype or "application/octet-stream",
                 "content": content,
+                **{field: request.form.get(field) for field in CAPTURE_FIELDS},
             },
             None,
             None,
@@ -132,6 +180,7 @@ def _load_upload_payload():
             "file_name": file_name,
             "mime_type": payload.get("mime_type") or "application/octet-stream",
             "content": content,
+            **{field: payload.get(field) for field in CAPTURE_FIELDS},
         },
         None,
         None,
@@ -223,6 +272,11 @@ def upload_document_via_api():
     except ValueError:
         return jsonify({"error": "document_date is required in YYYY-MM-DD format."}), 400
 
+    metadata = document_file_metadata(content)
+    capture, error_response, status_code = upload_capture(upload, metadata.file_sha256)
+    if error_response is not None:
+        return error_response, status_code
+
     session_factory = get_session_factory()
     with session_factory() as session:
         company = api_scoped_company(session, company_id)
@@ -242,6 +296,15 @@ def upload_document_via_api():
         except DocumentCategoryError as exc:
             return jsonify({"error": str(exc)}), 422
 
+        if capture.client_sha256:
+            # Idempotenz: Ein Gerät, das nach einem Verbindungsabbruch erneut sendet,
+            # bekommt den bereits gespeicherten Beleg statt eines Duplikats.
+            existing = find_current_document_by_hash(
+                session, company_id=company.id, file_sha256=metadata.file_sha256
+            )
+            if existing is not None:
+                return jsonify({**_document_dict(existing), "duplicate": True}), 200
+
         unique_name = f"{uuid4().hex}_{file_name}"
         company_dir = (
             Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
@@ -251,7 +314,6 @@ def upload_document_via_api():
         company_dir.mkdir(parents=True, exist_ok=True)
         target_path = company_dir / unique_name
         target_path.write_bytes(content)
-        metadata = document_file_metadata(content)
 
         document = Document(
             tenant_id=company.tenant_id,
@@ -264,6 +326,9 @@ def upload_document_via_api():
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
             document_date=document_date,
+            capture_source=capture.source,
+            captured_at=capture.captured_at,
+            capture_device=capture.device,
         )
         session.add(document)
         session.flush()
@@ -284,10 +349,14 @@ def upload_document_via_api():
                 "file_size_bytes": document.file_size_bytes,
                 "version_number": document.version_number,
                 "document_date": document.document_date.isoformat(),
+                "capture_source": capture.source,
+                "captured_at": _iso_utc(capture.captured_at),
+                "capture_device": capture.device,
+                "client_hash_verified": capture.client_sha256 is not None,
             },
         )
         session.commit()
-        return jsonify(_document_dict(document)), 201
+        return jsonify({**_document_dict(document), "duplicate": False}), 201
 
 
 @api_bp.post("/documents/<int:document_id>/link")
@@ -496,6 +565,7 @@ def replace_document_via_api(document_id: int):
             version_number=previous.version_number + 1,
             replaces_document_id=previous.id,
             document_date=previous.document_date,
+            capture_source="api",
         )
         previous.is_current = False
         previous.replaced_at = datetime.now(timezone.utc)

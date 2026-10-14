@@ -53,7 +53,38 @@ Diese Gliederung kann als Grundlage fuer eine Verfahrensdokumentation zu OpenBuc
 - Schutz gegen Loeschung oder Ueberschreibung
 - Zuordnung zu Buchungen, OPOS, Anlagen oder Bankumsaetzen
 
-### 4.3 Kontrolle
+### 4.3 Mobile Erfassung (iOS-App)
+
+Technischer Ablauf, wie ihn die Anwendung umsetzt (ADR-003). Organisatorische
+Regeln, etwa wer mobil erfassen darf, ergaenzt der Betreiber.
+
+- **Erfassungswege:** Scan mit der Dokumentenkamera der App (`mobile_scan`) und
+  PDF aus einer anderen App ueber "Teilen" (`mobile_share`). Die App erzeugt PDF-,
+  JPG- oder PNG-Dateien und laedt sie ueber `POST /api/v1/documents` (oder mit
+  OCR-Vorschlag ueber `POST /api/v1/receipt-ocr/suggestions`) hoch.
+- **Unveraenderbarkeit ab Aufnahme:** Die App berechnet den SHA-256 der Datei auf
+  dem Geraet und sendet ihn als `client_sha256` mit. Der Server berechnet den Hash
+  der empfangenen Datei erneut. Bei Abweichung speichert er nichts, und die App
+  sendet erneut. Der gespeicherte `file_sha256` entspricht damit dem Inhalt, der
+  auf dem Geraet aufgenommen wurde.
+- **Erfassungszeitpunkt:** `captured_at` (Aufnahme auf dem Geraet, mit Zeitzone,
+  hoechstens zehn Minuten in der Zukunft) wird getrennt von `uploaded_at` (Eingang
+  auf dem Server) und `document_date` (fachliches Belegdatum) gespeichert. Ein
+  spaeter Upload, etwa nach Offline-Erfassung, bleibt so nachvollziehbar.
+- **Doppelerfassung:** Ein erneut gesendeter Beleg mit bekanntem Inhalt (gleicher
+  Hash in derselben Gesellschaft) legt keinen zweiten Beleg an. Die Antwort
+  verweist auf den vorhandenen Beleg (`duplicate=true` bzw. HTTP 409 beim
+  OCR-Vorschlag).
+- **Protokollierung:** Der Upload landet mit Erfassungsweg, Geraet und dem Kennzeichen
+  `client_hash_verified` in der Audit-Hashkette. Der Pruefexport enthaelt
+  `capture_source`, `captured_at` und `capture_device` je Beleg.
+- **Papierbelege:** Die Vernichtung von Papieroriginalen nach mobiler Erfassung ist
+  nur nach den Regeln zum ersetzenden Scannen zulaessig (GoBD Rz. 136 ff.):
+  Sichtkontrolle auf Lesbarkeit und Vollstaendigkeit, festgelegte Verantwortlichkeit
+  und eine Beschreibung dieses Verfahrens in der Verfahrensdokumentation. Die
+  Anwendung erzwingt das nicht; der Betreiber regelt es organisatorisch.
+
+### 4.4 Kontrolle
 
 - Vollstaendigkeitspruefung
 - Beleg-Buchungs-Abgleich

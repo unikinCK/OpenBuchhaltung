@@ -679,9 +679,11 @@ dann selbst betriebener Modellserver).
       HTTPS-Veröffentlichung und erste Zustellung an ein echtes Gerät.
 - [ ] **Fristen-Mitteilungen**: Voranmeldungszeitraum und Dauerfristverlängerung je
       Gesellschaft modellieren, danach Erinnerung vor UStVA/ZM-Fristen.
-- [ ] **Server-Vorarbeit III – Mobile Belege**: Upload mit Hash vom Gerät,
-      Erfassungszeitpunkt und Quelle (`mobile_scan`/`share_extension`), Hash-Prüfung,
-      Verfahrensdokumentation „mobiles Erfassen“.
+- [x] **Server-Vorarbeit III – Mobile Belege** *(2026-10-14)*: Erfassungsweg,
+      Aufnahmezeitpunkt und Gerät je Beleg (`mobile_scan`/`mobile_share`), Hash vom
+      Gerät mit Prüfung beim Upload, idempotenter Upload bei gleichem Inhalt
+      (Dokumente und OCR-Vorschlag), Anzeige, Audit, Prüferexport,
+      Verfahrensdokumentation „Mobile Erfassung“.
 - [ ] **Demo-Instanz**: öffentliche Instanz mit Demodaten, die nachts zurückgesetzt
       werden, für den Demo-Modus der App und die App-Review.
 - [ ] **App-MVP (TestFlight)**: Anmeldung mit mehreren Instanzen, Beleg-Scanner, Share

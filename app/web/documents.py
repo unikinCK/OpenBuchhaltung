@@ -30,7 +30,7 @@ from app.services.document_categories import (
     set_document_category_active,
 )
 from app.services.document_llm import DocumentLLMError, send_document_update
-from app.services.documents import document_file_metadata
+from app.services.documents import CAPTURE_SOURCE_LABELS, document_file_metadata
 from app.services.llm_settings import PURPOSE_DOCUMENT, resolve_llm_endpoint
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
@@ -171,6 +171,7 @@ def documents_page():
         companies=companies,
         selected_company_id=selected_company_id,
         documents=documents,
+        capture_labels=CAPTURE_SOURCE_LABELS,
         documents_total=documents_total,
         limit=limit,
         offset=offset,
@@ -264,6 +265,7 @@ def upload_document():
             file_sha256=metadata.file_sha256,
             file_size_bytes=metadata.file_size_bytes,
             document_date=document_date,
+            capture_source="web",
         )
         session.add(document)
         session.flush()
@@ -518,6 +520,7 @@ def replace_document(document_id: int):
             version_number=previous.version_number + 1,
             replaces_document_id=previous.id,
             document_date=previous.document_date,
+            capture_source="web",
         )
         previous.is_current = False
         previous.replaced_at = datetime.now(timezone.utc)
