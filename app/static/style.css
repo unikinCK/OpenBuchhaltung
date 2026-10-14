@@ -1136,6 +1136,15 @@ a.partner-chip:hover {
 }
 
 /* Flash messages */
+.demo-banner {
+  background: #fff4d6;
+  color: #6b4b00;
+  border-bottom: 1px solid #f0d58a;
+  padding: 0.55rem 1.5rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 .flash-list {
   list-style: none;
   margin: 1rem auto 0;

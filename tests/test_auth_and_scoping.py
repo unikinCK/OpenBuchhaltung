@@ -722,7 +722,8 @@ def test_seed_demo_command_creates_demo_data_idempotently(tmp_path):
 
     assert account_count == 31
     assert tax_code_count == 5
-    assert entry_count == 4
+    # 4 Beispielbuchungen + 2 gebuchte Bankumsätze des Vormonats (Demo-Alltag).
+    assert entry_count == 6
     assert user_count == 4
 
     from app.services.reports import balance_sheet_for_company

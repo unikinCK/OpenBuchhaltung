@@ -104,6 +104,14 @@
       </div>
     {% endif %}
 
+    {% if demo_mode %}
+      <div class="demo-banner" role="note">
+        <strong>Demo-Instanz:</strong> Alle Daten sind für andere Besucher sichtbar und werden
+        täglich um {{ demo_reset_time }} Uhr zurückgesetzt. Bitte keine echten Belege oder
+        personenbezogenen Daten eingeben.
+      </div>
+    {% endif %}
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <ul class="flash-list">
