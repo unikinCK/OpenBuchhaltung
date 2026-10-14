@@ -111,6 +111,29 @@ def _include_closing_entries_property() -> dict[str, Any]:
     }
 
 
+def _capture_properties() -> dict[str, Any]:
+    """Optionale Erfassungsangaben beim Belegupload (mobile Belegerfassung)."""
+    return {
+        "capture_source": {
+            "type": "string",
+            "enum": ["api", "mobile_scan", "mobile_share"],
+            "description": "Erfassungsweg; Standard api.",
+        },
+        "captured_at": {
+            "type": "string",
+            "description": "Aufnahmezeitpunkt auf dem Gerät, ISO 8601 mit Zeitzone.",
+        },
+        "capture_device": {"type": "string", "description": "Gerätebezeichnung."},
+        "client_sha256": {
+            "type": "string",
+            "description": (
+                "SHA-256 der Datei, beim Absender berechnet. Weicht er ab, wird nichts "
+                "gespeichert; ist der Beleg schon vorhanden, kommt der vorhandene zurück."
+            ),
+        },
+    }
+
+
 def _period_report_schema() -> dict[str, Any]:
     """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
     return {
@@ -1732,6 +1755,7 @@ TOOLS: list[ToolSpec] = [
                         "Optional: aktive Belegkategorie (siehe list_document_categories)."
                     ),
                 },
+                **_capture_properties(),
             },
             "required": [
                 "company_id",
@@ -1914,6 +1938,7 @@ TOOLS: list[ToolSpec] = [
                     "format": "date",
                     "description": "Fallback-Belegdatum im Format JJJJ-MM-TT.",
                 },
+                **_capture_properties(),
             },
             "required": [
                 "company_id",

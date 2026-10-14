@@ -649,6 +649,11 @@ class Document(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    # Erfassungsweg (web, api, einvoice, mobile_scan, mobile_share; leer = vor Einführung
+    # erfasst), Aufnahmezeitpunkt auf dem Gerät und Gerätebezeichnung bei mobiler Erfassung.
+    capture_source: Mapped[str | None] = mapped_column(String(30))
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    capture_device: Mapped[str | None] = mapped_column(String(100))
 
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
     category: Mapped[DocumentCategory | None] = relationship(back_populates="documents")

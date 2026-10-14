@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -49,6 +51,97 @@ def document_content_error_code(
 class DocumentFileMetadata:
     file_sha256: str
     file_size_bytes: int
+
+
+# Erfassungswege eines Belegs (``Document.capture_source``). Über die API wählbar sind
+# nur ``API_CAPTURE_SOURCES``; ``web`` und ``einvoice`` setzt die Weboberfläche selbst.
+CAPTURE_SOURCE_LABELS = {
+    "web": "Weboberfläche",
+    "api": "API",
+    "einvoice": "E-Rechnung",
+    "mobile_scan": "iOS-Scan",
+    "mobile_share": "iOS-Teilen",
+}
+API_CAPTURE_SOURCES = ("api", "mobile_scan", "mobile_share")
+MOBILE_CAPTURE_SOURCES = ("mobile_scan", "mobile_share")
+# Toleranz für Uhrabweichungen des Geräts beim Aufnahmezeitpunkt.
+CAPTURED_AT_FUTURE_TOLERANCE = timedelta(minutes=10)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class DocumentCaptureError(ValueError):
+    """Ungültige Angaben zur Belegerfassung (Quelle, Zeitpunkt, Gerät, Hash)."""
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentCapture:
+    source: str
+    captured_at: datetime | None = None
+    device: str | None = None
+    client_sha256: str | None = None
+
+
+def parse_document_capture(
+    *,
+    source: object,
+    captured_at: object = None,
+    device: object = None,
+    client_sha256: object = None,
+    now: datetime | None = None,
+) -> DocumentCapture:
+    """Prüft die Erfassungsangaben eines API-Uploads.
+
+    ``captured_at`` muss eine ISO-8601-Zeit mit Zeitzone sein und darf höchstens
+    zehn Minuten in der Zukunft liegen; ``client_sha256`` ist der auf dem Gerät
+    berechnete SHA-256 der Datei (64 Hex-Zeichen).
+    """
+    source = str(source or "api").strip()
+    if source not in API_CAPTURE_SOURCES:
+        raise DocumentCaptureError(
+            f"capture_source must be one of: {', '.join(API_CAPTURE_SOURCES)}."
+        )
+    parsed_at = None
+    if captured_at not in (None, ""):
+        try:
+            parsed_at = datetime.fromisoformat(str(captured_at).strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise DocumentCaptureError("captured_at must be an ISO 8601 timestamp.") from exc
+        if parsed_at.tzinfo is None:
+            raise DocumentCaptureError("captured_at must include a time zone.")
+        now = now or datetime.now(timezone.utc)
+        if parsed_at > now + CAPTURED_AT_FUTURE_TOLERANCE:
+            raise DocumentCaptureError("captured_at lies in the future.")
+        parsed_at = parsed_at.astimezone(timezone.utc)
+    device_name = None
+    if device is not None:
+        device_name = str(device).strip()[:100] or None
+    client_hash = None
+    if client_sha256 not in (None, ""):
+        client_hash = str(client_sha256).strip().lower()
+        if not _SHA256_RE.match(client_hash):
+            raise DocumentCaptureError("client_sha256 must be a hex SHA-256 digest.")
+    return DocumentCapture(
+        source=source, captured_at=parsed_at, device=device_name, client_sha256=client_hash
+    )
+
+
+def find_current_document_by_hash(
+    session: Session, *, company_id: int, file_sha256: str
+) -> Document | None:
+    """Aktueller Beleg der Gesellschaft mit diesem Inhalt (für idempotente Uploads)."""
+    return (
+        session.execute(
+            select(Document)
+            .where(
+                Document.company_id == company_id,
+                Document.file_sha256 == file_sha256,
+                Document.is_current.is_(True),
+            )
+            .order_by(Document.id)
+        )
+        .scalars()
+        .first()
+    )
 
 
 def document_file_metadata(content: bytes) -> DocumentFileMetadata:

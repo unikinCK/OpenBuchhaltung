@@ -1299,6 +1299,38 @@ API: `GET/POST /api/v1/document-categories`,
 MCP-Tools: `list_document_categories`, `create_document_category`,
 `set_document_category_active`, `set_document_category`.
 
+## Mobile Belegerfassung (iOS-App)
+
+Jeder Beleg speichert seinen **Erfassungsweg** (`capture_source`): `web`, `api`,
+`einvoice`, `mobile_scan` (Scan in der App) oder `mobile_share` (aus einer anderen App
+geteilt). Vor Einführung des Feldes erfasste Belege bleiben ohne Angabe. Die
+Belegliste zeigt den Weg unter „Hochgeladen“; bei mobiler Erfassung stehen
+Aufnahmezeit und Gerät im Tooltip.
+
+`POST /api/v1/documents` und `POST /api/v1/receipt-ocr/suggestions` (JSON oder
+Multipart) nehmen dafür optional diese Felder an, ebenso die MCP-Tools
+`upload_document` und `create_receipt_ocr_suggestion`:
+
+| Feld | Bedeutung |
+|---|---|
+| `capture_source` | `api` (Standard), `mobile_scan` oder `mobile_share` |
+| `captured_at` | Aufnahmezeitpunkt auf dem Gerät, ISO 8601 mit Zeitzone, höchstens 10 Minuten in der Zukunft |
+| `capture_device` | Gerätebezeichnung (bis 100 Zeichen) |
+| `client_sha256` | SHA-256 der Datei, auf dem Gerät berechnet |
+
+Mit `client_sha256` prüft der Server die empfangene Datei. Bei Abweichung antwortet er
+mit `422`, nennt beide Hashes und speichert nichts. Außerdem wird der Upload
+**idempotent**: Liegt in der Gesellschaft schon ein aktueller Beleg mit demselben
+Inhalt, antwortet `POST /api/v1/documents` mit `200`, dem vorhandenen Beleg und
+`"duplicate": true`. Der OCR-Vorschlag antwortet in diesem Fall mit `409` und der
+`document_id`. Neue Belege tragen `"duplicate": false`. So erzeugt ein nach einem
+Verbindungsabbruch wiederholter Upload keinen zweiten Beleg. Ohne `client_sha256`
+bleibt jeder Upload ein neuer Beleg.
+
+Audit-Log und Prüferexport enthalten Erfassungsweg, Aufnahmezeitpunkt, Gerät und das
+Kennzeichen `client_hash_verified`. Den Ablauf beschreibt die Verfahrensdokumentation
+(`docs/compliance/verfahrensdokumentation-outline.md`, Abschnitt 4.3).
+
 ## Belegabgleich (Beleg ↔ Buchung, LLM-gestützt)
 
 Unter **Belegabgleich** werden hochgeladene Belege ohne Buchungsverknüpfung mit den

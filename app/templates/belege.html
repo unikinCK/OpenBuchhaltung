@@ -119,7 +119,8 @@
                       <span class="badge badge-warning">ohne Buchung</span>
                     {% endif %}
                   </td>
-                  <td class="datetime">{{ document.uploaded_at | datum_zeit }}</td>
+                  <td class="datetime">{{ document.uploaded_at | datum_zeit }}
+                    {% if document.capture_source %}<br /><span class="muted small"{% if document.captured_at %} title="Aufgenommen {{ document.captured_at | datum_zeit }}{% if document.capture_device %} auf {{ document.capture_device }}{% endif %}"{% endif %}>{{ capture_labels.get(document.capture_source, document.capture_source) }}</span>{% endif %}</td>
                   <td class="actions">
                     <button type="button" class="secondary btn-sm" popovertarget="document-panel-{{ document.id }}">{% if document.journal_entry_id %}Ändern …{% else %}Zuordnen …{% endif %}</button>
                     <div popover id="document-panel-{{ document.id }}" class="panel">
