@@ -688,6 +688,13 @@ dann selbst betriebener Modellserver).
       werden, für den Demo-Modus der App und die App-Review.
 - [ ] **App-MVP (TestFlight)**: Anmeldung mit mehreren Instanzen, Beleg-Scanner, Share
       Extension, Inbox, Übersicht; Test mit Pilotnutzern.
+  - [x] App 0.1 *(2026-10-14, eigenes Repository `openbuchhaltung-ios`)*: OAuth-Login an
+        beliebigen Instanzen (PKCE, App-Redirect, Keychain), Übersicht, Inbox
+        (unverbuchte Umsätze), Belegerfassung per Dokumentenkamera/Foto/Datei mit
+        Geräte-Hash und Upload-Warteschlange; im Simulator gegen den Dev-Server geprüft.
+  - [ ] Signierung und TestFlight, Push-Registrierung, Share Extension (brauchen den
+        Apple-Developer-Account).
+  - [ ] Inbox-Aktionen, Belegdatum per Texterkennung, Demo-Modus, App-Icon.
 - [ ] **Lokale KI**: `/responses`-kompatibler Modellserver auf eigener Hardware,
       Benchmark der Belegextraktion gegen Cloud-Modelle, Warteschlange und
       Fallback-Regeln, Betriebsdoku.
