@@ -1,0 +1,66 @@
+{# Gemeinsame Felder der Belegbuchung (Beleg-OCR, Belegabgleich). #}
+
+{# Aufteilung je Steuersatz: je Zeile Netto, Steuercode, Steuer und optional ein
+   abweichendes Konto. Eine leere Zusatzzeile erlaubt einen weiteren Satz;
+   Zeilen ohne Betrag werden beim Buchen übergangen. #}
+{% macro tax_split_rows(lines, tax_codes, expense_accounts, suffix="") -%}
+  <fieldset>
+    <legend>Aufteilung nach Steuersätzen</legend>
+    <p class="muted">Je Steuersatz wird eine Aufwands- und eine Vorsteuerzeile gebucht.</p>
+    <div class="table-scroll">
+      <table class="journal-lines-table" data-no-sort>
+        <thead>
+          <tr>
+            <th>Netto</th>
+            <th>Steuercode</th>
+            <th>Steuer</th>
+            <th>Konto (leer = Aufwandskonto oben)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines + [{}] %}
+            <tr>
+              <td>
+                <input name="split_net_amount" type="text" inputmode="decimal"
+                       aria-label="Netto Zeile {{ loop.index }}"
+                       id="split_net_amount{{ suffix }}_{{ loop.index }}"
+                       value="{{ line.net_amount or '' }}" />
+              </td>
+              <td>
+                <select name="split_tax_code_id" aria-label="Steuercode Zeile {{ loop.index }}"
+                        id="split_tax_code_id{{ suffix }}_{{ loop.index }}">
+                  <option value="">Ohne Steuer</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}" {% if tax_code.id == line.tax_code_id %}selected{% endif %}>
+                      {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <input name="split_tax_amount" type="text" inputmode="decimal"
+                       aria-label="Steuer Zeile {{ loop.index }}"
+                       id="split_tax_amount{{ suffix }}_{{ loop.index }}"
+                       value="{{ line.tax_amount or '' }}" />
+              </td>
+              <td>
+                <select name="split_expense_account_id" aria-label="Konto Zeile {{ loop.index }}"
+                        id="split_expense_account_id{{ suffix }}_{{ loop.index }}">
+                  <option value="">wie Aufwandskonto</option>
+                  {% for account in expense_accounts %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </fieldset>
+{%- endmacro %}
+
+{% macro tip_field(tip_amount, suffix="") -%}
+  <label for="tip_amount{{ suffix }}">Trinkgeld (eigene Aufwandszeile ohne USt, optional)</label>
+  <input id="tip_amount{{ suffix }}" name="tip_amount" type="text" inputmode="decimal"
+         value="{{ tip_amount or '' }}" />
+{%- endmacro %}

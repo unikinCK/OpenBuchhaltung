@@ -1,0 +1,78 @@
+{
+  "id": "resp_41d95b226f92a669d85813f997a6f1640e43f39ada87bc34",
+  "object": "response",
+  "created_at": 1792343033,
+  "completed_at": 1792343087,
+  "status": "completed",
+  "incomplete_details": null,
+  "model": "nvidia/nemotron-3.5-super-vl",
+  "previous_response_id": null,
+  "instructions": null,
+  "output": [
+    {
+      "id": "rs_d3o4n8vsf0k58jk2ytvppp",
+      "type": "reasoning",
+      "status": "completed",
+      "summary": [],
+      "content": [
+        {
+          "type": "reasoning_text",
+          "text": "Der Dashboard zeigt ein Bankkonto (Konto 1200 \"Bank\") mit einem Buchsaldo von 2.606,01 €. Das ist der aktuelle Saldo basierend auf den Buchungen. Es gibt außerdem einen \"statement_total\" von 1.842,12 €, was der Summe der importierten Bankauszugszeilen entspricht, aber das ist nicht der Kontosaldo.\n\nDer Benutzer fragt nach dem \"aktuellen Saldo\" der Bankkonten. Ich sollte den Buchsaldo (book_balance) nennen. Es gibt nur ein Bankkonto.\n\nIch kann das direkt aus dem Tool-Ergebnis ablesen, ohne weitere Aufrufe zu machen."
+        }
+      ]
+    },
+    {
+      "id": "msg_cjxx1jd3wic23tbwre5cmv",
+      "type": "message",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Die Demo GmbH hat ein Bankkonto:\n\n| Konto | Kontonummer | Name | Buchsaldo | Letzte Buchung | Offene Bankumsätze |\n|-------|-------------|------|-----------|----------------|-------------------|\n| Bank | 1200 | Bank | **2.606,01 €** | 17.10.2026 | 6 |\n\nDer aktuelle Buchsaldo der Bankkonten beträgt also **2.606,01 €** (Stand 18.10.2026). Dies ist der Saldo aus den gebuchten Buchungssätzen (Soll minus Haben) auf dem Konto 1200.\n\nHinweis: Zusätzlich liegen 6 noch nicht verbuchte Bankumsätze (Statement-Gesamt 1.842,12 €) vor, die noch abgeglichen/buchungsreif sind. Soll ich diese prüfen?",
+          "annotations": [],
+          "logprobs": []
+        }
+      ]
+    }
+  ],
+  "error": null,
+  "tool_choice": "auto",
+  "truncation": "auto",
+  "parallel_tool_calls": true,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "top_p": 0.95,
+  "presence_penalty": 0,
+  "frequency_penalty": 1,
+  "top_logprobs": 0,
+  "temperature": 1,
+  "reasoning": {
+    "summary": null,
+    "effort": null
+  },
+  "usage": {
+    "input_tokens": 34028,
+    "output_tokens": 364,
+    "total_tokens": 34392,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens_details": {
+      "reasoning_tokens": 154
+    }
+  },
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "store": true,
+  "background": false,
+  "service_tier": "default",
+  "metadata": {
+    "source": "openbuchhaltung-chat-debug"
+  },
+  "safety_identifier": null,
+  "prompt_cache_key": null
+}

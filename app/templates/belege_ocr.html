@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% from "_receipt_booking.html" import tax_split_rows, tip_field %}
+
+{% block title %}Beleg-OCR – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Beleg-OCR &amp; Buchungsvorschlag</h1>
+
+  <section class="card">
+    <h2>Beleg hochladen und auslesen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% else %}
+      <p class="muted">
+        Der Beleg (PDF, JPG oder PNG) wird gespeichert und ausgelesen. Aus dem erkannten
+        Text schlägt OpenBuchhaltung eine Eingangsrechnungsbuchung vor
+        (Netto auf Aufwand, Vorsteuer auf Steuerkonto, Brutto auf Kreditor). PDFs mit
+        Textebene werden lokal ausgelesen; für Scans/Bilder wird – falls konfiguriert –
+        ein OCR-Endpoint verwendet.
+      </p>
+      <form method="post" action="{{ url_for('main.receipt_ocr_suggest') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="document_date">Belegdatum (Fallback, falls OCR kein Datum erkennt)</label>
+        <input id="document_date" name="document_date" type="date" value="{{ today }}" required />
+
+        <label for="document_file">Beleg (PDF/JPG/PNG)</label>
+        <input id="document_file" name="document_file" type="file"
+               accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required />
+
+        <button type="submit">Beleg auslesen</button>
+      </form>
+    {% endif %}
+  </section>
+
+  {% if extraction %}
+    <section class="card">
+      <h2>Erkannte Belegdaten</h2>
+      <p class="muted">
+        Quelle: {{ extraction.source }} · Zuverlässigkeit:
+        <span class="badge">{{ extraction.confidence }}</span>
+        {% if extraction.llm_used %}
+          · KI-Kontrolle:
+          <span class="badge">
+            {%- if extraction.control_status == 'bestätigt' -%}bestätigt
+            {%- elif extraction.control_status == 'korrigiert' -%}korrigiert (KI)
+            {%- elif extraction.control_status == 'abweichung' -%}Abweichung
+            {%- elif extraction.control_status == 'ergänzt' -%}ergänzt (KI)
+            {%- else -%}nur regelbasiert{%- endif -%}
+          </span>
+        {% endif %}
+        {% if document_name %} · Datei: {{ document_name }}{% endif %}
+      </p>
+
+      {% if extraction.warnings %}
+        <ul class="flash-list">
+          {% for warning in extraction.warnings %}
+            <li class="error">{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      <table>
+        <tbody>
+          <tr><th>Lieferant</th><td>{{ extraction.supplier or '–' }}</td></tr>
+          <tr><th>Rechnungsnummer</th><td>{{ extraction.invoice_number or '–' }}</td></tr>
+          <tr><th>Rechnungsdatum</th><td>{{ extraction.invoice_date.isoformat() if extraction.invoice_date else '–' }}</td></tr>
+          <tr><th>Netto</th><td>{{ extraction.net_amount if extraction.net_amount is not none else '–' }}</td></tr>
+          <tr><th>Steuer{% if extraction.tax_rate is not none %} ({{ extraction.tax_rate }}%){% endif %}</th><td>{{ extraction.tax_amount if extraction.tax_amount is not none else '–' }}</td></tr>
+          <tr><th>Brutto</th><td>{{ extraction.gross_amount if extraction.gross_amount is not none else '–' }}</td></tr>
+          {% for rate, net, tax in extraction.tax_lines if extraction.tax_lines | length > 1 %}
+            <tr><th>davon {{ rate }} %</th><td>netto {{ net }} · Steuer {{ tax }}</td></tr>
+          {% endfor %}
+          {% if extraction.tip_amount %}
+            <tr><th>Trinkgeld (ohne USt)</th><td>{{ extraction.tip_amount }}</td></tr>
+          {% endif %}
+          {% if extraction.supplier_vat_id %}
+            <tr><th>USt-IdNr. Lieferant</th><td>{{ extraction.supplier_vat_id }}</td></tr>
+          {% endif %}
+          {% if extraction.description %}
+            <tr><th>Leistung</th><td>{{ extraction.description }}</td></tr>
+          {% endif %}
+          {% if proposal.partner_name %}
+            <tr><th>Geschäftspartner</th><td>{{ proposal.partner_number or '' }} {{ proposal.partner_name }}</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </section>
+
+    {% if extraction.has_booking_basis and expense_accounts and creditor_accounts %}
+      <section class="card">
+        <h2>Buchungsvorschlag prüfen und verbuchen</h2>
+        <p class="muted">Beträge und Konten können vor dem Verbuchen angepasst werden.</p>
+        {% if proposal.reason %}
+          <p class="muted">Kontierungsvorschlag: {{ proposal.reason }}</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('main.receipt_ocr_book') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <input type="hidden" name="document_id" value="{{ document_id }}" />
+          {% if proposal.partner_id %}
+            <input type="hidden" name="partner_id" value="{{ proposal.partner_id }}" />
+          {% endif %}
+
+          <label for="entry_date">Buchungsdatum</label>
+          <input id="entry_date" name="entry_date" type="date"
+                 value="{{ extraction.invoice_date.isoformat() if extraction.invoice_date else today }}" required />
+
+          <label for="description">Buchungstext</label>
+          <input id="description" name="description"
+                 value="{{ [extraction.supplier, extraction.invoice_number, extraction.description] | select | join(' – ') }}" />
+
+          <label for="expense_account_id">Aufwands-/Anlagekonto (Netto, Soll)</label>
+          <select id="expense_account_id" name="expense_account_id" required>
+            <option value="">Bitte wählen</option>
+            {% for account in expense_accounts %}
+              <option value="{{ account.id }}" {% if account.id == proposal.expense_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="cost_center_id">Kostenstelle (Aufwandszeile)</label>
+          <select id="cost_center_id" name="cost_center_id">
+            <option value="">Ohne Kostenstelle</option>
+            {% for unit in cost_centers %}
+              <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="profit_center_id">Profitcenter (Aufwandszeile)</label>
+          <select id="profit_center_id" name="profit_center_id">
+            <option value="">Ohne Profitcenter</option>
+            {% for unit in profit_centers %}
+              <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+            {% endfor %}
+          </select>
+
+          {% if proposal.tax_lines %}
+            {{ tax_split_rows(proposal.tax_lines, tax_codes, expense_accounts) }}
+          {% else %}
+            <label for="net_amount">Nettobetrag</label>
+            <input id="net_amount" name="net_amount" type="text" inputmode="decimal"
+                   value="{{ extraction.net_amount if extraction.net_amount is not none else '0.00' }}" required />
+
+            <label for="tax_code_id">Steuercode (für Vorsteuer)</label>
+            <select id="tax_code_id" name="tax_code_id">
+              <option value="">Ohne Steuer</option>
+              {% for tax_code in tax_codes %}
+                <option value="{{ tax_code.id }}"
+                  {% if (proposal.tax_code_id and tax_code.id == proposal.tax_code_id)
+                        or (not proposal.tax_code_id and not extraction.reverse_charge
+                            and extraction.tax_rate is not none and tax_code.rate == extraction.tax_rate
+                            and tax_code.kind == 'input') %}selected{% endif %}>
+                  {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+              {% endfor %}
+            </select>
+
+            <label for="tax_amount">Steuerbetrag</label>
+            <input id="tax_amount" name="tax_amount" type="text" inputmode="decimal"
+                   value="{{ extraction.tax_amount if extraction.tax_amount is not none else '0.00' }}" required />
+          {% endif %}
+
+          {{ tip_field(extraction.tip_amount) }}
+
+          <label for="creditor_account_id">Kreditoren-/Verbindlichkeitskonto (Brutto, Haben)</label>
+          <select id="creditor_account_id" name="creditor_account_id" required>
+            <option value="">Bitte wählen</option>
+            {% for account in creditor_accounts %}
+              <option value="{{ account.id }}" {% if account.id == default_creditor_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+            {% endfor %}
+          </select>
+
+          <button type="submit">Beleg verbuchen</button>
+        </form>
+      </section>
+    {% elif extraction.has_booking_basis %}
+      <section class="card">
+        <p class="muted">Für den Buchungsvorschlag werden ein Aufwands- und ein
+          Kreditoren-/Verbindlichkeitskonto benötigt — zuerst unter
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a>
+          anlegen oder einen SKR importieren.</p>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

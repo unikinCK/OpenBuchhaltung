@@ -1,0 +1,576 @@
+"""Belegverwaltung: Upload, Verknüpfung mit Buchungen und Download."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from pathlib import Path
+from uuid import uuid4
+
+from flask import (
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
+from sqlalchemy import func, select
+from werkzeug.utils import secure_filename
+
+from app.auth import current_tenant_id
+from app.services.audit_log import log_audit_event
+from app.services.document_categories import (
+    DocumentCategoryError,
+    assign_document_category,
+    create_document_category,
+    list_document_categories,
+    resolve_document_category,
+    set_document_category_active,
+)
+from app.services.document_llm import DocumentLLMError, send_document_update
+from app.services.documents import CAPTURE_SOURCE_LABELS, document_file_metadata
+from app.services.llm_settings import PURPOSE_DOCUMENT, resolve_llm_endpoint
+from app.services.scoping import scoped_select
+from app.web.blueprint import main_bp
+from app.web.helpers import (
+    changed_by,
+    company_context,
+    document_upload_error,
+    filter_url_args,
+    get_session_factory,
+    pagination_args,
+    require_company_access,
+    search_args,
+    sort_args,
+)
+from domain.models import Document, DocumentCategory, JournalEntry
+
+# Obergrenze für Verknüpfungs-Dropdowns (jüngste Buchungen).
+LINK_SELECT_LIMIT = 200
+
+
+DOCUMENT_SORT_COLUMNS = ("name", "category", "date", "entry", "uploaded")
+
+
+def _document_sort_expressions(key: str) -> tuple:
+    if key == "name":
+        return (func.lower(Document.file_name),)
+    if key == "category":
+        return (
+            select(func.lower(DocumentCategory.name))
+            .where(DocumentCategory.id == Document.category_id)
+            .scalar_subquery(),
+        )
+    if key == "entry":
+        return (
+            select(JournalEntry.posting_number)
+            .where(JournalEntry.id == Document.journal_entry_id)
+            .scalar_subquery(),
+        )
+    if key == "uploaded":
+        return (Document.uploaded_at,)
+    return (Document.document_date,)
+
+
+@main_bp.get("/belege")
+def documents_page():
+    limit, offset = pagination_args()
+    sort = sort_args(DOCUMENT_SORT_COLUMNS, "date", descending=True)
+    query, date_from, date_to = search_args()
+    preselected_entry_id = request.args.get("journal_entry_id", type=int)
+    unlinked_only = request.args.get("unlinked") == "1"
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = company_context(session)
+
+        documents = []
+        documents_total = 0
+        unlinked_total = 0
+        journal_entries = []
+        journal_entry_labels = {}
+        categories = []
+        if selected_company_id:
+            categories = list_document_categories(
+                session=session, company_id=selected_company_id
+            )
+            documents_stmt = scoped_select(Document, company_id=selected_company_id)
+            if query:
+                documents_stmt = documents_stmt.where(Document.file_name.ilike(f"%{query}%"))
+            if date_from:
+                documents_stmt = documents_stmt.where(Document.document_date >= date_from)
+            if date_to:
+                documents_stmt = documents_stmt.where(Document.document_date <= date_to)
+            if unlinked_only:
+                documents_stmt = documents_stmt.where(Document.journal_entry_id.is_(None))
+            unlinked_total = session.execute(
+                select(func.count()).select_from(
+                    scoped_select(Document, company_id=selected_company_id)
+                    .where(Document.journal_entry_id.is_(None))
+                    .subquery()
+                )
+            ).scalar_one()
+            documents_total = session.execute(
+                select(func.count()).select_from(documents_stmt.subquery())
+            ).scalar_one()
+            documents = (
+                session.execute(
+                    documents_stmt.order_by(
+                        *sort.order_by(
+                            *_document_sort_expressions(sort.key),
+                            tiebreak=(Document.uploaded_at, Document.id),
+                        )
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+                .scalars()
+                .all()
+            )
+            # Auswahlliste für Verknüpfungen: die jüngsten Buchungen genügen —
+            # die Seitengröße wächst sonst quadratisch (Zeilen × Buchungen).
+            journal_entries = (
+                session.execute(
+                    scoped_select(JournalEntry, company_id=selected_company_id)
+                    .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+                    .limit(LINK_SELECT_LIMIT)
+                )
+                .scalars()
+                .all()
+            )
+            # Aus der Buchungsliste („+ Beleg“): gewählte Buchung vorauswählen,
+            # auch wenn sie älter als die Auswahlliste ist.
+            if preselected_entry_id is not None:
+                preselected_entry = session.get(JournalEntry, preselected_entry_id)
+                if (
+                    preselected_entry is None
+                    or preselected_entry.company_id != selected_company_id
+                ):
+                    preselected_entry_id = None
+                elif preselected_entry not in journal_entries:
+                    journal_entries = [preselected_entry, *journal_entries]
+            linked_ids = {
+                document.journal_entry_id
+                for document in documents
+                if document.journal_entry_id is not None
+            }
+            journal_entry_labels = {entry.id: entry.posting_number for entry in journal_entries}
+            missing_ids = linked_ids - set(journal_entry_labels)
+            if missing_ids:
+                journal_entry_labels.update(
+                    session.execute(
+                        select(JournalEntry.id, JournalEntry.posting_number).where(
+                            JournalEntry.id.in_(missing_ids)
+                        )
+                    ).all()
+                )
+
+    return render_template(
+        "belege.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        documents=documents,
+        capture_labels=CAPTURE_SOURCE_LABELS,
+        documents_total=documents_total,
+        limit=limit,
+        offset=offset,
+        q=query,
+        date_from=date_from,
+        date_to=date_to,
+        filter_args=filter_url_args(
+            query, date_from, date_to, unlinked="1" if unlinked_only else None
+        ),
+        sort=sort,
+        unlinked_only=unlinked_only,
+        unlinked_total=unlinked_total,
+        journal_entries=journal_entries,
+        journal_entry_labels=journal_entry_labels,
+        categories=categories,
+        preselected_entry_id=preselected_entry_id,
+        active_categories=[category for category in categories if category.is_active],
+        today=date.today().isoformat(),
+    )
+
+
+@main_bp.post("/documents")
+def upload_document():
+    company_id = request.form.get("company_id", type=int)
+    journal_entry_id = request.form.get("journal_entry_id", type=int)
+    category_id = request.form.get("category_id", type=int)
+    document_date_raw = request.form.get("document_date", "").strip()
+    uploaded_file = request.files.get("document_file")
+
+    if (
+        not company_id
+        or not document_date_raw
+        or uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        flash("Gesellschaft, Belegdatum und Datei sind Pflichtfelder.", "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    try:
+        document_date = date.fromisoformat(document_date_raw)
+    except ValueError:
+        flash("Ungültiges Belegdatum.", "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    original_file_name = secure_filename(uploaded_file.filename)
+    if not original_file_name:
+        flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    upload_error = document_upload_error(uploaded_file, original_file_name)
+    if upload_error:
+        flash(upload_error, "error")
+        return redirect(url_for("main.documents_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+
+        linked_entry = None
+        if journal_entry_id is not None:
+            linked_entry = session.get(JournalEntry, journal_entry_id)
+            if linked_entry is None or linked_entry.company_id != company.id:
+                flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
+                return redirect(url_for("main.documents_page", company_id=company_id))
+
+        try:
+            category = resolve_document_category(
+                session=session, company_id=company.id, category_id=category_id
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=company_id))
+
+        unique_name = f"{uuid4().hex}_{original_file_name}"
+        tenant_dir = Path(current_app.config["DOCUMENT_UPLOAD_DIR"]) / str(company.tenant_id)
+        company_dir = tenant_dir / str(company.id)
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        file_bytes = uploaded_file.read()
+        target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
+
+        document = Document(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            journal_entry_id=linked_entry.id if linked_entry else None,
+            category_id=category.id if category else None,
+            file_name=original_file_name,
+            storage_key=str(target_path),
+            mime_type=uploaded_file.mimetype or "application/octet-stream",
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
+            capture_source="web",
+        )
+        session.add(document)
+        session.flush()
+
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="uploaded",
+            changed_by=changed_by(),
+            payload={
+                "file_name": document.file_name,
+                "journal_entry_id": document.journal_entry_id,
+                "category_id": document.category_id,
+                "mime_type": document.mime_type,
+                "file_sha256": document.file_sha256,
+                "file_size_bytes": document.file_size_bytes,
+                "version_number": document.version_number,
+                "document_date": document.document_date.isoformat(),
+            },
+        )
+        session.commit()
+
+        uploaded_document_id = document.id
+        uploaded_tenant_id = document.tenant_id
+        uploaded_company_id = document.company_id
+        uploaded_file_name = document.file_name
+        uploaded_mime_type = document.mime_type
+        uploaded_journal_entry_id = document.journal_entry_id
+        uploaded_document_date = document.document_date
+
+    llm_endpoint = resolve_llm_endpoint(PURPOSE_DOCUMENT)
+    if llm_endpoint is not None:
+        try:
+            llm_response = send_document_update(
+                endpoint_url=llm_endpoint.url,
+                model=llm_endpoint.model,
+                api_key=llm_endpoint.api_key,
+                company_id=company_id,
+                document_id=uploaded_document_id,
+                file_name=uploaded_file_name,
+                mime_type=uploaded_mime_type,
+                journal_entry_id=uploaded_journal_entry_id,
+                document_date=uploaded_document_date,
+            )
+            with session_factory() as session:
+                log_audit_event(
+                    session=session,
+                    tenant_id=uploaded_tenant_id,
+                    company_id=uploaded_company_id,
+                    entity_type="document",
+                    entity_id=str(uploaded_document_id),
+                    action="llm_update_requested",
+                    changed_by=changed_by(),
+                    payload={"status": "success", "response": llm_response},
+                )
+                session.commit()
+        except DocumentLLMError as exc:
+            current_app.logger.warning(
+                "LLM request for document %s failed: %s",
+                uploaded_document_id,
+                exc.message,
+            )
+            with session_factory() as session:
+                log_audit_event(
+                    session=session,
+                    tenant_id=uploaded_tenant_id,
+                    company_id=uploaded_company_id,
+                    entity_type="document",
+                    entity_id=str(uploaded_document_id),
+                    action="llm_update_requested",
+                    changed_by=changed_by(),
+                    payload={"status": "error", "message": exc.message},
+                )
+                session.commit()
+
+    flash("Beleg wurde hochgeladen.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
+@main_bp.post("/documents/<int:document_id>/link")
+def link_document(document_id: int):
+    company_id = request.form.get("company_id", type=int)
+    journal_entry_id = request.form.get("journal_entry_id", type=int)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        require_company_access(session, document.company_id)
+
+        linked_entry = None
+        if journal_entry_id is not None:
+            linked_entry = session.get(JournalEntry, journal_entry_id)
+            if linked_entry is None or linked_entry.company_id != document.company_id:
+                flash("Ausgewählte Buchung wurde nicht gefunden.", "error")
+                return redirect(
+                    url_for("main.documents_page", company_id=company_id or document.company_id)
+                )
+
+        previous_journal_entry_id = document.journal_entry_id
+        document.journal_entry_id = linked_entry.id if linked_entry else None
+
+        log_audit_event(
+            session=session,
+            tenant_id=document.tenant_id,
+            company_id=document.company_id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="linked",
+            changed_by=changed_by(),
+            payload={
+                "previous_journal_entry_id": previous_journal_entry_id,
+                "journal_entry_id": document.journal_entry_id,
+            },
+        )
+        session.commit()
+        redirect_company_id = document.company_id
+
+    if linked_entry:
+        flash("Beleg wurde mit der Buchung verknüpft.", "success")
+    else:
+        flash("Verknüpfung des Belegs wurde entfernt.", "success")
+    return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+
+
+@main_bp.post("/documents/<int:document_id>/category")
+def categorize_document(document_id: int):
+    category_id = request.form.get("category_id", type=int)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        require_company_access(session, document.company_id)
+        redirect_company_id = document.company_id
+        try:
+            assign_document_category(
+                session=session,
+                document=document,
+                category_id=category_id,
+                changed_by=changed_by(),
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+        session.commit()
+
+    flash("Belegkategorie wurde gespeichert.", "success")
+    return redirect(url_for("main.documents_page", company_id=redirect_company_id))
+
+
+@main_bp.post("/belegkategorien")
+def create_document_category_action():
+    company_id = request.form.get("company_id", type=int)
+    name = request.form.get("name", "")
+    if not company_id:
+        abort(400)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            category = create_document_category(
+                session=session, company=company, name=name, changed_by=changed_by()
+            )
+        except DocumentCategoryError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.documents_page", company_id=company_id))
+        session.commit()
+        category_name = category.name
+
+    flash(f"Belegkategorie „{category_name}“ wurde angelegt.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
+@main_bp.post("/belegkategorien/<int:category_id>/aktiv")
+def set_document_category_active_action(category_id: int):
+    is_active = request.form.get("is_active") == "1"
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        category = session.get(DocumentCategory, category_id)
+        if category is None:
+            abort(404)
+        require_company_access(session, category.company_id)
+        set_document_category_active(
+            session=session, category=category, is_active=is_active, changed_by=changed_by()
+        )
+        session.commit()
+        company_id = category.company_id
+        category_name = category.name
+
+    state = "aktiviert" if is_active else "deaktiviert"
+    flash(f"Belegkategorie „{category_name}“ wurde {state}.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
+@main_bp.post("/documents/<int:document_id>/replace")
+def replace_document(document_id: int):
+    uploaded_file = request.files.get("document_file")
+    if uploaded_file is None or not uploaded_file.filename:
+        flash("Bitte eine neue Belegdatei auswählen.", "error")
+        return redirect(url_for("main.documents_page"))
+
+    original_file_name = secure_filename(uploaded_file.filename)
+    if not original_file_name:
+        flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.documents_page"))
+
+    upload_error = document_upload_error(uploaded_file, original_file_name)
+    if upload_error:
+        flash(upload_error, "error")
+        return redirect(url_for("main.documents_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        previous = session.get(Document, document_id)
+        if previous is None:
+            abort(404)
+        require_company_access(session, previous.company_id)
+        if not previous.is_current:
+            flash("Nur die aktuelle Belegversion kann ersetzt werden.", "error")
+            return redirect(url_for("main.documents_page", company_id=previous.company_id))
+
+        unique_name = f"{uuid4().hex}_{original_file_name}"
+        company_dir = (
+            Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
+            / str(previous.tenant_id)
+            / str(previous.company_id)
+        )
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        file_bytes = uploaded_file.read()
+        target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
+
+        replacement = Document(
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            journal_entry_id=previous.journal_entry_id,
+            category_id=previous.category_id,
+            file_name=original_file_name,
+            storage_key=str(target_path),
+            mime_type=uploaded_file.mimetype or "application/octet-stream",
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
+            version_number=previous.version_number + 1,
+            replaces_document_id=previous.id,
+            document_date=previous.document_date,
+            capture_source="web",
+        )
+        previous.is_current = False
+        previous.replaced_at = datetime.now(timezone.utc)
+        session.add(replacement)
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=previous.tenant_id,
+            company_id=previous.company_id,
+            entity_type="document",
+            entity_id=str(previous.id),
+            action="replaced",
+            changed_by=changed_by(),
+            payload={
+                "replacement_document_id": replacement.id,
+                "previous_file_sha256": previous.file_sha256,
+                "replacement_file_sha256": replacement.file_sha256,
+                "previous_version_number": previous.version_number,
+                "replacement_version_number": replacement.version_number,
+                "document_date": (
+                    replacement.document_date.isoformat()
+                    if replacement.document_date
+                    else None
+                ),
+            },
+        )
+        session.commit()
+        company_id = replacement.company_id
+
+    flash("Beleg wurde als neue Version ersetzt.", "success")
+    return redirect(url_for("main.documents_page", company_id=company_id))
+
+
+@main_bp.get("/documents/<int:document_id>/download")
+def download_document(document_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None:
+            abort(404)
+        tenant_scope = current_tenant_id()
+        if tenant_scope is not None and document.tenant_id != tenant_scope:
+            abort(404)
+        document_path = Path(document.storage_key)
+        if not document_path.exists():
+            abort(404)
+
+        return send_file(
+            document_path,
+            mimetype=document.mime_type,
+            as_attachment=True,
+            download_name=document.file_name,
+        )

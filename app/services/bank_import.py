@@ -1,0 +1,1215 @@
+from __future__ import annotations
+
+import csv
+import hashlib
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from io import StringIO
+from typing import Iterable, TextIO
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.services.audit_log import log_audit_event
+from app.services.bank_statement import (
+    MAX_REFERENCE_LENGTH,
+    BankStatementParseError,
+    BankStatementRow,
+    BankStatementRowError,
+    StatementItem,
+    decode_statement_text,
+    detect_statement_format,
+    parse_camt053,
+    parse_mt940,
+)
+from app.services.journal_entries import (
+    JournalEntryInput,
+    JournalLineInput,
+    create_journal_entry,
+)
+from app.services.push import notify_bank_transactions
+from app.services.standard_accounts import GELDTRANSIT, find_standard_account
+from domain.models import (
+    Account,
+    BankTransaction,
+    Company,
+    JournalEntry,
+    JournalEntryLine,
+    TaxCode,
+)
+
+logger = logging.getLogger(__name__)
+
+REQUIRED_FIELDS = ("booking_date", "amount", "purpose")
+CSV_FIELD_ALIASES = {
+    "booking_date": ("booking_date", "buchungstag", "datum", "date", "valuta", "wertstellung"),
+    "amount": ("amount", "betrag", "umsatz", "betrag_eur"),
+    "purpose": ("purpose", "verwendungszweck", "beschreibung", "description", "buchungstext"),
+    "counterparty": (
+        "counterparty",
+        "name",
+        "auftraggeber/empfänger",
+        "auftraggeber",
+        "empfänger",
+        "beguenstigter/zahlungspflichtiger",
+    ),
+}
+DATE_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y")
+# Original-Kontoauszugsexport der Finom-Bank (Komma-getrennt, Punkt als
+# Dezimaltrenner); erkannt an diesen Spalten.
+FINOM_SIGNATURE_COLUMNS = ("transaktions-id", "zahlungsbetrag")
+
+
+class BankImportError(ValueError):
+    """Raised when a bank import or transaction action is invalid."""
+
+
+@dataclass
+class BankImportRowError:
+    line_number: int
+    message: str
+
+
+@dataclass
+class BankImportReport:
+    total_rows: int = 0
+    imported_rows: int = 0
+    duplicate_rows: int = 0
+    error_rows: int = 0
+    errors: list[BankImportRowError] = field(default_factory=list)
+
+
+def import_bank_csv(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    csv_stream: TextIO,
+    changed_by: str,
+) -> BankImportReport:
+    """Importiert Bankumsätze aus einem CSV-Stream (idempotent über Dedup-Hash)."""
+    return import_bank_items(
+        session=session,
+        company_id=company_id,
+        bank_account_id=bank_account_id,
+        items=_csv_items(csv_stream),
+        changed_by=changed_by,
+        source="csv",
+    )
+
+
+def import_bank_statement(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    file_name: str,
+    content: bytes,
+    changed_by: str,
+) -> BankImportReport:
+    """Importiert eine Kontoauszugsdatei (CSV, CAMT.053-XML oder MT940)."""
+    statement_format = detect_statement_format(file_name, content)
+    try:
+        if statement_format == "camt":
+            items: Iterable[StatementItem] = parse_camt053(content)
+        elif statement_format == "mt940":
+            items = parse_mt940(content)
+        else:
+            items = _csv_items(StringIO(decode_statement_text(content)))
+    except BankStatementParseError as exc:
+        raise BankImportError(str(exc)) from exc
+
+    return import_bank_items(
+        session=session,
+        company_id=company_id,
+        bank_account_id=bank_account_id,
+        items=items,
+        changed_by=changed_by,
+        source=statement_format,
+    )
+
+
+def import_bank_items(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    items: Iterable[StatementItem],
+    changed_by: str,
+    source: str,
+    _retry_on_conflict: bool = True,
+) -> BankImportReport:
+    """Gemeinsame Import-Pipeline: Dedup, Persistenz und Audit-Log.
+
+    Wird vom Datei-Import (CSV/CAMT/MT940) und vom FinTS-Abruf genutzt.
+    """
+    company = session.get(Company, company_id)
+    if company is None:
+        raise BankImportError("Gesellschaft nicht gefunden.")
+
+    bank_account = session.get(Account, bank_account_id)
+    if bank_account is None or bank_account.company_id != company.id:
+        raise BankImportError("Bankkonto nicht gefunden.")
+
+    items = list(items)
+    report = BankImportReport()
+    existing_hashes = _existing_hashes_for(
+        session=session, company_id=company.id, bank_account_id=bank_account.id, items=items
+    )
+    # Bestände aus Importen vor der Referenz-Auswertung tragen referenzlose
+    # Hashes; jede solche Zeile darf höchstens eine Referenz-Zeile "schlucken".
+    legacy_matchable = set(existing_hashes)
+    occurrence_in_batch: dict[str, int] = {}
+    reference_rows_in_batch = _reference_rows_per_legacy_hash(
+        bank_account_id=bank_account.id, items=items
+    )
+
+    for item in items:
+        report.total_rows += 1
+        if isinstance(item, BankStatementRowError):
+            _record_error(report, item.position, item.message)
+            continue
+
+        if item.amount == Decimal("0.00"):
+            _record_error(report, item.position, "Betrag darf nicht 0 sein.")
+            continue
+
+        hash_fields = _legacy_hash_fields(bank_account_id=bank_account.id, item=item)
+        purpose = hash_fields["purpose"]
+        counterparty = hash_fields["counterparty"]
+        legacy_hash = _dedup_hash(**hash_fields)
+        if item.bank_reference:
+            dedup_hash = _dedup_hash(**hash_fields, bank_reference=item.bank_reference)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
+            # Gleich aussehende Altbestandszeilen tragen ab der zweiten das
+            # Suffix "|n:k" — auch diese dürfen je eine Referenz-Zeile decken.
+            legacy_match = next(
+                (
+                    candidate
+                    for occurrence in range(1, reference_rows_in_batch[legacy_hash] + 1)
+                    if (candidate := _dedup_hash(**hash_fields, occurrence=occurrence))
+                    in legacy_matchable
+                ),
+                None,
+            )
+            if legacy_match is not None:
+                legacy_matchable.discard(legacy_match)
+                report.duplicate_rows += 1
+                continue
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            dedup_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
+            if dedup_hash in existing_hashes:
+                report.duplicate_rows += 1
+                continue
+
+        session.add(
+            BankTransaction(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                bank_account_id=bank_account.id,
+                booking_date=item.booking_date,
+                amount=item.amount,
+                currency_code=item.currency_code or company.currency_code,
+                purpose=purpose,
+                counterparty=counterparty,
+                bank_reference=item.bank_reference,
+                dedup_hash=dedup_hash,
+            )
+        )
+        existing_hashes.add(dedup_hash)
+        report.imported_rows += 1
+
+    try:
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="bank_import",
+            entity_id=str(bank_account.id),
+            action="imported",
+            changed_by=changed_by,
+            payload={
+                "source": source,
+                "imported": report.imported_rows,
+                "duplicates": report.duplicate_rows,
+                "errors": report.error_rows,
+            },
+        )
+        notify_bank_transactions(session, company_id=company.id, count=report.imported_rows)
+        session.commit()
+    except IntegrityError as exc:
+        # Paralleler Import derselben Datei: der Unique-Constraint auf
+        # (company_id, dedup_hash) hat gewonnen — einmal neu gegen den
+        # aktuellen Bestand rechnen, dann sind die Zeilen Duplikate.
+        session.rollback()
+        if not _retry_on_conflict:
+            raise BankImportError(
+                "Paralleler Bank-Import erkannt — bitte erneut versuchen."
+            ) from exc
+        return import_bank_items(
+            session=session,
+            company_id=company_id,
+            bank_account_id=bank_account_id,
+            items=items,
+            changed_by=changed_by,
+            source=source,
+            _retry_on_conflict=False,
+        )
+    return report
+
+
+def _legacy_hash_fields(*, bank_account_id: int, item: BankStatementRow) -> dict:
+    return dict(
+        bank_account_id=bank_account_id,
+        booking_date=item.booking_date,
+        amount=item.amount,
+        purpose=item.purpose[:255],
+        counterparty=item.counterparty[:255] if item.counterparty else None,
+    )
+
+
+def _reference_rows_per_legacy_hash(
+    *, bank_account_id: int, items: Sequence[StatementItem]
+) -> dict[str, int]:
+    """Zählt Referenz-Zeilen je referenzlosem Hash (für den Altbestand-Abgleich)."""
+    counts: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, BankStatementRowError) or not item.bank_reference:
+            continue
+        legacy_hash = _dedup_hash(**_legacy_hash_fields(bank_account_id=bank_account_id, item=item))
+        counts[legacy_hash] = counts.get(legacy_hash, 0) + 1
+    return counts
+
+
+def _existing_hashes_for(
+    *,
+    session: Session,
+    company_id: int,
+    bank_account_id: int,
+    items: Sequence[StatementItem],
+) -> set[str]:
+    """Lädt nur die Dedup-Hashes, die für diesen Import relevant sein können."""
+    candidates: set[str] = set()
+    occurrence_in_batch: dict[str, int] = {}
+    reference_occurrence_in_batch: dict[str, int] = {}
+    for item in items:
+        if isinstance(item, BankStatementRowError):
+            continue
+        hash_fields = _legacy_hash_fields(bank_account_id=bank_account_id, item=item)
+        legacy_hash = _dedup_hash(**hash_fields)
+        candidates.add(legacy_hash)
+        if item.bank_reference:
+            candidates.add(_dedup_hash(**hash_fields, bank_reference=item.bank_reference))
+            reference_occurrence = reference_occurrence_in_batch.get(legacy_hash, 0) + 1
+            reference_occurrence_in_batch[legacy_hash] = reference_occurrence
+            candidates.add(_dedup_hash(**hash_fields, occurrence=reference_occurrence))
+        else:
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            candidates.add(_dedup_hash(**hash_fields, occurrence=occurrence))
+    if not candidates:
+        return set()
+    return set(
+        session.execute(
+            select(BankTransaction.dedup_hash).where(
+                BankTransaction.company_id == company_id,
+                BankTransaction.dedup_hash.in_(candidates),
+            )
+        ).scalars()
+    )
+
+
+def _csv_items(csv_stream: TextIO) -> Iterable[StatementItem]:
+    reader = csv.DictReader(csv_stream, delimiter=_sniff_delimiter(csv_stream))
+    if not reader.fieldnames:
+        raise BankImportError("CSV-Kopfzeile fehlt.")
+    if _is_finom_header(reader.fieldnames):
+        return _finom_items(reader)
+    return _generic_csv_items(reader)
+
+
+def _generic_csv_items(reader: csv.DictReader) -> Iterable[StatementItem]:
+    header_mapping = _resolve_header_mapping(reader.fieldnames or [])
+
+    for line_number, raw_row in enumerate(reader, start=2):
+        row = {
+            canonical: (raw_row.get(source) or "").strip()
+            for canonical, source in header_mapping.items()
+        }
+
+        missing = [name for name in REQUIRED_FIELDS if not row.get(name)]
+        if missing:
+            yield BankStatementRowError(
+                line_number, f"Pflichtfelder fehlen: {', '.join(missing)}"
+            )
+            continue
+
+        try:
+            booking_date = _parse_date(row["booking_date"])
+            amount = _parse_amount(row["amount"])
+        except BankImportError as exc:
+            yield BankStatementRowError(line_number, str(exc))
+            continue
+
+        yield BankStatementRow(
+            position=line_number,
+            booking_date=booking_date,
+            amount=amount,
+            purpose=row["purpose"],
+            counterparty=row.get("counterparty") or None,
+        )
+
+
+def _is_finom_header(field_names: Sequence[str]) -> bool:
+    normalized = {name.strip().lstrip("\ufeff").lower() for name in field_names}
+    return all(column in normalized for column in FINOM_SIGNATURE_COLUMNS)
+
+
+def _finom_items(reader: csv.DictReader) -> Iterable[StatementItem]:
+    """Bildet den Finom-Export auf Umsatzzeilen ab.
+
+    Purpose/Counterparty entsprechen exakt der bisherigen manuellen Umwandlung
+    in das Standard-CSV, damit der referenzlose Dedup-Hash des Bestands passt:
+    nur ``Completed``-Zeilen, Betrag = Zahlungsbetrag, Kartenzahlungen als
+    "Kartenzahlung {Empfänger}" plus Ursprungsbetrag bei Fremdwährung. Die
+    Transaktions-ID wird zur bankseitigen Referenz.
+    """
+    for line_number, raw_row in enumerate(reader, start=2):
+        row = {
+            (key or "").strip().lstrip("\ufeff").lower(): (value or "").strip()
+            for key, value in raw_row.items()
+            if not isinstance(value, list)
+        }
+        if row.get("status", "").lower() != "completed":
+            continue
+
+        counterparty = row.get("auftraggeber/empfänger") or None
+        if row.get("transaktionsart", "").lower() == "card":
+            purpose = f"Kartenzahlung {counterparty or ''}".rstrip()
+            original_currency = row.get("ursprungswährung", "").upper()
+            original_amount = row.get("ursprungsbetrag", "")
+            if original_currency and original_currency != "EUR" and original_amount:
+                purpose += f" ({original_currency} {original_amount})"
+        else:
+            purpose = row.get("verwendungszweck", "")
+            if not purpose:
+                # Ohne Verwendungszweck lehnte das Standard-CSV die Zeile ab;
+                # es gibt also keinen Bestand, zu dem der Hash passen müsste.
+                purpose = " ".join(
+                    part for part in (row.get("transaktionsart"), counterparty) if part
+                )
+
+        missing = [
+            label
+            for label, value in (
+                ("Buchungsdatum", row.get("buchungsdatum")),
+                ("Zahlungsbetrag", row.get("zahlungsbetrag")),
+                ("Verwendungszweck", purpose),
+            )
+            if not value
+        ]
+        if missing:
+            yield BankStatementRowError(line_number, f"Pflichtfelder fehlen: {', '.join(missing)}")
+            continue
+
+        try:
+            booking_date = _parse_date(row["buchungsdatum"])
+            amount = _parse_amount(row["zahlungsbetrag"])
+        except BankImportError as exc:
+            yield BankStatementRowError(line_number, str(exc))
+            continue
+
+        yield BankStatementRow(
+            position=line_number,
+            booking_date=booking_date,
+            amount=amount,
+            purpose=purpose,
+            counterparty=counterparty,
+            currency_code=row.get("zahlungswährung", "").upper() or None,
+            bank_reference=row.get("transaktions-id", "")[:MAX_REFERENCE_LENGTH] or None,
+        )
+
+
+def suggest_matches(
+    *, session: Session, transaction: BankTransaction, limit: int = 5
+) -> list[JournalEntry]:
+    """Buchungen mit passender Zeile auf dem Bankkonto (Betrag + Seite), noch unverknüpft."""
+    return suggest_matches_for(session=session, transactions=[transaction], limit=limit).get(
+        transaction.id, []
+    )
+
+
+def suggest_matches_for(
+    *, session: Session, transactions: Sequence[BankTransaction], limit: int = 5
+) -> dict[int, list[JournalEntry]]:
+    """Wie ``suggest_matches``, aber mit einer Query für viele Umsätze (kein N+1)."""
+    open_transactions = [t for t in transactions if t.status == "open"]
+    if not open_transactions:
+        return {}
+
+    debit_amounts = {t.amount for t in open_transactions if t.amount > 0}
+    credit_amounts = {-t.amount for t in open_transactions if t.amount < 0}
+    amount_filters = []
+    if debit_amounts:
+        amount_filters.append(JournalEntryLine.debit_amount.in_(debit_amounts))
+    if credit_amounts:
+        amount_filters.append(JournalEntryLine.credit_amount.in_(credit_amounts))
+
+    already_linked = select(BankTransaction.journal_entry_id).where(
+        BankTransaction.journal_entry_id.is_not(None)
+    )
+    rows = session.execute(
+        select(JournalEntry, JournalEntryLine)
+        .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
+        .where(
+            JournalEntry.company_id.in_({t.company_id for t in open_transactions}),
+            JournalEntryLine.account_id.in_({t.bank_account_id for t in open_transactions}),
+            or_(*amount_filters),
+            JournalEntry.id.not_in(already_linked),
+        )
+        .order_by(JournalEntry.entry_date.desc())
+    ).all()
+
+    suggestions: dict[int, list[JournalEntry]] = {}
+    for transaction in open_transactions:
+        matches: list[JournalEntry] = []
+        seen: set[int] = set()
+        for entry, line in rows:
+            if (
+                entry.company_id != transaction.company_id
+                or line.account_id != transaction.bank_account_id
+                or entry.id in seen
+            ):
+                continue
+            if transaction.amount > 0:
+                fits = line.debit_amount == transaction.amount
+            else:
+                fits = line.credit_amount == -transaction.amount
+            if fits:
+                seen.add(entry.id)
+                matches.append(entry)
+                if len(matches) >= limit:
+                    break
+        suggestions[transaction.id] = matches
+    return suggestions
+
+
+@dataclass(slots=True)
+class BankReconciliationRow:
+    """Saldenabgleich eines Bankkontos: Buchsaldo vs. importierte Umsätze."""
+
+    account_id: int
+    account_code: str
+    account_name: str
+    book_balance: Decimal
+    statement_total: Decimal
+
+    @property
+    def difference(self) -> Decimal:
+        return self.book_balance - self.statement_total
+
+
+def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconciliationRow]:
+    """Je Bankkonto mit importierten Umsätzen: Buchsaldo (Soll − Haben aller
+    Buchungszeilen) gegen die Summe der Kontoauszugszeilen.
+
+    Eine Differenz ist nicht zwingend ein Fehler (z. B. Eröffnungsbuchungen vor
+    dem ersten Import), macht ein „schiefes“ Konto aber sofort sichtbar.
+    """
+    zero = Decimal("0.00")
+    statement_totals = dict(
+        session.execute(
+            select(BankTransaction.bank_account_id, func.sum(BankTransaction.amount))
+            .where(BankTransaction.company_id == company_id)
+            .group_by(BankTransaction.bank_account_id)
+        ).all()
+    )
+    if not statement_totals:
+        return []
+
+    book_rows = session.execute(
+        select(
+            JournalEntryLine.account_id,
+            func.coalesce(func.sum(JournalEntryLine.debit_amount), 0),
+            func.coalesce(func.sum(JournalEntryLine.credit_amount), 0),
+        )
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+        .where(
+            JournalEntry.company_id == company_id,
+            JournalEntryLine.account_id.in_(statement_totals),
+        )
+        .group_by(JournalEntryLine.account_id)
+    ).all()
+    book_balances = {row[0]: Decimal(row[1]) - Decimal(row[2]) for row in book_rows}
+
+    accounts = (
+        session.execute(
+            select(Account)
+            .where(Account.id.in_(statement_totals))
+            .order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        BankReconciliationRow(
+            account_id=account.id,
+            account_code=account.code,
+            account_name=account.name,
+            book_balance=book_balances.get(account.id, zero).quantize(zero),
+            statement_total=Decimal(statement_totals[account.id]).quantize(zero),
+        )
+        for account in accounts
+    ]
+
+
+TRANSFER_DATE_TOLERANCE_DAYS = 2
+
+
+def find_geldtransit_account(*, session: Session, company_id: int) -> Account | None:
+    """Findet das Geldtransit-Konto der Gesellschaft (SKR03 1360, SKR04 1460).
+
+    Maßgeblich ist die Bezeichnung „Geldtransit“; die Nummer allein genügt
+    nicht, weil 1360 im SKR04 „Darlehen“ und 1460 im SKR03 „Zweifelhafte
+    Forderungen“ ist.
+    """
+    return find_standard_account(session=session, company_id=company_id, standard=GELDTRANSIT)
+
+
+def detect_transfer_counterparts(
+    *, session: Session, transactions: Sequence[BankTransaction]
+) -> dict[int, BankTransaction]:
+    """Erkennt Übertrage zwischen eigenen Bankkonten unter den offenen Umsätzen.
+
+    Ein Gegenstück ist ein Umsatz derselben Gesellschaft auf einem anderen
+    Bankkonto mit gegenläufigem Betrag und höchstens
+    ``TRANSFER_DATE_TOLERANCE_DAYS`` Tagen Abstand. Jedes Gegenstück wird nur
+    einmal vergeben. Solche Übertrage gehören gegen das Geldtransit-Konto
+    gebucht, nie direkt gegen das andere Bankkonto.
+    """
+    candidates = [t for t in transactions if t.status == "open"]
+    if not candidates:
+        return {}
+
+    tolerance = timedelta(days=TRANSFER_DATE_TOLERANCE_DAYS)
+    min_date = min(t.booking_date for t in candidates) - tolerance
+    max_date = max(t.booking_date for t in candidates) + tolerance
+    counterpart_rows = (
+        session.execute(
+            select(BankTransaction).where(
+                BankTransaction.company_id.in_({t.company_id for t in candidates}),
+                BankTransaction.amount.in_({-t.amount for t in candidates}),
+                BankTransaction.booking_date >= min_date,
+                BankTransaction.booking_date <= max_date,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    matches: dict[int, BankTransaction] = {}
+    used_counterparts: set[int] = set()
+    for transaction in sorted(candidates, key=lambda t: (t.booking_date, t.id)):
+        best = None
+        for row in counterpart_rows:
+            if (
+                row.id == transaction.id
+                or row.id in used_counterparts
+                or row.company_id != transaction.company_id
+                or row.bank_account_id == transaction.bank_account_id
+                or row.amount != -transaction.amount
+                or abs(row.booking_date - transaction.booking_date) > tolerance
+            ):
+                continue
+            if best is None or abs(row.booking_date - transaction.booking_date) < abs(
+                best.booking_date - transaction.booking_date
+            ):
+                best = row
+        if best is not None:
+            used_counterparts.add(best.id)
+            matches[transaction.id] = best
+    return matches
+
+
+def match_transaction(
+    *, session: Session, transaction_id: int, journal_entry_id: int, changed_by: str
+) -> BankTransaction:
+    transaction = session.get(BankTransaction, transaction_id)
+    if transaction is None:
+        raise BankImportError("Bankumsatz nicht gefunden.")
+    if transaction.status != "open":
+        raise BankImportError("Der Bankumsatz ist bereits zugeordnet.")
+
+    entry = session.get(JournalEntry, journal_entry_id)
+    if entry is None or entry.company_id != transaction.company_id:
+        raise BankImportError("Buchung nicht gefunden.")
+
+    already_linked = session.execute(
+        select(BankTransaction.id).where(
+            BankTransaction.journal_entry_id == entry.id,
+            BankTransaction.id != transaction.id,
+        )
+    ).first()
+    if already_linked is not None:
+        raise BankImportError("Die Buchung ist bereits einem anderen Bankumsatz zugeordnet.")
+
+    transaction.journal_entry_id = entry.id
+    transaction.status = "matched"
+
+    log_audit_event(
+        session=session,
+        tenant_id=transaction.tenant_id,
+        company_id=transaction.company_id,
+        entity_type="bank_transaction",
+        entity_id=str(transaction.id),
+        action="matched",
+        changed_by=changed_by,
+        payload={"journal_entry_id": entry.id, "posting_number": entry.posting_number},
+    )
+    session.commit()
+    session.refresh(transaction)
+    return transaction
+
+
+@dataclass
+class ReassignResult:
+    """Ergebnis eines Umzugs: bewegte Umsätze plus optionale Umgliederungsbuchung."""
+
+    transactions: list[BankTransaction] = field(default_factory=list)
+    reclassification_entry: JournalEntry | None = None
+
+    def __bool__(self) -> bool:
+        return bool(self.transactions)
+
+
+def reassign_bank_transactions(
+    *,
+    session: Session,
+    transaction_ids: Sequence[int],
+    bank_account_id: int,
+    changed_by: str,
+    reclassify: bool = True,
+) -> ReassignResult:
+    """Hängt einzelne Bankumsätze auf ein anderes Bankkonto um."""
+    ids = list(dict.fromkeys(transaction_ids))
+    if not ids:
+        raise BankImportError("Kein Bankumsatz ausgewählt.")
+
+    transactions = (
+        session.execute(select(BankTransaction).where(BankTransaction.id.in_(ids)))
+        .scalars()
+        .all()
+    )
+    found = {transaction.id for transaction in transactions}
+    missing = [str(transaction_id) for transaction_id in ids if transaction_id not in found]
+    if missing:
+        raise BankImportError(f"Bankumsatz nicht gefunden: {', '.join(missing)}")
+
+    company_ids = {transaction.company_id for transaction in transactions}
+    if len(company_ids) > 1:
+        raise BankImportError(
+            "Bankumsätze mehrerer Gesellschaften können nicht gemeinsam umgehängt werden."
+        )
+
+    return _reassign(
+        session=session,
+        company_id=company_ids.pop(),
+        transactions=transactions,
+        bank_account_id=bank_account_id,
+        changed_by=changed_by,
+        reclassify=reclassify,
+    )
+
+
+def move_bank_transactions(
+    *,
+    session: Session,
+    company_id: int,
+    source_bank_account_id: int,
+    target_bank_account_id: int,
+    changed_by: str,
+    statuses: Sequence[str] | None = None,
+    reclassify: bool = True,
+) -> ReassignResult:
+    """Hängt alle Umsätze eines Bankkontos auf ein anderes Bankkonto um.
+
+    Mit ``statuses`` lässt sich die Auswahl auf einzelne Status einschränken
+    (z. B. nur ``open``); ohne Angabe werden alle Umsätze des Quellkontos bewegt.
+    """
+    if source_bank_account_id == target_bank_account_id:
+        raise BankImportError("Quell- und Zielkonto sind identisch.")
+
+    _resolve_bank_account(
+        session=session, company_id=company_id, bank_account_id=source_bank_account_id
+    )
+
+    stmt = select(BankTransaction).where(
+        BankTransaction.company_id == company_id,
+        BankTransaction.bank_account_id == source_bank_account_id,
+    )
+    if statuses:
+        stmt = stmt.where(BankTransaction.status.in_(list(statuses)))
+    transactions = (
+        session.execute(stmt.order_by(BankTransaction.booking_date, BankTransaction.id))
+        .scalars()
+        .all()
+    )
+    if not transactions:
+        return ReassignResult()
+
+    return _reassign(
+        session=session,
+        company_id=company_id,
+        transactions=transactions,
+        bank_account_id=target_bank_account_id,
+        changed_by=changed_by,
+        reclassify=reclassify,
+    )
+
+
+def _reassign(
+    *,
+    session: Session,
+    company_id: int,
+    transactions: Sequence[BankTransaction],
+    bank_account_id: int,
+    changed_by: str,
+    reclassify: bool = True,
+) -> ReassignResult:
+    """Setzt das Bankkonto der Umsätze um und schreibt den Dedup-Hash fort.
+
+    Bereits erzeugte Buchungen bleiben nach dem GoBD-Grundsatz der
+    Unveränderbarkeit unverändert; mit ``reclassify=True`` (Standard) wird der
+    Saldo der bereits verbuchten Umsätze stattdessen über eine automatische
+    Umgliederungsbuchung (altes Bankkonto an neues) mitgezogen — atomar mit
+    dem Umzug.
+    """
+    target = _resolve_bank_account(
+        session=session, company_id=company_id, bank_account_id=bank_account_id
+    )
+
+    pending = [
+        transaction for transaction in transactions if transaction.bank_account_id != target.id
+    ]
+    if not pending:
+        return ReassignResult()
+
+    moved_ids = {transaction.id for transaction in pending}
+    taken_hashes = set(
+        session.execute(
+            select(BankTransaction.dedup_hash).where(
+                BankTransaction.company_id == company_id,
+                BankTransaction.id.not_in(moved_ids),
+            )
+        ).scalars()
+    )
+
+    occurrence_in_batch: dict[str, int] = {}
+    booked_net_by_source: dict[int, Decimal] = {}
+    for transaction in pending:
+        hash_fields = dict(
+            bank_account_id=target.id,
+            booking_date=transaction.booking_date,
+            amount=transaction.amount,
+            purpose=transaction.purpose,
+            counterparty=transaction.counterparty,
+        )
+        if transaction.bank_reference:
+            new_hash = _dedup_hash(**hash_fields, bank_reference=transaction.bank_reference)
+        else:
+            legacy_hash = _dedup_hash(**hash_fields)
+            occurrence = occurrence_in_batch.get(legacy_hash, 0) + 1
+            occurrence_in_batch[legacy_hash] = occurrence
+            new_hash = _dedup_hash(**hash_fields, occurrence=occurrence)
+        if new_hash in taken_hashes:
+            raise BankImportError(
+                f"Bankumsatz {transaction.id} ({transaction.booking_date.isoformat()}, "
+                f"{transaction.amount}) ist auf Konto {target.code} bereits vorhanden."
+            )
+        taken_hashes.add(new_hash)
+
+        previous_bank_account_id = transaction.bank_account_id
+        transaction.bank_account_id = target.id
+        transaction.dedup_hash = new_hash
+        if transaction.journal_entry_id is not None:
+            # Nur bereits verbuchte/zugeordnete Umsätze haben den Buchsaldo
+            # des alten Kontos beeinflusst.
+            booked_net_by_source[previous_bank_account_id] = (
+                booked_net_by_source.get(previous_bank_account_id, Decimal("0.00"))
+                + transaction.amount
+            )
+
+        log_audit_event(
+            session=session,
+            tenant_id=transaction.tenant_id,
+            company_id=transaction.company_id,
+            entity_type="bank_transaction",
+            entity_id=str(transaction.id),
+            action="reassigned",
+            changed_by=changed_by,
+            payload={
+                "from_bank_account_id": previous_bank_account_id,
+                "to_bank_account_id": target.id,
+                "status": transaction.status,
+                # Die verknüpfte Buchung selbst bleibt unverändert (GoBD);
+                # der Saldo wird ggf. per Umgliederungsbuchung mitgezogen.
+                "journal_entry_id": transaction.journal_entry_id,
+            },
+        )
+
+    reclassification_entry = None
+    if reclassify:
+        reclassification_entry = _create_reclassification_entry(
+            session=session,
+            company_id=company_id,
+            target=target,
+            booked_net_by_source=booked_net_by_source,
+            changed_by=changed_by,
+        )
+
+    session.commit()
+    for transaction in pending:
+        session.refresh(transaction)
+    return ReassignResult(
+        transactions=list(pending), reclassification_entry=reclassification_entry
+    )
+
+
+def _create_reclassification_entry(
+    *,
+    session: Session,
+    company_id: int,
+    target: Account,
+    booked_net_by_source: dict[int, Decimal],
+    changed_by: str,
+) -> JournalEntry | None:
+    """Umgliederungsbuchung für umgehängte, bereits verbuchte Umsätze.
+
+    Je Quellkonto eine Zeile über den Netto-Saldo der bewegten verbuchten
+    Umsätze, gegengebucht auf dem Zielkonto — damit zeigen altes wie neues
+    Bankkonto nach dem Umzug wieder den echten Banksaldo. Kein eigener
+    Commit: läuft atomar mit dem Umzug.
+    """
+    zero = Decimal("0.00")
+    sources = {
+        account_id: net for account_id, net in booked_net_by_source.items() if net != zero
+    }
+    if not sources:
+        return None
+
+    source_codes = sorted(
+        code
+        for (code,) in session.execute(
+            select(Account.code).where(Account.id.in_(sources))
+        ).all()
+    )
+    lines = []
+    for source_account_id, net in sorted(sources.items()):
+        # net > 0: der Zugang lag bisher auf dem Quellkonto -> Quellkonto
+        # entlasten (Haben), Zielkonto belasten (Soll); net < 0 umgekehrt.
+        lines.append(
+            JournalLineInput(
+                account_id=source_account_id,
+                debit_amount=-net if net < zero else zero,
+                credit_amount=net if net > zero else zero,
+            )
+        )
+    total = sum(sources.values(), zero)
+    if total != zero:
+        lines.append(
+            JournalLineInput(
+                account_id=target.id,
+                debit_amount=total if total > zero else zero,
+                credit_amount=-total if total < zero else zero,
+            )
+        )
+    if len(lines) < 2:
+        return None
+
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company_id,
+            entry_date=date.today(),
+            description=(
+                f"Umgliederung Bankumsätze {', '.join(source_codes)} → {target.code}"
+            ),
+            status="posted",
+            changed_by=changed_by,
+            lines=lines,
+        ),
+        commit=False,
+    )
+
+
+def _resolve_bank_account(
+    *, session: Session, company_id: int, bank_account_id: int
+) -> Account:
+    account = session.get(Account, bank_account_id)
+    if account is None or account.company_id != company_id:
+        raise BankImportError("Bankkonto nicht gefunden.")
+    if account.account_type != "asset":
+        raise BankImportError("Als Bankkonto sind nur Sachkonten der Kontoart asset zulässig.")
+    if account.subledger is not None:
+        raise BankImportError("Ein Debitoren-Sammelkonto ist kein Bankkonto.")
+    return account
+
+
+def net_from_gross(gross: Decimal, rate: Decimal) -> tuple[Decimal, Decimal]:
+    """Zerlegt einen Bruttobetrag in Netto + Steuer.
+
+    Netto ist der kaufmännisch gerundete Anteil ``Brutto / (1 + Satz)``, die
+    Steuer die Differenz ``Brutto − Netto``. Damit geht jeder Bruttobetrag auf;
+    ein etwaiger Rundungscent gegenüber ``Netto × Satz`` liegt auf der
+    Steuerzeile (bei 19 % betrifft das rund jeden sechsten Centbetrag, z. B.
+    1,22 € → 1,03 € + 0,19 €).
+    """
+    cent = Decimal("0.01")
+    gross = gross.quantize(cent)
+    if rate <= 0:
+        return gross, Decimal("0.00")
+
+    net = (gross / (Decimal("1") + rate / Decimal("100"))).quantize(
+        cent, rounding=ROUND_HALF_UP
+    )
+    return net, gross - net
+
+
+def book_transaction(
+    *,
+    session: Session,
+    transaction_id: int,
+    contra_account_id: int,
+    changed_by: str,
+    tax_code_id: int | None = None,
+    description: str | None = None,
+    cost_center_id: int | None = None,
+    profit_center_id: int | None = None,
+    partner_id: int | None = None,
+) -> BankTransaction:
+    """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto).
+
+    ``partner_id`` ist der Geschäftspartner der Buchung: Er steht auf Bank- und
+    Gegenkontozeile, nicht auf der Steuerzeile (``apply_entry_partner``).
+    """
+    transaction = session.get(BankTransaction, transaction_id)
+    if transaction is None:
+        raise BankImportError("Bankumsatz nicht gefunden.")
+    if transaction.status != "open":
+        raise BankImportError("Der Bankumsatz ist bereits zugeordnet.")
+
+    contra_account = session.get(Account, contra_account_id)
+    if contra_account is None or contra_account.company_id != transaction.company_id:
+        raise BankImportError("Gegenkonto nicht gefunden.")
+
+    company = session.get(Company, transaction.company_id)
+    if transaction.currency_code and transaction.currency_code != company.currency_code:
+        raise BankImportError(
+            f"Bankumsatz in {transaction.currency_code} kann nicht direkt als "
+            f"{company.currency_code}-Buchung übernommen werden — bitte manuell "
+            "mit Umrechnungskurs buchen."
+        )
+
+    gross = abs(transaction.amount)
+    contra_net = gross
+    tax_amount = Decimal("0.00")
+    tax_code = None
+    if tax_code_id is not None:
+        tax_code = session.get(TaxCode, tax_code_id)
+        if tax_code is None or tax_code.company_id != transaction.company_id:
+            raise BankImportError("Steuercode nicht gefunden.")
+        if not tax_code.is_active:
+            raise BankImportError("Inaktive Steuercodes dürfen nicht verwendet werden.")
+        contra_net, tax_amount = net_from_gross(gross, tax_code.rate)
+        if tax_amount > Decimal("0.00") and tax_code.vat_account_id is None:
+            raise BankImportError(
+                f"Steuercode {tax_code.code} hat kein Steuerkonto hinterlegt."
+            )
+
+    zero = Decimal("0.00")
+    incoming = transaction.amount > 0
+    bank_line = JournalLineInput(
+        account_id=transaction.bank_account_id,
+        debit_amount=gross if incoming else zero,
+        credit_amount=zero if incoming else gross,
+    )
+    contra_line = JournalLineInput(
+        account_id=contra_account.id,
+        debit_amount=zero if incoming else contra_net,
+        credit_amount=contra_net if incoming else zero,
+        tax_code_id=tax_code_id,
+        cost_center_id=cost_center_id,
+        profit_center_id=profit_center_id,
+    )
+    lines = [bank_line, contra_line]
+    if tax_code is not None and tax_amount > zero:
+        # Steuer = Brutto − Netto als explizite Zeile (Rundungscent liegt hier),
+        # statt sie über die Auto-Expansion aus dem Netto neu zu berechnen —
+        # sonst ginge das Brutto bei jedem sechsten Centbetrag nicht auf.
+        lines.append(
+            JournalLineInput(
+                account_id=tax_code.vat_account_id,
+                debit_amount=zero if incoming else tax_amount,
+                credit_amount=tax_amount if incoming else zero,
+                description=(
+                    f"{tax_code.code} {tax_code.rate}% auf {contra_net} "
+                    f"(aus Brutto {gross})"
+                ),
+                tax_code_id=tax_code.id,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
+            )
+        )
+
+    # commit=False: Buchung und Statuswechsel des Bankumsatzes müssen atomar
+    # persistiert werden, sonst kann derselbe Umsatz doppelt verbucht werden.
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=transaction.company_id,
+            entry_date=transaction.booking_date,
+            description=description or f"Bank: {transaction.purpose}",
+            status="posted",
+            changed_by=changed_by,
+            lines=lines,
+            expand_tax_lines=False,
+            partner_id=partner_id,
+        ),
+        commit=False,
+    )
+
+    transaction.journal_entry_id = entry.id
+    transaction.status = "booked"
+
+    log_audit_event(
+        session=session,
+        tenant_id=transaction.tenant_id,
+        company_id=transaction.company_id,
+        entity_type="bank_transaction",
+        entity_id=str(transaction.id),
+        action="booked",
+        changed_by=changed_by,
+        payload={
+            "journal_entry_id": entry.id,
+            "posting_number": entry.posting_number,
+            "cost_center_id": cost_center_id,
+            "profit_center_id": profit_center_id,
+            "partner_id": partner_id,
+        },
+    )
+    session.commit()
+    session.refresh(transaction)
+    return transaction
+
+
+def _sniff_delimiter(csv_stream: TextIO) -> str:
+    # Die Kopfzeile entscheidet: Verwendungszwecke enthalten oft Semikolons.
+    sample = csv_stream.readline()
+    csv_stream.seek(0)
+    if sample.count(";") > sample.count(","):
+        return ";"
+    return ","
+
+
+def _resolve_header_mapping(field_names: list[str]) -> dict[str, str]:
+    normalized_headers = {name.strip().lower(): name for name in field_names}
+    mapping: dict[str, str] = {}
+    for canonical, aliases in CSV_FIELD_ALIASES.items():
+        for alias in aliases:
+            if alias in normalized_headers:
+                mapping[canonical] = normalized_headers[alias]
+                break
+
+    missing = [name for name in REQUIRED_FIELDS if name not in mapping]
+    if missing:
+        raise BankImportError(f"CSV-Kopfzeile: Pflichtspalten fehlen: {', '.join(missing)}")
+    return mapping
+
+
+def _parse_date(value: str) -> date:
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    raise BankImportError(f"Ungültiges Datum: {value}")
+
+
+def _parse_amount(value: str) -> Decimal:
+    """Parst deutsche (1.234,56) und englische (1,234.56) Beträge.
+
+    Kommen beide Trennzeichen vor, ist das letzte der Dezimaltrenner. Ein
+    einzelnes Trennzeichen mit genau drei Nachfolgeziffern (z. B. "1,234")
+    ist nicht entscheidbar und wird abgelehnt statt umgedeutet.
+    """
+    normalized = value.replace(" ", "").replace(" ", "").replace("€", "")
+    last_dot = normalized.rfind(".")
+    last_comma = normalized.rfind(",")
+    if last_dot >= 0 and last_comma >= 0:
+        thousands, decimal_sep = (",", ".") if last_dot > last_comma else (".", ",")
+        normalized = normalized.replace(thousands, "").replace(decimal_sep, ".")
+    elif last_dot >= 0 or last_comma >= 0:
+        separator = "." if last_dot >= 0 else ","
+        integer_part, _, fraction_part = normalized.rpartition(separator)
+        if separator in integer_part:
+            # Mehrfach vorkommend: reine Tausendertrenner (1.234.567).
+            normalized = normalized.replace(separator, "")
+        elif (
+            len(fraction_part) == 3
+            and fraction_part.isdigit()
+            and integer_part.lstrip("+-").isdigit()
+        ):
+            raise BankImportError(
+                f"Mehrdeutiger Betrag: {value} — Tausender- oder Dezimaltrennzeichen "
+                "nicht erkennbar."
+            )
+        else:
+            normalized = normalized.replace(separator, ".")
+    try:
+        return Decimal(normalized).quantize(Decimal("0.01"))
+    except InvalidOperation as exc:
+        raise BankImportError(f"Ungültiger Betrag: {value}") from exc
+
+
+def parse_amount(value: str) -> Decimal:
+    """Öffentliche Variante von ``_parse_amount`` für andere Importpfade."""
+    return _parse_amount(value)
+
+
+def _dedup_hash(
+    *,
+    bank_account_id: int,
+    booking_date: date,
+    amount: Decimal,
+    purpose: str,
+    counterparty: str | None,
+    bank_reference: str | None = None,
+    occurrence: int = 1,
+) -> str:
+    """Duplikat-Hash einer Umsatzzeile.
+
+    Liegt eine bankseitige Referenz vor, ist sie Teil der Identität. Ohne
+    Referenz unterscheidet ``occurrence`` gleich aussehende echte Zahlungen
+    innerhalb einer Datei (das erste Vorkommen bleibt hash-kompatibel zu
+    Beständen aus der Zeit vor der Referenz-Auswertung).
+    """
+    raw = f"{bank_account_id}|{booking_date.isoformat()}|{amount}|{purpose}|{counterparty or ''}"
+    if bank_reference:
+        raw += f"|ref:{bank_reference}"
+    elif occurrence > 1:
+        raw += f"|n:{occurrence}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _record_error(report: BankImportReport, line_number: int, message: str) -> None:
+    report.error_rows += 1
+    report.errors.append(BankImportRowError(line_number=line_number, message=message))
+    logger.warning("Bank import error in line %s: %s", line_number, message)

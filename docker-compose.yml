@@ -1,0 +1,106 @@
+services:
+  app:
+    build: .
+    command: python run.py
+    ports:
+      # Standardmäßig nur lokal (Loopback). Für Remote-Zugriff APP_BIND_HOST=0.0.0.0
+      # setzen — dann ist die UI im Netz erreichbar (nur hinter Firewall/VPN/Tailscale
+      # oder Reverse-Proxy mit Auth sinnvoll, die App enthält Finanzdaten).
+      - "${APP_BIND_HOST:-127.0.0.1}:8000:8000"
+    volumes:
+      - ./:/app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+psycopg://openbuchhaltung:openbuchhaltung@db:5432/openbuchhaltung
+      # Globaler API-Token. Muss mit OPENBUCHHALTUNG_API_TOKEN des mcp-Service
+      # übereinstimmen, sonst lehnt die API dessen Aufrufe mit 401 ab. Leer =
+      # kein globaler Token; die API-Auth bleibt trotzdem an (API_REQUIRE_AUTH
+      # Default 1). Für Entwicklung ohne Token: API_REQUIRE_AUTH=0 setzen.
+      - API_AUTH_TOKEN=${API_AUTH_TOKEN:-}
+      - API_REQUIRE_AUTH=${API_REQUIRE_AUTH:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  mcp:
+    profiles: ["mcp", "proxy"]
+    build: .
+    # Streamable-HTTP-Transport des OpenBuchhaltung-MCP-Servers (Sprint O/P).
+    command: python -m app.services.mcp_http
+    ports:
+      # Auf dem Host nur lokal erreichbar; der Prozess im Container verlangt
+      # zusätzlich MCP_HTTP_AUTH_TOKEN, weil er intern auf 0.0.0.0 bindet.
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./:/app
+    environment:
+      # Der MCP-Server spricht die App-API über das Compose-Netz an.
+      - OPENBUCHHALTUNG_API_URL=http://app:8000/api/v1
+      - OPENBUCHHALTUNG_API_TOKEN=${OPENBUCHHALTUNG_API_TOKEN:-}
+      # 0.0.0.0, damit der Port aus dem Container heraus erreichbar ist.
+      - MCP_HTTP_HOST=0.0.0.0
+      - MCP_HTTP_PORT=8090
+      - MCP_HTTP_PATH=/mcp
+      - MCP_HTTP_AUTH_TOKEN=${MCP_HTTP_AUTH_TOKEN:-}
+      # Kommagetrennte erlaubte Browser-Origins (DNS-Rebinding-Schutz); Clients
+      # ohne Origin-Header (Claude Desktop/CLI) sind ohnehin zugelassen.
+      - MCP_HTTP_ALLOWED_ORIGINS=${MCP_HTTP_ALLOWED_ORIGINS:-}
+    # Der HEALTHCHECK des Images prüft die App auf Port 8000; der MCP-Server
+    # antwortet auf 8090 (GET /mcp → 405 = Prozess lebt).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,urllib.error,contextlib\nwith contextlib.suppress(urllib.error.HTTPError): urllib.request.urlopen('http://127.0.0.1:8090/mcp', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      - app
+
+  caddy:
+    image: caddy:2
+    # Opt-in: startet nur mit `docker compose --profile proxy up -d caddy`.
+    # HTTPS-Reverse-Proxy vor den MCP-Server für Claude-Desktop-Custom-Connectoren.
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"     # HTTP-01-Challenge / Redirect auf HTTPS
+      - "443:443"   # HTTPS (automatisches Let's-Encrypt-Zertifikat)
+    environment:
+      # Öffentliche Domain, die auf diesen Server zeigt (A/AAAA-Record).
+      - MCP_DOMAIN=${MCP_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mcp
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: openbuchhaltung
+      POSTGRES_USER: openbuchhaltung
+      POSTGRES_PASSWORD: openbuchhaltung
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openbuchhaltung -d openbuchhaltung"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    profiles: ["dev-tools"]
+    image: adminer:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

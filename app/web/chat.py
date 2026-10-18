@@ -1,0 +1,216 @@
+"""UI-Routen für den integrierten KI-Chat."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from flask import (
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from sqlalchemy import select
+
+from app.auth import current_user
+from app.services.chat import (
+    ChatError,
+    accessible_conversation,
+    rename_conversation,
+    resolve_chat_action,
+    run_chat_message,
+    serialize_message,
+)
+from app.services.chat_stream import respond
+from app.web.blueprint import main_bp
+from app.web.formatting import to_local_time
+from app.web.helpers import (
+    company_context,
+    get_session_factory,
+    require_company_access,
+)
+from domain.models import ChatConversation
+
+
+def _conversation_groups(conversations: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Unterhaltungen (neueste zuerst) nach Alter gruppieren, in deutscher Ortszeit."""
+    today = to_local_time(datetime.now(timezone.utc)).date()
+    groups: list[tuple[str, list[dict]]] = []
+    for conversation in conversations:
+        age = (today - to_local_time(conversation["updated_at"]).date()).days
+        if age <= 0:
+            label = "Heute"
+        elif age == 1:
+            label = "Gestern"
+        elif age < 7:
+            label = "Letzte 7 Tage"
+        elif age < 30:
+            label = "Letzte 30 Tage"
+        else:
+            label = "Älter"
+        if not groups or groups[-1][0] != label:
+            groups.append((label, []))
+        groups[-1][1].append(conversation)
+    return groups
+
+
+@main_bp.get("/chat")
+def chat_page():
+    session_factory = get_session_factory()
+    user = current_user()
+    with session_factory() as session:
+        companies, selected_company_id = company_context(session)
+
+        conversations: list[dict] = []
+        selected_conversation = None
+        messages: list[dict] = []
+        if selected_company_id is not None:
+            rows = (
+                session.execute(
+                    select(ChatConversation)
+                    .where(
+                        ChatConversation.company_id == selected_company_id,
+                        ChatConversation.user_id == user["id"],
+                    )
+                    .order_by(ChatConversation.updated_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+            conversations = [
+                {"id": row.id, "title": row.title, "updated_at": row.updated_at}
+                for row in rows
+            ]
+
+            conversation_id = request.args.get("conversation_id", type=int)
+            if conversation_id is not None:
+                conversation = accessible_conversation(
+                    session,
+                    conversation_id,
+                    tenant_id=user.get("tenant_id"),
+                    user_id=user["id"],
+                )
+                if conversation is not None and conversation.company_id == selected_company_id:
+                    selected_conversation = {
+                        "id": conversation.id,
+                        "title": conversation.title,
+                    }
+                    messages = [
+                        serialize_message(message) for message in conversation.messages
+                    ]
+
+    return render_template(
+        "chat.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        conversations=conversations,
+        conversation_groups=_conversation_groups(conversations),
+        selected_conversation=selected_conversation,
+        messages=messages,
+    )
+
+
+
+@main_bp.post("/chat/send")
+def chat_send():
+    session_factory = get_session_factory()
+    user = current_user()
+    company_id = request.form.get("company_id", type=int)
+    if company_id is None:
+        return jsonify({"error": "company_id fehlt."}), 400
+
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        # Company-Objekt außerhalb der Session weiterverwenden (nur Wertzugriffe).
+        session.expunge(company)
+
+    conversation_id = request.form.get("conversation_id", type=int)
+    message_text = request.form.get("message", "")
+    uploads = [
+        (upload.filename, upload.read())
+        for upload in request.files.getlist("attachments")
+        if upload and upload.filename
+    ]
+
+    def job(progress) -> dict[str, Any]:
+        exchange = run_chat_message(
+            session_factory=session_factory,
+            company=company,
+            conversation_id=conversation_id,
+            message_text=message_text,
+            uploads=uploads,
+            api_user=user,
+            global_access=user.get("tenant_id") is None,
+            progress=progress,
+        )
+        return {
+            "conversation_id": exchange.conversation_id,
+            "conversation_title": exchange.conversation_title,
+            "created_conversation": exchange.created_conversation,
+            "user_message": exchange.user_message,
+            "assistant_message": exchange.assistant_message,
+        }
+
+    return respond(job)
+
+
+@main_bp.post("/chat/actions/<int:message_id>/<action>")
+def chat_action(message_id: int, action: str):
+    """Human-in-the-Loop: wartende schreibende Aktion bestätigen oder ablehnen."""
+    if action not in {"confirm", "reject"}:
+        abort(404)
+    user = current_user()
+    session_factory = get_session_factory()
+
+    def job(progress) -> dict[str, Any]:
+        result = resolve_chat_action(
+            session_factory=session_factory,
+            message_id=message_id,
+            approve=action == "confirm",
+            api_user=user,
+            global_access=user.get("tenant_id") is None,
+            progress=progress,
+        )
+        return {
+            "conversation_id": result.conversation_id,
+            "updated_message": result.updated_message,
+            "assistant_message": result.assistant_message,
+        }
+
+    return respond(job)
+
+
+@main_bp.post("/chat/<int:conversation_id>/rename")
+def chat_rename(conversation_id: int):
+    session_factory = get_session_factory()
+    user = current_user()
+    with session_factory() as session:
+        conversation = accessible_conversation(
+            session, conversation_id, tenant_id=user.get("tenant_id"), user_id=user["id"]
+        )
+        if conversation is None:
+            return jsonify({"error": "Unterhaltung nicht gefunden."}), 404
+        try:
+            title = rename_conversation(conversation, request.form.get("title"))
+        except ChatError as exc:
+            return jsonify({"error": str(exc)}), 400
+        session.commit()
+    return jsonify({"conversation_id": conversation_id, "title": title})
+
+
+@main_bp.post("/chat/<int:conversation_id>/delete")
+def chat_delete(conversation_id: int):
+    session_factory = get_session_factory()
+    user = current_user()
+    with session_factory() as session:
+        conversation = accessible_conversation(
+            session, conversation_id, tenant_id=user.get("tenant_id"), user_id=user["id"]
+        )
+        company_id = conversation.company_id if conversation else None
+        if conversation is not None:
+            session.delete(conversation)
+            session.commit()
+    return redirect(url_for("main.chat_page", company_id=company_id))

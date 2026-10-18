@@ -1,0 +1,757 @@
+# Umsetzungsplan: OpenBuchhaltung (UG, GmbH, gGmbH)
+
+## 1. Zielbild
+OpenBuchhaltung wird eine webbasierte Open-Source-Buchhaltungssoftware für deutsche Kapitalgesellschaften
+(UG, GmbH, gGmbH) mit Fokus auf HGB-Konformität, Nachvollziehbarkeit und Erweiterbarkeit.
+
+**Technologie-Stack (Start):**
+- Backend: Python + Flask
+- Datenbank: SQLite (Entwicklung/Einzelmandant), optional PostgreSQL oder MariaDB (Produktion)
+- Frontend: Flask-Templates + eigenes CSS und Vanilla-JS (`app/static/app.js`,
+  CSP ohne Inline-Skripte); HTMX/Alpine.js wurde nicht eingesetzt (später optional SPA)
+- Hintergrundjobs: Celery/RQ (für Export, OCR, E-Mail, Prüfungen) — **noch nicht
+  umgesetzt**, der `worker`-Service im Compose ist ein Platzhalter
+
+## 2. Einordnung von GnuCash (Desktop) als Referenz
+GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HGB-Fokus sind folgende Punkte relevant:
+- primär als Desktop-Anwendung gedacht
+- SQL-Speicher möglich (SQLite/MySQL/PostgreSQL), aber ohne echte Multi-User-DBMS-Funktionalität
+- kein Schwerpunkt auf deutscher HGB-Standardisierung für Kapitalgesellschaften
+
+=> Für OpenBuchhaltung sollte der Fokus auf Mandantenfähigkeit, rollenbasierter Zusammenarbeit,
+   GoBD-konformer Historisierung/Audit-Log sowie HGB-Berichtswesen liegen.
+
+## 3. Fachlicher Scope (MVP bis V2)
+
+### MVP (erste produktive Version)
+1. Mandanten- und Stammdatenverwaltung (UG, GmbH, gGmbH)
+2. Kontenrahmen (SKR03/SKR04) inkl. anpassbarer Konten
+3. Journalbuchungen mit Soll/Haben-Prüfung
+4. Belegverwaltung (Upload, Verknüpfung mit Buchung)
+5. USt-Logik (19%, 7%, steuerfrei, innergemeinschaftlich Basisfälle)
+6. Standardauswertungen:
+   - Summen- und Saldenliste
+   - BWA (einfach)
+   - Bilanz und GuV (HGB-Grundschema)
+7. Abschlussfunktionen:
+   - Periodensperre
+   - Abschlussbuchungen (manuell unterstützt)
+8. Export:
+   - CSV
+   - DATEV-ähnlicher Export (zunächst minimaler Umfang)
+9. Rechte & Sicherheit:
+   - Rollen (Admin, Buchhalter, Prüfer/Leser)
+   - Vollständiger Audit-Log
+
+### V1.5
+- [x] Offene-Posten-Logik Debitor/Kreditor
+- [x] Zahlungsabgleich (Kontoauszugs-Import CSV/CAMT.053/MT940 + FinTS-Direktabruf)
+- [x] Mahnstufen (Basis) *(Sprint 2026-08-30: Mahnstufe 1-3 + letztes
+      Mahndatum am offenen Posten [Migration 0033], Mahnvorschlagsliste mit
+      7-Tage-Schonfrist, druckbares Mahnschreiben je Stufe, Audit-Event
+      "dunned"; UI-Seite Mahnwesen plus API/MCP-Parität)*
+- [x] Anlagenverzeichnis + Anlagenbuchhaltung (siehe Sprint N)
+
+### V2
+- [x] E-Rechnung (XRechnung/ZUGFeRD Import/Export)
+- [x] Automatisierte Belegerkennung (OCR + Buchungsvorschläge, LLM-Belegabgleich)
+- [ ] Konsolidierung/mehrere Gesellschaften
+- [x] API für Steuerberater-Tools (REST + MCP-Server, UI/API/MCP-Parität)
+
+## 4. Zielarchitektur
+
+## 4.1 Schichten
+1. **Presentation Layer**: Flask Blueprints (UI + API)
+2. **Application Layer**: Use-Cases (Buchung erfassen, Abschlusslauf etc.)
+3. **Domain Layer**: Fachobjekte (Konto, Buchung, Beleg, Periode, Steuercode)
+4. **Persistence Layer**: SQLAlchemy + Alembic
+
+## 4.2 Mandantenfähigkeit
+- Jede Tabelle enthält `tenant_id`
+- Strikte Tenant-Filterung im ORM
+- Optional später: physische Trennung je Mandant (eigene DB)
+
+## 4.3 Auditierbarkeit/GoBD-Basis
+- Unveränderbarkeit von Buchungen nach Festschreibung
+- Korrekturen ausschließlich über Storno-/Gegenbuchungen
+- Lückenlose Änderungsprotokolle (wer, wann, was)
+- Versionierte Reports (Hash über Report-Inhalt und Parameter)
+
+## 4.4 Datenbankstrategie
+- **Entwicklung:** SQLite
+- **Produktion default:** PostgreSQL
+- **Alternative:** MariaDB
+
+Hinweis: Datenbankspezifische SQL-Features zunächst vermeiden (portable SQLAlchemy-Nutzung),
+um Wechsel zwischen Engines zu vereinfachen.
+
+## 5. Domänenmodell (Kern-Entitäten)
+- `Tenant` (Mandant)
+- `Company` (Gesellschaftsdaten, Rechtsform, Geschäftsjahr)
+- `FiscalYear`, `Period`, `PeriodLock`
+- `Account` (inkl. Kontenklasse, SKR-Mapping, Sammelkonto-Kennzeichen)
+- `BusinessPartner` (Kunden/Debitoren, Lieferanten/Kreditoren; Nebenbuch an Sammelkonten)
+- `TaxCode` (Steuerlogik)
+- `JournalEntry`, `JournalEntryLine`
+- `Document` (Belegmetadaten + Datei)
+- `VatReturn` (Vorbereitung UStVA)
+- `ReportSnapshot`
+- `User`, `Role`, `Permission`, `AuditLog`
+
+## 6. Sicherheits- und Compliance-Anforderungen
+- DSGVO: Datenminimierung, Export/Löschkonzepte
+- IT-Sicherheit:
+  - Passwort-Hashing (Argon2/Bcrypt)
+  - CSRF-Schutz
+  - Rate Limiting
+  - Verschlüsselung ruhender Belege (optional in V1)
+- Backups:
+  - automatisierte tägliche Backups
+  - Restore-Test als Pflichtprozess
+
+## 7. Projektphasen mit konkreten Tasks
+
+## Phase 0 – Foundations (2–3 Wochen)
+- [x] Repository-Struktur aufsetzen (`app/`, `domain/`, `tests/`, `migrations/`)
+- [x] Docker-Compose (app + db + worker + adminer/pgadmin)
+- [x] CI (Lint, Tests, Migrationscheck)
+- [x] Coding-Guidelines + ADR-Template
+- [x] Grundlegendes Rechtemodell + Login (v0, Demo-User)
+
+## Phase 1 – Kernbuchhaltung MVP (6–10 Wochen)
+- [x] Kontenrahmenimport SKR03/SKR04
+- [x] Buchungsmaske (Soll/Haben, Steuercode, Beleglink) *(MVP-Basis umgesetzt; Beleglink folgt mit P1-002)*
+- [x] Validierungsregeln (Bilanzgleichheit, gesperrte Perioden) *(Basisregeln inkl. Periodensperre umgesetzt)*
+- [x] Belegupload + Speicherung + Verknüpfung
+- [x] Externes LLM für Beleg-Updates über OpenAI-Responses-kompatible Schnittstelle integrieren *(Upload-Flow ruft optional einen OpenAI-Responses-kompatiblen Endpoint auf; Fehler blockieren Upload nicht)*
+- [x] Audit-Log für alle buchungsrelevanten Aktionen *(für JournalEntry-Erfassung umgesetzt; Erweiterung siehe P1-005)*
+- [x] Summen-/Saldenliste
+- [x] GuV/Bilanz-Report (HGB-Basisschema) *(MVP-Basis mit GuV/Bilanz-Endpunkten, Bilanzgleichheitsindikator und UI-Totals umgesetzt)*
+- [x] CSV-Export *(Core-Exports für Journal und Summen-/Saldenliste über API + UI-Downloadlinks umgesetzt)*
+- [x] End-to-End-Tests für Kernflows *(Happy Path + fachliche Negativfälle und CI-Gate mit `pytest -m e2e` ergänzt)*
+
+## Phase 1.5 – Prototyp-Härtung / Sprint C (Stand 2026-07-05)
+
+Ziel: Aus dem funktionierenden Kern einen vorzeigbaren, von Dritten nutzbaren Prototyp machen.
+
+- [x] **P1.5-001 Login-Pflicht durchsetzen**: UI-Routen erfordern Anmeldung; DB-Modell
+      `User` mit Passwort-Hash (werkzeug/scrypt) ersetzt den Platzhalter-Userstore;
+      Rollen (Admin/Buchhalter/Prüfer) werden bei Schreibaktionen geprüft. API optional
+      per `API_AUTH_TOKEN` (Bearer) geschützt; Benutzer-Tokens folgen in Phase 3.
+- [x] **P1.5-002 Tenant-Scoping aktivieren**: Session-Tenant des Benutzers filtert alle
+      UI-Queries; Cross-Tenant-Zugriffe liefern 404; Mandanten anlegen nur als globaler
+      Admin. Tests für Cross-Tenant-Verbot ergänzt.
+- [x] **P1.5-003 Steuercodes in Buchungsmaske**: Standard-Steuercodes (USt19/USt7/VSt19/
+      VSt7/frei) je Gesellschaft, Auswahl je Buchungszeile, automatische USt-/VSt-Teilbuchung
+      (Netto-Erfassung); `TaxCode.vat_account_id` per Migration ergänzt.
+- [x] **P1.5-004 Demo-Seed-Command**: `flask seed-demo` legt Mandant, Gesellschaft,
+      SKR03-Konten, Steuercodes, Benutzer und Beispielbuchungen idempotent an.
+- [x] **P1.5-005 Kleinigkeiten**: Port per `PORT`-ENV konfigurierbar (Default 8000),
+      README auf Port 8000 umgestellt; `create_app` liest jetzt ENV-Variablen
+      (DATABASE_URL, DOCUMENT_LLM_*, MCP_SERVER_URL, SECRET_KEY, API_AUTH_TOKEN) —
+      vorher waren die dokumentierten Exports wirkungslos. Bugfix: GuV/Bilanz erkennen
+      jetzt auch `account_type=income` (SKR-Importe) als Erlöskonten.
+
+## Phase 1.6 – UI & Sicherheit / Sprint D (Stand 2026-07-05)
+
+- [x] **P1.6-001 CSRF-Schutz**: Session-basierter Token für alle UI-/Auth-Formulare
+      (ohne neue Dependency); Requests ohne gültigen Token liefern 400.
+      In Tests standardmäßig deaktiviert, dedizierter CSRF-Test vorhanden.
+- [x] **P1.6-002 Mehrseitige UI**: Monolithische Startseite aufgeteilt in Dashboard,
+      Buchungen, Konten, Belege, Berichte und Verwaltung; Topbar-Navigation mit
+      Gesellschaftsauswahl und Login-Status; eigenes CSS (`app/static/style.css`,
+      kein Framework); Dashboard mit Kennzahlen (GuV-Totals, Bilanzsumme,
+      Bilanzgleichheit, Zähler); GuV/Bilanz jetzt mit Einzelpositionen;
+      Kontotyp-Auswahl statt Freitext; gestylte Login-Seite.
+
+## Phase 1.7 – Anlagenbuchhaltung / Sprint N (Stand 2026-07-09)
+
+- [x] **P1.7-001 Anlagenbuchhaltung mit allen HGB-/steuerlichen AfA-Verfahren**:
+      Reine Abschreibungs-Engine (`domain/services/depreciation.py`) mit
+      **linearer AfA** (§ 7 Abs. 1 EStG, im Zugangsjahr zeitanteilig/monatsgenau
+      nach § 7 Abs. 1 S. 4 EStG), **geometrisch-degressiver AfA** (§ 7 Abs. 2
+      EStG) inkl. automatischem **Übergang zur linearen AfA**, **Leistungs-AfA**
+      (§ 7 Abs. 1 S. 6 EStG, nach Jahresmengen), **GWG-Sofortabschreibung**
+      (§ 6 Abs. 2 EStG), **Sammelposten/Poolabschreibung** über 5 Jahre
+      (§ 6 Abs. 2a EStG) sowie Verfahren „manuell"; Restwert und Erinnerungswert
+      (1,00 €) als Buchwert-Untergrenze. Domänenmodelle `FixedAsset` /
+      `DepreciationEntry` (Migration 0009), Service `app/services/fixed_assets.py`
+      (Anlage anlegen, Plan rechnen, planmäßige AfA je Wirtschaftsjahr als
+      Direktabschreibung „Soll Abschreibungen an Anlagekonto" verbuchen,
+      außerplanmäßige Abschreibung/AfaA nach § 253 Abs. 3 HGB, Anlagenabgang mit
+      Ausbuchung des Restbuchwerts). REST-Endpunkte (`/api/v1/fixed-assets`,
+      `.../schedule`, `.../depreciation`), MCP-Tools (`create_fixed_asset`,
+      `list_fixed_assets`, `get_depreciation_schedule`, `post_depreciation`) und
+      UI-Seite „Anlagen" (Anlagenverzeichnis, Buchwertsumme, Abschreibungsplan,
+      AfA-/Abwertungs-/Abgangsbuchung). Audit-Events für alle Aktionen.
+
+## Phase 1.8 – Struktur-Refactoring / Sprint R (Stand 2026-07-12)
+
+- [x] **P1.8-001 Blueprint-Split**: Die monolithischen Module `app/main.py`
+      (~2.150 Zeilen) und `app/api.py` (~880 Zeilen) wurden in fachliche Pakete
+      zerlegt: `app/web/` (dashboard, journal, accounts, documents, receipt_ocr,
+      reports, admin, bank, open_items, fixed_assets, einvoice, periods) und
+      `app/api/` (system, tenants, accounts, journal, reports, exports,
+      fixed_assets, mcp), jeweils mit `blueprint.py` (Blueprint-Objekt) und
+      `helpers.py` (gemeinsame Helfer). Blueprint-Namen (`main`, `api`),
+      Routen und Endpoints sind unverändert — Templates und API-Clients sind
+      nicht betroffen. Rein mechanisches Refactoring ohne Verhaltensänderung.
+
+## Phase 1.9 – GoBD-Härtung / Sprint S (Stand 2026-07-12)
+
+- [x] **P1.9-001 Festschreibung & Storno (GoBD)**: `JournalEntry` um
+      `is_finalized`/`finalized_at`/`finalized_by` und `reversal_of_id`
+      (Migration 0010) erweitert. Festschreiben einzeln oder als
+      Festschreibelauf („alle Buchungen bis Datum", Service
+      `finalize_journal_entries_until`); doppeltes Festschreiben wird
+      abgewiesen. Storno ausschließlich über Gegenbuchung
+      (`reverse_journal_entry`): Original bleibt unverändert, die Stornobuchung
+      spiegelt alle Zeilen (Soll/Haben getauscht, keine erneute
+      Steuer-Auto-Expansion), trägt `source="storno"`, verweist auf das
+      Original (unique — kein Doppelstorno) und wird sofort festgeschrieben;
+      Storno von Stornobuchungen ist verboten, Periodensperren gelten auch für
+      das Stornodatum. UI: Status-/Aktionsspalte im Journal (🔒 festgeschrieben,
+      „Storno zu …"/„storniert durch …", Buttons Festschreiben/Stornieren,
+      Festschreibelauf-Formular). API: `POST /journal-entries/<id>/finalize`
+      und `/reverse`. DATEV-Export setzt das Festschreibekennzeichen im
+      EXTF-Header auf 1, wenn alle Buchungen des Stapels festgeschrieben sind.
+      Audit-Events `finalized`/`reversed` für alle Aktionen.
+
+## Phase 1.10 – UStVA / Sprint T (Stand 2026-07-12)
+
+- [x] **P1.10-001 Umsatzsteuer-Voranmeldung**: Kennziffern-Berechnung
+      (`app/services/vat_returns.py`) datengetrieben aus den Journaldaten:
+      Steuerzeilen (Zeile auf dem Steuerkonto des Steuercodes) liefern USt/VSt,
+      Basiszeilen die Bemessungsgrundlagen; Richtung über den Kontotyp des
+      Steuerkontos (liability = USt, asset = VSt), steuerfreie Umsätze über
+      0-%-Codes auf Ertragskonten. Kennziffern Kz 81/86 (BMG in vollen Euro,
+      abgerundet), Kz 48 (steuerfrei), Kz 66 (Vorsteuer), Kz 83
+      (Zahllast/Überschuss, centgenau aus der Buchhaltung); Stornos
+      neutralisieren sich automatisch (Stornozeilen behalten den Steuercode,
+      `expand_tax_lines=False` verhindert doppelte Steuer-Expansion).
+      Meldezeiträume Monat ("JJJJ-MM"), Quartal ("JJJJ-Qn"), Halbjahr
+      ("JJJJ-Hn") und Jahr ("JJJJ") — wiederverwendbar für weitere
+      Steuerarten (ELSTER, Phase 3.5).
+      `VatReturn`-Modell (Migration 0011) hält Voranmeldungen/Jahreserklärungen als
+      unveränderlichen Kennziffern-Snapshot fest (unique je Gesellschaft und
+      Zeitraum, Status erstellt/uebermittelt, Audit-Event). UI-Seite „UStVA"
+      (Zeitraumwahl, Kennziffern-Tabelle, Festhalten, Liste); API
+      `GET /api/v1/vat-return` (Berechnung), `GET/POST /api/v1/vat-returns`.
+      Die elektronische Übermittlung folgt mit der ELSTER-Schnittstelle
+      (Phase 3.5).
+
+## Phase 1.11 – Schnittstellen-Parität / Sprint U (Stand 2026-07-12)
+
+Grundsatz (auch in den Coding-Guidelines verankert): Jede Fachfunktion wird über
+UI, REST-API und MCP angeboten und gepflegt.
+
+- [x] **P1.11-001 MCP-Parität zur API**: Fünf fehlende MCP-Tools ergänzt —
+      `finalize_journal_entry`, `reverse_journal_entry` (GoBD), `get_vat_return`,
+      `create_vat_return`, `list_vat_returns` (UStVA). Damit sind alle
+      API-Endpunkte (außer dem MCP-Proxy selbst) als MCP-Tools verfügbar.
+- [x] **P1.11-002 API-/MCP-Ausbau für UI-only-Funktionen**: Journal lesen
+      (`GET /journal-entries` umgesetzt), Festschreibelauf
+      (`POST /journal-entries/finalize-until` umgesetzt), Belege (Upload/Verknüpfen/
+      Download/Liste umgesetzt), Beleg-OCR (Vorschlag/Buchen umgesetzt),
+      E-Rechnung (Import/Export umgesetzt), Bank (Import/
+      Zuordnen/Buchen/Liste umgesetzt), Offene Posten (Liste/Anlage/Ausgleich umgesetzt),
+      Anlagen (AfaA/Abgang umgesetzt),
+      Perioden/Geschäftsjahre (Liste/Sperren/Entsperren/Anlegen/Abschließen,
+      WJ-Beginn umgesetzt) — jeweils REST-Endpoint + MCP-Tool.
+- [x] **P1.11-003 Audit-Log einsehbar machen**: UI-Seite „Audit",
+      `GET /api/v1/audit-log` mit Tenant-/Company-/Objekt-/Aktionsfiltern und
+      MCP-Tool `list_audit_log`.
+- [x] **P1.11-004 Kontenrahmen-Import & Benutzerverwaltung** über UI/API/MCP
+      umgesetzt.
+
+## Phase 1.12 – Security-Härtung / Sprint V (Stand 2026-07-12)
+
+- [x] **P1.12-001 API default-secure**: `API_REQUIRE_AUTH` ist jetzt
+      standardmäßig aktiv (Opt-out nur für lokale Entwicklung per
+      `API_REQUIRE_AUTH=0`); eingeloggte UI-Sessions erhalten lesenden
+      API-Zugriff (GET) im eigenen Tenant-Scope, damit die
+      CSV-/DATEV-Downloadlinks der Berichte-Seite weiter funktionieren;
+      schreibende API-Aufrufe erfordern immer ein Bearer-Token (kein
+      CSRF-Risiko über Session-Cookies).
+- [x] **P1.12-002 API-Token-Lookup**: Benutzer-Tokens werden als SHA-256
+      gespeichert und per eindeutigem Index nachgeschlagen (vorher: scrypt-
+      Verifikation über alle Benutzer je Request — O(n) und DoS-anfällig).
+      Bestehende Alt-Tokens bleiben gültig und werden beim ersten Gebrauch
+      automatisch auf SHA-256 migriert (keine Migration nötig).
+- [x] **P1.12-003 Login-Rate-Limiting**: Fehlgeschlagene UI-Logins sind auf
+      5 Versuche je Benutzername/IP in 15 Minuten begrenzt (429; In-Memory,
+      konfigurierbar, erfolgreicher Login setzt den Zähler zurück).
+
+## Phase 2 – Prozesse & Qualität (4–6 Wochen)
+- [x] Jahresabschluss-Workflow (Periodenabschluss + Ergebnisvortrag) *(Sprint E:
+      Perioden-Seite mit Sperren [Schreibrollen] / Entsperren [nur Admin],
+      Geschäftsjahr abschließen [nur Admin, sperrt alle Perioden], Buchungssperre für
+      geschlossene Jahre, Audit-Events für alle Aktionen. Sprint J: Ergebnisvortrag —
+      der Abschluss bucht die GuV-Konten gegen den Gewinnvortrag [SKR03 0860 / SKR04
+      2970] glatt, bevor die Perioden gesperrt werden)*
+- [x] OPOS-Basis Debitor/Kreditor *(Sprint G: Offene-Posten-Tabelle mit Debitor/
+      Kreditor-Typ, Verknüpfung zu Konto/Buchung, Teil-/Vollausgleich gegen Bankumsatz
+      oder Zahlungsbuchung, UI-Seite und Audit-Events umgesetzt)*
+- [x] Bank-CSV-Import + Matching-Regeln *(Sprint F: CSV-Import mit Header-Aliassen,
+      deutschem Zahlen-/Datumsformat und Dedup-Hash; Betrags-Matching schlägt passende
+      Buchungen vor; offene Umsätze direkt verbuchbar inkl. Netto-aus-Brutto-Split
+      bei Steuercode; Audit-Events für Import/Zuordnung/Verbuchung)*
+- [x] Kontoauszugs-Standards + FinTS-Direktabruf *(Sprint 2026-08-23: CAMT.053-XML
+      und MT940/.sta zusätzlich zu CSV über eine gemeinsame Import-Pipeline
+      [Dedup, Audit, Latin-1-Fallback]; FinTS/HBCI-Abruf via python-fints mit
+      Bankzugängen je Gesellschaft [BLZ/Login/URL, PIN nie gespeichert],
+      TAN-Flow inkl. entkoppelter Verfahren über eingefrorene Dialoge
+      [fints_pending_dialog, 15-Min-Ablauf]; FINTS_PRODUCT_ID als Voraussetzung;
+      UI/API/MCP-Parität und Tests mit Fake-FinTS-Client)*
+- [x] Bank-Härtung & Mehrkonten *(Sprint 2026-08-29, Umsetzung des Code-Reviews:
+      FinTS-Web-Routen scopen gegen die geladene Ressource [IDOR-Fix];
+      Dedup-Hash mit Bankreferenz [CAMT/MT940] und Vorkommens-Zähler,
+      neue Spalte bank_transaction.bank_reference [Migration 0030];
+      Betragsparser für deutsches + englisches Format, mehrdeutige Werte abgelehnt;
+      atomare Bankverbuchung [create_journal_entry(commit=False)], Buchung nur
+      einmal per Match verknüpfbar, Währungsprüfung; TAN-Dialog-Lebenszyklus
+      vereinheitlicht inkl. cancel_pending_dialog; Status-CHECK + Index
+      [Migration 0031]; Bank-API paginiert, Buchungsvorschläge in einer Query,
+      Import-Konflikte [IntegrityError] als Duplikate; UI: company-gebundene
+      TAN-Challenge, Pagination für Bank/Buchungen/Belege/OPOS, gemeinsamer
+      Eingangsrechnungs-Service [incoming_invoice] für OCR/E-Rechnung in Web+API,
+      Inline-JS in app.js überführt und CSP ohne script-src 'unsafe-inline',
+      Doppel-Submit-Schutz, gruppierte Navigation, Flash-Kategorien info/warning)*
+- [x] Finom-Kontoauszug im CSV-Import *(2026-10-11: Erkennung an „Transaktions-ID“
+      + „Zahlungsbetrag“, nur Status Completed, Kartenzahlungen als „Kartenzahlung
+      {Empfänger}“ [+ Ursprungsbetrag bei Fremdwährung], hash-kompatibel zur bisherigen
+      manuellen Umwandlung; Transaktions-ID als Bankreferenz, Altbestand-Abgleich
+      deckt auch gleich aussehende Zeilen [`|n:k`]; Trennzeichen aus der Kopfzeile)*
+- [x] Open Banking (PSD2) für Banken ohne FinTS, z. B. Finom *(2026-10-11: Enable
+      Banking als Anbieter [GoCardless nimmt keine Neukunden mehr an];
+      `open_banking_connection` [Migration 0046] mit Fernet-verschlüsselter Sitzung;
+      Bank-Zustimmung per Redirect + Callback, Abruf gebuchter Umsätze mit Pagination
+      über die gemeinsame Import-Pipeline [Quelle `open_banking`]; Bankenliste,
+      Anlegen, Zustimmung, Abruf, Deaktivieren mit Sitzungs-Widerruf in UI/API/MCP;
+      im KI-Chat gesperrt)*
+- [x] Komfort & Robustheit *(Sprint 2026-08-30: Dashboard-Kacheln „Offene
+      Aufgaben" [unverbuchte Bankumsätze, unverknüpfte Belege, überfällige
+      OPOS, offene Abgleich-Vorschläge]; Suche (q) + Datumsfilter auf Bank-,
+      Buchungs-, Beleg- und OPOS-Seite inkl. API/MCP-Parität; Saldenabgleich
+      je Bankkonto [Buchsaldo vs. Summe importierter Umsätze, UI/API/MCP];
+      OCR-Härtung: defekte Dateien lösen ReceiptOCRError statt 500 aus)*
+- [x] Auto-Kontierungsregeln für Bankumsätze *(Sprint 2026-08-30:
+      bank_booking_rule-Tabelle [Migration 0032], Teilstring-Matching auf
+      Verwendungszweck/Gegenseite mit Längster-gewinnt-Priorität, Vorauswahl
+      im Buchen-Formular, Regel-Lauf mit Fehler-Report; CRUD + Anwenden in
+      UI, API und MCP)*
+- [x] SEPA-Zahllauf *(Sprint 2026-08-30: pain.001.001.03-Erzeugung aus
+      offenen Kreditoren-Posten; IBAN/BIC an Gesellschaft und offenem Posten
+      [Migration 0034] mit Mod-97-Validierung; Zahllauf-Seite mit Auswahl und
+      Ausführungsdatum, Datei-Download; Audit-Event payment_run; API/MCP-
+      Parität inkl. xml_base64-Antwort)*
+- [x] Buchungsvorlagen & Eröffnungsbilanz *(Sprint 2026-08-30:
+      journal_template-Tabelle [Migration 0035] mit Intervall/next_run und
+      JSON-Zeilen; „Als Vorlage speichern" im Buchungsformular, Vorlagen-Karte
+      mit Fällig-Badge und Dashboard-Kachel, Buchen schiebt die Fälligkeit
+      monatsend-sicher weiter; Eröffnungsbilanz-Seite mit Konto;Soll;Haben-
+      Eingabe, automatischem Saldenvortrags-Ausgleich [9000/Name] und
+      expand_tax_lines=False; UI/API/MCP-Parität, 5 neue MCP-Tools)*
+- [x] Performance-Profiling großer Journaldaten *(Sprint H: CI-freundliche
+      Performance-Baseline mit synthetischen Journaldaten, Reports, OPOS und
+      Bank-Matching ergänzt; Index-Migration für zentrale Query-Pfade umgesetzt)*
+- [x] Security-Hardening + PenTest-Light *(Sprint I: Security-Header,
+      gehärtete Session-Cookies, Upload-Allowlist/Größenlimit und Tests für
+      Header, Cookies, CSRF/Auth-Scoping sowie Upload-Missbrauch umgesetzt)*
+
+## Phase 3 – Ökosystem & Automatisierung (6–12 Wochen)
+- [x] DATEV-kompatiblere Exporte ausbauen *(Sprint K: DATEV-Buchungsstapel im
+      EXTF-Format [Kopfzeile + Spaltenüberschrift + Buchungssätze, Windows-1252];
+      2-zeilige Buchungen als Konto/Gegenkonto, mehrzeilige als Splitbuchung über
+      Belegfeld 1; API `GET /api/v1/exports/datev.csv` + Download auf Berichte-Seite;
+      Berater-/Mandantennummer konfigurierbar. Nicht zertifiziert, ohne BU-Automatik)*
+- [x] E-Rechnung Import/Export *(Sprint L: Import-Parser für XRechnung [UBL] und
+      ZUGFeRD/XRechnung [CII], namespace-agnostisch; Upload-und-Buchen-Flow bucht die
+      Eingangsrechnung [Netto auf Aufwand, Steuer auf Vorsteuer, Brutto auf Kreditor] und
+      legt das XML als verknüpften Beleg ab. Sprint M: Export erzeugt Ausgangsrechnungen
+      als XRechnung [UBL] und ZUGFeRD/CII zum Download; Verkäuferstammdaten über
+      `SELLER_*`-Config, Round-Trip gegen den Import-Parser getestet)*
+- [x] OCR-Pipeline für Belege *(Sprint Q: Beleg-OCR mit Buchungsvorschlag —
+      Textgewinnung aus Belegen [``text/plain`` direkt, PDF-Textebene via ``zlib``,
+      Bilder/Scan-PDFs über optionalen OCR-Endpoint ``RECEIPT_OCR_ENDPOINT_URL``] und
+      deterministische Heuristik-Analyse [Brutto/Netto/Steuer/Steuersatz, Rechnungs-
+      datum/-nummer, Lieferant] mit rechnerischer Vervollständigung. Upload-Seite
+      „Beleg-OCR" zeigt die erkannten Felder und einen editierbaren Eingangsrechnungs-
+      Vorschlag [Netto→Aufwand, Vorsteuer→Steuerkonto, Brutto→Kreditor]; nach Freigabe
+      wird gebucht und der gespeicherte Beleg verknüpft. Audit-Events ``ocr_analyzed``/
+      ``ocr_booked``. Erweiterung: optionaler LLM [``RECEIPT_LLM_ENDPOINT_URL``] als
+      Unterstützung/Fallback [ergänzt fehlende Felder] und als Kontrolle [Cross-Check des
+      Bruttobetrags → ``bestätigt``/``Abweichung``], nicht-blockierend)*
+- [x] REST-API + API-Tokens *(Security-Inkrement: `API_REQUIRE_AUTH`,
+      Benutzer-API-Tokens per CLI/UI/API, Tenant-Scoping, Rollenprüfung und
+      API-/MCP-Parität umgesetzt)*
+- [x] Mandantenübergreifendes Rollen-/Supportmodell *(globale Support-Rolle:
+      mandantenübergreifend lesend, ohne Schreib-/Admin-Rechte)*
+- [x] Prüferexport-Basis *(Sprint W: `GET /api/v1/exports/audit-package.zip`
+      erzeugt ein ZIP-Paket mit JSON-Tabellen für Stammdaten, Buchungen,
+      Belege, OPOS, Bank, Anlagen, Perioden, UStVA/ELSTER und Audit-Log;
+      Originalbelege werden unter `documents/` aufgenommen, `manifest.json`
+      enthält Zeitraumparameter, Tabellenzählungen, Dateigrößen und SHA-256-
+      Hashes; Berichte-Seite mit Downloadlink, MCP-Tool
+      `export_audit_package` mit `manifest_only` für Automationen.)*
+- [x] Belegintegrität & Versionierung *(Sprint X: `Document` speichert
+      `file_sha256`, `file_size_bytes`, `version_number`, `is_current`,
+      `replaces_document_id` und `replaced_at`; alle Upload-Pfade
+      [UI/API, OCR, E-Rechnung] schreiben Hash und Größe; Ersetzen erzeugt
+      append-only eine neue Version statt Überschreiben; API-DELETE wird mit
+      Löschschutz 409 abgewiesen; Prüferexport weist gespeicherten Hash gegen
+      archivierte Datei aus.)*
+- [x] Datenbankseitige Unveränderbarkeit *(Compliance-Härtung: Alembic-Migration
+      installiert für SQLite und PostgreSQL Trigger, die Updates und Deletes
+      festgeschriebener Buchungen sowie Inserts, Updates und Deletes ihrer Zeilen
+      verhindern; Audit-Einträge sind append-only. Neue Datenbanken werden vollständig
+      über Alembic aufgebaut, damit die Schutzmechanismen immer installiert sind.)*
+- [x] Audit-Hashkette & Integritätsprüfung *(Compliance-Härtung: Audit-Einträge
+      werden je Mandant deterministisch per SHA-256 verkettet; Sequenz und Vorgänger
+      sind gegen Forks eindeutig, ein atomarer Mandantenanker erkennt gekürzte Ketten.
+      Migration verkettet Altbestände. Prüfung und Manipulationsdiagnose stehen in UI,
+      REST-API, MCP und CLI zur Verfügung.)*
+- [x] Buchungsversiegelung & gemeinsame Integritätsprüfung *(Compliance-Härtung:
+      Festgeschriebene Buchungen erhalten einen versionierten, deterministischen
+      SHA-256-Inhaltshash über Kopfdaten und Zeilen; Migration versiegelt Altbestände.
+      Eine gemeinsame Prüfung kontrolliert Buchungshashes, Belegdateien und
+      Audit-Hashketten über UI, REST-API, MCP und CLI. Der Prüferexport enthält
+      Hashfelder und Prüfergebnis im Manifest.)*
+- [x] Prüferexport v2 & reproduzierbarer Datenbestandsnachweis *(Compliance-
+      Härtung: vollständiger technischer Feldkatalog, selbstbeschreibendes README,
+      Benutzer/Rollen ohne Authentisierungsgeheimnisse, stabile Einzelhashes und
+      kanonischer `dataset_sha256`; deterministische ZIP-Erzeugung bei festem
+      Zeitpunkt, Download-Hash und lokale CLI-Paketprüfung mit Manipulationsdiagnose.)*
+- [x] Belegdatum getrennt vom Erfassungszeitpunkt *(Compliance-Härtung:
+      `Document.document_date` per Migration ergänzt; manuelle Uploads erfassen
+      es verpflichtend über UI/API/MCP, OCR übernimmt und bestätigt das erkannte
+      Rechnungsdatum, E-Rechnungen übernehmen das strukturierte Ausstellungsdatum,
+      Versionen erben das fachliche Datum. Belegliste, Audit-Log, Feldkatalog und
+      Prüferexport weisen Beleg- und Uploaddatum getrennt aus; Altdaten bleiben
+      transparent `null` statt ein Datum zu erfinden.)*
+- [x] Kontenänderungshistorie mit Vorher-/Nachher-Snapshots *(Compliance-
+      Härtung: Einzelanlage und Kontenrahmenimport erzeugen je Konto einen
+      vollständigen `created`-Snapshot in der verketteten Audit-Historie;
+      Bezeichnung und Aktivstatus sind über UI/API/MCP kontrolliert änderbar,
+      Kontonummer und Kontotyp bleiben strukturell unveränderbar. Echte
+      Änderungen erzeugen atomar einen `updated`-Eintrag mit vollständigem
+      `before`/`after`; No-op-Updates erzeugen keinen Eintrag. Die Historie ist
+      in UI, REST, MCP und als `account_history.json` im Prüferexport verfügbar.)*
+
+## Phase 3.5 – ELSTER-Schnittstelle (Backlog)
+
+Elektronische Übermittlung an die Finanzverwaltung über die ELSTER-Schnittstelle
+(ERiC-Bibliothek bzw. zertifizierte Übermittlung). Voraussetzung je Verfahren:
+Datenmodell + Kennziffern-/Formularlogik, XML-Erzeugung nach amtlichem Schema,
+Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
+
+- [x] **ELSTER-Grundlage**: Basis umgesetzt (Submission-Modell,
+      Test-/Produktionsumgebung, Mock-Transport, Transport-Adapter,
+      Readiness-/Preflight-Prüfung mit Payload-Diagnostik und Größenlimit,
+      UI-Historie, archivfähiger Detailabruf, Payload-XML-Download,
+      Payload-Hash-Verifikation, Übermittlungsprotokolle inkl. fehlgeschlagener
+      Versuche, Protokollfilter/-übersicht, UI-Monitoring, Retry-Aktion und
+      API-/MCP-Retry + Audit, externer `ELSTER_ERIC_COMMAND`-Runner als
+      ERiC-Bridge; Sprint Y ergänzt strukturierte Produktions-Readiness-Checks
+      in API/MCP/UI); produktive amtliche Nutzung erfordert lokale
+      ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.
+- [x] **Umsatzsteuer** *(Sprint AB: UStVA elektronisch übermitteln
+      [Mock-Testtransport und ERiC-Runner-Kante aus Sprint Y] sowie
+      USt-Jahreserklärung als Jahres-Snapshot `period=JJJJ`. ELSTER-Payload
+      unterscheidet `ustva` und `ust_jahreserklaerung`, API/MCP bieten
+      explizite Jahreserklärungs-Endpunkte, UI kennzeichnet
+      UStVA/Jahreserklärung; produktive amtliche Nutzung erfordert weiterhin
+      lokale ERiC-Bibliothek, Zertifikat und Runner-Provisionierung.)*
+- [x] **Gewerbesteuer** *(Sprint AC: GewSt-Erklärung und
+      Vorauszahlungsanpassung als festhaltbare Ertragsteuer-Snapshots.
+      Berechnung startet beim GuV-Jahresergebnis, nimmt strukturierte
+      Hinzurechnungen/Kürzungen (GewStG §§ 8, 9), Verlustvortrag,
+      Gewerbesteuer-Messzahl 3,5 %, gemeindlichen Hebesatz, Vorauszahlungen
+      und Prüferexport auf. UI/API/MCP umgesetzt; amtliche ELSTER-Formularlogik
+      bleibt Folgeausbau.)*
+- [x] **Körperschaftsteuer** *(Sprint AC: KSt-Erklärung und
+      Vorauszahlungsanpassung als festhaltbare Ertragsteuer-Snapshots.
+      Berechnung startet beim GuV-Jahresergebnis, nimmt steuerliche
+      Hinzurechnungen/Kürzungen, Verlustvortrag, KSt 15 %, SolZ 5,5 % auf die
+      KSt, Vorauszahlungen und Prüferexport auf. UI/API/MCP umgesetzt;
+      E-Bilanz-Taxonomie/amtliche Übermittlung bleibt Folgeausbau.)*
+- [x] **Lohnbuchhaltung-MVP** *(Sprint Z: Mitarbeiterstamm mit Lohn-/Verbindlichkeits-
+      konten, konfigurierbare Abzugsraten, Lohnlauf-Entwurf je Zeitraum,
+      automatische FiBu-Buchung [Brutto- und AG-SV-Aufwand an Netto-, Lohnsteuer-
+      und SV-Verbindlichkeiten], UI/API/MCP und Prüferexport-Tabellen. Keine
+      amtliche ELStAM/PAP-/DEÜV-Berechnung.)*
+- [x] **Payroll-PAP-Brücke** *(Sprint AA: Mitarbeiterstamm um PAP-/ELStAM-
+      Eingabemerkmale [Geburtsdatum, Steuerklasse, Kinderfreibeträge, Bundesland,
+      Haupt-/Nebenarbeitgeber] erweitert; lokaler `PAYROLL_PAP_COMMAND`-Runner
+      kann Lohnsteuer/Kirchensteuer/Soli per JSON berechnen und überschreibt die
+      manuellen Steuer-Raten; Payroll-Readiness zeigt fehlende PAP-, ELStAM- und
+      DEÜV/SV-Runner transparent in API/UI/MCP.)*
+- [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
+      LSt-Bescheinigungen *(setzt amtliche Lohnsteuerberechnung und ELSTER-
+      Verfahren auf dem Lohnbuchhaltung-MVP voraus)*
+
+## Phase 4 – Internes Rechnungswesen (Backlog)
+
+- [x] **Kostenstellen- und Profitcenterrechnung – MVP** *(gemeinsames,
+      gesellschaftsbezogenes Dimensionsmodell mit Typ `cost_center` oder
+      `profit_center`, Code, Bezeichnung, Hierarchie, Gültigkeitszeitraum und
+      Aktivstatus. Buchungszeilen können optional genau einer
+      Kostenstelle und einem Profitcenter zugeordnet werden; unzugeordnete
+      Altbuchungen bleiben transparent leer. Der MVP umfasst validierte
+      Erfassung in UI, REST und MCP, Stammdatenpflege mit Vorher-/Nachher-Historie,
+      mandantensichere UI/API/MCP-Schnittstellen, Zeitraum-/Kontenberichte je
+      Kostenstelle bzw. Profitcenter sowie Aufnahme in CSV- und Prüferexport.
+      Kontierungen werden in Festschreibungs-Hashversion 2 versiegelt und beim
+      Storno gespiegelt.)*
+
+  Empfohlene Lieferreihenfolge:
+
+  1. [x] Dimensions- und Stammdatenmodell inklusive Migration, Audit-Historie und
+     Gültigkeitsregeln.
+  2. [x] Optionale Kontierung auf `JournalEntryLine` in manueller UI- und
+     API/MCP-Buchung; bestehende automatische Buchungsquellen bleiben
+     transparent unzugeordnet.
+  3. [x] Kostenstellenbericht und Profitcenter-GuV mit Konten-Drill-down.
+  4. [x] Prüferexport, CSV-Export und UI/API/MCP-Parität des MVP.
+  5. [x] Kontierung in den Fachmasken für Bank, E-Rechnung und OCR sowie dauerhafte
+     Standardzuordnungen an Anlagen und Mitarbeitern. Automatische Aufwandszeilen
+     übernehmen die Dimensionen, Gegen-/Verbindlichkeitszeilen bleiben unzugeordnet;
+     Lohnaufwand wird je Kontierung getrennt verdichtet. UI, REST, MCP, Audit und
+     Migration sind abgedeckt.
+  6. [x] Buchungs-Drill-down: Journalfilter nach Konto, Kostenstelle und Profitcenter
+     (inkl. „nicht zugeordnet“) in UI, REST und MCP; Berichtszeilen verlinken auf die
+     gefilterte Buchungsliste, Berichtszeitraum auf der Controlling-Seite.
+  7. [ ] Folgeausbau: konfigurierbare Vorschlagsregeln für automatische Quellen.
+  8. [ ] Folgeausbau für Aufteilungen, Umlageschlüssel, Budgets und
+     Soll-Ist-Auswertungen.
+
+## Phase 5 – Review-Umsetzung (Stand 2026-09-19)
+
+Grundlage: `docs/review/projektreview-2026-09-19.md` (Befund-Nummern F/S/A/T/U/O
+und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
+
+- [x] **Sprint 1 – Fachliche Korrektheit** *(umgesetzt 2026-09-19)*:
+      Abschlussbuchungen (Periode 13) in SuSa/GuV/Bilanz/UStVA/KSt standardmäßig
+      ausgeklammert, Schalter `include_closing_entries` in Service/API/MCP/UI;
+      Ergebnisvortrag (`source=year_end_close`) zählt in GuV/UStVA/KSt nie mit,
+      Bilanz je Stichtags-WJ mit Jahresergebnis als eigener Position (F1).
+      Jahresabschluss atomar mit Vorjahresprüfung und Saldovortrag der
+      Bestandskonten ins Folgejahr (`source=carryforward`, EB-Werte in der SuSa
+      ab Startdatum), Vortragsbuchungen nicht stornierbar (F7). Netto-aus-Brutto
+      mit Rundungscent auf expliziter Steuerzeile (F2). `commit=False` in AfA
+      (inkl. Abgang), Lohn, Belegabgleich und Storno; Lohnaufwand am Monatsende
+      des Lohnmonats (A1, F11). `TaxCode.kind` input/output mit Migration 0037,
+      Validierung gegen Kontoart und Soll-/Haben-Seite, UStVA-Richtung aus
+      `kind` (F5). Nummernkreis je WJ (`posting_number_sequence`, Migration
+      0038, `FOR UPDATE`, Präfix = WJ-Label, Retry bei Kollision) (F6).
+      Storno-Hooks: Bankumsatz → open, AfA-Satz zurück, Lohnlauf → draft, OPOS
+      per `settlement_journal_entry_id`/`settlement_amount` (Migration 0039)
+      wieder offen (F4). `parse_decimal` quantisiert auf Cent und lehnt mehr als
+      zwei Nachkommastellen ab (Sätze/Mengen mit `places=None`), Validator prüft
+      Zeilen; Stornodatum ≥ Originaldatum; automatisches WJ prüft Überlappung,
+      mehrdeutige Zuordnung ist ein Fehler (F12, F13).
+- [x] **Sprint 2 – Sicherheit** (2026-09-19): Chat-Tool-Allowlist (nur lesende
+      Tools sofort) + Human-in-the-Loop für schreibende Tools mit
+      Bestätigungsschritt in UI/API/MCP, Benutzer-/Token-/Passwort-/ELSTER-/
+      SEPA-/FinTS-Tools im Chat gesperrt, Anhänge und Tool-Ergebnisse als
+      „untrusted data“ gekennzeichnet (S1); Secret-Redaktion (pin/tan/password/
+      api_token) vor Persistierung (S2); `/mcp/call` in-process mit
+      Aufruferkontext (S3); ProxyFix in Produktion, Rate-Limit in Tabelle
+      `login_attempt`, Admin-Entsperrung (S4); Open Redirect via `urlsplit`/
+      Backslash (S6); Secure-Cookie/HSTS/Session-Laufzeit in Produktion (S7);
+      Admin-Check bei Mandantenanlage (S8); MCP-HTTP-Body-Limit (S9);
+      `compare_digest` auf Bytes, generische Upstream-Fehlertexte, CLI-Passwort
+      per Prompt, `seed-demo` in Produktion verweigert, Session-Rotation beim
+      Login, Dummy-Hash gegen Timing-Enumeration, Mindestlänge 8 (S10);
+      Audit-Events für Login/Fehlversuche/Token/Benutzeranlage/Passwort;
+      Passwort-ändern-Flow (UI/API/MCP/CLI). S5 (FinTS-URL-Allowlist) umgesetzt
+      2026-10-11 über die FinTS-Bankenliste (s. u.).
+- [x] **FinTS-Registrierung & Bankenliste** *(2026-10-11)*: DK-Registrierungsnummer
+      als `FINTS_PRODUCT_ID` (25 Zeichen, Startwarnung/Ablehnung bei falscher Länge,
+      nur in der Instanz-`.env`); Import der DK-Bankenliste in `fints_institute`
+      [Migration 0045, instanzweit, nur globaler Admin] über UI/API/MCP/CLI;
+      BLZ-Abfrage mit URL-Vorschlag im Anlageformular, URL optional;
+      Allowlist für FinTS-URLs bei Anlage und Abruf, private Hosts gesperrt (S5).
+- [x] **Sprint 3 – Betrieb** *(umgesetzt 2026-09-20)*: `redeploy.sh` auf Prod-Compose (O1);
+      `.dockerignore`, non-root, HEALTHCHECK (O4, O6); Backup/Restore-Skript
+      + Runbook (O5); Migration als eigener Schritt (O2); gunicorn-Timeout,
+      Logging-Konfiguration, Health mit DB-Check (O3, O7); Tags, CHANGELOG,
+      `.env.example` (O9).
+- [ ] **Sprint 4 – Qualität**: Postgres-Matrix in CI (T1); FK-Pragma/WAL
+      (T2); Coverage-Gate (T4); `conftest.py` (T5); mypy, pip-audit,
+      Docker-Build, Downgrade-Rundlauf (T6); Paritätstest aus `url_map` (A2);
+      `DomainError` + Errorhandler (A4); Index-Drift (A5); Lockfile (A7);
+      DATEV je WJ mit BU-Schlüsseln + Golden-Files (F3, T7).
+  - [x] DATEV-Export nach Brutto-Prinzip *(2026-10-09, F3 teilweise)*: Steuer über
+        Automatikkonto bzw. Steuerschlüssel 101/102/401/402, BU 40 als Rückfall,
+        Konto und Gegenkonto in jedem Satz, Kontenrahmen im Kopffeld 27.
+  - [x] DATEV-Export je Wirtschaftsjahr *(2026-10-09, F3 Teil 1)*: ein Stapel je
+        WJ bzw. Zeitraum darin (`fiscal_year_id`, `date_from`/`date_to` in UI, API
+        und MCP), Kopffeld 13 = WJ-Beginn auch bei abweichendem/Rumpf-WJ, 15/16 =
+        Zeitraum, Festschreibekennzeichen nur über die exportierten Buchungen; ohne
+        Angabe bei mehreren WJ mit Buchungen 400 mit Auswahl. Offen bei F3: nur
+        noch Golden-Files (T7).
+- [ ] **Sprint 5 – Produkt-Basis**: Firmenstammdaten in DB (#3);
+      Kunden-/Lieferantenstamm (#1); Eingangsrechnung → OPOS (#5); Skonto
+      (#11); Zahllauf markiert Posten (F8); § 13b / ig. Erwerb / ZM (#4, F10);
+      BWA + Vorjahresvergleich (#8); Steuercode-UI, Gesellschaft bearbeiten.
+  - [x] Kunden-/Lieferantenstamm, PR 1 *(2026-10-08, Detailplan
+        `docs/sprint/sprint-5-geschaeftspartner-stammdaten.md`, ADR-002):
+        `business_partner` mit Debitoren-/Kreditorennummern, Historie und
+        separatem Bankdaten-Endpunkt; Sammelkonto-Kennzeichen `subledger`;
+        `partner_id` an Buchungszeilen (Hashversion 3, Storno, Vorlagen,
+        Eröffnungsbilanz, Saldovortrag je Partner, Journal-CSV, Prüferexport);
+        Kontoarten validiert, ungültige Altwerte reparierbar; UI/API/MCP
+        (Migration `20261008_0042`).)*
+  - [x] UStVA-Kennzahlen für EU-Umsätze, § 13b und ig. Erwerb, Zusammenfassende
+        Meldung *(2026-10-09, #4/F10 teilweise)*: Kennzahlen über die DATEV-Kontenfunktion
+        und die Steuerkonten, Hinweis statt Kz-48-Pauschale, ZM je Kunden-USt-IdNr. in
+        UI/API/MCP. Offen: Steuercodes mit zwei Steuerkonten für Reverse Charge in den
+        Buchungsmasken, ZM-Übermittlung.
+  - [x] Leistungsdatum und Ergänzen offener Buchungen *(2026-10-09)*: `service_date`
+        bestimmt den Meldezeitraum von UStVA, Jahreserklärung und ZM (Leistung,
+        Rechnung bzw. spätestens Folgemonat, Vorsteuer zum späteren Datum), Storno
+        übernimmt es, Hashversion 4, DATEV-Felder 115/116; offene Buchungen lassen
+        sich um Leistungsdatum und Partner ergänzen (Audit-Log) in UI/API/MCP
+        (Migration `20261009_0044`). Offen: Leistungsdatum in E-Rechnung,
+        Beleg-OCR und Vorlagen.
+  - [x] Geschäftspartner an jeder Buchung *(2026-10-12, ADR-002 Nachtrag)*: Partnerbezug
+        auf allen Buchungszeilen (Nebenbuch weiter nur auf Sammelkonten), Partner der
+        Buchung beim Buchen, Ergänzen und in der Bankbuchung, Journal mit Partner-Spalte,
+        Partnerfilter und „Partner zuordnen“, Partnerseite mit Buchungen; UI/API/MCP.
+  - [ ] Kunden-/Lieferantenstamm, PR 2–4: OPOS/Zahllauf/Mahnwesen am Partner,
+        Partnerkonto und Saldenliste, Partnererkennung in automatischen
+        Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.
+- [ ] **Sprint 6 – UX**: deutsches Betrags-/Datumsformat (U2);
+      Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
+      Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit
+      WJ-Bezug, Liquidität, Fälligkeiten (U6).
+  - [x] Übersichtlichere Oberfläche, Teil 1 *(2026-10-12)*: Jinja-Filter für Beträge,
+        Datum und Steuersatz (U2 in Journal, Buchungsdetail, Dashboard, Bank, OPOS,
+        Belege, Partner, Konten, Anlagen, Berichte; deutsche Beträge in der
+        Buchungsmaske); Kopfzeile mit Benutzermenü, eingeklappte Formulare, Dialoge per
+        Popover-API statt Formularstapeln (U7 Bank-Tabelle), Kontoarten auf Deutsch;
+        Buchungsdetailseite; Buchungsmaske mit Live-Summe Soll/Haben inkl. Steuer, Zeile
+        entfernen, leere Zusatzzeilen blockieren nicht mehr (U3 teilweise);
+        Bestätigung beim Einzel-Festschreiben (U4 teilweise). Offen: U2 in den übrigen
+        Seiten und Formularen, U1, Combobox für Konten (U3), U5, U6, U8.
+  - [x] Kontoblatt *(2026-10-12)*: Klick auf ein Konto (Kontenplan, Journal,
+        Buchungsdetail, SuSa/GuV/Bilanz, Bank, OPOS, Controlling, Kontenrahmen-Prüfung)
+        öffnet `/konten/<id>` mit Anfangssaldo, Buchungszeilen, Gegenkonten und laufendem
+        Saldo je Geschäftsjahr oder Zeitraum; REST `GET /api/v1/accounts/<id>/ledger`,
+        MCP `get_account_ledger`; Berichte liefern `account_id` je Zeile (behebt
+        „API ohne UI: Kontoblatt“ aus dem Review).
+  - [x] Tabellen nach jeder Spalte sortieren *(2026-10-13)*: Klick auf den Spaltenkopf
+        sortiert auf-/absteigend; paginierte Listen (Journal, Bank, Belege, Partner,
+        OPOS, Kontoblatt) serverseitig über `?sort=&dir=` mit Erhalt beim Blättern und
+        Filtern, alle übrigen Tabellen im Browser (dritter Klick stellt die
+        Ursprungsreihenfolge her). Kontoblatt-Sortierung auch per REST/MCP; der Saldo je
+        Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
+        und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
+        Listen-Endpunkte in REST/MCP.
+- [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
+      Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+
+## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
+
+Grundlage: `docs/adr/ADR-003-ios-begleit-app.md`. Native Begleit-App (SwiftUI, eigenes
+Repository `openbuchhaltung-ios`) über die REST-API, KI lokal zuerst (auf dem Gerät,
+dann selbst betriebener Modellserver).
+
+- [x] **Server-Vorarbeit I** *(2026-10-13)*: `GET /api/v1/dashboard` und MCP
+      `get_dashboard` (offene Aufgaben, Bankstände je Bankkonto, Ergebnis des laufenden
+      Geschäftsjahres, Bilanzsumme; gemeinsamer Service mit der Dashboard-Seite).
+      OAuth-Redirects nativer Apps über ein Private-Use-URI-Schema in
+      Reverse-Domain-Form (RFC 8252, `de.openbuchhaltung.app:/oauth/callback`), auch
+      über `OAUTH_ALLOWED_REDIRECT_HOSTS` beschränkbar. Den PDF-Fix der
+      Belegextraktion (pypdf, Bereinigung der NUL-Bytes) gab es bereits.
+- [x] **Server-Vorarbeit II – Push (Instanz)** *(2026-10-13)*: Geräteregistrierung
+      `POST /api/v1/devices` mit Ereignisauswahl, Test und Widerruf in UI/API/MCP (Audit,
+      im Chat gesperrt). Ereignisse: neue Bankumsätze, ELSTER-Ergebnis, tägliche
+      Zusammenfassung überfälliger OPOS. Ausgangswarteschlange in der Transaktion des
+      Ereignisses, Dispatcher `flask push-dispatch` (Compose-Profil `push`),
+      Relay-Protokoll v1, neutrale Texte. FinTS-„TAN nötig“ entfällt: Abrufe starten
+      interaktiv, und pushTAN-Apps melden sich selbst.
+- [x] **Push-Relay** *(2026-10-13)*: eigenständiger Dienst `push_relay/` mit
+      APNs-Anbindung (HTTP/2, ES256-Provider-Token), Instanzschlüsseln (nur Hash),
+      Rate-Limit je Instanz, Eingabeprüfung, ohne Speicherung von Inhalten; Trockenlauf
+      ohne Apple-Account. Offen: Apple-Developer-Account (APNs-Schlüssel, Team-ID),
+      HTTPS-Veröffentlichung und erste Zustellung an ein echtes Gerät.
+- [ ] **Fristen-Mitteilungen**: Voranmeldungszeitraum und Dauerfristverlängerung je
+      Gesellschaft modellieren, danach Erinnerung vor UStVA/ZM-Fristen.
+- [x] **Server-Vorarbeit III – Mobile Belege** *(2026-10-14)*: Erfassungsweg,
+      Aufnahmezeitpunkt und Gerät je Beleg (`mobile_scan`/`mobile_share`), Hash vom
+      Gerät mit Prüfung beim Upload, idempotenter Upload bei gleichem Inhalt
+      (Dokumente und OCR-Vorschlag), Anzeige, Audit, Prüferexport,
+      Verfahrensdokumentation „Mobile Erfassung“.
+- [x] **Demo-Instanz** *(2026-10-14)*: `DEMO_MODE` (Banner, vorbelegter Login
+      `demo`/`demo1234`, Sperre für Benutzer, KI-Schlüssel, Bankverbindungen, ELSTER),
+      `flask demo-reset [--loop]` mit täglichem Reset (PostgreSQL per `TRUNCATE`),
+      Overlay `docker-compose.demo.yml`, erweiterte Demo-Daten; „Demo ausprobieren“ in
+      der App. Demo-MCP *(2026-10-18)*: Profil `mcp` im Demo-Stack, `/mcp` über den
+      Demo-Proxy, nur Benutzer-/OAuth-Tokens, Sperren auch für MCP-Tools. Offen: Betrieb
+      unter einer öffentlichen Domain (Deploy auf Ansage).
+- [ ] **App-MVP (TestFlight)**: Anmeldung mit mehreren Instanzen, Beleg-Scanner, Share
+      Extension, Inbox, Übersicht; Test mit Pilotnutzern.
+  - [x] App 0.1 *(2026-10-14, eigenes Repository `openbuchhaltung-ios`)*: OAuth-Login an
+        beliebigen Instanzen (PKCE, App-Redirect, Keychain), Übersicht, Inbox
+        (unverbuchte Umsätze), Belegerfassung per Dokumentenkamera/Foto/Datei mit
+        Geräte-Hash und Upload-Warteschlange; im Simulator gegen den Dev-Server geprüft.
+  - [ ] Signierung und TestFlight, Push-Registrierung, Share Extension (brauchen den
+        Apple-Developer-Account).
+  - [ ] Inbox-Aktionen, Belegdatum per Texterkennung, Demo-Modus, App-Icon.
+- [ ] **Lokale KI**: `/responses`-kompatibler Modellserver auf eigener Hardware,
+      Benchmark der Belegextraktion gegen Cloud-Modelle, Warteschlange und
+      Fallback-Regeln, Betriebsdoku.
+- [ ] **Selbstregistrierung** (optional): Mandantenanlage ohne Admin, Kontolöschung mit
+      Datenexport (Apple 5.1.1(v)).
+- [ ] **App-Store-Start**: Store-Texte und Keywords, Screenshots, Datenschutzangaben,
+      Smart App Banner auf der Website.
+- [ ] **App 1.x**: Push, TAN/Open Banking, Freigaben mit Face ID, Widgets, Bewirtungs- und
+      Reisebelege; danach App Intents und KI auf dem Gerät (Foundation Models).
+
+## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
+1. **Architektur-ADR 001** (Monolith + modulare Schichten)
+2. **Datenmodell v0** inkl. ER-Diagramm
+3. **Migrations-Setup** (Alembic initial)
+4. **Auth + Rollen v0**
+5. **Kontenrahmen-Importer SKR03**
+6. **JournalEntry Use-Case** mit starker Validierung
+7. **AuditLog Middleware**
+8. **Summen-/Saldenliste Report**
+9. **Bilanz/GuV MVP**
+10. **Testdaten-Generator für Demo-Mandanten**
+
+## 9. Vorschlag Team-/Rollenaufteilung
+- Product/Accounting Lead: HGB-Fachlichkeit, Abnahme Reports
+- Backend Lead: Domänenmodell, Buchungslogik, Integrität
+- Frontend Engineer: Eingabemasken, Usability, Reporting-UI
+- QA/Automation: Testpyramide, Regressionssuite, E2E
+- DevOps/SRE (teilzeit): CI/CD, Backup, Monitoring
+
+## 10. Definition of Done (DoD)
+Ein Feature gilt erst als fertig, wenn:
+- fachliche Akzeptanzkriterien erfüllt sind,
+- Unit- und Integrationstests vorhanden sind,
+- Auditierbarkeit sichergestellt ist,
+- Dokumentation (User + Dev) aktualisiert ist,
+- Migrationen und Rollback getestet sind.
+
+## 11. Risiken & Gegenmaßnahmen
+- **Rechtliche/fachliche Komplexität (HGB/Steuer):**
+  - Gegenmaßnahme: frühzeitig Steuerberater-Beirat einbinden
+- **Datenkonsistenz bei Korrekturen:**
+  - Gegenmaßnahme: Storno-Prinzip technisch erzwingen
+- **Scope Creep:**
+  - Gegenmaßnahme: strikte MVP-Grenze und quartalsweise Re-Priorisierung
+- **DB-Portabilität:**
+  - Gegenmaßnahme: CI-Matrix mit SQLite + PostgreSQL
+
+## 12. Nächster Schritt (direkt nach diesem Plan)
+1. ADR 001 + Domänenmodell-Entwurf erstellen
+2. 2-wöchigen Sprint für Phase 0 planen
+3. Vertikalen Prototyp bauen:
+   - Mandant anlegen
+   - Konto anlegen
+   - Buchung erfassen
+   - Summen-/Saldenliste anzeigen

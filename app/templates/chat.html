@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}KI-Chat – OpenBuchhaltung{% endblock %}
+{% block head_extra %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='chat.css') }}" />
+  <script src="{{ url_for('static', filename='chat_markdown.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='chat.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% macro render_message(message) %}
+  {% set status_labels = {
+    'pending': 'Bestätigung erforderlich',
+    'deferred': 'zurückgestellt',
+    'confirmed': 'ausgeführt',
+    'rejected': 'abgelehnt',
+  } %}
+  <div class="chat-message chat-message-{{ message.role }}" data-message-id="{{ message.id }}">
+    <div class="chat-avatar">{{ 'Du' if message.role == 'user' else 'KI' }}</div>
+    <div class="chat-bubble">
+      {% if message.attachments %}
+        <div class="chat-attachments">
+          {% for attachment in message.attachments %}
+            <span class="chat-attachment-chip{% if attachment.kind == 'error' %} error{% endif %}"
+                  {% if attachment.error %}title="{{ attachment.error }}"{% endif %}>
+              📎 {{ attachment.file_name }}
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if message.tool_calls %}
+        {% set calls = message.tool_calls %}
+        <details class="chat-tool-group{% if calls | selectattr('is_error') | list %} has-error{% endif %}">
+          <summary>
+            <span class="chat-tool-group-count">{{ calls | length }} {{ 'Schritt' if calls | length == 1 else 'Schritte' }}</span>
+            <span class="chat-tool-group-titles">{{ calls | map(attribute='title') | unique | join(' · ') }}</span>
+          </summary>
+          <div class="chat-tool-group-body">
+            {% for call in calls %}
+              <details class="chat-tool-call{% if call.is_error %} error{% endif %}">
+                <summary>
+                  <span class="chat-tool-title">{{ call.title }}</span>
+                  {% if call.is_error %}<span class="chat-tool-status status-error">Fehler</span>{% endif %}
+                  {% if call.status in status_labels %}<span class="chat-tool-status status-{{ call.status }}">{{ status_labels[call.status] }}</span>{% endif %}
+                  <code class="chat-tool-name">{{ call.name }}</code>
+                </summary>
+                <div class="chat-tool-call-body">
+                  <div class="chat-tool-call-label">Argumente</div>
+                  <pre>{{ call.arguments | tojson(indent=2) }}</pre>
+                  <div class="chat-tool-call-label">Ergebnis</div>
+                  <pre>{{ call.result_display }}</pre>
+                </div>
+              </details>
+            {% endfor %}
+          </div>
+        </details>
+      {% endif %}
+      {% if message.pending_action %}
+        {% set action = message.pending_action %}
+        <div class="chat-action-confirm" data-message-id="{{ message.id }}">
+          <div class="chat-action-head">
+            <strong>{{ action.title }}</strong>
+            <span class="chat-action-badge">{{ status_labels['pending'] }}</span>
+          </div>
+          <p class="chat-action-note">
+            Diese Aktion ändert Daten und wird erst nach Ihrer Bestätigung ausgeführt.
+          </p>
+          {% if action.summary.fields %}
+            <dl class="chat-action-fields">
+              {% for label, value in action.summary.fields %}
+                <dt>{{ label }}</dt><dd>{{ value }}</dd>
+              {% endfor %}
+            </dl>
+          {% endif %}
+          {% for table in action.summary.tables %}
+            <div class="chat-action-table">
+              <div class="chat-tool-call-label">{{ table.label }}</div>
+              <div class="chat-md-table-scroll">
+                <table data-no-sort>
+                  <thead><tr>{% for column in table.columns %}<th{% if table.numeric[loop.index0] %} class="align-right"{% endif %}>{{ column }}</th>{% endfor %}</tr></thead>
+                  <tbody>
+                    {% for row in table.rows %}
+                      <tr>{% for cell in row %}<td{% if table.numeric[loop.index0] %} class="align-right"{% endif %}>{{ cell }}</td>{% endfor %}</tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endfor %}
+          <div class="chat-action-buttons">
+            <button type="button" class="primary" data-chat-action="confirm">Ausführen</button>
+            <button type="button" class="secondary" data-chat-action="reject">Ablehnen</button>
+          </div>
+          <details class="chat-action-raw">
+            <summary>Technische Details</summary>
+            <code>{{ action.name }}</code>
+            <pre>{{ action.arguments | tojson(indent=2) }}</pre>
+          </details>
+        </div>
+      {% endif %}
+      {% if message.role == 'assistant' %}
+        {# Rohtext; chat.js rendert ihn als Markdown (ohne HTML-Durchreichen). #}
+        <div class="chat-content chat-markdown" data-markdown>{{ message.content }}</div>
+      {% else %}
+        <div class="chat-content">{{ message.content }}</div>
+      {% endif %}
+    </div>
+  </div>
+{% endmacro %}
+<div class="chat-layout"
+     id="chat-root"
+     data-company-id="{{ selected_company_id or '' }}"
+     data-conversation-id="{{ selected_conversation.id if selected_conversation else '' }}"
+     data-page-url="{{ url_for('main.chat_page', company_id=selected_company_id) }}"
+     data-action-url="{{ url_for('main.chat_action', message_id=0, action='confirm') }}">
+  <aside class="chat-sidebar" id="chat-sidebar">
+    <a class="chat-new-button" href="{{ url_for('main.chat_page', company_id=selected_company_id) }}">
+      <span aria-hidden="true">＋</span> Neue Unterhaltung
+    </a>
+    <nav class="chat-conversation-list" aria-label="Unterhaltungen">
+      {% for label, group in conversation_groups %}
+        <div class="chat-conversation-group">{{ label }}</div>
+        {% for conversation in group %}
+          {% set active = selected_conversation and conversation.id == selected_conversation.id %}
+          <div class="chat-conversation-item{% if active %} active{% endif %}"
+               data-rename-url="{{ url_for('main.chat_rename', conversation_id=conversation.id) }}">
+            <a class="chat-conversation-link"
+               href="{{ url_for('main.chat_page', company_id=selected_company_id, conversation_id=conversation.id) }}"
+               title="{{ conversation.title }}"{% if active %} aria-current="page"{% endif %}>{{ conversation.title }}</a>
+            <div class="chat-conversation-actions">
+              <button type="button" class="chat-icon-button" data-chat-rename
+                      title="Umbenennen" aria-label="„{{ conversation.title }}“ umbenennen">✎</button>
+              <form method="post"
+                    action="{{ url_for('main.chat_delete', conversation_id=conversation.id) }}"
+                    data-confirm="Unterhaltung „{{ conversation.title }}“ löschen?">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit" class="chat-icon-button chat-delete-button"
+                        title="Löschen" aria-label="„{{ conversation.title }}“ löschen">🗑</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="chat-sidebar-empty">Noch keine Unterhaltungen.</p>
+      {% endfor %}
+    </nav>
+  </aside>
+
+  <section class="chat-main">
+    <header class="chat-header">
+      <button type="button" class="chat-sidebar-toggle" id="chat-sidebar-toggle"
+              aria-controls="chat-sidebar" aria-expanded="false">
+        <span aria-hidden="true">☰</span> Unterhaltungen
+      </button>
+      <h2 class="chat-title" id="chat-title">
+        {{ selected_conversation.title if selected_conversation else 'Neue Unterhaltung' }}
+      </h2>
+    </header>
+    {% if selected_company_id is none %}
+      <div class="chat-welcome">
+        <h2>KI-Chat</h2>
+        <p>Bitte zuerst eine Gesellschaft anlegen bzw. auswählen.</p>
+      </div>
+    {% else %}
+      <div class="chat-messages" id="chat-messages" aria-live="polite" aria-relevant="additions">
+        <div class="chat-welcome" id="chat-welcome" {% if messages %}hidden{% endif %}>
+          <h2>Wobei kann ich helfen?</h2>
+          <p>
+            Fragen zur Buchhaltung stellen, Auswertungen abrufen, Buchungen anlegen
+            oder Belege hochladen – der Assistent nutzt dafür direkt die
+            OpenBuchhaltung-Funktionen. Buchungen und Änderungen führt er erst nach
+            Ihrer Bestätigung aus.
+          </p>
+          <div class="chat-suggestions">
+            {% for suggestion in [
+              'Welche Bankumsätze sind noch nicht gebucht?',
+              'Welche offenen Posten sind seit mehr als 30 Tagen überfällig?',
+              'Wie sieht die Umsatzsteuer-Voranmeldung für das letzte Quartal aus?',
+              'Zeig mir die größten Aufwandskonten in diesem Jahr.',
+            ] %}
+              <button type="button" class="chat-suggestion" data-chat-suggestion="{{ suggestion }}">{{ suggestion }}</button>
+            {% endfor %}
+            <label class="chat-suggestion" for="chat-file-input">📎 Beleg hochladen und Buchung vorschlagen lassen</label>
+          </div>
+        </div>
+        {% for message in messages %}{{ render_message(message) }}{% endfor %}
+        <div class="chat-message chat-message-assistant chat-pending" id="chat-pending" hidden>
+          <div class="chat-avatar">KI</div>
+          <div class="chat-bubble chat-progress">
+            <div class="chat-progress-head">
+              <div class="chat-typing" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="chat-progress-label" id="chat-progress-label" role="status">Sendet …</span>
+              <span class="chat-progress-time" id="chat-progress-time"></span>
+              <button type="button" class="chat-cancel-button" id="chat-cancel-button" hidden>Abbrechen</button>
+            </div>
+            <p class="chat-progress-snippet" id="chat-progress-snippet" hidden></p>
+            <ol class="chat-progress-steps" id="chat-progress-steps" hidden></ol>
+          </div>
+        </div>
+      </div>
+
+      <form class="chat-input-area" id="chat-form" method="post"
+            action="{{ url_for('main.chat_send') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="hidden" name="conversation_id" id="chat-conversation-id"
+               value="{{ selected_conversation.id if selected_conversation else '' }}" />
+        <div class="chat-error" id="chat-error" role="alert" hidden></div>
+        <div class="chat-attachment-preview" id="chat-attachment-preview" hidden></div>
+        <div class="chat-input-row">
+          <label class="chat-attach-button" for="chat-file-input" title="Datei anhängen (PDF, PNG, JPG, TXT, CSV, MD)">📎
+            <input type="file" id="chat-file-input" name="attachments" multiple
+                   accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.md" hidden />
+          </label>
+          <textarea id="chat-textarea" name="message" rows="1" aria-label="Nachricht"
+                    placeholder="Frage oder Auftrag …"></textarea>
+          <button type="submit" class="chat-send-button" id="chat-send-button" title="Senden" aria-label="Senden">➤</button>
+        </div>
+        <p class="chat-hint">
+          Enter sendet, Umschalt+Enter für neue Zeile. Änderungen erst nach Ihrer Bestätigung.
+        </p>
+      </form>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

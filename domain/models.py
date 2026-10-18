@@ -1,0 +1,1808 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
+
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base for all persistence entities."""
+
+
+class Tenant(Base):
+    __tablename__ = "tenant"
+    __table_args__ = (
+        CheckConstraint(
+            "audit_sequence_number >= 0", name="ck_tenant_audit_sequence_non_negative"
+        ),
+        CheckConstraint(
+            "length(audit_head_hash) = 64", name="ck_tenant_audit_head_hash_length"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    audit_sequence_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    audit_head_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="0" * 64, server_default="0" * 64
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    companies: Mapped[list[Company]] = relationship(back_populates="tenant", cascade="all, delete")
+
+
+class Company(Base):
+    __tablename__ = "company"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_company_tenant_name"),
+        CheckConstraint(
+            "fiscal_year_start_month BETWEEN 1 AND 12",
+            name="ck_company_fiscal_year_start_month",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Erster Monat des Wirtschaftsjahres (1 = Januar = Kalenderjahr, sonst abweichendes WJ).
+    fiscal_year_start_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Auftraggeber-Bankverbindung für SEPA-Zahlläufe (pain.001).
+    iban: Mapped[str | None] = mapped_column(String(34))
+    bic: Mapped[str | None] = mapped_column(String(11))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    tenant: Mapped[Tenant] = relationship(back_populates="companies")
+    fiscal_years: Mapped[list[FiscalYear]] = relationship(
+        back_populates="company", cascade="all, delete"
+    )
+    accounts: Mapped[list[Account]] = relationship(back_populates="company", cascade="all, delete")
+    tax_codes: Mapped[list[TaxCode]] = relationship(back_populates="company", cascade="all, delete")
+    journal_entries: Mapped[list[JournalEntry]] = relationship(
+        back_populates="company", cascade="all, delete"
+    )
+    payroll_employees: Mapped[list[PayrollEmployee]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    payroll_runs: Mapped[list[PayrollRun]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    income_tax_returns: Mapped[list[IncomeTaxReturn]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    controlling_units: Mapped[list[ControllingUnit]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    business_partners: Mapped[list[BusinessPartner]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+
+
+class FiscalYear(Base):
+    __tablename__ = "fiscal_year"
+    __table_args__ = (
+        UniqueConstraint("company_id", "label", name="uq_fiscal_year_company_label"),
+        CheckConstraint("start_date < end_date", name="ck_fiscal_year_date_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(20), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    company: Mapped[Company] = relationship(back_populates="fiscal_years")
+    periods: Mapped[list[Period]] = relationship(
+        back_populates="fiscal_year", cascade="all, delete"
+    )
+    journal_entries: Mapped[list[JournalEntry]] = relationship(
+        back_populates="fiscal_year", cascade="all, delete"
+    )
+    income_tax_returns: Mapped[list[IncomeTaxReturn]] = relationship(
+        back_populates="fiscal_year"
+    )
+
+
+class Period(Base):
+    __tablename__ = "period"
+    __table_args__ = (
+        UniqueConstraint("fiscal_year_id", "period_number", name="uq_period_fiscal_year_number"),
+        CheckConstraint("period_number BETWEEN 1 AND 13", name="ck_period_number_range"),
+        CheckConstraint("start_date <= end_date", name="ck_period_date_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="CASCADE"), nullable=False
+    )
+    period_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Abschlussperiode (Periode 13) fuer Jahresabschlussbuchungen; nicht datumsbasiert bebucht.
+    is_closing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    fiscal_year: Mapped[FiscalYear] = relationship(back_populates="periods")
+    locks: Mapped[list[PeriodLock]] = relationship(back_populates="period", cascade="all, delete")
+    journal_entries: Mapped[list[JournalEntry]] = relationship(
+        back_populates="period", cascade="all, delete"
+    )
+
+
+class PostingNumberSequence(Base):
+    """Nummernkreis für Buchungsnummern je Geschäftsjahr.
+
+    Die Zeile wird beim Ziehen einer Nummer mit ``FOR UPDATE`` gesperrt, damit
+    parallele Buchungen keine gleichen Nummern erhalten; ``last_number`` ist
+    die zuletzt vergebene laufende Nummer.
+    """
+
+    __tablename__ = "posting_number_sequence"
+    __table_args__ = (
+        UniqueConstraint("fiscal_year_id", name="uq_posting_sequence_fiscal_year"),
+        CheckConstraint("last_number >= 0", name="ck_posting_sequence_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="CASCADE"), nullable=False
+    )
+    last_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+
+class PeriodLock(Base):
+    __tablename__ = "period_lock"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    period_id: Mapped[int] = mapped_column(
+        ForeignKey("period.id", ondelete="CASCADE"), nullable=False
+    )
+    locked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    reason: Mapped[str | None] = mapped_column(String(255))
+    locked_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    period: Mapped[Period] = relationship(back_populates="locks")
+
+
+# Sammelkonto-Kennzeichen (Nebenbuch): Auf Debitoren- bzw. Kreditoren-
+# Sammelkonten (z. B. 1400/1600) dürfen Buchungszeilen einen Geschäftspartner
+# tragen; dessen Personenkontonummer erscheint erst im DATEV-Export.
+SUBLEDGER_DEBTOR = "debtor"
+SUBLEDGER_CREDITOR = "creditor"
+SUBLEDGER_TYPES = (SUBLEDGER_DEBTOR, SUBLEDGER_CREDITOR)
+
+
+class Account(Base):
+    __tablename__ = "account"
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_account_company_code"),
+        CheckConstraint("hierarchy_level BETWEEN 1 AND 4", name="ck_account_hierarchy_level_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    # ``debtor``/``creditor`` für Sammelkonten, sonst leer (siehe SUBLEDGER_TYPES).
+    subledger: Mapped[str | None] = mapped_column(String(10))
+    hierarchy_level: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    level_1: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_2: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_3: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    level_4: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    parent_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    company: Mapped[Company] = relationship(back_populates="accounts")
+    journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="account")
+    parent_account: Mapped[Account | None] = relationship(
+        remote_side="Account.id", back_populates="child_accounts"
+    )
+    child_accounts: Mapped[list[Account]] = relationship(back_populates="parent_account")
+
+    @validates("code")
+    def _sync_hierarchy(self, key: str, value: str) -> str:
+        del key
+        normalized_code = (value or "").strip()
+        self.level_1, self.level_2, self.level_3, self.level_4, self.hierarchy_level = (
+            self.derive_hierarchy(normalized_code)
+        )
+        return normalized_code
+
+    @staticmethod
+    def derive_hierarchy(code: str) -> tuple[str, str, str, str, int]:
+        digits = "".join(char for char in code if char.isdigit())
+        padded = (digits[:4]).ljust(4, "0")
+        if padded[3] != "0":
+            level = 4
+        elif padded[2] != "0":
+            level = 3
+        elif padded[1] != "0":
+            level = 2
+        else:
+            level = 1
+        return padded[0], padded[1], padded[2], padded[3], level
+
+
+class ControllingUnit(Base):
+    __tablename__ = "controlling_unit"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "unit_type",
+            "code",
+            name="uq_controlling_unit_company_type_code",
+        ),
+        CheckConstraint(
+            "unit_type IN ('cost_center', 'profit_center')",
+            name="ck_controlling_unit_type",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_from IS NULL OR valid_from <= valid_to",
+            name="ck_controlling_unit_validity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    unit_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    code: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="SET NULL")
+    )
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="controlling_units")
+    parent: Mapped[ControllingUnit | None] = relationship(
+        remote_side="ControllingUnit.id", back_populates="children"
+    )
+    children: Mapped[list[ControllingUnit]] = relationship(back_populates="parent")
+    cost_center_lines: Mapped[list[JournalEntryLine]] = relationship(
+        foreign_keys="JournalEntryLine.cost_center_id", back_populates="cost_center"
+    )
+    profit_center_lines: Mapped[list[JournalEntryLine]] = relationship(
+        foreign_keys="JournalEntryLine.profit_center_id", back_populates="profit_center"
+    )
+
+
+PARTNER_KIND_ORGANIZATION = "organization"
+PARTNER_KIND_PERSON = "person"
+PARTNER_KINDS = (PARTNER_KIND_ORGANIZATION, PARTNER_KIND_PERSON)
+
+
+class BusinessPartner(Base):
+    """Geschäftspartner (Kunde und/oder Lieferant) einer Gesellschaft.
+
+    Die Rolle ergibt sich aus den Personenkontonummern: Kunde = Debitorennummer,
+    Lieferant = Kreditorennummer; ein Partner kann beides sein. Partner werden
+    nicht gelöscht, sondern deaktiviert.
+    """
+
+    __tablename__ = "business_partner"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "debtor_number", name="uq_business_partner_company_debtor"
+        ),
+        UniqueConstraint(
+            "company_id", "creditor_number", name="uq_business_partner_company_creditor"
+        ),
+        CheckConstraint(
+            "debtor_number IS NOT NULL OR creditor_number IS NOT NULL",
+            name="ck_business_partner_role",
+        ),
+        CheckConstraint(
+            "payment_term_days IS NULL OR payment_term_days >= 0",
+            name="ck_business_partner_payment_term",
+        ),
+        CheckConstraint(
+            "partner_kind IN ('organization', 'person')",
+            name="ck_business_partner_kind",
+        ),
+        Index("ix_business_partner_company_active_name", "company_id", "is_active", "name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    debtor_number: Mapped[str | None] = mapped_column(String(20))
+    creditor_number: Mapped[str | None] = mapped_column(String(20))
+    partner_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=PARTNER_KIND_ORGANIZATION
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    street: Mapped[str | None] = mapped_column(String(255))
+    postal_code: Mapped[str | None] = mapped_column(String(20))
+    city: Mapped[str | None] = mapped_column(String(120))
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, default="DE")
+    vat_id: Mapped[str | None] = mapped_column(String(20))
+    tax_number: Mapped[str | None] = mapped_column(String(30))
+    email: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    contact_person: Mapped[str | None] = mapped_column(String(255))
+    # Bankverbindung nur über den eigenen Bankdaten-Endpunkt änderbar.
+    iban: Mapped[str | None] = mapped_column(String(34))
+    bic: Mapped[str | None] = mapped_column(String(11))
+    # Zahlungsziel in Tagen: Vorbelegung der Fälligkeit offener Posten.
+    payment_term_days: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="business_partners")
+    journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="partner")
+
+
+# Richtung eines Steuercodes: Vorsteuer (Eingangsleistungen, Kz 66) oder
+# Umsatzsteuer (Ausgangsumsätze, Kz 81/86/48).
+TAX_KIND_INPUT = "input"
+TAX_KIND_OUTPUT = "output"
+TAX_CODE_KINDS = (TAX_KIND_INPUT, TAX_KIND_OUTPUT)
+
+
+class TaxCode(Base):
+    __tablename__ = "tax_code"
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_tax_code_company_code"),
+        CheckConstraint("rate >= 0", name="ck_tax_code_rate_non_negative"),
+        CheckConstraint("kind IN ('input', 'output')", name="ck_tax_code_kind_known"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # "input" = Vorsteuer (Bemessungsgrundlage auf Aufwand/Anlagen),
+    # "output" = Umsatzsteuer (Bemessungsgrundlage auf Erlösen).
+    kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=TAX_KIND_OUTPUT, server_default=TAX_KIND_OUTPUT
+    )
+    description: Mapped[str | None] = mapped_column(String(255))
+    vat_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    company: Mapped[Company] = relationship(back_populates="tax_codes")
+    vat_account: Mapped[Account | None] = relationship(foreign_keys=[vat_account_id])
+    journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="tax_code")
+
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entry"
+    __table_args__ = (
+        UniqueConstraint("company_id", "posting_number", name="uq_journal_entry_company_no"),
+        # Eine Buchung darf höchstens einmal storniert werden.
+        UniqueConstraint("reversal_of_id", name="uq_journal_entry_reversal_of"),
+        CheckConstraint(
+            "((is_finalized = false AND content_hash IS NULL "
+            "AND content_hash_version IS NULL) OR "
+            "(is_finalized = true AND content_hash IS NOT NULL "
+            "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
+            "AND content_hash_version IN (2, 3, 4)))",
+            name="ck_journal_entry_finalized_content_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="RESTRICT"), nullable=False
+    )
+    period_id: Mapped[int] = mapped_column(
+        ForeignKey("period.id", ondelete="RESTRICT"), nullable=False
+    )
+    posting_number: Mapped[str] = mapped_column(String(30), nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Leistungsdatum (Tag der Lieferung/Leistung, bei Leistungszeiträumen deren Ende):
+    # bestimmt den Umsatzsteuer-Meldezeitraum (app.services.tax_period); leer =
+    # Buchungsdatum.
+    service_date: Mapped[date | None] = mapped_column(Date)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    # GoBD-Festschreibung: festgeschriebene Buchungen sind unveränderbar;
+    # Korrekturen erfolgen ausschließlich über Stornobuchungen.
+    is_finalized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finalized_by: Mapped[str | None] = mapped_column(String(120))
+    content_hash_version: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    # Gesetzt auf der Stornobuchung: verweist auf die stornierte Originalbuchung.
+    reversal_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="journal_entries")
+    fiscal_year: Mapped[FiscalYear] = relationship(back_populates="journal_entries")
+    period: Mapped[Period] = relationship(back_populates="journal_entries")
+    lines: Mapped[list[JournalEntryLine]] = relationship(
+        back_populates="journal_entry", cascade="all, delete-orphan"
+    )
+    documents: Mapped[list[Document]] = relationship(back_populates="journal_entry")
+    reversal_of: Mapped[JournalEntry | None] = relationship(
+        remote_side="JournalEntry.id", back_populates="reversed_by"
+    )
+    reversed_by: Mapped[JournalEntry | None] = relationship(
+        back_populates="reversal_of", uselist=False
+    )
+
+
+class JournalEntryLine(Base):
+    __tablename__ = "journal_entry_line"
+    __table_args__ = (
+        UniqueConstraint("journal_entry_id", "line_number", name="uq_je_line_number"),
+        CheckConstraint("debit_amount >= 0", name="ck_je_line_debit_non_negative"),
+        CheckConstraint("credit_amount >= 0", name="ck_je_line_credit_non_negative"),
+        CheckConstraint(
+            "((debit_amount = 0 AND credit_amount > 0) OR "
+            "(credit_amount = 0 AND debit_amount > 0))",
+            name="ck_je_line_single_side",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="CASCADE"), nullable=False
+    )
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    tax_code_id: Mapped[int | None] = mapped_column(ForeignKey("tax_code.id", ondelete="RESTRICT"))
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    # Nebenbuch: Geschäftspartner auf Zeilen eines Debitoren-/Kreditoren-Sammelkontos.
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT")
+    )
+    description: Mapped[str | None] = mapped_column(String(255))
+    debit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    credit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+
+    journal_entry: Mapped[JournalEntry] = relationship(back_populates="lines")
+    account: Mapped[Account] = relationship(back_populates="journal_lines")
+    tax_code: Mapped[TaxCode | None] = relationship(back_populates="journal_lines")
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id], back_populates="cost_center_lines"
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id], back_populates="profit_center_lines"
+    )
+    partner: Mapped[BusinessPartner | None] = relationship(back_populates="journal_lines")
+
+    @validates("debit_amount", "credit_amount")
+    def validate_debit_credit(self, key: str, value: Decimal) -> Decimal:
+        if value < 0:
+            raise ValueError(f"{key} must be non-negative")
+
+        debit = value if key == "debit_amount" else self.debit_amount or Decimal("0.00")
+        credit = value if key == "credit_amount" else self.credit_amount or Decimal("0.00")
+
+        if debit > 0 and credit > 0:
+            raise ValueError("Debit and credit cannot both be greater than zero")
+
+        if debit == 0 and credit == 0:
+            raise ValueError("Either debit or credit must be greater than zero")
+
+        return value
+
+
+class DocumentCategory(Base):
+    """Belegkategorie (z. B. Rechnung, Zahlungsbeleg) je Gesellschaft.
+
+    Die Standardkategorien (``is_default``) werden beim Anlegen einer
+    Gesellschaft gesetzt; Admin und Buchhalter können weitere ergänzen.
+    Kategorien werden nicht gelöscht, sondern deaktiviert, damit bestehende
+    Belege ihre Zuordnung behalten.
+    """
+
+    __tablename__ = "document_category"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_document_category_company_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    documents: Mapped[list[Document]] = relationship(back_populates="category")
+
+
+class Document(Base):
+    __tablename__ = "document"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "storage_key", name="uq_document_tenant_storage_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_category.id", ondelete="SET NULL")
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    replaces_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document.id", ondelete="SET NULL")
+    )
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    document_date: Mapped[date | None] = mapped_column(Date)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    # Erfassungsweg (web, api, einvoice, mobile_scan, mobile_share; leer = vor Einführung
+    # erfasst), Aufnahmezeitpunkt auf dem Gerät und Gerätebezeichnung bei mobiler Erfassung.
+    capture_source: Mapped[str | None] = mapped_column(String(30))
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    capture_device: Mapped[str | None] = mapped_column(String(100))
+
+    journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
+    category: Mapped[DocumentCategory | None] = relationship(back_populates="documents")
+    replaces_document: Mapped[Document | None] = relationship(remote_side="Document.id")
+
+
+class ReceiptMatchSuggestion(Base):
+    """Abgleichsvorschlag zwischen einem Beleg-Upload und den Buchungen.
+
+    ``suggestion_type`` = ``"match"``: der Beleg passt zu einer vorhandenen
+    Buchung (``journal_entry_id``). ``suggestion_type`` = ``"new_booking"``:
+    keine passende Buchung gefunden – aus den Belegdaten wird eine neue
+    Buchung vorgeschlagen. Nach der Freigabe verweist ``journal_entry_id``
+    auf die verknüpfte bzw. neu erzeugte Buchung.
+    """
+
+    __tablename__ = "receipt_match_suggestion"
+    __table_args__ = (
+        CheckConstraint(
+            "suggestion_type IN ('match', 'new_booking')",
+            name="ck_receipt_match_suggestion_type",
+        ),
+        CheckConstraint(
+            "status IN ('offen', 'freigegeben', 'abgelehnt')",
+            name="ck_receipt_match_suggestion_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), nullable=False
+    )
+    suggestion_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    confidence: Mapped[str] = mapped_column(String(20), nullable=False, default="niedrig")
+    reason: Mapped[str | None] = mapped_column(Text)
+    llm_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="offen")
+    # Aus dem Beleg extrahierte Felder (Grundlage des Buchungsvorschlags).
+    supplier: Mapped[str | None] = mapped_column(String(120))
+    invoice_number: Mapped[str | None] = mapped_column(String(50))
+    invoice_date: Mapped[date | None] = mapped_column(Date)
+    net_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    gross_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    tax_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    supplier_vat_id: Mapped[str | None] = mapped_column(String(20))
+    description: Mapped[str | None] = mapped_column(String(120))
+    tip_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    reverse_charge: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Kontierungsvorschlag (app.services.receipt_proposals) für neue Buchungen.
+    expense_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="SET NULL")
+    )
+    tax_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tax_code.id", ondelete="SET NULL")
+    )
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="SET NULL")
+    )
+    proposal_source: Mapped[str | None] = mapped_column(String(20))
+    proposal_reason: Mapped[str | None] = mapped_column(Text)
+    # Aufteilung je Steuersatz bei mehreren Sätzen: Liste von
+    # {"rate", "net_amount", "tax_amount", "tax_code_id"} (Beträge als Strings).
+    tax_lines: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(120))
+
+    document: Mapped[Document] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
+class BankTransaction(Base):
+    __tablename__ = "bank_transaction"
+    __table_args__ = (
+        UniqueConstraint("company_id", "dedup_hash", name="uq_bank_tx_company_hash"),
+        CheckConstraint("amount != 0", name="ck_bank_tx_amount_non_zero"),
+        CheckConstraint(
+            "status IN ('open', 'matched', 'booked')", name="ck_bank_tx_status_known"
+        ),
+        Index("ix_bank_tx_journal_entry", "journal_entry_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    booking_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Signiert: positiv = Zahlungseingang, negativ = Zahlungsausgang
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    purpose: Mapped[str] = mapped_column(String(255), nullable=False)
+    counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Bankseitige Referenz (CAMT AcctSvcrRef/EndToEndId, MT940-Bankreferenz);
+    # fließt in den Dedup-Hash ein, damit echte Doppelumsätze unterscheidbar bleiben.
+    bank_reference: Mapped[str | None] = mapped_column(String(64))
+    dedup_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
+class JournalTemplate(Base):
+    """Buchungsvorlage für wiederkehrende Buchungen (Miete, Abos, Versicherungen).
+
+    ``lines`` hält die Buchungszeilen als JSON-Liste (account_id, debit,
+    credit, optional tax_code_id/cost_center_id/profit_center_id/description);
+    ``interval`` steuert die Wiedervorlage (monthly/quarterly/yearly oder
+    ``on_demand`` ohne Fälligkeit), ``next_run`` das nächste Buchungsdatum.
+    """
+
+    __tablename__ = "journal_template"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_journal_template_company_name"),
+        CheckConstraint(
+            "interval IN ('on_demand', 'monthly', 'quarterly', 'yearly')",
+            name="ck_journal_template_interval",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    interval: Mapped[str] = mapped_column(String(20), nullable=False, default="on_demand")
+    next_run: Mapped[date | None] = mapped_column(Date)
+    lines: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class BankBookingRule(Base):
+    """Auto-Kontierungsregel für Bankumsätze.
+
+    Trifft ``pattern`` (Teilstring, ohne Groß-/Kleinschreibung) auf
+    Verwendungszweck oder Gegenseite eines offenen Umsatzes zu, wird das
+    hinterlegte Gegenkonto (plus optional Steuercode und Controlling-
+    Dimensionen) vorgeschlagen bzw. beim Regel-Lauf direkt verbucht.
+    Bei mehreren Treffern gewinnt das längste (spezifischste) Muster.
+    """
+
+    __tablename__ = "bank_booking_rule"
+    __table_args__ = (
+        UniqueConstraint("company_id", "pattern", name="uq_bank_rule_company_pattern"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    pattern: Mapped[str] = mapped_column(String(120), nullable=False)
+    contra_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    tax_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tax_code.id", ondelete="RESTRICT")
+    )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    contra_account: Mapped[Account] = relationship(foreign_keys=[contra_account_id])
+    tax_code: Mapped[TaxCode | None] = relationship(foreign_keys=[tax_code_id])
+
+
+class OpenItem(Base):
+    __tablename__ = "open_item"
+    __table_args__ = (
+        CheckConstraint("original_amount > 0", name="ck_open_item_original_amount_positive"),
+        CheckConstraint("open_amount >= 0", name="ck_open_item_open_amount_non_negative"),
+        CheckConstraint(
+            "item_type IN ('receivable', 'payable')", name="ck_open_item_type_known"
+        ),
+        CheckConstraint("status IN ('open', 'settled')", name="ck_open_item_status_known"),
+        CheckConstraint(
+            "dunning_level BETWEEN 0 AND 3", name="ck_open_item_dunning_level"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    bank_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_transaction.id", ondelete="SET NULL")
+    )
+    # Letzte Ausgleichsbuchung samt Betrag: wird diese Buchung storniert, lebt
+    # der Posten mit dem Betrag wieder auf (Storno-Hook).
+    settlement_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    settlement_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    item_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    reference: Mapped[str] = mapped_column(String(120), nullable=False)
+    counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Bankverbindung der Gegenpartei für SEPA-Zahlläufe (nur Kreditoren nötig).
+    counterparty_iban: Mapped[str | None] = mapped_column(String(34))
+    counterparty_bic: Mapped[str | None] = mapped_column(String(11))
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    original_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    open_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    # Mahnwesen (nur Forderungen): 0 = ungemahnt, 1-3 = Mahnstufe.
+    dunning_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_dunning_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settled_by: Mapped[str | None] = mapped_column(String(120))
+
+    account: Mapped[Account] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship(foreign_keys=[journal_entry_id])
+    settlement_journal_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[settlement_journal_entry_id]
+    )
+    bank_transaction: Mapped[BankTransaction | None] = relationship()
+
+
+class FixedAsset(Base):
+    """Anlagegut der Anlagenbuchhaltung (Sachanlage) inkl. AfA-Parametern."""
+
+    __tablename__ = "fixed_asset"
+    __table_args__ = (
+        UniqueConstraint("company_id", "asset_number", name="uq_fixed_asset_company_number"),
+        CheckConstraint("acquisition_cost > 0", name="ck_fixed_asset_cost_positive"),
+        CheckConstraint("residual_value >= 0", name="ck_fixed_asset_residual_non_negative"),
+        CheckConstraint(
+            "method IN ('linear', 'degressive', 'leistung', 'gwg', 'sammelposten', "
+            "'manuell', 'digital')",
+            name="ck_fixed_asset_method_known",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'disposed', 'fully_depreciated', 'cancelled')",
+            name="ck_fixed_asset_status_known",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_number: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    acquisition_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Datum der Inbetriebnahme = Beginn der AfA (§ 7 Abs. 1 Satz 4 EStG).
+    in_service_date: Mapped[date] = mapped_column(Date, nullable=False)
+    acquisition_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
+    useful_life_months: Mapped[int | None] = mapped_column(Integer)
+    # 4 Nachkommastellen: praxisübliche Sätze wie 23,0769 % (3/13 × 100) dürfen
+    # nicht auf 2 Stellen gerundet werden, sonst weicht der AfA-Plan ab.
+    degressive_rate: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    total_units: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    residual_value: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    keep_memo_value: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Bilanzkonto (Sachanlage) und Aufwandskonto (Abschreibungen).
+    asset_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    depreciation_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    disposal_date: Mapped[date | None] = mapped_column(Date)
+    disposal_proceeds: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    notes: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship()
+    asset_account: Mapped[Account] = relationship(foreign_keys=[asset_account_id])
+    depreciation_account: Mapped[Account] = relationship(foreign_keys=[depreciation_account_id])
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id]
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id]
+    )
+    depreciation_entries: Mapped[list[DepreciationEntry]] = relationship(
+        back_populates="fixed_asset", cascade="all, delete-orphan"
+    )
+
+
+class DepreciationEntry(Base):
+    """Verbuchte Abschreibungszeile eines Anlageguts für ein Wirtschaftsjahr."""
+
+    __tablename__ = "depreciation_entry"
+    __table_args__ = (
+        UniqueConstraint(
+            "fixed_asset_id", "fiscal_year", "kind", name="uq_depreciation_asset_year_kind"
+        ),
+        CheckConstraint("amount > 0", name="ck_depreciation_amount_positive"),
+        CheckConstraint(
+            "kind IN ('planmaessig', 'ausserplanmaessig', 'abgang')",
+            name="ck_depreciation_kind_known",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fixed_asset_id: Mapped[int] = mapped_column(
+        ForeignKey("fixed_asset.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    depreciation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # planmaessig (laut Plan), ausserplanmaessig (AfaA/§ 253 Abs. 3 HGB), abgang (Restbuchwert).
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="planmaessig")
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    book_value_before: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    book_value_after: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    fixed_asset: Mapped[FixedAsset] = relationship(back_populates="depreciation_entries")
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+
+
+class VatReturn(Base):
+    """Festgehaltene Umsatzsteuer-Voranmeldung (Kennziffern-Snapshot je Zeitraum)."""
+
+    __tablename__ = "vat_return"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_label", name="uq_vat_return_company_period"),
+        CheckConstraint("date_from <= date_to", name="ck_vat_return_date_range"),
+        CheckConstraint(
+            "status IN ('erstellt', 'uebermittelt')", name="ck_vat_return_status_known"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    # Voranmeldungszeitraum, z. B. "2026-05" (Monat) oder "2026-Q2" (Quartal).
+    period_label: Mapped[str] = mapped_column(String(10), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    # Kennziffern-Snapshot: Liste von {kennziffer, label, amount} zum Zeitpunkt des Festhaltens.
+    kennzahlen: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship()
+    elster_submissions: Mapped[list[ElsterSubmission]] = relationship(
+        back_populates="vat_return", cascade="all, delete-orphan"
+    )
+
+
+class ElsterSubmission(Base):
+    """Protokollierte ELSTER-Übermittlung bzw. Testübermittlung."""
+
+    __tablename__ = "elster_submission"
+    __table_args__ = (
+        CheckConstraint(
+            "procedure IN ('ustva', 'ust_jahreserklaerung')",
+            name="ck_elster_submission_procedure_known",
+        ),
+        CheckConstraint(
+            "environment IN ('test', 'production')",
+            name="ck_elster_submission_environment_known",
+        ),
+        CheckConstraint(
+            "status IN ('created', 'transmitted', 'failed')",
+            name="ck_elster_submission_status_known",
+        ),
+        CheckConstraint(
+            "transport IN ('mock', 'eric')", name="ck_elster_submission_transport_known"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    vat_return_id: Mapped[int] = mapped_column(
+        ForeignKey("vat_return.id", ondelete="CASCADE"), nullable=False
+    )
+    procedure: Mapped[str] = mapped_column(String(20), nullable=False, default="ustva")
+    environment: Mapped[str] = mapped_column(String(20), nullable=False, default="test")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    transport: Mapped[str] = mapped_column(String(20), nullable=False, default="mock")
+    certificate_alias: Mapped[str | None] = mapped_column(String(120))
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_xml: Mapped[str] = mapped_column(Text, nullable=False)
+    response_protocol: Mapped[str | None] = mapped_column(Text)
+    transfer_ticket: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship()
+    vat_return: Mapped[VatReturn] = relationship(back_populates="elster_submissions")
+
+
+class IncomeTaxReturn(Base):
+    """Festgehaltener KSt-/GewSt-Snapshot fuer Erklaerung oder Vorauszahlung."""
+
+    __tablename__ = "income_tax_return"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "tax_type",
+            "declaration_type",
+            "period_label",
+            name="uq_income_tax_return_scope",
+        ),
+        CheckConstraint(
+            "tax_type IN ('corporate_income', 'trade_tax')",
+            name="ck_income_tax_return_tax_type_known",
+        ),
+        CheckConstraint(
+            "declaration_type IN ('declaration', 'prepayment_adjustment')",
+            name="ck_income_tax_return_declaration_type_known",
+        ),
+        CheckConstraint(
+            "status IN ('erstellt', 'uebermittelt')",
+            name="ck_income_tax_return_status_known",
+        ),
+        CheckConstraint("date_from <= date_to", name="ck_income_tax_return_date_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_year_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fiscal_year.id", ondelete="RESTRICT")
+    )
+    tax_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    declaration_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    period_label: Mapped[str] = mapped_column(String(20), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    calculation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship(back_populates="income_tax_returns")
+    fiscal_year: Mapped[FiscalYear | None] = relationship(
+        back_populates="income_tax_returns"
+    )
+
+
+class PayrollEmployee(Base):
+    """Mitarbeiter-Stammdaten fuer das Lohnbuchhaltungs-MVP."""
+
+    __tablename__ = "payroll_employee"
+    __table_args__ = (
+        UniqueConstraint("company_id", "employee_number", name="uq_payroll_employee_number"),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_payroll_employee_status_known"
+        ),
+        CheckConstraint("gross_monthly_salary >= 0", name="ck_payroll_employee_salary_nonneg"),
+        CheckConstraint("wage_tax_rate >= 0", name="ck_payroll_employee_wage_tax_nonneg"),
+        CheckConstraint("tax_class BETWEEN 1 AND 6", name="ck_payroll_employee_tax_class"),
+        CheckConstraint(
+            "employee_social_security_rate >= 0",
+            name="ck_payroll_employee_employee_sv_nonneg",
+        ),
+        CheckConstraint(
+            "employer_social_security_rate >= 0",
+            name="ck_payroll_employee_employer_sv_nonneg",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    employment_start: Mapped[date] = mapped_column(Date, nullable=False)
+    employment_end: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    tax_id: Mapped[str | None] = mapped_column(String(40))
+    tax_class: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    child_allowances: Mapped[Decimal] = mapped_column(Numeric(4, 1), nullable=False, default=0)
+    federal_state: Mapped[str | None] = mapped_column(String(2))
+    main_employment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    social_security_number: Mapped[str | None] = mapped_column(String(40))
+    gross_monthly_salary: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    wage_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)
+    church_tax_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)
+    solidarity_surcharge_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    employee_social_security_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    employer_social_security_rate: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False, default=0
+    )
+    wage_expense_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    employer_social_security_expense_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    payroll_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    wage_tax_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    social_security_liability_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    cost_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    profit_center_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controlling_unit.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    company: Mapped[Company] = relationship(back_populates="payroll_employees")
+    wage_expense_account: Mapped[Account] = relationship(foreign_keys=[wage_expense_account_id])
+    employer_social_security_expense_account: Mapped[Account] = relationship(
+        foreign_keys=[employer_social_security_expense_account_id]
+    )
+    payroll_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[payroll_liability_account_id]
+    )
+    wage_tax_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[wage_tax_liability_account_id]
+    )
+    social_security_liability_account: Mapped[Account] = relationship(
+        foreign_keys=[social_security_liability_account_id]
+    )
+    cost_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[cost_center_id]
+    )
+    profit_center: Mapped[ControllingUnit | None] = relationship(
+        foreign_keys=[profit_center_id]
+    )
+    payroll_lines: Mapped[list[PayrollRunLine]] = relationship(back_populates="employee")
+
+
+class PayrollRun(Base):
+    """Lohnlauf je Gesellschaft und Meldezeitraum."""
+
+    __tablename__ = "payroll_run"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_label", name="uq_payroll_run_company_period"),
+        CheckConstraint("status IN ('draft', 'posted')", name="ck_payroll_run_status_known"),
+        CheckConstraint("gross_total >= 0", name="ck_payroll_run_gross_nonneg"),
+        CheckConstraint("net_total >= 0", name="ck_payroll_run_net_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    period_label: Mapped[str] = mapped_column(String(10), nullable=False)
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    gross_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    wage_tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    church_tax_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    solidarity_surcharge_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employee_social_security_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employer_social_security_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    net_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    company: Mapped[Company] = relationship(back_populates="payroll_runs")
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+    lines: Mapped[list[PayrollRunLine]] = relationship(
+        back_populates="payroll_run", cascade="all, delete-orphan"
+    )
+
+
+class PayrollRunLine(Base):
+    """Mitarbeiterzeile eines Lohnlaufs."""
+
+    __tablename__ = "payroll_run_line"
+    __table_args__ = (
+        UniqueConstraint("payroll_run_id", "employee_id", name="uq_payroll_line_employee"),
+        CheckConstraint("gross_pay >= 0", name="ck_payroll_line_gross_nonneg"),
+        CheckConstraint("net_pay >= 0", name="ck_payroll_line_net_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    payroll_run_id: Mapped[int] = mapped_column(
+        ForeignKey("payroll_run.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("payroll_employee.id", ondelete="RESTRICT"), nullable=False
+    )
+    gross_pay: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    wage_tax: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    church_tax: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    solidarity_surcharge: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employee_social_security: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    employer_social_security: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    net_pay: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    employer_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    calculation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+    payroll_run: Mapped[PayrollRun] = relationship(back_populates="lines")
+    employee: Mapped[PayrollEmployee] = relationship(back_populates="payroll_lines")
+
+
+class User(Base):
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    api_token_hash: Mapped[str | None] = mapped_column(String(255), unique=True)
+    api_token_last4: Mapped[str | None] = mapped_column(String(4))
+    role: Mapped[str] = mapped_column(String(30), nullable=False, default="Buchhalter")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    # KI-Zugang (LLM) des Benutzers, vom Administrator gepflegt: ``openai``
+    # (Standard-Endpoint) oder ``custom`` (eigener /responses-kompatibler Endpoint);
+    # ohne Anbieter gelten die Instanz-Endpoints. Der API-Key liegt nur
+    # verschlüsselt vor (siehe app.services.llm_settings).
+    llm_provider: Mapped[str | None] = mapped_column(String(20))
+    llm_endpoint_url: Mapped[str | None] = mapped_column(String(500))
+    llm_model: Mapped[str | None] = mapped_column(String(120))
+    llm_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    llm_api_key_last4: Mapped[str | None] = mapped_column(String(4))
+
+    tenant: Mapped[Tenant | None] = relationship()
+
+
+class LoginAttempt(Base):
+    """Fehlgeschlagener UI-Login (Rate-Limit über alle Prozesse/Worker hinweg).
+
+    Pro (Benutzername, Client-Adresse) zählt das Login die Fehlversuche im
+    konfigurierten Zeitfenster; erfolgreiche Logins und die Admin-Entsperrung
+    löschen die Einträge.
+    """
+
+    __tablename__ = "login_attempt"
+    __table_args__ = (
+        Index("ix_login_attempt_username_addr", "username", "remote_addr"),
+        Index("ix_login_attempt_attempted_at", "attempted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
+    remote_addr: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class OAuthClient(Base):
+    """Per Dynamic Client Registration (RFC 7591) angemeldeter OAuth-Client (z. B. ChatGPT)."""
+
+    __tablename__ = "oauth_client"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    client_secret_hash: Mapped[str | None] = mapped_column(String(64))
+    client_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    token_endpoint_auth_method: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="none"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class OAuthAuthorizationCode(Base):
+    """Einmal-Code des Authorization-Code-Flows (PKCE S256, kurzlebig)."""
+
+    __tablename__ = "oauth_authorization_code"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("oauth_client.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    code_challenge: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str | None] = mapped_column(String(200))
+    resource: Mapped[str | None] = mapped_column(String(500))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthGrant(Base):
+    """Zugriff eines OAuth-Clients im Namen eines Benutzers (Access- und Refresh-Token).
+
+    Tokens liegen nur als SHA-256 vor. Der Refresh rotiert beide Tokens; ein Widerruf
+    setzt ``revoked_at`` und beendet den Zugriff sofort.
+    """
+
+    __tablename__ = "oauth_grant"
+    __table_args__ = (Index("ix_oauth_grant_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("oauth_client.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    access_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    access_token_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    refresh_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scope: Mapped[str | None] = mapped_column(String(200))
+    resource: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    client: Mapped[OAuthClient] = relationship()
+    user: Mapped[User] = relationship()
+
+
+class PushDevice(Base):
+    """Mobilgerät eines Benutzers für Push-Mitteilungen (z. B. die iOS-App).
+
+    ``device_token`` ist das APNs-Gerätetoken; es identifiziert das Gerät gegenüber dem
+    Push-Relay und wird nicht als Geheimnis behandelt. ``events`` listet die
+    abonnierten Ereignisse, ``server_url`` die Adresse, unter der die App diese Instanz
+    kennt (wird in jeder Mitteilung mitgeschickt). Ein Widerruf setzt ``revoked_at``.
+    """
+
+    __tablename__ = "push_device"
+    __table_args__ = (Index("ix_push_device_user", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False, default="ios")
+    device_token: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, default="production")
+    device_name: Mapped[str | None] = mapped_column(String(100))
+    app_version: Mapped[str | None] = mapped_column(String(40))
+    server_url: Mapped[str | None] = mapped_column(String(500))
+    events: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
+
+
+class PushNotification(Base):
+    """Ausgangswarteschlange der Push-Mitteilungen (eine Zeile je Gerät und Ereignis).
+
+    Ereignisse legen Zeilen in der Transaktion der auslösenden Änderung an; der
+    Dispatcher (``flask push-dispatch``) übergibt sie an das Push-Relay. Texte sind
+    bewusst neutral (Anzahl statt Beträge oder Namen).
+    """
+
+    __tablename__ = "push_notification"
+    __table_args__ = (
+        Index("ix_push_notification_status", "status", "id"),
+        Index("ix_push_notification_company_event", "company_id", "event", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("push_device.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int | None] = mapped_column(ForeignKey("company.id", ondelete="CASCADE"))
+    event: Mapped[str] = mapped_column(String(40), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    body: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    device: Mapped[PushDevice] = relationship()
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "sequence_number", name="uq_audit_log_tenant_sequence"
+        ),
+        UniqueConstraint(
+            "tenant_id", "previous_hash", name="uq_audit_log_tenant_previous_hash"
+        ),
+        CheckConstraint("sequence_number > 0", name="ck_audit_log_sequence_positive"),
+        CheckConstraint("hash_version = 1", name="ck_audit_log_hash_version"),
+        CheckConstraint(
+            "length(previous_hash) = 64", name="ck_audit_log_previous_hash_length"
+        ),
+        CheckConstraint("length(entry_hash) = 64", name="ck_audit_log_entry_hash_length"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int | None] = mapped_column(ForeignKey("company.id", ondelete="SET NULL"))
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    hash_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    changed_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class FinTSConnection(Base):
+    """FinTS/HBCI-Bankzugang einer Gesellschaft.
+
+    Es werden nur Zugangs-Stammdaten gespeichert (BLZ, Login, Endpunkt) —
+    niemals PIN oder TAN. Die PIN wird bei jedem Abruf neu eingegeben.
+    """
+
+    __tablename__ = "fints_connection"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_fints_connection_company_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    blz: Mapped[str] = mapped_column(String(8), nullable=False)
+    login: Mapped[str] = mapped_column(String(120), nullable=False)
+    fints_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional: IBAN, falls der Zugang mehrere SEPA-Konten umfasst.
+    sepa_iban: Mapped[str | None] = mapped_column(String(34))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+
+
+class OpenBankingConnection(Base):
+    """PSD2-Bankzugang über einen Open-Banking-Anbieter (derzeit Enable Banking).
+
+    Für Banken ohne FinTS (z. B. Finom). Gespeichert werden die Bankauswahl,
+    die vom Anbieter vergebene Sitzung (``session_id_encrypted``, Fernet mit
+    aus ``SECRET_KEY`` abgeleitetem Schlüssel) und das ausgewählte Konto —
+    keine Bank-Zugangsdaten. Die Zustimmung erteilt der Kontoinhaber direkt
+    bei der Bank; sie läuft nach ``consent_valid_until`` ab und muss dann
+    erneuert werden.
+    """
+
+    __tablename__ = "open_banking_connection"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_open_banking_connection_company_name"),
+        UniqueConstraint("auth_state", name="uq_open_banking_connection_auth_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="enable_banking")
+    aspsp_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    aspsp_country: Mapped[str] = mapped_column(String(2), nullable=False)
+    psu_type: Mapped[str] = mapped_column(String(10), nullable=False, default="business")
+    # Optional: IBAN, falls die Zustimmung mehrere Konten umfasst.
+    iban: Mapped[str | None] = mapped_column(String(34))
+    session_id_encrypted: Mapped[str | None] = mapped_column(Text)
+    account_uid: Mapped[str | None] = mapped_column(String(64))
+    consent_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Laufende Autorisierung: zufälliger state für den Rücksprung von der Bank.
+    auth_state: Mapped[str | None] = mapped_column(String(64))
+    auth_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_to: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+
+
+class FinTSPendingDialog(Base):
+    """Eingefrorener FinTS-Dialog, der auf eine TAN-Bestätigung wartet.
+
+    Enthält den von python-fints serialisierten Client-/Dialogzustand
+    (ohne PIN — die wird bei der TAN-Eingabe erneut abgefragt) und wird
+    nach Abschluss oder Ablauf gelöscht.
+    """
+
+    __tablename__ = "fints_pending_dialog"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("fints_connection.id", ondelete="CASCADE"), nullable=False
+    )
+    # Schritt, an dem die TAN nötig wurde: "init" (Dialog-Initialisierung)
+    # oder "transactions" (Umsatzabruf).
+    step: Mapped[str] = mapped_column(String(20), nullable=False)
+    client_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    dialog_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    tan_request_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    from_date: Mapped[date | None] = mapped_column(Date)
+    to_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    connection: Mapped[FinTSConnection] = relationship()
+
+
+class FinTSInstitute(Base):
+    """Eintrag der FinTS-Bankenliste der Deutschen Kreditwirtschaft.
+
+    Instanzweite Referenzdaten (kein Mandantenbezug): BLZ → PIN/TAN-URL und
+    BIC. Die Liste wird nur an registrierte FinTS-Produkte verteilt und deshalb
+    nicht mitgeliefert, sondern vom Betreiber importiert; ein Import ersetzt
+    den gesamten Bestand.
+    """
+
+    __tablename__ = "fints_institute"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blz: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    bic: Mapped[str | None] = mapped_column(String(11))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(120))
+    data_center: Mapped[str | None] = mapped_column(String(120))
+    organisation: Mapped[str | None] = mapped_column(String(60))
+    fints_url: Mapped[str | None] = mapped_column(String(255))
+    fints_version: Mapped[str | None] = mapped_column(String(40))
+    last_changed: Mapped[date | None] = mapped_column(Date)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ChatConversation(Base):
+    """Eine KI-Chat-Unterhaltung eines Benutzers im Kontext einer Gesellschaft."""
+
+    __tablename__ = "chat_conversation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    # Bei API-Aufrufen mit globalem Token gibt es keinen Benutzer.
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="Neue Unterhaltung")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    messages: Mapped[list[ChatMessage]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id",
+    )
+
+
+class ChatMessage(Base):
+    """Eine Nachricht innerhalb einer KI-Chat-Unterhaltung.
+
+    ``tool_calls`` protokolliert die vom Assistenten ausgeführten MCP-Tool-Aufrufe
+    (Name, Argumente, gekürztes Ergebnis); ``attachments`` die Metadaten und den
+    extrahierten Text hochgeladener Dateien.
+    """
+
+    __tablename__ = "chat_message"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tool_calls: Mapped[list[Any] | None] = mapped_column(JSON)
+    attachments: Mapped[list[Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    conversation: Mapped[ChatConversation] = relationship(back_populates="messages")

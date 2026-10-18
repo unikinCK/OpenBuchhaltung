@@ -1,0 +1,22 @@
+{% macro pagination(endpoint, total, limit, offset, company_id, extra={}, prev_label='‹ Neuere', next_label='Ältere ›') %}
+  {% if total > limit %}
+    <div class="pagination">
+      <span class="muted">{{ offset + 1 }}–{{ [offset + limit, total] | min }} von {{ total }}</span>
+      {% if offset > 0 %}
+        <a href="{{ url_for(endpoint, company_id=company_id, limit=limit, offset=[offset - limit, 0] | max, **extra) }}">{{ prev_label }}</a>
+      {% endif %}
+      {% if offset + limit < total %}
+        <a href="{{ url_for(endpoint, company_id=company_id, limit=limit, offset=offset + limit, **extra) }}">{{ next_label }}</a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endmacro %}
+
+{# Serverseitige Spaltensortierung (app.js): Tabellenattribute und Filter-Hidden-Felder. #}
+{% macro sort_attrs(sort) %}data-sort-server data-sort="{{ sort.key }}" data-sort-dir="{{ sort.direction }}"{% endmacro %}
+
+{% macro sort_hidden(sort) %}
+  {% for key, value in sort.url_args.items() %}
+    <input type="hidden" name="{{ key }}" value="{{ value }}" />
+  {% endfor %}
+{% endmacro %}

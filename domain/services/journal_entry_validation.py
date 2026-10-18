@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+
+
+class JournalEntryValidationError(ValueError):
+    """Raised when a JournalEntry violates business validation rules."""
+
+
+CENT = Decimal("0.01")
+
+
+def is_cent_amount(value: Decimal) -> bool:
+    """True, wenn der Betrag höchstens zwei Nachkommastellen hat."""
+    try:
+        return value.is_finite() and value == value.quantize(CENT)
+    except InvalidOperation:
+        return False
+
+
+@dataclass(slots=True)
+class ValidationLine:
+    account_id: int | None
+    debit_amount: Decimal
+    credit_amount: Decimal
+
+
+@dataclass(slots=True)
+class JournalEntryDraft:
+    status: str
+    lines: list[ValidationLine]
+
+
+class JournalEntryValidator:
+    ALLOWED_STATUSES = {"draft", "posted"}
+
+    @classmethod
+    def validate(cls, entry: JournalEntryDraft) -> None:
+        if entry.status not in cls.ALLOWED_STATUSES:
+            raise JournalEntryValidationError(
+                "Ungültiger Status. Erlaubt sind nur 'draft' oder 'posted'."
+            )
+
+        if len(entry.lines) < 2:
+            raise JournalEntryValidationError(
+                "Eine Buchung benötigt mindestens zwei Buchungszeilen."
+            )
+
+        debit_total = Decimal("0.00")
+        credit_total = Decimal("0.00")
+        for idx, line in enumerate(entry.lines, start=1):
+            if line.account_id is None:
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Konto ist erforderlich."
+                )
+            if line.debit_amount < Decimal("0.00") or line.credit_amount < Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Beträge dürfen nicht negativ sein."
+                )
+            if line.debit_amount > Decimal("0.00") and line.credit_amount > Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Soll und Haben dürfen nicht gleichzeitig > 0 sein."
+                )
+            if line.debit_amount == Decimal("0.00") and line.credit_amount == Decimal("0.00"):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Betrag muss größer 0 sein."
+                )
+            if not is_cent_amount(line.debit_amount) or not is_cent_amount(line.credit_amount):
+                raise JournalEntryValidationError(
+                    f"Zeile {idx}: Beträge dürfen höchstens zwei Nachkommastellen haben."
+                )
+            debit_total += line.debit_amount
+            credit_total += line.credit_amount
+
+        if debit_total != credit_total:
+            raise JournalEntryValidationError(
+                "Soll und Haben müssen identisch sein "
+                f"(Soll: {debit_total:.2f}, Haben: {credit_total:.2f})."
+            )
+
+        if entry.status == "posted" and debit_total == Decimal("0.00"):
+            raise JournalEntryValidationError(
+                "Eine gebuchte Buchung benötigt einen Betrag größer 0."
+            )

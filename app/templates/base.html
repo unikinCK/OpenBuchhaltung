@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}OpenBuchhaltung{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('main.index') }}">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="#1d4059" />
+          <path d="M4.8 8.5h22.4M16 8.5v17.1" fill="none" stroke="#eef4f8" stroke-width="2.4" stroke-linecap="round" />
+          <g fill="none" stroke="#ff8a7d" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9.5" cy="17.4" r="3.1" />
+            <path d="M20.6 14.3v6.2M20.6 14.3h3.175a1.475 1.475 0 0 1 0 2.95h-3.175M20.6 17.25h3.375a1.625 1.625 0 0 1 0 3.25h-3.375" />
+          </g>
+        </svg>
+        <span>OpenBuchhaltung</span>
+      </a>
+      {% if session.get('user') %}
+        {% set nav_groups = [
+          ('Buchen', [
+            ('main.journal_page', 'Buchungen'),
+            ('main.accounts_page', 'Konten'),
+            ('main.partners_page', 'Partner'),
+            ('main.controlling_page', 'Controlling'),
+            ('main.periods_page', 'Perioden'),
+            ('main.opening_balance_page', 'Eröffnungsbilanz'),
+          ]),
+          ('Belege', [
+            ('main.documents_page', 'Belege'),
+            ('main.receipt_ocr_page', 'Beleg-OCR'),
+            ('main.receipt_matching_page', 'Belegabgleich'),
+            ('main.einvoice_page', 'E-Rechnung'),
+          ]),
+          ('Bank & OPOS', [
+            ('main.bank_page', 'Bank'),
+            ('main.open_items_page', 'OPOS'),
+            ('main.dunning_page', 'Mahnwesen'),
+            ('main.payment_run_page', 'Zahllauf'),
+            ('main.fixed_assets_page', 'Anlagen'),
+            ('main.payroll_page', 'Lohn'),
+          ]),
+          ('Steuern & Berichte', [
+            ('main.reports_page', 'Berichte'),
+            ('main.vat_returns_page', 'UStVA'),
+            ('main.income_taxes_page', 'Ertragsteuern'),
+          ]),
+          ('Verwaltung', [
+            ('main.admin_page', 'Verwaltung'),
+            ('main.audit_log_page', 'Audit'),
+          ]),
+        ] %}
+        {% set detail_pages = {
+          'main.journal_entry_detail_page': 'main.journal_page',
+          'main.amend_journal_entry_page': 'main.journal_page',
+          'main.partner_detail_page': 'main.partners_page',
+        } %}
+        {% set current_endpoint = detail_pages.get(request.endpoint, request.endpoint) %}
+        <nav class="mainnav" aria-label="Hauptnavigation">
+          <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
+             {% if current_endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
+          <a href="{{ url_for('main.chat_page', company_id=selected_company_id) }}"
+             {% if current_endpoint == 'main.chat_page' %}class="active"{% endif %}>KI-Chat</a>
+          {% for group_label, group_items in nav_groups %}
+            {% set group_active = current_endpoint in (group_items | map('first') | list) %}
+            <div class="nav-group{% if group_active %} active{% endif %}">
+              <button type="button" class="nav-group-label" aria-haspopup="true">{{ group_label }} <span aria-hidden="true">▾</span></button>
+              <div class="nav-group-menu">
+                {% for endpoint, label in group_items %}
+                  <a href="{{ url_for(endpoint) if endpoint == 'main.audit_log_page' else url_for(endpoint, company_id=selected_company_id) }}"
+                     {% if current_endpoint == endpoint %}class="active"{% endif %}>{{ label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </nav>
+        <div class="nav-group user-menu">
+          <button type="button" class="nav-group-label" aria-haspopup="true" title="Benutzer {{ session['user']['username'] }} ({{ session['user']['role'] }})">
+            <span class="user-avatar" aria-hidden="true">{{ session['user']['username'][:1] | upper }}</span>
+            <span class="user-name">{{ session['user']['username'] }}</span> <span aria-hidden="true">▾</span>
+          </button>
+          <div class="nav-group-menu">
+            <span class="menu-info">Angemeldet als <strong>{{ session['user']['username'] }}</strong> <span class="badge">{{ session['user']['role'] }}</span></span>
+            <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort ändern</a>
+            <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Verbundene Apps</a>
+            <form method="post" action="{{ url_for('auth.logout') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="menu-button">Logout</button>
+            </form>
+          </div>
+        </div>
+      {% endif %}
+    </header>
+
+    {% if session.get('user') and companies is defined and companies %}
+      <div class="company-bar">
+        {% if companies | length > 1 %}
+          <form method="get" action="{{ request.path }}">
+            <label for="company-select">Gesellschaft:</label>
+            <select id="company-select" name="company_id" data-autosubmit>
+              {% for company in companies %}
+                <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>{{ company.name }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        {% else %}
+          <span class="company-name"><span class="muted">Gesellschaft:</span> <strong>{{ companies[0].name }}</strong></span>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if demo_mode %}
+      <div class="demo-banner" role="note">
+        <strong>Demo-Instanz:</strong> Alle Daten sind für andere Besucher sichtbar und werden
+        täglich um {{ demo_reset_time }} Uhr zurückgesetzt. Bitte keine echten Belege oder
+        personenbezogenen Daten eingeben.
+      </div>
+    {% endif %}
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash-list">
+          {% for category, message in messages %}
+            <li class="{{ category }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

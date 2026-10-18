@@ -1,0 +1,132 @@
+# nginx-Reverse-Proxy für eine öffentliche OpenBuchhaltung-Instanz
+# (docker-compose.nginx.yml). ${PUBLIC_DOMAIN}, ${PUBLIC_DOMAIN_ALIASES} und
+# ${NGINX_CLIENT_MAX_BODY_SIZE} ersetzt das nginx-Image beim Start (envsubst), alle
+# anderen $-Variablen sind nginx-eigene. Weitere Domains der Instanz
+# (PUBLIC_DOMAIN_ALIASES) liefern dieselbe Instanz aus, jede mit eigenem Zertifikat.
+
+server_tokens off;
+
+# Login-Versuche je Client-IP drosseln (zusätzlich zur Kontosperre der App).
+limit_req_zone $binary_remote_addr zone=obh_login:10m rate=10r/m;
+# Allgemeine Drossel gegen Scanner und Massenabrufe.
+limit_req_zone $binary_remote_addr zone=obh_general:10m rate=20r/s;
+limit_req_status 429;
+
+upstream obh_app {
+    # Alias aus docker-compose.nginx.yml, nicht der Dienstname „app“ (siehe dort).
+    server obh-instance-app:8000;
+    keepalive 16;
+}
+
+# Port 80: ACME-Challenge für certbot, sonst Umleitung auf HTTPS.
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Health-Check des Containers (nur intern sinnvoll, verrät nichts).
+    location = /nginx-health {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 https://${PUBLIC_DOMAIN}$request_uri;
+    }
+}
+
+# Bekannte Instanz-Domains bleiben beim Wechsel auf HTTPS auf ihrem Namen.
+server {
+    listen 80;
+    server_name ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Unbekannte Hostnamen (Scans auf die IP) per TLS-Handshake abweisen.
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES};
+
+    # Je Domain das eigene Zertifikat (certbot legt es unter ihrem Namen ab). Andere
+    # Namen erreichen diesen Block nicht: der default_server oben lehnt sie ab.
+    ssl_certificate     /etc/letsencrypt/live/$ssl_server_name/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$ssl_server_name/privkey.pem;
+    # Ohne Cache läse nginx die Dateien bei jedem Handshake; Änderungen (Erneuerung)
+    # erkennt er nach spätestens einer Minute.
+    ssl_certificate_cache max=16 valid=1m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    client_max_body_size ${NGINX_CLIENT_MAX_BODY_SIZE};
+
+    # Sicherheits-Header (HSTS, nosniff, Referrer-Policy, CSP) setzt die App selbst.
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # Überschreiben statt anhängen: die App vertraut genau einem Proxy
+    # (TRUSTED_PROXY_COUNT=1), gefälschte X-Forwarded-For-Werte fallen weg.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    # MCP-Server (Streamable HTTP, Bearer-Token MCP_HTTP_AUTH_TOKEN).
+    location = /mcp {
+        limit_req zone=obh_general burst=40 nodelay;
+        # Ohne Profil mcp läuft kein mcp-Service: zur Laufzeit auflösen, damit
+        # nginx trotzdem startet (502 statt Startabbruch).
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $obh_mcp http://obh-instance-mcp:8090;
+        # Der MCP-Server prüft Origin (DNS-Rebinding-Schutz für Browser);
+        # hinter diesem Proxy entfernen, wie im Caddyfile. Achtung: proxy_set_header in
+        # einer location ersetzt alle geerbten — daher Host/X-Forwarded-* wiederholen
+        # (der MCP-Server baut daraus den OAuth-Hinweis im 401).
+        proxy_set_header Origin "";
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_pass $obh_mcp;
+    }
+
+    location = /auth/login {
+        limit_req zone=obh_login burst=5 nodelay;
+        proxy_pass http://obh_app;
+    }
+
+    location / {
+        limit_req zone=obh_general burst=40 nodelay;
+        # Langläufer (OCR, FinTS, Prüferexport): Zeit bis zum ersten bzw. zwischen
+        # zwei Lesevorgängen. Der KI-Chat streamt alle 5 s ein Lebenszeichen.
+        proxy_read_timeout 190s;
+        proxy_send_timeout 190s;
+        proxy_pass http://obh_app;
+    }
+}

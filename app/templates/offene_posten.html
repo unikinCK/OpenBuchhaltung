@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination, sort_attrs %}
+{% from "_journal.html" import account_link %}
+{% from "_filters.html" import filter_form %}
+
+{% block title %}Offene Posten – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Offene Posten</h1>
+      <p class="page-subtitle">Forderungen und Verbindlichkeiten mit Fälligkeit</p>
+    </div>
+    {% if selected_company_id and accounts %}
+      <div class="page-actions">
+        <a class="button" href="#posten-erfassen" data-open-details="#posten-erfassen">+ Posten erfassen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Offene Debitoren (Forderungen)</div>
+      <div class="stat-value">{{ totals.receivable | betrag }} €</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Offene Kreditoren (Verbindlichkeiten)</div>
+      <div class="stat-value">{{ totals.payable | betrag }} €</div>
+    </div>
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% elif not accounts %}
+    <section class="card">
+      <p class="muted">Bitte zuerst ein Debitoren-/Kreditorenkonto oder ein passendes Forderungs-/Verbindlichkeitskonto anlegen.</p>
+    </section>
+  {% else %}
+    <details class="card card-primary" id="posten-erfassen"{% if not open_items_total and not filter_args %} open{% endif %}>
+      <summary>Offenen Posten erfassen</summary>
+      <form method="post" action="{{ url_for('main.create_open_item_action') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="item_type">Typ</label>
+            <select id="item_type" name="item_type" required>
+              <option value="receivable">Debitorisch (Forderung)</option>
+              <option value="payable">Kreditorisch (Verbindlichkeit)</option>
+            </select>
+          </div>
+          <div class="field field-wide">
+            <label for="account_id">OPOS-Konto</label>
+            <select id="account_id" name="account_id" required>
+              {% for account in accounts %}
+                <option value="{{ account.id }}">{{ account.code }} – {{ account.name }} ({{ account.account_type }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="reference">Referenz</label>
+            <input id="reference" name="reference" placeholder="RE-2026-001" required />
+          </div>
+          <div class="field">
+            <label for="counterparty">Debitor/Kreditor</label>
+            <input id="counterparty" name="counterparty" placeholder="Kunde oder Lieferant" />
+          </div>
+          <div class="field">
+            <label for="amount">Betrag</label>
+            <input id="amount" name="amount" inputmode="decimal" placeholder="1190.00" required />
+          </div>
+          <div class="field">
+            <label for="entry_date">Belegdatum</label>
+            <input id="entry_date" name="entry_date" type="date" value="{{ today }}" />
+          </div>
+          <div class="field">
+            <label for="due_date">Fällig am</label>
+            <input id="due_date" name="due_date" type="date" />
+          </div>
+          <div class="field field-wide">
+            <label for="journal_entry_id">Buchung (optional)</label>
+            <select id="journal_entry_id" name="journal_entry_id">
+              <option value="">Ohne Buchungsverknüpfung</option>
+              {% for entry in journal_entries %}
+                <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.entry_date | datum }} – {{ entry.description }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="counterparty_iban">IBAN der Gegenpartei <span class="muted">(für SEPA-Zahllauf)</span></label>
+            <input id="counterparty_iban" name="counterparty_iban" placeholder="DE.." />
+          </div>
+          <div class="field">
+            <label for="counterparty_bic">BIC <span class="muted">(optional)</span></label>
+            <input id="counterparty_bic" name="counterparty_bic" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Posten speichern</button>
+        </div>
+      </form>
+    </details>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Posten <span class="count">{{ open_items_total }}</span></h2>
+      {% if selected_company_id %}
+        <div class="row-actions">
+          <a class="{{ 'button-secondary btn-sm' if include_settled else 'button btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">Nur offene</a>
+          <a class="{{ 'button btn-sm' if include_settled else 'button-secondary btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id, include_settled=1) }}">Mit erledigten</a>
+        </div>
+      {% endif %}
+    </div>
+    {% if selected_company_id %}
+      {{ filter_form('main.open_items_page', selected_company_id, q, date_from, date_to,
+                     extra=dict({'include_settled': 1} if include_settled else {}, **sort.url_args),
+                     placeholder="Referenz oder Gegenpartei") }}
+    {% endif %}
+
+    {% if open_items %}
+      <div class="table-scroll">
+        <table class="data" {{ sort_attrs(sort) }}>
+          <thead>
+            <tr>
+              <th data-sort-key="reference">Referenz</th>
+              <th data-sort-key="type">Typ</th>
+              <th data-sort-key="counterparty">Gegenseite</th>
+              <th data-sort-key="account">Konto</th>
+              <th data-sort-key="due">Fällig</th>
+              <th class="num" data-sort-key="original">Original</th>
+              <th class="num" data-sort-key="open">Offen</th>
+              <th data-sort-key="status">Status</th>
+              <th class="actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in open_items %}
+              {% set overdue = item.status == "open" and item.due_date and item.due_date.isoformat() < today %}
+              <tr{% if item.status != "open" %} class="row-muted"{% endif %}>
+                <td class="nowrap">
+                  <strong>{{ item.reference }}</strong>
+                  {% if item.journal_entry %}
+                    <br /><a class="small" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=item.journal_entry.id) }}">{{ item.journal_entry.posting_number }}</a>
+                  {% endif %}
+                </td>
+                <td>{% if item.item_type == "receivable" %}<span class="badge badge-info">Debitor</span>{% else %}<span class="badge badge-warning">Kreditor</span>{% endif %}</td>
+                <td>{{ item.counterparty or "–" }}</td>
+                <td class="nowrap" title="{{ item.account.name }}">{{ account_link(item.account.id, item.account.code) }}</td>
+                <td class="date">
+                  {% if item.due_date %}
+                    {% if overdue %}<strong class="negative" title="überfällig">{{ item.due_date | datum }}</strong>{% else %}{{ item.due_date | datum }}{% endif %}
+                  {% else %}–{% endif %}
+                </td>
+                <td class="num">{{ item.original_amount | betrag }}</td>
+                <td class="num"><strong>{{ item.open_amount | betrag }}</strong></td>
+                <td class="nowrap">
+                  {% if item.status == "open" %}
+                    {% if overdue %}<span class="badge badge-danger">überfällig</span>{% else %}<span class="badge badge-warning">offen</span>{% endif %}
+                  {% else %}
+                    <span class="badge badge-success">ausgeglichen</span>
+                    {% if item.settled_at %}<br /><span class="muted small">{{ item.settled_at | datum }}</span>{% endif %}
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  {% if item.status == "open" %}
+                    <button type="button" class="primary btn-sm" popovertarget="item-panel-{{ item.id }}">Ausgleichen …</button>
+                    <div popover id="item-panel-{{ item.id }}" class="panel">
+                      <div class="panel-header">
+                        <div>
+                          <h3>{{ item.reference }} ausgleichen</h3>
+                          <p class="muted small" style="margin:0.2rem 0 0;">{{ item.counterparty or "ohne Gegenseite" }} · offen {{ item.open_amount | betrag }} €</p>
+                        </div>
+                        <button type="button" class="panel-close" popovertarget="item-panel-{{ item.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
+                      </div>
+                      <form method="post" action="{{ url_for('main.settle_open_item_action', open_item_id=item.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                        <div class="form-grid">
+                          <div class="field">
+                            <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>
+                            <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" placeholder="{{ item.open_amount }}" aria-label="Ausgleichsbetrag" />
+                            <span class="hint">leer = voller offener Betrag</span>
+                          </div>
+                          <div class="field field-wide">
+                            <label for="settle-tx-{{ item.id }}">Bankumsatz <span class="muted">(optional)</span></label>
+                            <select id="settle-tx-{{ item.id }}" name="bank_transaction_id">
+                              <option value="">Bankumsatz optional</option>
+                              {% for tx in bank_transactions %}
+                                <option value="{{ tx.id }}">{{ tx.booking_date | datum }} – {{ tx.amount | betrag }} – {{ tx.purpose }}</option>
+                              {% endfor %}
+                            </select>
+                          </div>
+                          <div class="field field-full">
+                            <label for="settle-entry-{{ item.id }}">Ausgleichsbuchung <span class="muted">(optional)</span></label>
+                            <select id="settle-entry-{{ item.id }}" name="journal_entry_id">
+                              <option value="">Ausgleichsbuchung optional</option>
+                              {% for entry in journal_entries %}
+                                <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+                              {% endfor %}
+                            </select>
+                          </div>
+                        </div>
+                        <div class="form-actions">
+                          <button type="submit">Ausgleichen</button>
+                        </div>
+                      </form>
+                    </div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {{ pagination('main.open_items_page', open_items_total, limit, offset, selected_company_id,
+                    extra=dict(filter_args, **sort.url_args)) }}
+    {% else %}
+      <p class="empty-state">Keine offenen Posten vorhanden.</p>
+    {% endif %}
+  </section>
+{% endblock %}

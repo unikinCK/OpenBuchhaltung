@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import logging
+import os
+from datetime import timedelta
+from pathlib import Path
+
+from flask import Flask, request
+from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+from .api import api_bp
+from .auth import auth_bp, ensure_csrf_token
+from .cli import register_cli_commands
+from .db import auto_migrate_enabled, create_session_factory, running_from_cli
+from .demo_mode import register_demo_mode
+from .logging_config import configure_logging, init_request_id
+from .oauth import oauth_bp
+from .services.document_fetch import parse_allowed_hosts
+from .version import get_commit, get_version
+from .web import main_bp
+
+logger = logging.getLogger(__name__)
+INSECURE_DEVELOPMENT_SECRET = "dev-secret-key-change-me"
+DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local"}
+DEFAULT_SESSION_LIFETIME_SECONDS = 8 * 60 * 60
+DEFAULT_HSTS_MAX_AGE = 365 * 24 * 60 * 60
+
+
+def _env_flag(name: str) -> bool | None:
+    """Liest ein Ja/Nein-Flag aus der Umgebung; None, wenn nicht gesetzt."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    return int(raw)
+
+
+def is_production(app: Flask) -> bool:
+    """Produktionsbetrieb = weder Tests noch explizite Entwicklungsumgebung."""
+    if app.config.get("TESTING"):
+        return False
+    environment = str(app.config.get("APP_ENV") or "production").strip().lower()
+    return environment not in DEVELOPMENT_ENVIRONMENTS
+
+
+def create_app(test_config: dict | None = None) -> Flask:
+    """Application factory for OpenBuchhaltung."""
+    document_max_upload_bytes = int(os.environ.get("DOCUMENT_MAX_UPLOAD_BYTES", "10485760"))
+    document_min_upload_bytes = int(os.environ.get("DOCUMENT_MIN_UPLOAD_BYTES", "1024"))
+    app = Flask(__name__)
+    app.config.from_mapping(
+        APP_ENV=os.environ.get("APP_ENV") or os.environ.get("FLASK_ENV") or "production",
+        # Version (pyproject.toml) und Commit (GIT_COMMIT bzw. lokaler Checkout) für
+        # Health-Endpoint und Prüferexport-Manifest.
+        APP_VERSION=get_version(),
+        APP_COMMIT_SHA=os.environ.get("APP_COMMIT_SHA") or get_commit(),
+        # Schema-Migrationen beim Start (Default an). Produktion: DB_AUTO_MIGRATE=0 und
+        # `alembic upgrade head` als eigener Schritt vor dem Start (siehe redeploy.sh).
+        DB_AUTO_MIGRATE=auto_migrate_enabled(),
+        SECRET_KEY=os.environ.get("SECRET_KEY"),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        # None = Vorgabe nach Umgebung (Produktion: an); siehe _configure_hardening.
+        SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE"),
+        # Idle-Timeout der Browser-Session (Login setzt session.permanent).
+        PERMANENT_SESSION_LIFETIME=timedelta(
+            seconds=int(
+                os.environ.get("SESSION_LIFETIME_SECONDS", str(DEFAULT_SESSION_LIFETIME_SECONDS))
+            )
+        ),
+        # Anzahl vertrauenswürdiger Reverse-Proxies (X-Forwarded-*); None = Vorgabe
+        # nach Umgebung (Produktion: 1, sonst 0).
+        TRUSTED_PROXY_COUNT=_env_int("TRUSTED_PROXY_COUNT"),
+        HSTS_ENABLED=_env_flag("HSTS_ENABLED"),
+        HSTS_MAX_AGE=int(os.environ.get("HSTS_MAX_AGE", str(DEFAULT_HSTS_MAX_AGE))),
+        DATABASE_URL=os.environ.get("DATABASE_URL"),
+        # OAuth 2.1 für MCP-Connectoren (ChatGPT, Claude): Discovery, DCR, Login-Flow.
+        OAUTH_ENABLED=_env_flag("OAUTH_ENABLED") is not False,
+        # Öffentliche Demo-Instanz: Banner, vorbelegter Login, gesperrte Bereiche
+        # (Benutzer, KI-Schlüssel, Bankverbindungen, ELSTER) und täglicher Reset
+        # (`flask demo-reset --loop`, Compose-Overlay docker-compose.demo.yml).
+        DEMO_MODE=bool(_env_flag("DEMO_MODE")),
+        DEMO_RESET_TIME=os.environ.get("DEMO_RESET_TIME", "03:30"),
+        OAUTH_ISSUER=os.environ.get("OAUTH_ISSUER"),
+        OAUTH_ACCESS_TOKEN_SECONDS=int(os.environ.get("OAUTH_ACCESS_TOKEN_SECONDS", "3600")),
+        OAUTH_REFRESH_TOKEN_DAYS=int(os.environ.get("OAUTH_REFRESH_TOKEN_DAYS", "30")),
+        OAUTH_ALLOWED_REDIRECT_HOSTS=os.environ.get("OAUTH_ALLOWED_REDIRECT_HOSTS", ""),
+        # Push-Mitteilungen an die iOS-App über ein zentrales Relay (leer = aus);
+        # Zustellung durch den Dispatcher `flask push-dispatch` (Compose-Profil push).
+        PUSH_RELAY_URL=os.environ.get("PUSH_RELAY_URL", ""),
+        PUSH_RELAY_TOKEN=os.environ.get("PUSH_RELAY_TOKEN", ""),
+        PUSH_DIGEST_HOUR=int(os.environ.get("PUSH_DIGEST_HOUR", "8")),
+        PUSH_DISPATCH_INTERVAL_SECONDS=int(
+            os.environ.get("PUSH_DISPATCH_INTERVAL_SECONDS", "30")
+        ),
+        DOCUMENT_UPLOAD_DIR=str(Path(app.instance_path) / "uploads"),
+        DOCUMENT_MAX_UPLOAD_BYTES=document_max_upload_bytes,
+        DOCUMENT_MIN_UPLOAD_BYTES=document_min_upload_bytes,
+        MAX_CONTENT_LENGTH=document_max_upload_bytes,
+        # Belege per Link (source_url): erlaubte Hosts als host:port, kommagetrennt;
+        # leer = abgeschaltet. Siehe app/services/document_fetch.py.
+        DOCUMENT_FETCH_ALLOWED_HOSTS=os.environ.get("DOCUMENT_FETCH_ALLOWED_HOSTS", ""),
+        DOCUMENT_FETCH_TIMEOUT_SECONDS=float(
+            os.environ.get("DOCUMENT_FETCH_TIMEOUT_SECONDS", "30")
+        ),
+        DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
+        # OCR-Pipeline: fällt auf den Beleg-LLM-Endpoint zurück, wenn nicht separat gesetzt.
+        RECEIPT_OCR_ENDPOINT_URL=os.environ.get("RECEIPT_OCR_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_OCR_MODEL=os.environ.get(
+            "RECEIPT_OCR_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
+        # LLM zur Feld-Extraktion (Unterstützung/Fallback) und Kontrolle des
+        # regelbasierten Vorschlags; Fallback-Kette auf den Beleg-LLM-Endpoint.
+        RECEIPT_LLM_ENDPOINT_URL=os.environ.get("RECEIPT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_LLM_MODEL=os.environ.get(
+            "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
+        # LLM für den Belegabgleich (Beleg ↔ vorhandene Buchungen);
+        # Fallback-Kette über den Beleg-Extraktions- auf den Beleg-LLM-Endpoint.
+        RECEIPT_MATCH_LLM_ENDPOINT_URL=os.environ.get("RECEIPT_MATCH_LLM_ENDPOINT_URL")
+        or os.environ.get("RECEIPT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        RECEIPT_MATCH_LLM_MODEL=os.environ.get(
+            "RECEIPT_MATCH_LLM_MODEL",
+            os.environ.get(
+                "RECEIPT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+            ),
+        ),
+        # KI-Chat: OpenAI-/responses-kompatibler Endpoint für den integrierten
+        # Chat mit Tool-Zugriff; Fallback auf den Beleg-LLM-Endpoint. Die
+        # *_LLM_ENDPOINT_URL-Werte sind Instanz-Defaults ohne API-Key; API-Keys
+        # hinterlegt der Administrator je Benutzer (app.services.llm_settings).
+        CHAT_LLM_ENDPOINT_URL=os.environ.get("CHAT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        CHAT_LLM_MODEL=os.environ.get(
+            "CHAT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+        ),
+        # Timeout je Beleg-/Dokument-LLM-Aufruf (Standard 30 s, Dokument-Update 20 s).
+        LLM_TIMEOUT_SECONDS=os.environ.get("LLM_TIMEOUT_SECONDS"),
+        CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),
+        CHAT_LLM_TIMEOUT_SECONDS=float(os.environ.get("CHAT_LLM_TIMEOUT_SECONDS", "1200")),
+        # FinTS-Produktkennung: 25-stellige Registrierungsnummer der Deutschen
+        # Kreditwirtschaft (HKVVB „Produktbezeichnung“), Voraussetzung für den
+        # Direktabruf. Sie ist an den Betreiber gebunden und gehört nur in die
+        # .env der Instanz, nie ins Repository.
+        FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),
+        # Open Banking (PSD2) über Enable Banking für Banken ohne FinTS: ID und
+        # privater Schlüssel der dort registrierten Anwendung; die Redirect-URL
+        # muss in der Anwendung hinterlegt sein (Default: Callback dieser Instanz).
+        ENABLE_BANKING_APP_ID=os.environ.get("ENABLE_BANKING_APP_ID"),
+        ENABLE_BANKING_KEY_FILE=os.environ.get("ENABLE_BANKING_KEY_FILE"),
+        ENABLE_BANKING_REDIRECT_URL=os.environ.get("ENABLE_BANKING_REDIRECT_URL"),
+        ENABLE_BANKING_API_URL=os.environ.get("ENABLE_BANKING_API_URL"),
+        API_AUTH_TOKEN=os.environ.get("API_AUTH_TOKEN"),
+        # Default-secure: API-Auth ist aktiv, Opt-out für lokale Entwicklung
+        # per API_REQUIRE_AUTH=0.
+        API_REQUIRE_AUTH=os.environ.get("API_REQUIRE_AUTH", "1") == "1",
+        CSRF_PROTECT=os.environ.get("CSRF_PROTECT", "1") == "1",
+        LOGIN_RATE_LIMIT=os.environ.get("LOGIN_RATE_LIMIT", "1") == "1",
+        LOGIN_RATE_LIMIT_ATTEMPTS=int(os.environ.get("LOGIN_RATE_LIMIT_ATTEMPTS", "5")),
+        LOGIN_RATE_LIMIT_WINDOW_SECONDS=int(
+            os.environ.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900")
+        ),
+        DATEV_CONSULTANT_NUMBER=int(os.environ.get("DATEV_CONSULTANT_NUMBER", "1000")),
+        DATEV_CLIENT_NUMBER=(
+            int(os.environ["DATEV_CLIENT_NUMBER"])
+            if os.environ.get("DATEV_CLIENT_NUMBER")
+            else None
+        ),
+        SELLER_STREET=os.environ.get("SELLER_STREET", ""),
+        SELLER_POSTAL_CODE=os.environ.get("SELLER_POSTAL_CODE", ""),
+        SELLER_CITY=os.environ.get("SELLER_CITY", ""),
+        SELLER_COUNTRY_CODE=os.environ.get("SELLER_COUNTRY_CODE", "DE"),
+        SELLER_VAT_ID=os.environ.get("SELLER_VAT_ID", ""),
+        # ELSTER-Bridge (ERiC-Runner) – optional, siehe app/services/elster.py.
+        ELSTER_ENVIRONMENT=os.environ.get("ELSTER_ENVIRONMENT", "test"),
+        ELSTER_ERIC_LIBRARY_PATH=os.environ.get("ELSTER_ERIC_LIBRARY_PATH"),
+        ELSTER_CERTIFICATE_PATH=os.environ.get("ELSTER_CERTIFICATE_PATH"),
+        ELSTER_CERTIFICATE_ALIAS=os.environ.get("ELSTER_CERTIFICATE_ALIAS"),
+        ELSTER_ERIC_COMMAND=os.environ.get("ELSTER_ERIC_COMMAND"),
+        ELSTER_ERIC_TIMEOUT_SECONDS=int(os.environ.get("ELSTER_ERIC_TIMEOUT_SECONDS", "60")),
+        # Lohn: externe Runner für Lohnsteuer-PAP, ELStAM und DEÜV – optional.
+        PAYROLL_PAP_COMMAND=os.environ.get("PAYROLL_PAP_COMMAND"),
+        PAYROLL_PAP_TIMEOUT_SECONDS=int(os.environ.get("PAYROLL_PAP_TIMEOUT_SECONDS", "30")),
+        PAYROLL_PARAMETER_VERSION=os.environ.get("PAYROLL_PARAMETER_VERSION", "manual"),
+        PAYROLL_ELSTAM_COMMAND=os.environ.get("PAYROLL_ELSTAM_COMMAND"),
+        PAYROLL_DEUEV_COMMAND=os.environ.get("PAYROLL_DEUEV_COMMAND"),
+    )
+
+    if test_config:
+        app.config.update(test_config)
+        # Tests posten Formulare ohne Token bzw. rufen die API ohne Bearer auf;
+        # expliziter Opt-in je Test über die jeweilige Config möglich.
+        if app.config.get("TESTING"):
+            if "CSRF_PROTECT" not in test_config:
+                app.config["CSRF_PROTECT"] = False
+            if "API_REQUIRE_AUTH" not in test_config:
+                app.config["API_REQUIRE_AUTH"] = False
+            if "LOGIN_RATE_LIMIT" not in test_config:
+                app.config["LOGIN_RATE_LIMIT"] = False
+
+    configure_logging(app)
+    _configure_secret_key(app)
+    if os.environ.get("CHAT_LLM_API_KEY"):
+        logger.warning(
+            "CHAT_LLM_API_KEY wird nicht mehr ausgewertet. API-Keys hinterlegt der "
+            "Administrator je Benutzer (Verwaltung → KI-Zugang)."
+        )
+    # Fail-fast bei Tippfehlern in der Allowlist statt Fehler erst beim ersten Abruf.
+    parse_allowed_hosts(app.config.get("DOCUMENT_FETCH_ALLOWED_HOSTS"))
+    fints_product_id = (app.config.get("FINTS_PRODUCT_ID") or "").strip()
+    if fints_product_id and len(fints_product_id) != 25:
+        logger.warning(
+            "FINTS_PRODUCT_ID hat %s statt 25 Zeichen. Die Registrierungsnummer der "
+            "Deutschen Kreditwirtschaft muss vollständig und unverändert eingetragen werden.",
+            len(fints_product_id),
+        )
+    _configure_hardening(app)
+
+    Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
+
+    app.extensions["db_session_factory"] = create_session_factory(
+        app.config.get("DATABASE_URL"),
+        auto_migrate=bool(app.config.get("DB_AUTO_MIGRATE", True)),
+        cli_context=running_from_cli(),
+    )
+
+    app.register_blueprint(main_bp)
+    app.register_blueprint(api_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(oauth_bp)
+    register_cli_commands(app)
+    init_request_id(app)
+    register_demo_mode(app)
+
+    @app.context_processor
+    def _inject_csrf_token():
+        return {"csrf_token": ensure_csrf_token}
+
+    @app.after_request
+    def _add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "img-src 'self' data:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'",
+        )
+        # HSTS nur über HTTPS senden (Browser ignorieren es sonst ohnehin);
+        # hinter ProxyFix zählt X-Forwarded-Proto.
+        if app.config.get("HSTS_ENABLED") and request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                f"max-age={int(app.config.get('HSTS_MAX_AGE') or DEFAULT_HSTS_MAX_AGE)}; "
+                "includeSubDomains",
+            )
+        return response
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def _handle_large_upload(exc):
+        del exc
+        return {"error": "Uploaded file is too large."}, 413
+
+    return app
+
+
+def _configure_secret_key(app: Flask) -> None:
+    """Require an explicit session secret except in tests or an explicit dev environment."""
+    if app.config.get("TESTING"):
+        app.config["SECRET_KEY"] = app.config.get("SECRET_KEY") or "testing-secret-key"
+        return
+
+    environment = str(app.config.get("APP_ENV") or "production").strip().lower()
+    secret_key = app.config.get("SECRET_KEY")
+    if environment in DEVELOPMENT_ENVIRONMENTS:
+        if not secret_key:
+            app.config["SECRET_KEY"] = INSECURE_DEVELOPMENT_SECRET
+            logger.warning(
+                "Kein SECRET_KEY gesetzt; die unsichere Entwicklungsvorgabe wird verwendet."
+            )
+        return
+
+    if not secret_key or secret_key == INSECURE_DEVELOPMENT_SECRET:
+        raise RuntimeError(
+            "SECRET_KEY muss außerhalb einer expliziten Entwicklungsumgebung gesetzt sein. "
+            "Für lokale Entwicklung APP_ENV=development setzen."
+        )
+
+
+def _configure_hardening(app: Flask) -> None:
+    """Produktionsvorgaben für Cookie-Secure-Flag, HSTS und ProxyFix.
+
+    In Produktion (``APP_ENV`` weder Test- noch Entwicklungsumgebung) sind das
+    Secure-Flag der Session-Cookies und HSTS eingeschaltet und genau ein
+    Reverse-Proxy (Caddy, Tailscale Serve) wird für ``X-Forwarded-For/-Proto``
+    als vertrauenswürdig behandelt. Alle drei Vorgaben lassen sich explizit
+    überschreiben (``SESSION_COOKIE_SECURE``, ``HSTS_ENABLED``,
+    ``TRUSTED_PROXY_COUNT``); ``SESSION_COOKIE_SECURE=0`` in Produktion wird
+    protokolliert, weil Sessions dann über Klartext-HTTP abgreifbar sind.
+    """
+    production = is_production(app)
+
+    if app.config.get("SESSION_COOKIE_SECURE") is None:
+        app.config["SESSION_COOKIE_SECURE"] = production
+    elif production and not app.config["SESSION_COOKIE_SECURE"]:
+        logger.warning(
+            "SESSION_COOKIE_SECURE=0 in Produktion: Session-Cookies werden auch über "
+            "unverschlüsseltes HTTP gesendet."
+        )
+
+    if app.config.get("HSTS_ENABLED") is None:
+        app.config["HSTS_ENABLED"] = production
+
+    if app.config.get("TRUSTED_PROXY_COUNT") is None:
+        app.config["TRUSTED_PROXY_COUNT"] = 1 if production else 0
+    proxies = int(app.config["TRUSTED_PROXY_COUNT"])
+    if proxies > 0:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies, x_host=proxies)

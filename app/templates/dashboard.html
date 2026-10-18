@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% from "_journal.html" import partner_chips %}
+
+{% block title %}Dashboard – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    {% if selected_company_id %}
+      <div class="page-actions">
+        <a class="button-secondary btn-sm" href="{{ url_for('main.reports_page', company_id=selected_company_id) }}">Berichte</a>
+        <a class="button btn-sm" href="{{ url_for('main.journal_page', company_id=selected_company_id, neu=1) }}#neue-buchung">+ Neue Buchung</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p>Noch keine Gesellschaft vorhanden. Legen Sie unter
+        <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> einen Mandanten mit Gesellschaft an
+        oder führen Sie <code>flask --app run.py seed-demo</code> aus.</p>
+    </section>
+  {% else %}
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Umsatzerlöse</div>
+        <div class="stat-value">{{ totals.total_revenue | betrag }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Aufwendungen</div>
+        <div class="stat-value">{{ totals.total_expense | betrag }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Jahresergebnis</div>
+        <div class="stat-value {% if totals.net_income < 0 %}negative{% endif %}">{{ totals.net_income | betrag }} €</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Bilanzsumme</div>
+        <div class="stat-value">{{ balance_totals.total_assets | betrag }} €</div>
+      </div>
+    </div>
+    <p class="muted small" style="margin:-0.5rem 0 1.25rem;">
+      {{ stats.journal_entries }} Buchungen · {{ stats.accounts }} Konten · {{ stats.documents }} Belege ·
+      {% if balance_totals.is_balanced %}
+        <span class="badge badge-success">Bilanzgleichheit: Ja</span>
+      {% else %}
+        <span class="badge badge-danger">Bilanzgleichheit: Nein</span>
+      {% endif %}
+    </p>
+
+    <section class="card">
+      <h2>Offene Aufgaben</h2>
+      {% if tasks.open_bank_transactions or tasks.unlinked_documents
+            or tasks.overdue_open_items or tasks.pending_match_suggestions
+            or tasks.due_templates %}
+        <div class="stat-grid" style="margin-bottom:0;">
+          <a class="stat-card task-card {% if tasks.open_bank_transactions %}task-open{% endif %}"
+             href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">
+            <div class="stat-label">Unverbuchte Bankumsätze</div>
+            <div class="stat-value">{{ tasks.open_bank_transactions }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.unlinked_documents %}task-open{% endif %}"
+             href="{{ url_for('main.documents_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Unverknüpfte Belege</div>
+            <div class="stat-value">{{ tasks.unlinked_documents }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.overdue_open_items %}task-open{% endif %}"
+             href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Überfällige offene Posten</div>
+            <div class="stat-value">{{ tasks.overdue_open_items }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.pending_match_suggestions %}task-open{% endif %}"
+             href="{{ url_for('main.receipt_matching_page', company_id=selected_company_id) }}">
+            <div class="stat-label">Offene Belegabgleich-Vorschläge</div>
+            <div class="stat-value">{{ tasks.pending_match_suggestions }}</div>
+          </a>
+          <a class="stat-card task-card {% if tasks.due_templates %}task-open{% endif %}"
+             href="{{ url_for('main.journal_page', company_id=selected_company_id) }}#vorlagen">
+            <div class="stat-label">Fällige Buchungsvorlagen</div>
+            <div class="stat-value">{{ tasks.due_templates }}</div>
+          </a>
+        </div>
+      {% else %}
+        <p class="muted">Alles erledigt — keine offenen Aufgaben.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Letzte Buchungen</h2>
+        {% if recent_entries %}<a class="small" href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Alle Buchungen ansehen →</a>{% endif %}
+      </div>
+      {% if recent_entries %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Beleg-Nr.</th>
+                <th>Datum</th>
+                <th>Buchungstext</th>
+                <th>Geschäftspartner</th>
+                <th class="num">Betrag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in recent_entries %}
+                {% set info = recent_overview.get(entry.id, {}) %}
+                <tr>
+                  <td class="nowrap"><a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}">{{ entry.posting_number }}</a></td>
+                  <td class="date">{{ entry.entry_date | datum }}</td>
+                  <td>{{ entry.description }}</td>
+                  <td>
+                    {% if info.partners %}
+                      {{ partner_chips(info.partners) }}
+                    {% else %}
+                      <span class="muted">–</span>
+                    {% endif %}
+                  </td>
+                  <td class="num">{{ info.total | betrag }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Noch keine Buchungen vorhanden.
+          <a href="{{ url_for('main.journal_page', company_id=selected_company_id, neu=1) }}#neue-buchung">Erste Buchung erfassen →</a></p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

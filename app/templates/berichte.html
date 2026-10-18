@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% from "_journal.html" import account_link %}
+
+{% block title %}Berichte – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Berichte</h1>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    {# Kontoblatt passend zum Auswertungszeitraum; ohne Daten wie die SuSa über alle Jahre. #}
+    {% set period_ledger_args = {"date_from": date_from.isoformat(), "date_to": date_to.isoformat() if date_to else none} if date_from else ({"date_to": date_to.isoformat(), "fiscal_year_id": "alle"} if date_to else {"fiscal_year_id": "alle"}) %}
+    {% set as_of_ledger_args = {"date_to": date_to.isoformat(), "fiscal_year_id": "alle"} if date_to else {"fiscal_year_id": "alle"} %}
+    <section class="card">
+      <h2>Auswertungszeitraum</h2>
+      <form method="get" action="{{ url_for('main.reports_page') }}" class="inline-form">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="date_from">Von</label>
+        <input id="date_from" name="date_from" type="date" value="{{ date_from.isoformat() if date_from else '' }}" style="width:auto;" />
+        <label for="date_to">Bis / Stichtag</label>
+        <input id="date_to" name="date_to" type="date" value="{{ date_to.isoformat() if date_to else '' }}" style="width:auto;" />
+        <label for="include_closing_entries">
+          <input id="include_closing_entries" name="include_closing_entries" type="checkbox" value="1" {% if include_closing_entries %}checked{% endif %} />
+          inkl. Abschlussbuchungen
+        </label>
+        <button type="submit">Anzeigen</button>
+      </form>
+      <p class="muted">
+        Ohne Häkchen zeigen SuSa, GuV und Bilanz den Stand vor den Abschlussbuchungen
+        (Periode 13, z. B. AfA). Der Ergebnisvortrag des Jahresabschlusses zählt in der GuV nie
+        mit; Saldovorträge (EB-Werte) erscheinen in der SuSa nur bei Auswertung ab einem Datum.
+        {% if balance_sheet.period and balance_sheet.period.fiscal_year %}
+          Bilanz-Geschäftsjahr: {{ balance_sheet.period.fiscal_year }}.
+        {% endif %}
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Summen- und Saldenliste</h2>
+      {% if trial_balance %}
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Konto</th>
+              <th>Name</th>
+              <th class="num">Soll</th>
+              <th class="num">Haben</th>
+              <th class="num">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in trial_balance %}
+              <tr>
+                <td>{{ account_link(row.account_id, row.code, none, period_ledger_args) }}</td>
+                <td><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=row.account_id, **period_ledger_args) }}">{{ row.name }}</a></td>
+                <td class="num">{{ row.debit_total | betrag }}</td>
+                <td class="num">{{ row.credit_total | betrag }}</td>
+                <td class="num{% if row.balance < 0 %} negative{% endif %}">{{ row.balance | betrag }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Buchungen für diese Gesellschaft.</p>
+      {% endif %}
+      <p>
+        <a href="{{ url_for('main.download_trial_balance_csv', company_id=selected_company_id, **report_args) }}">Summen-/Saldenliste als CSV exportieren</a>
+        ·
+        <a href="{{ url_for('api.export_journal_csv', company_id=selected_company_id) }}">Journal-Export (CSV)</a>
+        ·
+        <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id, **report_args) }}">SuSa-Export (CSV, API-Format)</a>
+        ·
+        <a href="{{ url_for('api.export_audit_package', company_id=selected_company_id) }}">Prüferexport (ZIP)</a>
+      </p>
+      {% if datev_fiscal_years %}
+        <form method="get" action="{{ url_for('main.download_datev_csv') }}" class="inline-form" id="datev-export">
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <strong title="Brutto-Prinzip: Umsatz-/Vorsteuer über DATEV-Automatikkonten bzw. Steuerschlüssel">DATEV-Buchungsstapel (EXTF, {{ datev_chart|upper if datev_chart else 'Kontenrahmen nicht erkannt' }})</strong>
+          <label for="datev_fiscal_year_id">Wirtschaftsjahr</label>
+          <select id="datev_fiscal_year_id" name="fiscal_year_id" style="width:auto;">
+            {% for fiscal_year in datev_fiscal_years %}
+              <option value="{{ fiscal_year.id }}" {% if fiscal_year.id == datev_selection.fiscal_year_id %}selected{% endif %}>
+                {{ fiscal_year.label }} ({{ fiscal_year.start_date.isoformat() }} – {{ fiscal_year.end_date.isoformat() }}, {{ fiscal_year.entry_count }} {{ 'Buchung' if fiscal_year.entry_count == 1 else 'Buchungen' }})
+              </option>
+            {% endfor %}
+          </select>
+          <label for="datev_date_from">Von</label>
+          <input id="datev_date_from" name="date_from" type="date" value="{{ datev_selection.date_from }}" style="width:auto;" />
+          <label for="datev_date_to">Bis</label>
+          <input id="datev_date_to" name="date_to" type="date" value="{{ datev_selection.date_to }}" style="width:auto;" />
+          <button type="submit">Exportieren</button>
+        </form>
+        <p class="muted">
+          Ein Stapel je Wirtschaftsjahr: DATEV liest das Jahr des Belegdatums (TTMM) aus dem
+          WJ-Beginn im Kopf der Datei. Ohne Von/Bis wird das ganze Wirtschaftsjahr exportiert,
+          sonst nur der Zeitraum darin (z. B. ein Monat).
+        </p>
+      {% else %}
+        <p class="muted">DATEV-Buchungsstapel: noch kein Wirtschaftsjahr angelegt – es entsteht mit der ersten Buchung.</p>
+      {% endif %}
+    </section>
+
+    <div class="report-grid">
+      <section class="card">
+        <h2>GuV</h2>
+        <table data-no-sort>
+          <thead>
+            <tr><th>Position</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in income_statement.revenues %}
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, period_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Umsätze</strong></td><td class="num"><strong>{{ income_statement.totals.total_revenue | betrag }}</strong></td></tr>
+            {% for row in income_statement.expenses %}
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, period_ledger_args) }}</td><td class="num">−{{ row.amount | betrag }}</td></tr>
+            {% endfor %}
+            <tr><td><strong>Aufwendungen</strong></td><td class="num"><strong>−{{ income_statement.totals.total_expense | betrag }}</strong></td></tr>
+            <tr><td><strong>Jahresergebnis</strong></td><td class="num"><strong{% if income_statement.totals.net_income < 0 %} class="negative"{% endif %}>{{ income_statement.totals.net_income | betrag }}</strong></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Bilanz</h2>
+        <table>
+          <thead>
+            <tr><th>Aktiva</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in balance_sheet.assets %}
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+            {% endfor %}
+            <tr data-sort-fixed><td><strong>Summe Aktiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_assets | betrag }}</strong></td></tr>
+          </tbody>
+        </table>
+        <br />
+        <table>
+          <thead>
+            <tr><th>Passiva</th><th class="num">Betrag</th></tr>
+          </thead>
+          <tbody>
+            {% for row in balance_sheet.liabilities_and_equity %}
+              <tr><td>{{ account_link(row.account_id, row.code, row.name, as_of_ledger_args) }}</td><td class="num">{{ row.amount | betrag }}</td></tr>
+            {% endfor %}
+            <tr data-sort-fixed><td><strong>Summe Passiva</strong></td><td class="num"><strong>{{ balance_sheet.totals.total_liabilities_and_equity | betrag }}</strong></td></tr>
+          </tbody>
+        </table>
+        <p>
+          Bilanzgleichheit:
+          {% if balance_sheet.totals.is_balanced %}
+            <strong>Ja</strong>
+          {% else %}
+            <strong class="negative">Nein</strong> (Differenz: {{ balance_sheet.totals.difference | betrag }})
+          {% endif %}
+        </p>
+      </section>
+    </div>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,2214 @@
+from __future__ import annotations
+
+import base64
+import io
+import json
+from email.message import Message
+from pathlib import Path
+
+from document_files import pdf_document_bytes
+
+import app.services.mcp_server as mcp_server_module
+from app import create_app
+from app.services.mcp_server import (
+    TOOLS,
+    ApiResponse,
+    HttpApiClient,
+    MCPServer,
+    build_server_from_env,
+    serve,
+)
+
+EXPECTED_TOOL_NAMES = {
+    "health",
+    "list_companies",
+    "create_tenant_with_company",
+    "list_users",
+    "get_current_user",
+    "create_user",
+    "rotate_user_api_token",
+    "set_user_active",
+    "create_account",
+    "update_account",
+    "import_account_chart",
+    "check_account_chart",
+    "list_accounts",
+    "get_account_history",
+    "get_account_ledger",
+    "create_controlling_unit",
+    "list_controlling_units",
+    "update_controlling_unit",
+    "get_controlling_unit_history",
+    "get_controlling_report",
+    "export_controlling_csv",
+    "list_partners",
+    "get_partner",
+    "create_partner",
+    "update_partner",
+    "set_partner_bank_details",
+    "get_partner_history",
+    "create_journal_entry",
+    "amend_journal_entry",
+    "list_journal_entries",
+    "finalize_journal_entry",
+    "finalize_journal_entries_until",
+    "reverse_journal_entry",
+    "get_vat_return",
+    "get_zm_report",
+    "list_vat_returns",
+    "create_vat_return",
+    "get_vat_annual_return",
+    "create_vat_annual_return",
+    "preview_income_tax_return",
+    "create_income_tax_return",
+    "list_income_tax_returns",
+    "list_elster_submissions",
+    "get_elster_submission_summary",
+    "get_elster_submission",
+    "download_elster_payload",
+    "retry_elster_submission",
+    "preflight_vat_return_elster",
+    "preflight_vat_annual_return_elster",
+    "get_elster_readiness",
+    "submit_vat_return_elster",
+    "submit_vat_annual_return_elster",
+    "get_payroll_readiness",
+    "create_payroll_employee",
+    "list_payroll_employees",
+    "create_payroll_run",
+    "list_payroll_runs",
+    "post_payroll_run",
+    "get_trial_balance",
+    "get_dashboard",
+    "get_income_statement",
+    "get_balance_sheet",
+    "export_trial_balance_csv",
+    "export_journal_csv",
+    "export_datev_csv",
+    "export_audit_package",
+    "list_documents",
+    "upload_document",
+    "link_document",
+    "set_document_category",
+    "list_document_categories",
+    "create_document_category",
+    "set_document_category_active",
+    "replace_document",
+    "download_document",
+    "create_receipt_ocr_suggestion",
+    "book_receipt_ocr_suggestion",
+    "create_receipt_match_suggestion",
+    "list_receipt_match_suggestions",
+    "approve_receipt_match_suggestion",
+    "reject_receipt_match_suggestion",
+    "import_einvoice",
+    "export_einvoice",
+    "list_bank_accounts",
+    "create_bank_account",
+    "list_bank_transactions",
+    "get_bank_reconciliation",
+    "list_bank_booking_rules",
+    "create_bank_booking_rule",
+    "set_bank_booking_rule_active",
+    "apply_bank_booking_rules",
+    "import_bank_transactions",
+    "reassign_bank_transaction",
+    "move_bank_transactions",
+    "match_bank_transaction",
+    "book_bank_transaction",
+    "list_fints_connections",
+    "create_fints_connection",
+    "set_fints_connection_active",
+    "sync_fints_transactions",
+    "submit_fints_tan",
+    "lookup_fints_institute",
+    "import_fints_institutes",
+    "list_open_banking_institutes",
+    "list_open_banking_connections",
+    "create_open_banking_connection",
+    "set_open_banking_connection_active",
+    "start_open_banking_authorization",
+    "complete_open_banking_authorization",
+    "sync_open_banking_transactions",
+    "list_open_items",
+    "list_dunning_proposals",
+    "record_dunning",
+    "set_company_bank_details",
+    "list_payment_run_proposals",
+    "create_sepa_payment_run",
+    "list_journal_templates",
+    "create_journal_template",
+    "set_journal_template_active",
+    "book_journal_template",
+    "book_opening_balance",
+    "create_open_item",
+    "settle_open_item",
+    "list_fiscal_years",
+    "create_fiscal_year",
+    "lock_period",
+    "unlock_period",
+    "close_fiscal_year",
+    "set_fiscal_year_start",
+    "list_audit_log",
+    "verify_audit_log_integrity",
+    "verify_compliance_integrity",
+    "create_fixed_asset",
+    "list_fixed_assets",
+    "get_depreciation_schedule",
+    "post_depreciation",
+    "record_fixed_asset_impairment",
+    "dispose_fixed_asset",
+    "list_tax_codes",
+    "create_tax_code",
+    "ensure_default_tax_codes",
+    "update_fixed_asset",
+    "cancel_fixed_asset",
+    "list_chat_conversations",
+    "get_chat_conversation",
+    "send_chat_message",
+    "delete_chat_conversation",
+    "rename_chat_conversation",
+    "confirm_chat_action",
+    "reject_chat_action",
+    "unlock_user_login",
+    "set_user_password",
+    "set_user_llm_settings",
+    "clear_user_llm_settings",
+    "change_own_password",
+    "list_oauth_grants",
+    "revoke_oauth_grant",
+    "get_push_status",
+    "list_push_devices",
+    "update_push_device",
+    "revoke_push_device",
+    "send_push_test",
+}
+
+
+class RecordingHttp:
+    """Fake-HTTP-Client, der Aufrufe protokolliert und vorgegebene Antworten liefert."""
+
+    def __init__(self, response: ApiResponse | None = None) -> None:
+        self.calls: list[tuple] = []
+        self.response = response or ApiResponse(
+            status=200, text='{"ok": true}', content_type="application/json", json={"ok": True}
+        )
+
+    def call(self, method, path, *, params=None, json_body=None) -> ApiResponse:
+        self.calls.append((method, path, params, json_body))
+        return self.response
+
+
+def test_tools_cover_all_api_endpoints() -> None:
+    assert {tool.name for tool in TOOLS} == EXPECTED_TOOL_NAMES
+    # Jedes Tool trägt ein gültiges JSON-Schema und einen HTTP-Verweis.
+    for tool in TOOLS:
+        assert tool.input_schema["type"] == "object"
+        assert tool.http_method in {"GET", "POST", "PATCH"}
+        assert tool.path.startswith("/")
+
+
+def test_initialize_echoes_requested_protocol_version() -> None:
+    server = MCPServer(http=RecordingHttp())
+    result = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
+    )["result"]
+    assert result["protocolVersion"] == "2024-11-05"
+    assert result["serverInfo"]["name"] == "openbuchhaltung"
+    assert "tools" in result["capabilities"]
+
+
+def test_tools_list_returns_all_tools() -> None:
+    server = MCPServer(http=RecordingHttp())
+    result = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]
+    assert {tool["name"] for tool in result["tools"]} == EXPECTED_TOOL_NAMES
+
+
+def test_query_tool_forwards_arguments_as_query_params() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "get_balance_sheet", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/balance-sheet", {"company_id": 7}, None)
+
+
+def test_user_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {"name": "list_users", "arguments": {}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/users", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {
+                "name": "create_user",
+                "arguments": {
+                    "username": "api-user",
+                    "password": "secret",
+                    "role": "Buchhalter",
+                    "tenant_id": 7,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/users",
+        None,
+        {
+            "username": "api-user",
+            "password": "secret",
+            "role": "Buchhalter",
+            "tenant_id": 7,
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {"name": "rotate_user_api_token", "arguments": {"user_id": 9}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/users/9/api-token", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "set_user_active",
+                "arguments": {"user_id": 9, "is_active": False},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/users/9/active", None, {"is_active": False})
+
+
+def test_account_chart_tool_forwards_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {
+                "name": "import_account_chart",
+                "arguments": {"company_id": 7, "chart": "skr03"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/account-chart/import",
+        None,
+        {"company_id": 7, "chart": "skr03"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {"name": "check_account_chart", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/account-chart/check", {"company_id": 7}, None)
+
+
+def test_account_update_and_history_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 331,
+            "method": "tools/call",
+            "params": {
+                "name": "update_account",
+                "arguments": {"account_id": 9, "name": "Hausbank", "is_active": False},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "PATCH",
+        "/accounts/9",
+        None,
+        {"name": "Hausbank", "is_active": False},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 332,
+            "method": "tools/call",
+            "params": {
+                "name": "get_account_history",
+                "arguments": {"account_id": 9, "limit": 25},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/accounts/9/history",
+        {"limit": 25},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 333,
+            "method": "tools/call",
+            "params": {
+                "name": "get_account_ledger",
+                "arguments": {"account_id": 9, "fiscal_year_id": 3, "offset": 200},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/accounts/ledger",
+        {"account_id": 9, "fiscal_year_id": 3, "offset": 200},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 334,
+            "method": "tools/call",
+            "params": {
+                "name": "get_account_ledger",
+                "arguments": {"company_id": 1, "account_code": "4985"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/accounts/ledger",
+        {"company_id": 1, "account_code": "4985"},
+        None,
+    )
+
+
+def test_update_fixed_asset_forwards_plan_parameters() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+
+    # Das Schema muss die Plan-Parameter zulassen, sonst verwerfen MCP-Clients
+    # sie wegen additionalProperties=False (Umstellung auf degressiv schlug fehl).
+    tools = server.handle({"jsonrpc": "2.0", "id": 40, "method": "tools/list"})["result"]["tools"]
+    schema = next(t for t in tools if t["name"] == "update_fixed_asset")["inputSchema"]
+    assert {"degressive_rate", "total_units", "in_service_date"} <= set(schema["properties"])
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "update_fixed_asset",
+                "arguments": {
+                    "asset_id": 5,
+                    "method": "degressive",
+                    "degressive_rate": "23.08",
+                    "total_units": "100000",
+                    "in_service_date": "2026-02-01",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "PATCH",
+        "/fixed-assets/5",
+        None,
+        {
+            "method": "degressive",
+            "degressive_rate": "23.08",
+            "total_units": "100000",
+            "in_service_date": "2026-02-01",
+        },
+    )
+
+
+def test_path_placeholder_filled_from_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "tools/call",
+            "params": {
+                "name": "post_depreciation",
+                "arguments": {"asset_id": 5, "fiscal_year": 2026},
+            },
+        }
+    )
+    # asset_id landet im Pfad, nicht im Body.
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/depreciation",
+        None,
+        {"fiscal_year": 2026},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 301,
+            "method": "tools/call",
+            "params": {
+                "name": "record_fixed_asset_impairment",
+                "arguments": {
+                    "asset_id": 5,
+                    "fiscal_year": 2026,
+                    "amount": "100.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/impairment",
+        None,
+        {"fiscal_year": 2026, "amount": "100.00"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 302,
+            "method": "tools/call",
+            "params": {
+                "name": "dispose_fixed_asset",
+                "arguments": {
+                    "asset_id": 5,
+                    "disposal_date": "2026-12-31",
+                    "proceeds": "10.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fixed-assets/5/disposal",
+        None,
+        {"disposal_date": "2026-12-31", "proceeds": "10.00"},
+    )
+
+
+def test_finalize_and_reverse_fill_path_placeholder() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "finalize_journal_entry",
+                "arguments": {"journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/journal-entries/9/finalize", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 310,
+            "method": "tools/call",
+            "params": {
+                "name": "finalize_journal_entries_until",
+                "arguments": {"company_id": 7, "up_to_date": "2026-07-31"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/journal-entries/finalize-until",
+        None,
+        {"company_id": 7, "up_to_date": "2026-07-31"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {
+                "name": "reverse_journal_entry",
+                "arguments": {"journal_entry_id": 9, "reversal_date": "2026-07-12"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/journal-entries/9/reverse",
+        None,
+        {"reversal_date": "2026-07-12"},
+    )
+
+
+def test_list_journal_entries_forwards_filters_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "list_journal_entries",
+                "arguments": {
+                    "company_id": 7,
+                    "date_from": "2026-01-01",
+                    "date_to": "2026-01-31",
+                    "is_finalized": False,
+                    "limit": 25,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/journal-entries",
+        {
+            "company_id": 7,
+            "date_from": "2026-01-01",
+            "date_to": "2026-01-31",
+            "is_finalized": False,
+            "limit": 25,
+        },
+        None,
+    )
+
+
+def test_vat_return_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {
+                "name": "get_vat_return",
+                "arguments": {"company_id": 7, "period": "2026-H1"},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/vat-return", {"company_id": 7, "period": "2026-H1"}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {
+                "name": "create_vat_return",
+                "arguments": {"company_id": 7, "period": "2026-Q2"},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/vat-returns", None, {"company_id": 7, "period": "2026-Q2"})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {"name": "list_vat_returns", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/vat-returns", {"company_id": 7}, None)
+
+
+def test_income_tax_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    arguments = {
+        "company_id": 7,
+        "year": 2026,
+        "tax_type": "trade_tax",
+        "declaration_type": "prepayment_adjustment",
+        "additions": [{"code": "GEW8", "label": "Hinzurechnung", "amount": "100.00"}],
+        "municipality_multiplier": "400",
+    }
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {"name": "preview_income_tax_return", "arguments": arguments},
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/income-tax-returns/preview",
+        None,
+        arguments,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {"name": "create_income_tax_return", "arguments": arguments},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/income-tax-returns", None, arguments)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "list_income_tax_returns",
+                "arguments": {"company_id": 7, "tax_type": "trade_tax"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/income-tax-returns",
+        {"company_id": 7, "tax_type": "trade_tax"},
+        None,
+    )
+
+
+def test_elster_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 321,
+            "method": "tools/call",
+            "params": {
+                "name": "list_elster_submissions",
+                "arguments": {
+                    "company_id": 7,
+                    "vat_return_id": 8,
+                    "status": "failed",
+                    "transport": "eric",
+                    "environment": "production",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/elster/submissions",
+        {
+            "company_id": 7,
+            "vat_return_id": 8,
+            "status": "failed",
+            "transport": "eric",
+            "environment": "production",
+        },
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 326,
+            "method": "tools/call",
+            "params": {
+                "name": "get_elster_submission_summary",
+                "arguments": {"company_id": 7},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/submissions/summary", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 324,
+            "method": "tools/call",
+            "params": {
+                "name": "get_elster_submission",
+                "arguments": {"submission_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/submissions/9", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 325,
+            "method": "tools/call",
+            "params": {
+                "name": "download_elster_payload",
+                "arguments": {"submission_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/submissions/9/payload.xml", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 327,
+            "method": "tools/call",
+            "params": {
+                "name": "retry_elster_submission",
+                "arguments": {"submission_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == ("POST", "/elster/submissions/9/retry", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 322,
+            "method": "tools/call",
+            "params": {"name": "get_elster_readiness", "arguments": {}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/readiness", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 323,
+            "method": "tools/call",
+            "params": {
+                "name": "submit_vat_return_elster",
+                "arguments": {
+                    "vat_return_id": 8,
+                    "environment": "test",
+                    "transport": "mock",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/elster/ustva/submit",
+        None,
+        {"vat_return_id": 8, "environment": "test", "transport": "mock"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 328,
+            "method": "tools/call",
+            "params": {
+                "name": "preflight_vat_return_elster",
+                "arguments": {
+                    "vat_return_id": 8,
+                    "environment": "test",
+                    "transport": "mock",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/elster/ustva/preflight",
+        None,
+        {"vat_return_id": 8, "environment": "test", "transport": "mock"},
+    )
+
+
+def test_income_statement_forwards_date_range_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "get_income_statement",
+                "arguments": {
+                    "company_id": 1,
+                    "date_from": "2026-01-01",
+                    "date_to": "2026-03-31",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/income-statement",
+        {"company_id": 1, "date_from": "2026-01-01", "date_to": "2026-03-31"},
+        None,
+    )
+
+
+def test_payroll_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3281,
+            "method": "tools/call",
+            "params": {"name": "get_payroll_readiness", "arguments": {}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/readiness", None, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 329,
+            "method": "tools/call",
+            "params": {
+                "name": "create_payroll_employee",
+                "arguments": {
+                    "company_id": 7,
+                    "employee_number": "P-001",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "employment_start": "2026-01-01",
+                    "gross_monthly_salary": "4000.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/payroll/employees",
+        None,
+        {
+            "company_id": 7,
+            "employee_number": "P-001",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "employment_start": "2026-01-01",
+            "gross_monthly_salary": "4000.00",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 330,
+            "method": "tools/call",
+            "params": {"name": "list_payroll_employees", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/employees", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 331,
+            "method": "tools/call",
+            "params": {
+                "name": "create_payroll_run",
+                "arguments": {
+                    "company_id": 7,
+                    "period_label": "2026-05",
+                    "payment_date": "2026-05-31",
+                    "auto_post": True,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/payroll/runs",
+        None,
+        {
+            "company_id": 7,
+            "period_label": "2026-05",
+            "payment_date": "2026-05-31",
+            "auto_post": True,
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 332,
+            "method": "tools/call",
+            "params": {"name": "list_payroll_runs", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/payroll/runs", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 333,
+            "method": "tools/call",
+            "params": {"name": "post_payroll_run", "arguments": {"payroll_run_id": 11}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/payroll/runs/11/post", None, {})
+
+
+def test_report_tools_expose_date_parameters() -> None:
+    by_name = {tool.name: tool for tool in TOOLS}
+    period_props = by_name["get_income_statement"].input_schema["properties"]
+    assert "date_from" in period_props and "date_to" in period_props
+    assert "date_from" in by_name["get_trial_balance"].input_schema["properties"]
+    # Bilanz ist Stichtag: date_to, aber kein date_from.
+    balance_props = by_name["get_balance_sheet"].input_schema["properties"]
+    assert "date_to" in balance_props and "date_from" not in balance_props
+    # Schalter „inkl. Abschlussbuchungen“ überall, wo Salden ausgewertet werden.
+    for name in (
+        "get_trial_balance",
+        "get_income_statement",
+        "get_balance_sheet",
+        "export_trial_balance_csv",
+        "get_vat_return",
+        "create_vat_return",
+        "get_vat_annual_return",
+        "create_vat_annual_return",
+        "preview_income_tax_return",
+        "create_income_tax_return",
+    ):
+        properties = by_name[name].input_schema["properties"]
+        assert properties["include_closing_entries"]["type"] == "boolean", name
+
+
+def test_audit_log_tool_forwards_filters_as_query() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {
+                "name": "list_audit_log",
+                "arguments": {
+                    "company_id": 7,
+                    "entity_type": "journal_entry",
+                    "action": "created",
+                    "limit": 20,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/audit-log",
+        {
+            "company_id": 7,
+            "entity_type": "journal_entry",
+            "action": "created",
+            "limit": 20,
+        },
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 37,
+            "method": "tools/call",
+            "params": {
+                "name": "verify_audit_log_integrity",
+                "arguments": {"tenant_id": 3},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/audit-log/integrity",
+        {"tenant_id": 3},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "verify_compliance_integrity",
+                "arguments": {"tenant_id": 3, "company_id": 7},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/integrity",
+        {"tenant_id": 3, "company_id": 7},
+        None,
+    )
+
+
+def test_document_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 38,
+            "method": "tools/call",
+            "params": {
+                "name": "list_documents",
+                "arguments": {"company_id": 7, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/documents",
+        {"company_id": 7, "journal_entry_id": 9},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 39,
+            "method": "tools/call",
+            "params": {
+                "name": "upload_document",
+                "arguments": {
+                    "company_id": 7,
+                    "file_name": "beleg.pdf",
+                    "mime_type": "application/pdf",
+                    "document_date": "2026-04-03",
+                    "content_base64": "JVBERi0xLjQK",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/documents",
+        None,
+        {
+            "company_id": 7,
+            "file_name": "beleg.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": "JVBERi0xLjQK",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 40,
+            "method": "tools/call",
+            "params": {
+                "name": "link_document",
+                "arguments": {"document_id": 3, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/documents/3/link",
+        None,
+        {"journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "download_document", "arguments": {"document_id": 3}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/documents/3/content", {}, None)
+
+
+def test_receipt_ocr_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {
+                "name": "create_receipt_ocr_suggestion",
+                "arguments": {
+                    "company_id": 7,
+                    "file_name": "beleg.pdf",
+                    "mime_type": "application/pdf",
+                    "document_date": "2026-04-03",
+                    "content_base64": "JVBERi0xLjQK",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-ocr/suggestions",
+        None,
+        {
+            "company_id": 7,
+            "file_name": "beleg.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": "JVBERi0xLjQK",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {
+                "name": "book_receipt_ocr_suggestion",
+                "arguments": {
+                    "company_id": 7,
+                    "document_id": 3,
+                    "expense_account_id": 4,
+                    "creditor_account_id": 5,
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-ocr/book",
+        None,
+        {
+            "company_id": 7,
+            "document_id": 3,
+            "expense_account_id": 4,
+            "creditor_account_id": 5,
+            "net_amount": "100.00",
+            "tax_amount": "19.00",
+        },
+    )
+
+
+def test_receipt_matching_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "create_receipt_match_suggestion",
+                "arguments": {"company_id": 7, "document_id": 3},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions",
+        None,
+        {"company_id": 7, "document_id": 3},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 56,
+            "method": "tools/call",
+            "params": {
+                "name": "list_receipt_match_suggestions",
+                "arguments": {"company_id": 7, "status": "offen"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/receipt-matching/suggestions",
+        {"company_id": 7, "status": "offen"},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 57,
+            "method": "tools/call",
+            "params": {
+                "name": "approve_receipt_match_suggestion",
+                "arguments": {
+                    "suggestion_id": 11,
+                    "company_id": 7,
+                    "journal_entry_id": 9,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions/11/approve",
+        None,
+        {"company_id": 7, "journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 58,
+            "method": "tools/call",
+            "params": {
+                "name": "reject_receipt_match_suggestion",
+                "arguments": {"suggestion_id": 11, "company_id": 7},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/receipt-matching/suggestions/11/reject",
+        None,
+        {"company_id": 7},
+    )
+
+
+def test_einvoice_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {
+                "name": "import_einvoice",
+                "arguments": {
+                    "company_id": 7,
+                    "expense_account_id": 4,
+                    "creditor_account_id": 5,
+                    "tax_lines": [{"rate": "7", "tax_code_id": 9}],
+                    "file_name": "rechnung.xml",
+                    "content_base64": "PEludm9pY2UvPg==",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/einvoices/import",
+        None,
+        {
+            "company_id": 7,
+            "expense_account_id": 4,
+            "creditor_account_id": 5,
+            "tax_lines": [{"rate": "7", "tax_code_id": 9}],
+            "file_name": "rechnung.xml",
+            "content_base64": "PEludm9pY2UvPg==",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "tools/call",
+            "params": {
+                "name": "export_einvoice",
+                "arguments": {
+                    "company_id": 7,
+                    "syntax": "ubl",
+                    "invoice_number": "AR-1",
+                    "issue_date": "2026-07-12",
+                    "buyer_name": "Kunde AG",
+                    "lines": [
+                        {
+                            "name": "Beratung",
+                            "quantity": "1",
+                            "unit_price": "100.00",
+                            "tax_rate": "19.00",
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/einvoices/export",
+        None,
+        {
+            "company_id": 7,
+            "syntax": "ubl",
+            "invoice_number": "AR-1",
+            "issue_date": "2026-07-12",
+            "buyer_name": "Kunde AG",
+            "lines": [
+                {
+                    "name": "Beratung",
+                    "quantity": "1",
+                    "unit_price": "100.00",
+                    "tax_rate": "19.00",
+                }
+            ],
+        },
+    )
+
+
+def test_bank_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {
+                "name": "list_bank_accounts",
+                "arguments": {"company_id": 7, "include_inactive": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/bank-accounts",
+        {"company_id": 7, "include_inactive": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "tools/call",
+            "params": {
+                "name": "create_bank_account",
+                "arguments": {"company_id": 7, "code": "1210", "name": "ING Girokonto"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-accounts",
+        None,
+        {"company_id": 7, "code": "1210", "name": "ING Girokonto"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "list_bank_transactions",
+                "arguments": {"company_id": 7, "status": "open", "include_suggestions": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/bank-transactions",
+        {"company_id": 7, "status": "open", "include_suggestions": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 56,
+            "method": "tools/call",
+            "params": {
+                "name": "import_bank_transactions",
+                "arguments": {
+                    "company_id": 7,
+                    "bank_account_id": 4,
+                    "file_name": "umsaetze.csv",
+                    "content_base64": "QnVjaHVuZ3N0YWc7QmV0cmFnCg==",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/import",
+        None,
+        {
+            "company_id": 7,
+            "bank_account_id": 4,
+            "file_name": "umsaetze.csv",
+            "content_base64": "QnVjaHVuZ3N0YWc7QmV0cmFnCg==",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 57,
+            "method": "tools/call",
+            "params": {
+                "name": "match_bank_transaction",
+                "arguments": {"transaction_id": 8, "journal_entry_id": 9},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/match",
+        None,
+        {"journal_entry_id": 9},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 58,
+            "method": "tools/call",
+            "params": {
+                "name": "book_bank_transaction",
+                "arguments": {
+                    "transaction_id": 8,
+                    "contra_account_id": 10,
+                    "description": "Bankgebühr",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/book",
+        None,
+        {"contra_account_id": 10, "description": "Bankgebühr"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 59,
+            "method": "tools/call",
+            "params": {
+                "name": "reassign_bank_transaction",
+                "arguments": {"transaction_id": 8, "bank_account_id": 12},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/8/bank-account",
+        None,
+        {"bank_account_id": 12},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 60,
+            "method": "tools/call",
+            "params": {
+                "name": "move_bank_transactions",
+                "arguments": {
+                    "company_id": 7,
+                    "source_bank_account_id": 3,
+                    "target_bank_account_id": 12,
+                    "statuses": ["open"],
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/bank-transactions/reassign",
+        None,
+        {
+            "company_id": 7,
+            "source_bank_account_id": 3,
+            "target_bank_account_id": 12,
+            "statuses": ["open"],
+        },
+    )
+
+
+def test_open_item_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "list_open_items",
+                "arguments": {"company_id": 7, "include_settled": True},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/open-items",
+        {"company_id": 7, "include_settled": True},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "create_open_item",
+                "arguments": {
+                    "company_id": 7,
+                    "account_id": 2,
+                    "item_type": "receivable",
+                    "reference": "RE-1",
+                    "amount": "1190.00",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/open-items",
+        None,
+        {
+            "company_id": 7,
+            "account_id": 2,
+            "item_type": "receivable",
+            "reference": "RE-1",
+            "amount": "1190.00",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 44,
+            "method": "tools/call",
+            "params": {
+                "name": "settle_open_item",
+                "arguments": {"open_item_id": 3, "amount": "100.00"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/open-items/3/settle",
+        None,
+        {"amount": "100.00"},
+    )
+
+
+def test_period_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 45,
+            "method": "tools/call",
+            "params": {"name": "list_fiscal_years", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/fiscal-years", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 46,
+            "method": "tools/call",
+            "params": {
+                "name": "create_fiscal_year",
+                "arguments": {
+                    "company_id": 7,
+                    "label": "2026",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/fiscal-years",
+        None,
+        {
+            "company_id": 7,
+            "label": "2026",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+        },
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 47,
+            "method": "tools/call",
+            "params": {"name": "lock_period", "arguments": {"period_id": 3, "reason": "QA"}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/periods/3/lock", None, {"reason": "QA"})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 48,
+            "method": "tools/call",
+            "params": {"name": "unlock_period", "arguments": {"period_id": 3}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/periods/3/unlock", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 49,
+            "method": "tools/call",
+            "params": {"name": "close_fiscal_year", "arguments": {"fiscal_year_id": 4}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/fiscal-years/4/close", None, {})
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 50,
+            "method": "tools/call",
+            "params": {
+                "name": "set_fiscal_year_start",
+                "arguments": {"company_id": 7, "start_month": 4},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/companies/7/fiscal-year-start",
+        None,
+        {"start_month": 4},
+    )
+
+
+def test_json_tool_forwards_arguments_as_body() -> None:
+    http = RecordingHttp(
+        ApiResponse(status=201, text='{"id": 1}', content_type="application/json", json={"id": 1})
+    )
+    server = MCPServer(http=http)
+    payload = {"tenant_name": "M", "company_name": "C"}
+    result = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "create_tenant_with_company", "arguments": payload},
+        }
+    )["result"]
+    assert http.calls[-1] == ("POST", "/tenants", None, payload)
+    assert result["isError"] is False
+
+
+def test_error_status_marks_tool_result_as_error() -> None:
+    http = RecordingHttp(
+        ApiResponse(
+            status=404,
+            text='{"error": "Company not found."}',
+            content_type="application/json",
+            json={"error": "Company not found."},
+        )
+    )
+    server = MCPServer(http=http)
+    result = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "get_trial_balance", "arguments": {"company_id": 999}},
+        }
+    )["result"]
+    assert result["isError"] is True
+    assert "Company not found" in result["content"][0]["text"]
+
+
+def test_unknown_tool_returns_jsonrpc_error() -> None:
+    server = MCPServer(http=RecordingHttp())
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "does_not_exist", "arguments": {}},
+        }
+    )
+    assert response["error"]["code"] == -32602
+
+
+def test_unknown_method_returns_jsonrpc_error() -> None:
+    server = MCPServer(http=RecordingHttp())
+    response = server.handle({"jsonrpc": "2.0", "id": 7, "method": "totally/unknown"})
+    assert response["error"]["code"] == -32601
+
+
+def test_notifications_are_not_answered() -> None:
+    server = MCPServer(http=RecordingHttp())
+    assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+
+
+def test_serve_processes_lines_and_skips_notifications() -> None:
+    server = MCPServer(http=RecordingHttp())
+    stdin = io.StringIO(
+        "\n".join(
+            [
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+                json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                "not-json",
+            ]
+        )
+        + "\n"
+    )
+    stdout = io.StringIO()
+    serve(server, stdin=stdin, stdout=stdout)
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    # tools/list-Antwort + Parse-Error, aber keine Antwort auf die Notification.
+    assert len(lines) == 2
+    assert lines[0]["id"] == 1
+    assert lines[1]["error"]["code"] == -32700
+
+
+def test_build_server_from_env_uses_configured_url_and_token() -> None:
+    env = {
+        "OPENBUCHHALTUNG_API_URL": "http://example.test/api/v1/",
+        "OPENBUCHHALTUNG_API_TOKEN": "obk_secret",
+    }
+    server = build_server_from_env(getenv=env.get)
+    assert server.http.base_url == "http://example.test/api/v1"
+    assert server.http.token == "obk_secret"
+
+
+def test_http_client_decodes_the_response_charset(monkeypatch) -> None:
+    # Der DATEV-Export kommt als Windows-1252; als UTF-8 gelesen gingen Umlaute verloren.
+    headers = Message()
+    headers["Content-Type"] = "text/csv; charset=windows-1252"
+
+    class _Response:
+        status = 200
+
+        def __init__(self) -> None:
+            self.headers = headers
+
+        def read(self) -> bytes:
+            return '"Erlöse 19 % USt"'.encode("cp1252")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> bool:
+            return False
+
+    monkeypatch.setattr(mcp_server_module, "urlopen", lambda request, timeout: _Response())
+    response = HttpApiClient("http://example.test/api/v1").call("GET", "/exports/datev.csv")
+    assert response.text == '"Erlöse 19 % USt"'
+    assert response.content_type == "text/csv; charset=windows-1252"
+
+
+class _TestClientHttp:
+    """Adapter, der die MCP-HTTP-Aufrufe auf einen Flask-Test-Client abbildet."""
+
+    def __init__(self, client, token: str) -> None:
+        self.client = client
+        self.headers = {"Authorization": f"Bearer {token}"}
+
+    def call(self, method, path, *, params=None, json_body=None) -> ApiResponse:
+        url = f"/api/v1{path}"
+        if method == "GET":
+            response = self.client.get(url, query_string=params or {}, headers=self.headers)
+        else:
+            response = self.client.open(
+                url,
+                method=method,
+                json=json_body or {},
+                headers=self.headers,
+            )
+        # Wie HttpApiClient: im Zeichensatz des Content-Type (DATEV: Windows-1252).
+        charset = response.mimetype_params.get("charset") or "utf-8"
+        body = response.get_data().decode(charset, errors="replace")
+        content_type = response.headers.get("Content-Type", "")
+        parsed = response.get_json(silent=True) if "application/json" in content_type else None
+        return ApiResponse(
+            status=response.status_code, text=body, content_type=content_type, json=parsed
+        )
+
+
+def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_mcp.db'}",
+            "API_AUTH_TOKEN": "global-token",
+        }
+    )
+    client = app.test_client()
+    server = MCPServer(http=_TestClientHttp(client, token="global-token"))
+
+    def call_tool(name: str, arguments: dict) -> dict:
+        return server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": name,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )["result"]
+
+    health = call_tool("health", {})
+    assert health["isError"] is False
+
+    created = call_tool(
+        "create_tenant_with_company",
+        {"tenant_name": "MCP Mandant", "company_name": "MCP GmbH"},
+    )
+    assert created["isError"] is False
+    company_id = json.loads(created["content"][0]["text"])["company"]["id"]
+
+    for code, name, account_type, subledger in [
+        ("1200", "Bank", "asset", None),
+        ("1400", "Forderungen", "asset", "debtor"),
+        ("8400", "Erlöse", "income", None),
+    ]:
+        result = call_tool(
+            "create_account",
+            {
+                "company_id": company_id,
+                "code": code,
+                "name": name,
+                "account_type": account_type,
+                "subledger": subledger,
+            },
+        )
+        assert result["isError"] is False
+
+    companies = json.loads(call_tool("list_companies", {})["content"][0]["text"])
+    # Konten werden der Reihe nach angelegt.
+    bank_id, receivable_id, revenue_id = 1, 2, 3
+
+    updated_account = json.loads(
+        call_tool("update_account", {"account_id": bank_id, "name": "Hausbank"})[
+            "content"
+        ][0]["text"]
+    )
+    assert updated_account["name"] == "Hausbank"
+    account_history = json.loads(
+        call_tool("get_account_history", {"account_id": bank_id})["content"][0]["text"]
+    )
+    assert [entry["action"] for entry in account_history["entries"]] == [
+        "updated",
+        "created",
+    ]
+
+    # Bankkonto anlegen und auflisten: nur Sachkonten der Kontoart asset.
+    created_bank_account = call_tool(
+        "create_bank_account",
+        {"company_id": company_id, "code": "1210", "name": "ING Girokonto"},
+    )
+    assert created_bank_account["isError"] is False
+    ing_account = json.loads(created_bank_account["content"][0]["text"])
+    assert ing_account["account_type"] == "asset"
+
+    bank_accounts = json.loads(
+        call_tool("list_bank_accounts", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [account["code"] for account in bank_accounts["bank_accounts"]] == ["1200", "1210"]
+
+    entry = call_tool(
+        "create_journal_entry",
+        {
+            "company_id": company_id,
+            "entry_date": "2026-03-15",
+            "description": "MCP Buchung",
+            "lines": [
+                {"account_id": bank_id, "debit_amount": "100.00"},
+                {"account_id": revenue_id, "credit_amount": "100.00"},
+            ],
+        },
+    )
+    assert entry["isError"] is False
+    entry_id = json.loads(entry["content"][0]["text"])["id"]
+
+    journal = json.loads(
+        call_tool("list_journal_entries", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert journal["entries"][0]["description"] == "MCP Buchung"
+    assert journal["entries"][0]["lines"][0]["account_code"] == "1200"
+
+    tb_result = call_tool("get_trial_balance", {"company_id": company_id})
+    trial_balance = json.loads(tb_result["content"][0]["text"])
+    assert trial_balance["company_id"] == company_id
+    assert any(row["code"] == "1200" for row in trial_balance["rows"])
+
+    csv_result = call_tool("export_journal_csv", {"company_id": company_id})
+    assert csv_result["isError"] is False
+    assert "posting_number" in csv_result["content"][0]["text"]
+    assert company_id == companies[0]["id"]
+
+    document_upload = call_tool(
+        "upload_document",
+        {
+            "company_id": company_id,
+            "file_name": "mcp-beleg.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(pdf_document_bytes(b"mcp-beleg")).decode("ascii"),
+        },
+    )
+    assert document_upload["isError"] is False
+    document_id = json.loads(document_upload["content"][0]["text"])["id"]
+    assert json.loads(document_upload["content"][0]["text"])["document_date"] == "2026-04-03"
+
+    linked_document = call_tool(
+        "link_document", {"document_id": document_id, "journal_entry_id": entry_id}
+    )
+    assert linked_document["isError"] is False
+    assert json.loads(linked_document["content"][0]["text"])["journal_entry_id"] == entry_id
+
+    listed_documents = json.loads(
+        call_tool("list_documents", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [document["id"] for document in listed_documents["documents"]] == [document_id]
+
+    downloaded_document = json.loads(
+        call_tool("download_document", {"document_id": document_id})["content"][0]["text"]
+    )
+    assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
+
+    replacement = json.loads(
+        call_tool(
+            "replace_document",
+            {
+                "document_id": document_id,
+                "file_name": "mcp-beleg-v2.pdf",
+                "mime_type": "application/pdf",
+                "content_base64": base64.b64encode(pdf_document_bytes(b"mcp-v2")).decode(
+                    "ascii"
+                ),
+            },
+        )["content"][0]["text"]
+    )
+    assert replacement["replaces_document_id"] == document_id
+    assert replacement["version_number"] == 2
+    assert replacement["document_date"] == "2026-04-03"
+
+    audit_export = json.loads(
+        call_tool(
+            "export_audit_package",
+            {"company_id": company_id, "manifest_only": True},
+        )["content"][0]["text"]
+    )
+    assert audit_export["company"]["id"] == company_id
+    assert audit_export["table_counts"]["documents"] == 2
+    assert audit_export["totals"]["document_file_count"] == 2
+
+    open_item = call_tool(
+        "create_open_item",
+        {
+            "company_id": company_id,
+            "account_id": receivable_id,
+            "journal_entry_id": entry_id,
+            "item_type": "receivable",
+            "reference": "MCP-RE-1",
+            "counterparty": "MCP Kunde",
+            "entry_date": "2026-03-15",
+            "amount": "100.00",
+        },
+    )
+    assert open_item["isError"] is False
+    open_item_id = json.loads(open_item["content"][0]["text"])["id"]
+
+    open_items = json.loads(
+        call_tool("list_open_items", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [item["reference"] for item in open_items["open_items"]] == ["MCP-RE-1"]
+
+    settled_item = call_tool("settle_open_item", {"open_item_id": open_item_id})
+    assert settled_item["isError"] is False
+    assert json.loads(settled_item["content"][0]["text"])["status"] == "settled"
+
+    # GoBD: Festschreiben und Storno über MCP.
+    batch = call_tool(
+        "finalize_journal_entries_until",
+        {"company_id": company_id, "up_to_date": "2026-03-15"},
+    )
+    assert batch["isError"] is False
+    assert json.loads(batch["content"][0]["text"])["finalized_count"] == 1
+
+    # Einzelnes Festschreiben ist idempotent blockiert, wenn die Buchung schon
+    # im Festschreibelauf enthalten war.
+    finalized = call_tool("finalize_journal_entry", {"journal_entry_id": entry_id})
+    assert finalized["isError"] is True
+
+    reversed_result = call_tool(
+        "reverse_journal_entry",
+        {"journal_entry_id": entry_id, "reversal_date": "2026-03-20"},
+    )
+    assert reversed_result["isError"] is False
+    reversal = json.loads(reversed_result["content"][0]["text"])
+    assert reversal["reversal_of_id"] == entry_id
+
+    # Doppelstorno wird von der API abgewiesen und als Tool-Fehler gemeldet.
+    second = call_tool(
+        "reverse_journal_entry",
+        {"journal_entry_id": entry_id, "reversal_date": "2026-03-21"},
+    )
+    assert second["isError"] is True
+
+    # UStVA: berechnen, festhalten, auflisten.
+    vat = json.loads(
+        call_tool("get_vat_return", {"company_id": company_id, "period": "2026-03"})[
+            "content"
+        ][0]["text"]
+    )
+    assert vat["period"] == "2026-03"
+    assert {row["kennziffer"] for row in vat["kennzahlen"]} >= {"81", "66", "83"}
+
+    saved = call_tool("create_vat_return", {"company_id": company_id, "period": "2026-03"})
+    assert saved["isError"] is False
+    assert json.loads(saved["content"][0]["text"])["period_label"] == "2026-03"
+
+    listed = json.loads(
+        call_tool("list_vat_returns", {"company_id": company_id})["content"][0]["text"]
+    )
+    assert [item["period_label"] for item in listed["vat_returns"]] == ["2026-03"]
+
+    annual = json.loads(
+        call_tool("get_vat_annual_return", {"company_id": company_id, "year": 2026})[
+            "content"
+        ][0]["text"]
+    )
+    assert annual["period"] == "2026"
+    assert annual["declaration_type"] == "annual"
+
+    saved_annual = call_tool(
+        "create_vat_annual_return", {"company_id": company_id, "year": 2026}
+    )
+    assert saved_annual["isError"] is False
+    saved_annual_payload = json.loads(saved_annual["content"][0]["text"])
+    assert saved_annual_payload["period_label"] == "2026"
+
+    annual_preflight = call_tool(
+        "preflight_vat_annual_return_elster",
+        {
+            "vat_return_id": saved_annual_payload["id"],
+            "environment": "test",
+            "transport": "mock",
+        },
+    )
+    assert annual_preflight["isError"] is False
+    assert json.loads(annual_preflight["content"][0]["text"])["payload"][
+        "procedure"
+    ] == "ust_jahreserklaerung"
+
+    annual_submit = call_tool(
+        "submit_vat_annual_return_elster",
+        {
+            "vat_return_id": saved_annual_payload["id"],
+            "environment": "test",
+            "transport": "mock",
+        },
+    )
+    assert annual_submit["isError"] is False
+    assert json.loads(annual_submit["content"][0]["text"])[
+        "procedure"
+    ] == "ust_jahreserklaerung"
+
+
+def test_export_datev_csv_tool_exports_one_fiscal_year(tmp_path: Path) -> None:
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_mcp_datev.db'}",
+            "API_AUTH_TOKEN": "global-token",
+        }
+    )
+    server = MCPServer(http=_TestClientHttp(app.test_client(), token="global-token"))
+
+    def call_tool(name: str, arguments: dict) -> dict:
+        return server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": name,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )["result"]
+
+    created = call_tool(
+        "create_tenant_with_company", {"tenant_name": "DATEV", "company_name": "DATEV GmbH"}
+    )
+    company_id = json.loads(created["content"][0]["text"])["company"]["id"]
+    account_ids = [
+        json.loads(
+            call_tool(
+                "create_account",
+                {"company_id": company_id, "code": code, "name": name, "account_type": kind},
+            )["content"][0]["text"]
+        )["id"]
+        for code, name, kind in (("1200", "Bank", "asset"), ("8400", "Erlöse", "income"))
+    ]
+    for entry_date in ("2025-11-20", "2026-05-04"):
+        entry = call_tool(
+            "create_journal_entry",
+            {
+                "company_id": company_id,
+                "entry_date": entry_date,
+                "description": "Umsatz",
+                "lines": [
+                    {"account_id": account_ids[0], "debit_amount": "100.00"},
+                    {"account_id": account_ids[1], "credit_amount": "100.00"},
+                ],
+            },
+        )
+        assert entry["isError"] is False
+
+    schema = next(tool for tool in TOOLS if tool.name == "export_datev_csv").input_schema
+    assert {"fiscal_year_id", "date_from", "date_to"} <= set(schema["properties"])
+
+    # Mehrere Wirtschaftsjahre mit Buchungen: Fehler mit der Auswahl.
+    ambiguous = call_tool("export_datev_csv", {"company_id": company_id})
+    assert ambiguous["isError"] is True
+    choices = json.loads(ambiguous["content"][0]["text"])["fiscal_years"]
+    assert [choice["label"] for choice in choices] == ["2026", "2025"]
+
+    exported = call_tool(
+        "export_datev_csv", {"company_id": company_id, "fiscal_year_id": choices[1]["id"]}
+    )
+    assert exported["isError"] is False
+    text = exported["content"][0]["text"]
+    assert text.split("\r\n")[0].split(";")[12:16] == ["20250101", "4", "20250101", "20251231"]
+    # Umlaute der Spaltenüberschrift kommen aus Windows-1252 korrekt an.
+    assert '"Gegenkonto (ohne BU-Schlüssel)"' in text
+
+    month = call_tool(
+        "export_datev_csv",
+        {"company_id": company_id, "date_from": "2026-05-01", "date_to": "2026-05-31"},
+    )
+    header = month["content"][0]["text"].split("\r\n")[0].split(";")
+    assert header[12:16] == ["20260101", "4", "20260501", "20260531"]

@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
+{% from "_journal.html" import partner_chips, posting_record %}
+
+{% block title %}Buchungen – OpenBuchhaltung{% endblock %}
+
+{% macro partner_options(partners, selected=None) -%}
+  {% for partner in partners %}<option value="{{ partner.id }}"{% if partner.debtor_number %} data-debtor="{{ partner.debtor_number }}"{% endif %}{% if partner.creditor_number %} data-creditor="{{ partner.creditor_number }}"{% endif %}{% if partner.id == selected %} selected{% endif %}>{{ partner.name }} ({{ [partner.debtor_number, partner.creditor_number] | select | join("/") }})</option>{% endfor %}
+{%- endmacro %}
+
+{% macro line_group(required) -%}
+  <tbody class="line-group">
+    <tr class="line-main">
+      <td class="col-account">
+        <select name="line_account_id" aria-label="Konto"{% if required %} required{% endif %} data-subledger-account>
+          <option value="">Konto wählen</option>
+          {% for account in accounts if account.is_active %}
+            <option value="{{ account.id }}"{% if account.subledger %} data-subledger="{{ account.subledger }}"{% endif %}>{{ account.code }} – {{ account.name }}{% if account.subledger %} (Sammelkonto {{ "Debitoren" if account.subledger == "debtor" else "Kreditoren" }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td class="col-side">
+        <select name="line_side" aria-label="Soll oder Haben" required>
+          <option value="debit">Soll</option>
+          <option value="credit">Haben</option>
+        </select>
+      </td>
+      <td class="col-amount">
+        <input name="line_amount" inputmode="decimal" placeholder="0,00" aria-label="Betrag"{% if required %} required{% endif %} />
+      </td>
+      <td class="col-tax">
+        <select name="line_tax_code_id" aria-label="Steuercode">
+          <option value="">Ohne Steuer</option>
+          {% for tax_code in tax_codes %}
+            <option value="{{ tax_code.id }}" data-rate="{{ tax_code.rate }}">{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td class="col-more">
+        <button type="button" class="link" data-remove-line title="Zeile entfernen" aria-label="Zeile entfernen">✕</button>
+      </td>
+    </tr>
+    <tr class="line-extra">
+      <td colspan="5">
+        <details class="line-details">
+          <summary class="muted small">Weitere Angaben: Partner der Zeile, {% if cost_centers or profit_centers %}Kostenstelle/Profitcenter, {% endif %}Zeilentext</summary>
+          <div class="line-extra-grid">
+            <div>
+              <label>Geschäftspartner der Zeile</label>
+              <select name="line_partner_id" data-partner-select>
+                <option value="">wie Buchung</option>
+                {{ partner_options(partners) }}
+              </select>
+            </div>
+            <div>
+              <label>Kostenstelle</label>
+              <select name="line_cost_center_id">
+                <option value="">Ohne Kostenstelle</option>
+                {% for unit in cost_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label>Profitcenter</label>
+              <select name="line_profit_center_id">
+                <option value="">Ohne Profitcenter</option>
+                {% for unit in profit_centers %}<option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label>Zeilenbeschreibung</label>
+              <input name="line_description" />
+            </div>
+          </div>
+        </details>
+      </td>
+    </tr>
+  </tbody>
+{%- endmacro %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Buchungen</h1>
+      {% if selected_company_id %}
+        <p class="page-subtitle">{{ all_entries_count }} Buchung{{ "" if all_entries_count == 1 else "en" }} im Journal{% if due_template_ids %} · <a href="#vorlagen">{{ due_template_ids | length }} fällige Vorlage{{ "" if due_template_ids | length == 1 else "n" }}</a>{% endif %}</p>
+      {% endif %}
+    </div>
+    {% if selected_company_id and accounts %}
+      <div class="page-actions">
+        {% if journal_entries %}
+          <button type="button" class="secondary btn-sm" popovertarget="festschreiben-panel">Festschreiben bis …</button>
+        {% endif %}
+        <a class="button" href="#neue-buchung" data-open-details="#neue-buchung">+ Neue Buchung</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% elif not accounts %}
+    <section class="card">
+      <p class="muted">Noch keine Konten vorhanden — zuerst unter
+        <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen oder importieren.</p>
+    </section>
+  {% else %}
+    <details class="card card-primary" id="neue-buchung"{% if open_form or not all_entries_count %} open{% endif %}>
+      <summary>Neue Buchung erfassen <span class="summary-hint">Soll/Haben, Beträge bei Steuercode netto</span></summary>
+      <form method="post" action="{{ url_for('main.create_journal_entry_from_form') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="entry_date">Buchungsdatum</label>
+            <input id="entry_date" name="entry_date" type="date" value="{{ today }}" required />
+          </div>
+          <div class="field">
+            <label for="service_date">Leistungsdatum <span class="muted">(optional)</span></label>
+            <input id="service_date" name="service_date" type="date" aria-describedby="service_date_hint" />
+          </div>
+          <div class="field field-wide">
+            <label for="description">Buchungstext</label>
+            <input id="description" name="description" required maxlength="500" placeholder="z. B. Eingangsrechnung RE-4711 Wartung Server" />
+          </div>
+          <div class="field">
+            <label for="partner_id">Geschäftspartner</label>
+            <select id="partner_id" name="partner_id" data-entry-partner>
+              <option value="">Ohne Partner</option>
+              {{ partner_options(partners) }}
+            </select>
+          </div>
+        </div>
+        <p class="hint" id="service_date_hint">Leistungsdatum: Tag der Leistung bzw. Ende des Leistungszeitraums (Rechnung vom 01.07. für Juni → 30.06.); bestimmt den Umsatzsteuer-Meldezeitraum, leer = Buchungsdatum. Der Geschäftspartner gilt für alle Zeilen ohne eigenen Partner außer Steuerzeilen; auf Debitoren-/Kreditoren-Sammelkonten muss seine Rolle passen.</p>
+
+        <h3 class="form-section-title">Buchungszeilen <span class="muted small">(mindestens zwei)</span></h3>
+        <div class="table-scroll">
+          <table class="journal-lines-table" id="journal-lines" data-no-sort>
+            <thead>
+              <tr>
+                <th>Konto</th>
+                <th>Seite</th>
+                <th>Betrag</th>
+                <th>Steuercode</th>
+                <th></th>
+              </tr>
+            </thead>
+            {% for _ in range(2) %}{{ line_group(True) }}{% endfor %}
+          </table>
+        </div>
+        <p class="line-totals muted small" data-line-totals aria-live="polite"></p>
+        <template id="journal-line-template">{{ line_group(False) }}</template>
+        <button type="button" class="secondary btn-sm" data-add-row="#journal-lines" data-template="#journal-line-template">+ Weitere Zeile</button>
+
+        <p style="margin:1rem 0 0;">
+          <label class="check">
+            <input type="checkbox" name="post_to_closing_period" value="1" />
+            Abschlussbuchung (in Abschlussperiode 13 des Geschäftsjahres buchen)
+          </label>
+        </p>
+        <details class="line-details" style="margin-top:0.5rem;">
+          <summary class="muted small">Als Vorlage speichern (wiederkehrende Buchung)</summary>
+          <div class="form-grid" style="margin-top:0.5rem;">
+            <div class="field">
+              <label for="template_name">Vorlagen-Name</label>
+              <input id="template_name" name="template_name" placeholder="z. B. Miete Büro" />
+            </div>
+            <div class="field">
+              <label for="template_interval">Intervall</label>
+              <select id="template_interval" name="template_interval">
+                <option value="on_demand">Bei Bedarf</option>
+                <option value="monthly">Monatlich</option>
+                <option value="quarterly">Quartalsweise</option>
+                <option value="yearly">Jährlich</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit">Buchung speichern</button>
+        </div>
+      </form>
+    </details>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Journal <span class="count">{% if filters_active %}{{ journal_entries_total }} von {{ all_entries_count }}{% else %}{{ journal_entries_total }}{% endif %}</span></h2>
+      </div>
+      <form method="get" action="{{ url_for('main.journal_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        {{ sort_hidden(sort) }}
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Buchungstext oder Beleg-Nr." aria-label="Suchbegriff" />
+        <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
+        <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+        <select name="partner_id" aria-label="Geschäftspartner">
+          <option value="">Alle Geschäftspartner</option>
+          {% for partner in partners %}
+            <option value="{{ partner.id }}" {% if partner.id == partner_filter %}selected{% endif %}>{{ partner.name }}</option>
+          {% endfor %}
+          {% if filter_partner and not filter_partner.is_active %}
+            <option value="{{ filter_partner.id }}" selected>{{ filter_partner.name }} (inaktiv)</option>
+          {% endif %}
+        </select>
+        <select name="account_id" aria-label="Konto">
+          <option value="">Alle Konten</option>
+          {% for account in accounts %}
+            <option value="{{ account.id }}" {% if account.id == account_filter %}selected{% endif %}>{{ account.code }} – {{ account.name }}{% if not account.is_active %} (inaktiv){% endif %}</option>
+          {% endfor %}
+        </select>
+        {% for unit_type, label, units, selected in [
+          ("cost_center", "Kostenstellen", cost_centers, cost_center_filter),
+          ("profit_center", "Profitcenter", profit_centers, profit_center_filter),
+        ] %}
+          {% if units or selected %}
+            <select name="{{ unit_type }}_id" aria-label="{{ label }}">
+              <option value="">Alle {{ label }}</option>
+              <option value="{{ unassigned_unit }}" {% if selected == unassigned_unit %}selected{% endif %}>ohne {{ "Kostenstelle" if unit_type == "cost_center" else "Profitcenter" }}</option>
+              {% for unit in units %}
+                <option value="{{ unit.id }}" {% if unit.id == selected %}selected{% endif %}>{{ unit.code }} – {{ unit.name }}</option>
+              {% endfor %}
+              {% set filter_unit = filter_units[unit_type] %}
+              {% if filter_unit and not filter_unit.is_active %}
+                <option value="{{ filter_unit.id }}" selected>{{ filter_unit.code }} – {{ filter_unit.name }} (inaktiv)</option>
+              {% endif %}
+            </select>
+          {% endif %}
+        {% endfor %}
+        <select name="status" aria-label="Status">
+          <option value="">Alle Status</option>
+          <option value="offen" {% if status_filter == "offen" %}selected{% endif %}>nur offene</option>
+          <option value="festgeschrieben" {% if status_filter == "festgeschrieben" %}selected{% endif %}>nur festgeschriebene</option>
+        </select>
+        <button type="submit" class="secondary">Filtern</button>
+        {% if filters_active %}
+          <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Zurücksetzen</a>
+        {% endif %}
+        {% if filter_account %}
+          <a href="{{ url_for('main.account_detail_page', account_id=filter_account.id) }}">Kontoblatt {{ filter_account.code }} →</a>
+        {% endif %}
+      </form>
+
+      {% if journal_entries %}
+        <div class="table-scroll">
+          <table class="data journal-table" {{ sort_attrs(sort) }}>
+            <thead>
+              <tr>
+                <th data-sort-key="number">Beleg-Nr.</th>
+                <th data-sort-key="date">Datum</th>
+                <th data-sort-key="text">Buchungstext</th>
+                <th data-sort-key="partner">Geschäftspartner</th>
+                <th data-sort-key="posting">Kontierung <span class="th-hint">Soll an Haben</span></th>
+                <th class="num" data-sort-key="amount">Betrag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in journal_entries %}
+                {% set info = overview.get(entry.id, {}) %}
+                {% set reversed_by = reversed_by_entry.get(entry.id) %}
+                {% set documents = documents_by_entry.get(entry.id, []) %}
+                <tr>
+                  <td class="nowrap">
+                    <a class="posting-number" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}">{{ entry.posting_number }}</a>
+                    {% if entry.is_finalized %}<span class="status-icon" title="Festgeschrieben{% if entry.finalized_at %} am {{ entry.finalized_at | datum_zeit }}{% endif %}">🔒</span>{% endif %}
+                  </td>
+                  <td class="date">
+                    {{ entry.entry_date | datum }}
+                    {% if entry.service_date %}<br /><span class="muted small" title="Leistungsdatum (Umsatzsteuer-Meldezeitraum)">Leistung {{ entry.service_date | datum }}</span>{% endif %}
+                  </td>
+                  <td class="entry-text">
+                    {{ entry.description }}
+                    <div class="entry-meta">
+                      {% if source_labels.get(entry.source) %}<span class="badge">{{ source_labels[entry.source] }}</span>{% endif %}
+                      {% if entry.reversal_of_id %}<span>Storno zu <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.reversal_of_id) }}">{{ posting_number_by_id.get(entry.reversal_of_id, "?") }}</a></span>{% endif %}
+                      {% if reversed_by %}<span class="badge badge-danger">storniert durch <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=reversed_by.id) }}">{{ reversed_by.number }}</a></span>{% endif %}
+                      {% for document in documents %}
+                        <a href="{{ url_for('main.download_document', document_id=document.id) }}" title="Beleg herunterladen">📎 {% if document.category_name %}{{ document.category_name }}: {% endif %}{{ document.file_name }}</a>
+                      {% endfor %}
+                      <a href="{{ url_for('main.documents_page', company_id=selected_company_id, journal_entry_id=entry.id) }}#beleg-hochladen">{% if documents %}+ weiterer Beleg{% else %}+ Beleg{% endif %}</a>
+                    </div>
+                  </td>
+                  <td class="col-partner">
+                    {% if info.partners %}
+                      {{ partner_chips(info.partners) }}
+                    {% else %}
+                      {% if info.bank_transaction and info.bank_transaction.counterparty %}
+                        <span class="muted small" title="Gegenseite laut Kontoauszug – kein Geschäftspartner zugeordnet">Bank: {{ info.bank_transaction.counterparty }}</span><br />
+                      {% elif not is_amendable(entry, reversed_by) %}
+                        <span class="muted">–</span>
+                      {% endif %}
+                      {% if is_amendable(entry, reversed_by) %}
+                        <a class="small" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}#partner" data-assign-partner="{{ url_for('main.amend_journal_entry_action', journal_entry_id=entry.id) }}" data-posting-number="{{ entry.posting_number }}" data-description="{{ entry.description }}">+ Partner zuordnen</a>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                  <td class="col-posting">{{ posting_record(info.debit_lines, info.credit_lines) }}</td>
+                  <td class="num">{{ info.total | betrag }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {{ pagination('main.journal_page', journal_entries_total, limit, offset, selected_company_id,
+                      extra=dict(filter_args, **sort.url_args)) }}
+      {% elif filters_active %}
+        <p class="empty-state">Keine Buchungen zu diesen Filtern. <a href="{{ url_for('main.journal_page', company_id=selected_company_id) }}">Filter zurücksetzen</a></p>
+      {% else %}
+        <p class="empty-state">Noch keine Buchungen vorhanden.</p>
+      {% endif %}
+    </section>
+
+    {% if templates %}
+      <details class="card" id="vorlagen"{% if due_template_ids %} open{% endif %}>
+        <summary>Buchungsvorlagen <span class="summary-hint">{{ templates | length }} aktiv{% if due_template_ids %}, {{ due_template_ids | length }} fällig{% endif %}</span></summary>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Buchungstext</th>
+                <th>Intervall</th>
+                <th>Nächste Fälligkeit</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for template in templates %}
+                <tr>
+                  <td>{{ template.name }}
+                    {% if template.id in due_template_ids %}<span class="badge badge-warning">fällig</span>{% endif %}
+                  </td>
+                  <td>{{ template.description }}</td>
+                  <td>{{ {'on_demand': 'bei Bedarf', 'monthly': 'monatlich',
+                          'quarterly': 'quartalsweise', 'yearly': 'jährlich'}[template.interval] }}</td>
+                  <td class="date">{{ template.next_run | datum if template.next_run else "–" }}</td>
+                  <td class="actions">
+                    <div class="row-actions">
+                      <form method="post" action="{{ url_for('main.book_journal_template_action', template_id=template.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <button type="submit" class="btn-sm"
+                                data-confirm="Vorlage „{{ template.name }}“ jetzt buchen?">Buchen</button>
+                      </form>
+                      <form method="post" action="{{ url_for('main.deactivate_journal_template_action', template_id=template.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <button type="submit" class="secondary btn-sm">Deaktivieren</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">Vorlagen entstehen beim Speichern einer Buchung („Als Vorlage speichern“).
+          Buchen übernimmt die Zeilen als neue Buchung und schiebt die Fälligkeit um das Intervall weiter.</p>
+      </details>
+    {% endif %}
+
+    {% if journal_entries %}
+      <div popover id="festschreiben-panel" class="panel">
+        <div class="panel-header">
+          <h3>Festschreibelauf</h3>
+          <button type="button" class="panel-close" popovertarget="festschreiben-panel" popovertargetaction="hide" aria-label="Schließen">×</button>
+        </div>
+        <p class="hint">Schreibt alle offenen Buchungen bis einschließlich des Datums unwiderruflich fest (GoBD). Korrekturen sind danach nur noch per Storno möglich.</p>
+        <form method="post" action="{{ url_for('main.finalize_journal_entries_action') }}" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <label for="up_to_date">Bis einschließlich</label>
+          <input id="up_to_date" name="up_to_date" type="date" value="{{ today }}" required />
+          <button type="submit" data-confirm="Alle Buchungen bis zu diesem Datum unwiderruflich festschreiben?">Festschreiben</button>
+        </form>
+      </div>
+
+      <div popover id="partner-panel" class="panel" data-partner-panel>
+        <div class="panel-header">
+          <div>
+            <h3>Geschäftspartner zuordnen</h3>
+            <p class="muted small" data-partner-panel-title></p>
+          </div>
+          <button type="button" class="panel-close" popovertarget="partner-panel" popovertargetaction="hide" aria-label="Schließen">×</button>
+        </div>
+        <form method="post" action="" data-partner-panel-form>
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="next" value="{{ request.full_path }}" />
+          <div class="field">
+            <label for="assign_partner_id">Geschäftspartner der Buchung</label>
+            <select id="assign_partner_id" name="partner_id" required>
+              <option value="">Bitte wählen</option>
+              {{ partner_options(partners) }}
+            </select>
+          </div>
+          <p class="hint">Gilt für alle Zeilen außer Steuerzeilen. Auf Debitoren-/Kreditoren-Sammelkonten muss die Rolle passen; abweichende Partner je Zeile auf der Detailseite der Buchung.</p>
+          <div class="form-actions">
+            <button type="submit">Zuordnen</button>
+            <a class="partner-panel-new" href="{{ url_for('main.partners_page', company_id=selected_company_id) }}#partner-anlegen">Neuen Partner anlegen</a>
+          </div>
+        </form>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}

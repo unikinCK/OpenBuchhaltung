@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+
+{% from "_journal.html" import audit_changes, account_link %}
+
+{% block title %}Konten – OpenBuchhaltung{% endblock %}
+
+{% set type_labels = {"asset": "Aktiva", "liability": "Passiva", "equity": "Eigenkapital", "income": "Ertrag", "expense": "Aufwand"} %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Konten</h1>
+      {% if selected_company_id %}<p class="page-subtitle">{{ all_accounts_count }} {{ "Konto" if all_accounts_count == 1 else "Konten" }} im Kontenplan</p>{% endif %}
+    </div>
+    {% if selected_company_id %}
+      <div class="page-actions">
+        <a class="button-secondary btn-sm" href="#kontenrahmen-import" data-open-details="#kontenrahmen-import">Kontenrahmen importieren</a>
+        <a class="button" href="#konto-anlegen" data-open-details="#konto-anlegen">+ Konto anlegen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% macro skr03_target(row) -%}
+    {% if row.skr03_status == "occupied" %}
+      belegt durch {{ account_link(row.skr03_account.account_id, row.skr03_account.code, row.skr03_account.name) }}
+    {% elif row.skr03_status == "present" %}
+      vorhanden{% if row.skr03_account.name != row.skr03_name %} ({{ row.skr03_account.name }}){% endif %}
+    {% else %}
+      fehlt
+    {% endif %}
+  {%- endmacro %}
+
+  {% if chart_check and (not chart_check.ok or chart_check.nonstandard_skr03_accounts) %}
+    {% set finding_count = (chart_check.legacy_skr04_accounts | length) + (chart_check.foreign_skr04_accounts | length) + (chart_check.nonstandard_skr03_accounts | length) + (chart_check.unknown_account_types | length) %}
+    <details class="card" id="kontenrahmen-pruefung"{% if not chart_check.ok %} open{% endif %}>
+      <summary>Kontenrahmen-Prüfung
+        {% if not chart_check.ok %}<span class="badge badge-warning">{{ finding_count }} Befunde</span>{% else %}<span class="badge badge-info">{{ finding_count }} Hinweise</span>{% endif %}
+      </summary>
+      {% if chart_check.dominant_chart %}
+        {% set evidence = chart_check.chart_evidence %}
+        <p>
+          Vorherrschender Kontenrahmen: <strong>{{ chart_check.dominant_chart|upper }}</strong>
+          {% if evidence.skr03.accounts or evidence.skr04.accounts %}
+            – eigene Konten außerhalb des alten SKR04-Imports:
+            {{ evidence.skr03.accounts }} SKR03-typische mit {{ evidence.skr03.posting_count }} Buchungszeilen,
+            {{ evidence.skr04.accounts }} SKR04-typische mit {{ evidence.skr04.posting_count }} Buchungszeilen.
+          {% else %}
+            – ohne eigene Konten außerhalb des alten Imports gilt der importierte SKR04.
+          {% endif %}
+        </p>
+      {% endif %}
+      {% for warning in chart_check.warnings %}
+        <p>{{ warning }}</p>
+      {% endfor %}
+      {% if chart_check.legacy_skr04_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>Altkonto</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>Richtig im SKR04</th>
+              <th>SKR04-Konto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.legacy_skr04_accounts %}
+              <tr>
+                <td>{{ account_link(row.account_id, row.code, row.name) }}</td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr04_code }} – {{ row.skr04_name }}</td>
+                <td>
+                  {% if row.skr04_status == "occupied" %}
+                    belegt durch Altkonto {{ account_link(row.skr04_account.account_id, row.skr04_account.code, row.skr04_account.name) }}
+                  {% elif row.skr04_status == "present" %}
+                    vorhanden{% if row.skr04_account.name != row.skr04_name %} ({{ row.skr04_account.name }}){% endif %}
+                  {% else %}
+                    fehlt
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Altkonten ohne Buchungen einfach deaktivieren; fehlende SKR04-Konten ergänzt ein
+          erneuter Import des Kontenrahmens SKR04. Salden zum Stichtag per Umbuchung auf das
+          SKR04-Konto übertragen und das Altkonto danach deaktivieren. Belegt ein Altkonto die
+          SKR04-Nummer (1200, 1600), eine freie Nummer wählen, z. B. 1210 „Forderungen aus
+          Lieferungen und Leistungen ohne Kontokorrent“ oder 1610 „Nebenkasse 1“.
+        </p>
+      {% endif %}
+      {% if chart_check.foreign_skr04_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>SKR04-Konto</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>Richtig im SKR03</th>
+              <th>SKR03-Konto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.foreign_skr04_accounts %}
+              <tr>
+                <td>
+                  {{ account_link(row.account_id, row.code, row.name) }}
+                  <br /><span class="muted">im SKR03: {{ row.skr03_meaning or "nicht vergeben" }}</span>
+                  {% if row.tax_codes %}<br /><strong class="negative">Steuerkonto der Steuercodes {{ row.tax_codes|join(", ") }}</strong>{% endif %}
+                </td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
+                <td>{{ skr03_target(row) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Fehlende SKR03-Konten oben unter „Konto anlegen“ mit Nummer, Bezeichnung und der Kontoart
+          des SKR04-Kontos ergänzen – einzeln, ein Import des ganzen SKR03 legte weitere Konten an.
+          SKR04-Konten ohne Buchungen einfach deaktivieren; Salden zum Stichtag per Umbuchung auf
+          das SKR03-Konto übertragen und das SKR04-Konto danach deaktivieren. Den Gewinnvortrag vor
+          dem nächsten Jahresabschluss umbuchen: Solange 2970 aktiv ist, bucht der Abschluss das
+          Ergebnis dorthin. Steuerkonten, auf die ein Steuercode verweist, nicht umbuchen – die UStVA
+          erkennt Steuerzeilen über die Steuercodes.
+        </p>
+      {% endif %}
+      {% if chart_check.nonstandard_skr03_accounts %}
+        <table>
+          <thead>
+            <tr>
+              <th>Konto (Hinweis)</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+              <th>SKR03-Standardkonto</th>
+              <th>Standardkonto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.nonstandard_skr03_accounts %}
+              <tr>
+                <td>
+                  {{ account_link(row.account_id, row.code, row.name) }}
+                  <br /><span class="muted">im SKR03: {{ row.skr03_meaning }}</span>
+                </td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+                <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
+                <td>{{ skr03_target(row) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Konten ohne Buchungen deaktivieren oder, wenn die Nummer im SKR03 ein Einzelkonto
+          bezeichnet, in dessen DATEV-Bezeichnung umbenennen. Mit Buchungen: Saldo auf das
+          SKR03-Standardkonto umbuchen und das Konto deaktivieren. Konten, die Anlagen (Anlage- oder
+          AfA-Konto), Bankregeln oder Buchungsvorlagen noch verwenden, aktiv lassen – inaktive Konten
+          lassen sich nicht bebuchen.
+        </p>
+      {% endif %}
+      {% if chart_check.unknown_account_types %}
+        <table>
+          <thead>
+            <tr>
+              <th>Konto mit unbekannter Kontoart</th>
+              <th>Typ</th>
+              <th>Status</th>
+              <th>Buchungen</th>
+              <th>Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in chart_check.unknown_account_types %}
+              <tr>
+                <td>{{ account_link(row.account_id, row.code, row.name) }}</td>
+                <td><span class="badge">{{ row.account_type }}</span></td>
+                <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
+                <td>{{ row.posting_count }}</td>
+                <td>{{ row.balance }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">
+          Die Kontoart lässt sich unten in der Kontenliste korrigieren („Bearbeiten“ → „Kontotyp korrigieren …“);
+          danach zählen die bisherigen Buchungen in Bilanz bzw. GuV ihrer jeweiligen Periode.
+        </p>
+      {% endif %}
+    </details>
+  {% endif %}
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    <details class="card card-primary" id="konto-anlegen"{% if not all_accounts_count %} open{% endif %}>
+      <summary>Konto anlegen</summary>
+      <form method="post" action="{{ url_for('main.create_account') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="code">Kontonummer</label>
+            <input id="code" name="code" required />
+          </div>
+          <div class="field field-wide">
+            <label for="name">Kontobezeichnung</label>
+            <input id="name" name="name" required />
+          </div>
+          <div class="field">
+            <label for="account_type">Kontotyp</label>
+            <select id="account_type" name="account_type" required>
+              <option value="asset">Aktiva (asset)</option>
+              <option value="liability">Passiva (liability)</option>
+              <option value="equity">Eigenkapital (equity)</option>
+              <option value="income">Ertrag (income)</option>
+              <option value="expense">Aufwand (expense)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="subledger">Sammelkonto (Nebenbuch)</label>
+            <select id="subledger" name="subledger">
+              <option value="">Kein Sammelkonto</option>
+              <option value="debtor">Debitoren-Sammelkonto (nur Aktiva)</option>
+              <option value="creditor">Kreditoren-Sammelkonto (nur Passiva)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Konto speichern</button>
+        </div>
+      </form>
+    </details>
+
+    <details class="card" id="kontenrahmen-import"{% if not all_accounts_count %} open{% endif %}>
+      <summary>Kontenrahmen importieren <span class="summary-hint">SKR03, SKR04 oder eigene CSV-Datei</span></summary>
+      <form method="post" action="{{ url_for('main.import_account_chart_action') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="chart">Vorgebundener Kontenrahmen</label>
+            <select id="chart" name="chart">
+              <option value="">CSV-Datei verwenden</option>
+              {% for chart in bundled_charts %}
+                <option value="{{ chart }}">{{ chart|upper }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field field-wide">
+            <label for="account_chart_csv">CSV-Datei</label>
+            <input id="account_chart_csv" name="account_chart_csv" type="file" accept=".csv,text/csv" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit">Kontenrahmen importieren</button>
+        </div>
+      </form>
+    </details>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Kontenplan <span class="count">{% if filters_active %}{{ accounts | length }} von {{ all_accounts_count }}{% else %}{{ accounts | length }}{% endif %}</span></h2>
+      </div>
+      <form method="get" action="{{ url_for('main.accounts_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="Kontonummer oder Bezeichnung" aria-label="Suchbegriff" />
+        <select name="account_type" aria-label="Kontoart">
+          <option value="">Alle Kontoarten</option>
+          {% for account_type in valid_account_types %}
+            <option value="{{ account_type }}" {% if account_type == type_filter %}selected{% endif %}>{{ type_labels.get(account_type, account_type) }}</option>
+          {% endfor %}
+        </select>
+        <select name="status" aria-label="Status">
+          <option value="">Aktive und inaktive</option>
+          <option value="aktiv" {% if status_filter == "aktiv" %}selected{% endif %}>nur aktive</option>
+          <option value="inaktiv" {% if status_filter == "inaktiv" %}selected{% endif %}>nur inaktive</option>
+        </select>
+        <button type="submit" class="secondary">Filtern</button>
+        {% if filters_active %}<a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Zurücksetzen</a>{% endif %}
+      </form>
+      {% if accounts %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Nummer</th>
+                <th>Bezeichnung</th>
+                <th>Kontoart</th>
+                <th>Sammelkonto</th>
+                <th>Ebene</th>
+                <th>Status</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for account in accounts %}
+                <tr{% if not account.is_active %} class="row-muted"{% endif %}>
+                  <td class="nowrap"><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account.id) }}" title="Kontoblatt {{ account.code }}"><span class="account-code">{{ account.code }}</span></a></td>
+                  <td><a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account.id) }}" title="Kontoblatt {{ account.code }}">{{ account.name }}</a></td>
+                  <td class="nowrap">
+                    <span class="badge" title="{{ account.account_type }}">{{ type_labels.get(account.account_type, account.account_type) }}</span>
+                    {% if account.account_type not in valid_account_types %}<br /><strong class="negative">ungültig – fällt aus allen Berichten</strong>{% endif %}
+                  </td>
+                  <td>{{ {"debtor": "Debitoren", "creditor": "Kreditoren"}.get(account.subledger, "–") }}</td>
+                  <td>{{ account.hierarchy_level }}</td>
+                  <td>{% if account.is_active %}aktiv{% else %}<span class="badge">inaktiv</span>{% endif %}</td>
+                  <td class="actions">
+                    <button type="button" class="secondary btn-sm" popovertarget="account-panel-{{ account.id }}">Bearbeiten</button>
+                    <div popover id="account-panel-{{ account.id }}" class="panel">
+                      <div class="panel-header">
+                        <h3>Konto {{ account.code }} bearbeiten</h3>
+                        <button type="button" class="panel-close" popovertarget="account-panel-{{ account.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
+                      </div>
+                      <form method="post" action="{{ url_for('main.update_account', account_id=account.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <div class="form-grid">
+                          <div class="field field-wide">
+                            <label for="account-name-{{ account.id }}">Kontobezeichnung</label>
+                            <input id="account-name-{{ account.id }}" name="name" value="{{ account.name }}" required />
+                          </div>
+                          <div class="field">
+                            <label for="account-active-{{ account.id }}">Status</label>
+                            <select id="account-active-{{ account.id }}" name="is_active">
+                              <option value="true" {% if account.is_active %}selected{% endif %}>aktiv</option>
+                              <option value="false" {% if not account.is_active %}selected{% endif %}>inaktiv</option>
+                            </select>
+                          </div>
+                          {% if account.account_type in ("asset", "liability") %}
+                            <div class="field">
+                              <label for="account-subledger-{{ account.id }}">Sammelkonto</label>
+                              <select id="account-subledger-{{ account.id }}" name="subledger">
+                                <option value="">kein Sammelkonto</option>
+                                {% if account.account_type == "asset" %}<option value="debtor" {% if account.subledger == "debtor" %}selected{% endif %}>Debitoren</option>{% endif %}
+                                {% if account.account_type == "liability" %}<option value="creditor" {% if account.subledger == "creditor" %}selected{% endif %}>Kreditoren</option>{% endif %}
+                              </select>
+                            </div>
+                          {% endif %}
+                          {% if account.account_type not in valid_account_types %}
+                            <div class="field">
+                              <label for="account-type-{{ account.id }}">Kontotyp korrigieren</label>
+                              <select id="account-type-{{ account.id }}" name="account_type">
+                                <option value="">Kontotyp korrigieren …</option>
+                                {% for account_type in valid_account_types %}<option value="{{ account_type }}">{{ account_type }}</option>{% endfor %}
+                              </select>
+                            </div>
+                          {% endif %}
+                        </div>
+                        <div class="form-actions">
+                          <button type="submit">Speichern</button>
+                        </div>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% elif filters_active %}
+        <p class="empty-state">Keine Konten zu diesen Filtern.</p>
+      {% else %}
+        <p class="empty-state">Noch keine Konten vorhanden.</p>
+      {% endif %}
+    </section>
+
+    <details class="card" id="kontenhistorie">
+      <summary>Kontenänderungshistorie <span class="summary-hint">{{ account_events | length }} Einträge</span></summary>
+      {% if account_events %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Zeitpunkt</th>
+                <th>Konto</th>
+                <th>Aktion</th>
+                <th>Benutzer</th>
+                <th>Änderungen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for event in account_events %}
+                {% set snapshot = (event.payload.after or event.payload.before) if event.payload else none %}
+                <tr>
+                  <td class="datetime">{{ event.changed_at | datum_zeit }}</td>
+                  <td class="nowrap">{{ snapshot.code if snapshot is mapping and snapshot.code else "#" ~ event.entity_id }}</td>
+                  <td><span class="badge" title="{{ event.action }}">{{ {"created": "angelegt", "updated": "geändert"}.get(event.action, event.action) }}</span></td>
+                  <td>{{ event.changed_by }}</td>
+                  <td>{{ audit_changes(event.payload, {"name": "Bezeichnung", "is_active": "aktiv", "subledger": "Sammelkonto", "account_type": "Kontoart", "code": "Nummer"}) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Noch keine protokollierten Kontenänderungen.</p>
+      {% endif %}
+    </details>
+  {% endif %}
+{% endblock %}

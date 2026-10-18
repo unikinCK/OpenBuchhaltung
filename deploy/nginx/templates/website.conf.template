@@ -1,0 +1,96 @@
+# Projekt-Webseite (docker-compose.website.yml): statische Dateien aus website/ unter
+# ${WEBSITE_DOMAIN}; www.${WEBSITE_DOMAIN} leitet dorthin um. Wird nur mit dem
+# Webseiten-Overlay eingebunden. ${WEBSITE_DOMAIN} ersetzt das nginx-Image beim Start
+# (envsubst), alle anderen $-Variablen sind nginx-eigene. Das Zertifikat holt der
+# certbot-Service unter dem Namen ${WEBSITE_DOMAIN} (Domain und www).
+
+# Port 80: ACME-Challenge für certbot, sonst Umleitung auf HTTPS.
+server {
+    listen 80;
+    server_name ${WEBSITE_DOMAIN} www.${WEBSITE_DOMAIN};
+    access_log off;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://${WEBSITE_DOMAIN}$request_uri;
+    }
+}
+
+# www.<Domain> → <Domain>
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name www.${WEBSITE_DOMAIN};
+    access_log off;
+
+    ssl_certificate     /etc/letsencrypt/live/${WEBSITE_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${WEBSITE_DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    return 301 https://${WEBSITE_DOMAIN}$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${WEBSITE_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${WEBSITE_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${WEBSITE_DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Datenschutz (website/datenschutz.html): keine Zugriffsprotokolle, keine
+    # 404-Meldungen und Fehler erst ab „crit“ – IP-Adressen landen nicht im Log.
+    access_log off;
+    log_not_found off;
+    error_log /dev/stderr crit;
+    limit_req zone=obh_general burst=40 nodelay;
+
+    root /usr/share/nginx/website;
+    index index.html;
+    charset utf-8;
+    charset_types text/css application/javascript image/svg+xml text/plain application/xml;
+
+    gzip on;
+    gzip_min_length 512;
+    gzip_types text/css application/javascript image/svg+xml text/plain application/xml;
+
+    # Alle Ressourcen kommen von dieser Domain; keine Inline-Skripte oder -Styles.
+    add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+
+    error_page 404 /404.html;
+
+    # Kein Inhalt außerhalb von website/ und keine versteckten Dateien.
+    location ~ /\. {
+        return 404;
+    }
+
+    # expires setzt Cache-Control ohne add_header, die Sicherheits-Header gelten weiter.
+    # HTML, CSS und JS werden per ETag revalidiert (no-cache), damit nach einem
+    # git pull keine veralteten Styles ausgeliefert werden; Bilder ändern sich selten.
+    location ~* \.(?:webp|png|svg|ico)$ {
+        expires 7d;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+        expires -1;
+    }
+}

@@ -1,0 +1,211 @@
+# Compliance-Testkatalog
+
+Dieser Testkatalog beschreibt fachliche und technische Tests, die fuer eine GoBD-orientierte und prueferfreundliche OpenBuchhaltung-Version nachweisbar durchgefuehrt werden sollten.
+
+## 1. Testgrundsaetze
+
+Jeder Testfall sollte dokumentieren:
+
+- Test-ID
+- Anforderung/Referenz
+- Ausgangsdaten
+- Schritte
+- erwartetes Ergebnis
+- tatsaechliches Ergebnis
+- automatisiert oder manuell
+- verantwortliche Person
+- Datum und Softwareversion
+- Link zu CI-Lauf, Screenshot oder Exportartefakt
+
+## 2. Kernbuchhaltung
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-BOOK-001 | Einfache Soll/Haben-Buchung erfassen | Buchung wird gespeichert, Journal ist ausgeglichen | automatisiert | hoch |
+| T-BOOK-002 | Unaussgeglichene Buchung erfassen | Speicherung wird mit klarer Fehlermeldung abgewiesen | automatisiert | hoch |
+| T-BOOK-003 | Buchung mit USt19 | Steuerzeile wird korrekt berechnet und gebucht | automatisiert | hoch |
+| T-BOOK-004 | Buchung mit VSt19 | Vorsteuerzeile wird korrekt berechnet und gebucht | automatisiert | hoch |
+| T-BOOK-005 | Steuerfreie Buchung | Keine Steuerzeile, korrekte Kennzeichnung fuer Auswertung | automatisiert | mittel |
+| T-BOOK-006 | Rundungsfall mit Centbetraegen | Summe bleibt ausgeglichen, Steuerbetrag nachvollziehbar | automatisiert | hoch |
+| T-BOOK-007 | Mehrzeilige Splitbuchung | Buchung wird korrekt gespeichert und exportiert | automatisiert | hoch |
+| T-BOOK-008 | Buchung ohne Pflichtfelder | Speicherung wird abgewiesen | automatisiert | mittel |
+| T-BOOK-009 | Offene Buchung ergaenzen (Leistungsdatum, Partner auf Sammelkonto) | Aenderung mit altem und neuem Wert im Audit-Log; Partner auf Nicht-Sammelkonto, festgeschriebene oder stornierte Buchung, gesperrte Periode und fremde Gesellschaft werden abgewiesen; UI, API (PATCH), MCP | automatisiert | hoch |
+
+## 3. Festschreibung und Storno
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-FIN-001 | Einzelne Buchung festschreiben | Status, Zeitpunkt und Benutzer werden gesetzt | automatisiert | hoch |
+| T-FIN-002 | Doppelte Festschreibung | Aktion wird abgewiesen oder bleibt idempotent nachvollziehbar | automatisiert | hoch |
+| T-FIN-003 | Festgeschriebene Buchung per UI aendern | Aenderung wird verhindert | automatisiert | hoch |
+| T-FIN-004 | Festgeschriebene Buchung per API aendern | Aenderung wird verhindert | automatisiert | hoch |
+| T-FIN-005 | Festgeschriebene Buchung per DB-Update aendern | Datenbank verhindert Aenderung | automatisiert | hoch |
+| T-FIN-006 | Storno erzeugen | Gegenbuchung entsteht, Original bleibt unveraendert | automatisiert | hoch |
+| T-FIN-007 | Doppelstorno versuchen | Zweites Storno wird verhindert | automatisiert | hoch |
+| T-FIN-008 | Storno einer Stornobuchung | Aktion wird verhindert | automatisiert | hoch |
+| T-FIN-009 | Storno in gesperrter Periode | Aktion wird verhindert | automatisiert | hoch |
+| T-FIN-010 | Festschreibelauf bis Datum | Alle passenden Buchungen werden festgeschrieben, spaetere bleiben offen | automatisiert | hoch |
+| T-FIN-011 | Inhaltshash bei Festschreibung | Kopfdaten und Zeilen werden deterministisch per SHA-256 versiegelt | automatisiert | hoch |
+| T-FIN-012 | Privilegierte Buchungsmanipulation | Gemeinsame Integritaetspruefung meldet eine Hashabweichung | automatisiert | hoch |
+| T-FIN-013 | Migration festgeschriebener Altbestaende | Migration erzeugt gueltige Inhaltshashes und erhaelt DB-Schutz | automatisiert | hoch |
+
+## 4. Perioden und Jahresabschluss
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-PER-001 | Periode sperren | Buchungen in Periode werden fuer Schreibrollen verhindert | automatisiert | hoch |
+| T-PER-002 | Periode entsperren als Buchhalter | Aktion wird abgewiesen | automatisiert | hoch |
+| T-PER-003 | Periode entsperren als Admin | Aktion wird protokolliert und erlaubt | automatisiert | mittel |
+| T-PER-004 | Jahresabschluss durchfuehren | GuV-Konten werden abgeschlossen, Jahr wird gesperrt | automatisiert | hoch |
+| T-PER-005 | Nachbuchung in abgeschlossenes Jahr | Aktion wird verhindert | automatisiert | hoch |
+| T-PER-006 | Abschluss erneut ausfuehren | Doppelabschluss wird verhindert oder nachvollziehbar idempotent behandelt | automatisiert | hoch |
+| T-PER-007 | Jahresabschluss mit SKR04 | Ergebnisvortrag bucht auf 2970; das SKR04-Aktivkonto 0860 (Beteiligungen) wird nie als Gewinnvortrag verwendet | automatisiert | hoch |
+
+## 5. Belege und Archiv
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-DOC-001 | PDF hochladen | Datei wird gespeichert, Metadaten und Hash werden erzeugt | automatisiert | hoch |
+| T-DOC-002 | JPG/PNG hochladen | Datei wird gespeichert, Metadaten und Hash werden erzeugt | automatisiert | mittel |
+| T-DOC-003 | Nicht erlaubter Dateityp | Upload wird abgewiesen | automatisiert | hoch |
+| T-DOC-004 | Datei ueber Groessenlimit | Upload wird abgewiesen | automatisiert | mittel |
+| T-DOC-005 | Beleg mit Buchung verknuepfen | Link ist in Buchung und Belegindex sichtbar | automatisiert | hoch |
+| T-DOC-006 | Zugeordneten Beleg loeschen | Loeschung wird verhindert oder nur als dokumentierter Sonderprozess erlaubt | automatisiert | hoch |
+| T-DOC-007 | Beleg ersetzen | Neue Version wird erzeugt, Original bleibt erhalten | automatisiert | hoch |
+| T-DOC-008 | Belegmanipulation im Dateisystem | Integritaetspruefung meldet Hashabweichung | manuell/automatisiert | hoch |
+| T-DOC-009 | Belegdatum erfassen | Belegdatum und technischer Uploadzeitpunkt werden getrennt gespeichert und exportiert | automatisiert | hoch |
+| T-DOC-010 | OCR-/E-Rechnungsdatum übernehmen | Erkanntes oder eingebettetes Rechnungsdatum wird als Belegdatum gespeichert | automatisiert | hoch |
+| T-DOC-011 | Belegabgleich: Match-Vorschlag | Unverknuepfter Beleg wird per Betrag/LLM einer vorhandenen Buchung zugeordnet; Vorschlag bleibt bis zur Freigabe offen | automatisiert | hoch |
+| T-DOC-012 | Belegabgleich: Freigabe mit Aenderung | Nutzer kann vor der Freigabe eine andere Buchung waehlen; Original- und Endauswahl stehen im Audit-Log | automatisiert | hoch |
+| T-DOC-013 | Belegabgleich: Neue Buchung | Ohne passende Buchung entsteht ein editierbarer Buchungsvorschlag; Freigabe erzeugt Buchung und verknuepft den Beleg | automatisiert | hoch |
+| T-DOC-014 | Belegabgleich: Ablehnung | Abgelehnter Vorschlag laesst den Beleg unverknuepft; erneuter Abgleich ist moeglich | automatisiert | mittel |
+| T-DOC-015 | Belegabgleich: LLM-Ausfall | Bei LLM-Fehler oder halluzinierter Buchungs-ID greift der regelbasierte Fallback mit Begruendung | automatisiert | hoch |
+
+## 6. Audit-Log
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-AUD-001 | Buchung erfassen | Audit-Eintrag mit Benutzer, Mandant, Objekt und Aktion | automatisiert | hoch |
+| T-AUD-002 | Buchung festschreiben | Audit-Eintrag wird erzeugt | automatisiert | hoch |
+| T-AUD-003 | Storno erzeugen | Audit-Eintrag fuer Original und Storno nachvollziehbar | automatisiert | hoch |
+| T-AUD-004 | Benutzer/Rolle aendern | Audit-Eintrag wird erzeugt | automatisiert | hoch |
+| T-AUD-005 | Export erzeugen | Export wird mit Parametern protokolliert | automatisiert | mittel |
+| T-AUD-006 | Audit-Eintrag aendern oder loeschen | DB verhindert Aenderung und Loeschung | automatisiert | hoch |
+| T-AUD-007 | Hashkette pruefen | Unveraenderte Kette ist gueltig | automatisiert | hoch |
+| T-AUD-008 | Hashkette manipulieren | Pruefung erkennt Abweichung | automatisiert | hoch |
+| T-AUD-009 | Konto anlegen | Erstellungsereignis enthaelt `before=null` und vollstaendigen `after`-Snapshot | automatisiert | hoch |
+| T-AUD-010 | Kontobezeichnung oder Status aendern | Genau ein Ereignis enthaelt vollstaendige Vorher-/Nachher-Werte | automatisiert | hoch |
+| T-AUD-011 | Kontonummer oder Kontotyp aendern | Strukturelle Aenderung wird abgewiesen | automatisiert | hoch |
+| T-AUD-012 | Kostenstelle oder Profitcenter aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert | automatisiert | hoch |
+| T-AUD-013 | Geschaeftspartner oder dessen Bankdaten aendern | Vorher-/Nachher-Snapshot wird verkettet protokolliert, Bankdaten als eigene Aktion | automatisiert | hoch |
+
+## 7. Rollen, Mandanten und API/MCP
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-IAM-001 | Pruefer ruft Journal auf | Lesender Zugriff erlaubt | automatisiert | hoch |
+| T-IAM-002 | Pruefer erzeugt Buchung | Schreibzugriff wird verweigert | automatisiert | hoch |
+| T-IAM-003 | Buchhalter greift auf fremden Mandanten zu | Zugriff wird verweigert | automatisiert | hoch |
+| T-IAM-004 | API ohne Token im Produktivmodus | Zugriff wird verweigert | automatisiert | hoch |
+| T-IAM-005 | API mit Pruefer-Token schreibt Daten | Zugriff wird verweigert | automatisiert | hoch |
+| T-IAM-006 | MCP-Tool mit falschem Tenant | Zugriff wird verweigert | automatisiert | hoch |
+| T-IAM-007 | Admin erstellt Benutzer | Benutzer wird angelegt und Audit-Log geschrieben | automatisiert | mittel |
+
+## 8. Importe und Exporte
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-EXP-001 | DATEV-Export einfache Buchung | Datei enthaelt korrekte Werte und Encoding | automatisiert | hoch |
+| T-EXP-002 | DATEV-Export mehrzeilige Buchung | Jeder Buchungssatz mit Konto und Gegenkonto, über Belegfeld 1 gruppiert; Aufteilung auf mehrere Gegenkonten bleibt brutto, solange DATEV die Steuer exakt nachrechnet | automatisiert | hoch |
+| T-EXP-003 | DATEV-Export festgeschriebener Stapel | Festschreibekennzeichen (Kopffeld 21) nur gesetzt, wenn alle Buchungen des exportierten Stapels festgeschrieben sind | automatisiert | hoch |
+| T-EXP-004 | Prueferexport erzeugen | Paket enthaelt Manifest, Daten, Belegindex und Belege | automatisiert | hoch |
+| T-EXP-005 | Prueferexport Hashes pruefen | Alle im Manifest genannten Hashes stimmen | automatisiert | hoch |
+| T-EXP-006 | Export mit Zeitraum | Nur relevante Daten plus notwendige Stammdaten enthalten | automatisiert | mittel |
+| T-EXP-007 | Bank-CSV importieren | Umsaetze werden korrekt gelesen und dedupliziert | automatisiert | mittel |
+| T-EXP-008 | E-Rechnung importieren | Rechnungsdaten werden gelesen und korrekt verbucht | automatisiert | mittel |
+| T-EXP-009 | Feldkatalog im Prueferexport | Alle exportierten Tabellen und Felder sind technisch beschrieben | automatisiert | hoch |
+| T-EXP-010 | Export reproduzieren | Identischer Datenstand ergibt denselben Datenbestands-Hash | automatisiert | hoch |
+| T-EXP-011 | Exportdatei manipulieren | Paketpruefung meldet Datei- und Datenbestands-Hashabweichung | automatisiert | hoch |
+| T-EXP-012 | Benutzer und Rollen exportieren | Rollen sind enthalten; Passwort- und Token-Hashes fehlen | automatisiert | hoch |
+| T-EXP-013 | Kontenaenderungshistorie exportieren | Anlage und Aenderungen sind mit Snapshots und Hashkette enthalten | automatisiert | hoch |
+| T-EXP-014 | Controlling-Daten exportieren | Einheiten, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+| T-EXP-015 | Kontenrahmen SKR04 importieren | Alle Konten mit DATEV-SKR04-Nummer und Kontoart ohne Fehlerzeile; Geldtransit, Gewinnvortrag, Steuer-, Bank- und Verbindlichkeitskonto werden in SKR03 und SKR04 gefunden | automatisiert | hoch |
+| T-EXP-016 | Kontenrahmen-CSV mit unmaskiertem Komma oder unbekannter Kontoart | Zeile wird als Fehler gemeldet und nicht angelegt | automatisiert | mittel |
+| T-EXP-017 | Kontenrahmen-Pruefung bei Altbestand des fehlerhaften SKR04-Imports | Altkonten mit SKR04-Nummer, Buchungen und Saldo gemeldet (UI, API, MCP); SKR03 und korrekter SKR04 ohne Befund; nichts wird geaendert | automatisiert | hoch |
+| T-EXP-018 | Geschaeftspartner exportieren | Partnerstamm, Historie und Zeilenzuordnungen sind enthalten | automatisiert | hoch |
+| T-EXP-019 | Kontenrahmen-Pruefung bei SKR03-Buchhaltung nach fehlerhaftem SKR04-Import | Vorherrschender Kontenrahmen SKR03 erkannt; SKR04-Fremdkonten mit DATEV-SKR03-Gegenkonto, Buchungen, Saldo und Steuercodes gemeldet, 0400/3400/4800/6200/8000 als Hinweis; nachimportierter SKR04 oder ein einzelnes SKR03-Konto kippt die Erkennung nicht; nichts wird geaendert (UI, API, MCP) | automatisiert | hoch |
+| T-EXP-020 | DATEV-Export Steuer nach Brutto-Prinzip (SKR03/SKR04) | Steuerzeile im Bruttobetrag: ohne BU-Schlüssel auf Automatikkonten, Steuerschlüssel 101/102/401/402 sonst; BU 40 und eigene Steuerzeile bei Rundungs- oder Steuersatzabweichung und auf Automatikkonten ohne Steuer; die nachgerechneten DATEV-Salden entsprechen dem Journal | automatisiert | hoch |
+| T-EXP-021 | DATEV-Export je Wirtschaftsjahr (auch abweichendes und Rumpf-WJ) | Nur Buchungen des gewählten WJ bzw. Zeitraums; Kopffeld 13 = WJ-Beginn, 15/16 = Zeitraum; das aus TTMM und WJ-Beginn gelesene Belegdatum entspricht dem Journal; Zeitraum über die WJ-Grenze und fehlende Auswahl bei mehreren WJ mit Buchungen werden abgewiesen (UI, API, MCP) | automatisiert | hoch |
+| T-EXP-022 | DATEV-Export Rundungscent und fremde Steuerkonten | Steuerabweichung bis 5 Cent/1 % bleibt brutto mit Korrektursatz „Steuer-Rundungsdifferenz“, groessere faellt auf Netto + Steuerzeile zurueck; SKR04-Steuerkonten im SKR03 unter 1571/1576/1771/1776, Umbuchung zwischen ihnen entfaellt | automatisiert | hoch |
+
+## 8.1 Kostenstellen und Profitcenter
+
+| ID | Testfall | Erwartung | Typ | Prioritaet |
+|---|---|---|---|---|
+| T-CTL-001 | Gültige Einheit kontieren | Buchungszeile speichert Kostenstelle und Profitcenter | automatisiert | hoch |
+| T-CTL-002 | Fremden oder falschen Typ kontieren | Buchung wird mandantensicher abgewiesen | automatisiert | hoch |
+| T-CTL-003 | Inaktive oder ungültige Einheit kontieren | Buchung wird abgewiesen | automatisiert | hoch |
+| T-CTL-004 | Buchung festschreiben und stornieren | Dimensionen sind gehasht und werden gespiegelt | automatisiert | hoch |
+| T-CTL-005 | Controlling-Berichte | Erlöse, Aufwand und Ergebnis stimmen je Einheit | automatisiert | hoch |
+| T-CTL-006 | Controlling-Berichte mit SKR03/SKR04 | Erlöskonten vom Typ `income` zählen in UI, API und CSV als Erlös | automatisiert | hoch |
+
+## 8.2 Geschäftspartner und Nebenbuch
+
+| ID | Testfall | Erwartung | Typ | Prioritaet |
+|---|---|---|---|---|
+| T-PAR-001 | Partner anlegen | Debitoren-/Kreditorennummer wird im Bereich vergeben, Dubletten werden gemeldet | automatisiert | hoch |
+| T-PAR-002 | Partner auf Buchungszeile | Nur auf Sammelkonto mit passender Rolle, mandantensicher, nicht inaktiv | automatisiert | hoch |
+| T-PAR-003 | Buchung festschreiben und stornieren | Partner ist im Hash (ab Version 3) und wird gespiegelt; Version-2-Siegel bleiben gültig | automatisiert | hoch |
+| T-PAR-004 | Rolle oder Nummer nach Verwendung aendern | Aenderung wird abgewiesen | automatisiert | hoch |
+| T-PAR-005 | Jahresabschluss | Sammelkonten werden je Partner vorgetragen | automatisiert | hoch |
+| T-PAR-006 | Migration rueckwaerts und vorwaerts | Siegel bleiben gueltig, Trigger bleiben aktiv | automatisiert | hoch |
+
+## 9. Umsatzsteuer und Meldungen
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-VAT-001 | UStVA Monat | Kennziffern werden aus Journaldaten korrekt berechnet | automatisiert | hoch |
+| T-VAT-002 | UStVA Quartal | Zeitraum wird korrekt ausgewertet | automatisiert | hoch |
+| T-VAT-003 | UStVA Jahr | Jahreswerte stimmen mit Journaldaten ueberein | automatisiert | mittel |
+| T-VAT-004 | Storno in UStVA | Storno neutralisiert urspruengliche Buchung | automatisiert | hoch |
+| T-VAT-005 | UStVA-Snapshot festhalten | Snapshot bleibt unveraendert trotz spaeterer Buchungen | automatisiert | hoch |
+| T-VAT-006 | UStVA ohne Steuercodes | Standard-Steuerkonten beider Kontenrahmen (1571/1576/1771/1776, 1401/1406/3801/3806) zaehlen bei passender Kontoart und Bezeichnung als Steuerkonten; Umbuchung zwischen Steuerkonten ist neutral; 1401 als Forderungskonto bleibt aussen vor | automatisiert | hoch |
+| T-VAT-007 | UStVA-Kennzahlen aus der Kontenfunktion | 8125 → Kz 41, 8336 → Kz 21, 8338 → Kz 45; Erträge ohne Steuer und ohne UStVA-Funktion (Zinsen) nicht in Kz 48, sondern als Hinweis | automatisiert | hoch |
+| T-VAT-008 | Ig. Erwerb und § 13b als Leistungsempfänger | Kz 89/61 aus 1574/1774; Kz 46/47 bei EU-Partner oder Konto 3123, sonst 84/85 mit Hinweis; Vorsteuer 67; Kz 83 = 0 bei voller Vorsteuer; Nachbuchung nur mit Steuerzeilen leitet die Bemessungsgrundlage ab, Storno neutralisiert | automatisiert | hoch |
+| T-VAT-010 | Leistungsdatum bestimmt den Meldezeitraum | Rechnung vom 01.07. fuer Juni zaehlt in Q2 (Kz 81/21, ZM S); ig. Lieferung spaetestens im Folgemonat (Kz 41, ZM L); Vorsteuer zum spaeteren Datum aus Leistung und Rechnung; Dezember-Leistung mit Januar-Rechnung im alten Jahr; § 13b-Korrektur im Zeitraum der Leistung (46/47) bzw. Rechnung (84/85); Storno uebernimmt das Leistungsdatum | automatisiert | hoch |
+| T-VAT-011 | Leistungsdatum versiegelt und exportiert | Inhaltshash Version 4 deckt das Leistungsdatum, Version-3-Siegel bleiben gueltig; DATEV-Felder 115/116 nur mit Leistungsdatum (116 = Steuerzeitpunkt) | automatisiert | hoch |
+| T-VAT-009 | Zusammenfassende Meldung | Summen je Kunden-USt-IdNr. und Art (L/S), Gutschrift mindert, Centbeträge entfallen; Zeilen ohne Partner oder ohne USt-IdNr. als fehlend gemeldet; UI, API, MCP | automatisiert | hoch |
+
+## 10. Anlagenbuchhaltung
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-FA-001 | Lineare AfA | Plan und Buchung sind korrekt | automatisiert | hoch |
+| T-FA-002 | Degressive AfA mit Wechsel | Automatischer Wechsel zur linearen AfA nachvollziehbar | automatisiert | mittel |
+| T-FA-003 | Leistungs-AfA | Abschreibung folgt Leistungsmengen | automatisiert | mittel |
+| T-FA-004 | GWG | Sofortabschreibung korrekt | automatisiert | mittel |
+| T-FA-005 | Sammelposten | Fuenfjahresverteilung korrekt | automatisiert | mittel |
+| T-FA-006 | Ausserplanmaessige AfA | Buchwert und Audit-Log korrekt | automatisiert | mittel |
+| T-FA-007 | Anlagenabgang | Restbuchwert wird korrekt ausgebucht | automatisiert | hoch |
+
+## 11. Betriebs- und Sicherheitspruefungen
+
+| ID | Testfall | Erwartung | Art | Prioritaet |
+|---|---|---|---|---|
+| T-OPS-001 | Produktivstart ohne SECRET_KEY | Start wird verhindert oder klare Warnung | automatisiert | hoch |
+| T-OPS-002 | Migration gegen bestehende DB | Migration laeuft oder bricht fail-fast ab | automatisiert | hoch |
+| T-OPS-003 | Backup erzeugen | Datenbank und Belege sind vollstaendig gesichert | manuell | hoch |
+| T-OPS-004 | Restore durchfuehren | System ist aus Backup wiederherstellbar | manuell | hoch |
+| T-OPS-005 | Security-Header | Header sind gesetzt | automatisiert | mittel |
+| T-OPS-006 | CSRF-Schutz | Formulare ohne Token werden abgewiesen | automatisiert | hoch |
+| T-OPS-007 | Upload-Missbrauch | Path Traversal und gefaehrliche Inhalte werden verhindert | automatisiert | hoch |
+
+## 12. Mindestkriterium fuer Release-Freigabe
+
+Ein Compliance-Release darf nur freigegeben werden, wenn:
+
+- alle Tests mit Prioritaet `hoch` erfolgreich sind oder begruendet ausgeschlossen wurden,
+- die Testdaten und erwarteten Ergebnisse versioniert vorliegen,
+- der CI-Lauf zum Release-Commit archiviert ist,
+- manuelle Tests mit Datum und verantwortlicher Person dokumentiert sind,
+- bekannte Abweichungen im Changelog und in den Release Notes genannt werden.

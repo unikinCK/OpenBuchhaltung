@@ -1,0 +1,71 @@
+{# Gemeinsame Bausteine für Journal, Buchungsdetail, Dashboard und Partnerseite. #}
+
+{% macro partner_chips(partners) -%}
+  <div class="partner-list">
+    {% for partner in partners %}
+      <a class="partner-chip" href="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}" title="Geschäftspartner {{ partner.name }}{% if partner.number %} ({{ partner.number }}){% endif %}">{{ partner.name }}{% if partner.number %} <span class="partner-number">{{ partner.number }}</span>{% endif %}</a>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{# Konto mit Link aufs Kontoblatt (Nummer hervorgehoben, Bezeichnung optional). #}
+{% macro account_link(account_id, code, name=none, args={}) -%}
+  {% if account_id %}<a class="account-link" href="{{ url_for('main.account_detail_page', account_id=account_id, **args) }}" title="Kontoblatt {{ code }}{% if name %} – {{ name }}{% endif %}"><span class="account-code">{{ code }}</span>{% if name %} {{ name }}{% endif %}</a>{% else %}<span class="account-code">{{ code }}</span>{% if name %} {{ name }}{% endif %}{% endif %}
+{%- endmacro %}
+
+{# Saldo als Betrag mit S (Soll) bzw. H (Haben); Eingabe = Soll minus Haben. #}
+{% macro saldo(value) -%}
+  {{ value | abs | betrag }}&nbsp;{% if value > 0 %}S{% elif value < 0 %}H{% else %}<span class="muted">±</span>{% endif %}
+{%- endmacro %}
+
+{# Buchungssatz kompakt: Sollkonten, darunter „an“ Habenkonten; Beträge nur bei Splitbuchungen. #}
+{% macro posting_record(debit_lines, credit_lines) -%}
+  <ul class="posting-lines">
+    {% for line in debit_lines %}
+      <li title="Soll {{ line.account_code }} – {{ line.account_name }}{% if line.tax_code %} · {{ line.tax_code }}{% endif %}{% if line.description %} · {{ line.description }}{% endif %}">
+        <span class="account">{{ account_link(line.account_id, line.account_code, line.account_name) }}</span>
+        {% if debit_lines | length > 1 %}<span class="amount">{{ line.debit_amount | betrag }}</span>{% endif %}
+      </li>
+    {% endfor %}
+    {% for line in credit_lines %}
+      <li class="credit" title="Haben {{ line.account_code }} – {{ line.account_name }}{% if line.tax_code %} · {{ line.tax_code }}{% endif %}{% if line.description %} · {{ line.description }}{% endif %}">
+        <span class="account"><span class="an">an</span> {{ account_link(line.account_id, line.account_code, line.account_name) }}</span>
+        {% if credit_lines | length > 1 %}<span class="amount">{{ line.credit_amount | betrag }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{%- endmacro %}
+
+{% macro entry_status(entry, reversed_by) -%}
+  {% if entry.is_finalized %}
+    <span class="badge badge-success" title="Festgeschrieben{% if entry.finalized_at %} am {{ entry.finalized_at | datum_zeit }}{% endif %}">🔒 festgeschrieben</span>
+  {% else %}
+    <span class="badge">offen</span>
+  {% endif %}
+  {% if reversed_by %}
+    <br /><span class="muted small">storniert durch <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=reversed_by.id) }}">{{ reversed_by.number }}</a></span>
+  {% endif %}
+{%- endmacro %}
+
+{# Änderungen eines Audit-Eintrags lesbar: nur geänderte Felder statt kompletter Datensätze. #}
+{% macro audit_changes(payload, labels={}) -%}
+  {% if payload and payload.before is mapping and payload.after is mapping %}
+    <ul class="change-list">
+      {% for key, new_value in payload.after.items() if key not in ("id", "tenant_id", "company_id", "created_at") and payload.before.get(key) != new_value %}
+        <li><span class="field-name">{{ labels.get(key, key) }}:</span> <del>{{ payload.before.get(key) if payload.before.get(key) not in (none, "") else "leer" }}</del> → <ins>{{ new_value if new_value not in (none, "") else "leer" }}</ins></li>
+      {% else %}
+        <li class="muted">keine Feldänderung</li>
+      {% endfor %}
+    </ul>
+  {% elif payload and payload.after is mapping %}
+    <ul class="change-list">
+      {% for key, value in payload.after.items() if key not in ("id", "tenant_id", "company_id", "created_at") and value not in (none, "", false) %}
+        <li><span class="field-name">{{ labels.get(key, key) }}:</span> {{ value }}</li>
+      {% endfor %}
+    </ul>
+  {% elif payload %}
+    <code class="small">{{ payload }}</code>
+  {% else %}
+    <span class="muted">–</span>
+  {% endif %}
+{%- endmacro %}

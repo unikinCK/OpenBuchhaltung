@@ -1,0 +1,280 @@
+"""ELSTER-Übermittlungen über die API."""
+
+from __future__ import annotations
+
+from flask import current_app, jsonify, make_response, request
+
+from app.api.blueprint import api_bp
+from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.auth import current_api_user
+from app.services.elster import (
+    ElsterError,
+    elster_payload_filename,
+    elster_payload_hash_matches,
+    elster_readiness,
+    elster_submission_summary,
+    get_elster_submission,
+    list_elster_submissions,
+    preflight_vat_return,
+    retry_elster_submission,
+    submit_vat_return,
+)
+from app.services.vat_returns import VAT_RETURN_KIND_ANNUAL, vat_return_kind_from_label
+from domain.models import ElsterSubmission, VatReturn
+
+
+def _api_changed_by() -> str:
+    return (current_api_user() or {}).get("username", "api")
+
+
+def _submission_dict(
+    submission: ElsterSubmission, *, include_payload: bool = False
+) -> dict[str, object]:
+    payload = {
+        "id": submission.id,
+        "tenant_id": submission.tenant_id,
+        "company_id": submission.company_id,
+        "vat_return_id": submission.vat_return_id,
+        "procedure": submission.procedure,
+        "environment": submission.environment,
+        "status": submission.status,
+        "transport": submission.transport,
+        "certificate_alias": submission.certificate_alias,
+        "payload_hash": submission.payload_hash,
+        "payload_hash_valid": elster_payload_hash_matches(submission),
+        "response_protocol": submission.response_protocol,
+        "transfer_ticket": submission.transfer_ticket,
+        "created_at": submission.created_at.isoformat(),
+        "submitted_at": submission.submitted_at.isoformat()
+        if submission.submitted_at is not None
+        else None,
+        "created_by": submission.created_by,
+    }
+    if include_payload:
+        payload["payload_xml"] = submission.payload_xml
+    return payload
+
+
+def _is_annual_vat_return(vat_return: VatReturn) -> bool:
+    return vat_return_kind_from_label(vat_return.period_label) == VAT_RETURN_KIND_ANNUAL
+
+
+def _parse_vat_return_submission_payload() -> (
+    tuple[int, str, str, str | None] | tuple[None, None, None, None]
+):
+    payload = request.get_json(silent=True) or {}
+    try:
+        vat_return_id = int(payload.get("vat_return_id"))
+    except (TypeError, ValueError):
+        return None, None, None, None
+
+    environment = (payload.get("environment") or "test").strip()
+    transport = (payload.get("transport") or "mock").strip()
+    certificate_alias = (payload.get("certificate_alias") or "").strip() or None
+    return vat_return_id, environment, transport, certificate_alias
+
+
+def _get_scoped_vat_return(session, vat_return_id: int) -> VatReturn | None:
+    vat_return = session.get(VatReturn, vat_return_id)
+    if vat_return is None or api_scoped_company(session, vat_return.company_id) is None:
+        return None
+    return vat_return
+
+
+def _submit_vat_return_elster_response(*, require_annual: bool = False):
+    if not api_can_write():
+        return forbidden()
+
+    vat_return_id, environment, transport, certificate_alias = (
+        _parse_vat_return_submission_payload()
+    )
+    if vat_return_id is None:
+        return jsonify({"error": "vat_return_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        vat_return = _get_scoped_vat_return(session, vat_return_id)
+        if vat_return is None:
+            return jsonify({"error": "VAT return not found."}), 404
+        if require_annual and not _is_annual_vat_return(vat_return):
+            return jsonify({"error": "USt-Jahreserklärung requires period JJJJ."}), 422
+        try:
+            submission = submit_vat_return(
+                session=session,
+                vat_return_id=vat_return.id,
+                environment=environment,
+                transport=transport,
+                certificate_alias=certificate_alias,
+                changed_by=_api_changed_by(),
+                config=current_app.config,
+            )
+        except ElsterError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_submission_dict(submission)), 201
+
+
+def _preflight_vat_return_elster_response(*, require_annual: bool = False):
+    vat_return_id, environment, transport, certificate_alias = (
+        _parse_vat_return_submission_payload()
+    )
+    if vat_return_id is None:
+        return jsonify({"error": "vat_return_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        vat_return = _get_scoped_vat_return(session, vat_return_id)
+        if vat_return is None:
+            return jsonify({"error": "VAT return not found."}), 404
+        if require_annual and not _is_annual_vat_return(vat_return):
+            return jsonify({"error": "USt-Jahreserklärung requires period JJJJ."}), 422
+        result = preflight_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment=environment,
+            transport=transport,
+            certificate_alias=certificate_alias,
+            config=current_app.config,
+        )
+        return jsonify(result), 200 if result["ok"] else 422
+
+
+@api_bp.get("/elster/readiness")
+def get_elster_readiness_via_api():
+    return jsonify(elster_readiness(current_app.config)), 200
+
+
+@api_bp.get("/elster/submissions")
+def list_elster_submissions_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    vat_return_id = request.args.get("vat_return_id", type=int)
+    status = (request.args.get("status") or "").strip() or None
+    transport = (request.args.get("transport") or "").strip() or None
+    environment = (request.args.get("environment") or "").strip() or None
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            submissions = list_elster_submissions(
+                session=session,
+                company_id=company_id,
+                vat_return_id=vat_return_id,
+                status=status,
+                transport=transport,
+                environment=environment,
+            )
+        except ElsterError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "filters": {
+                        "vat_return_id": vat_return_id,
+                        "status": status,
+                        "transport": transport,
+                        "environment": environment,
+                    },
+                    "submissions": [_submission_dict(item) for item in submissions],
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.get("/elster/submissions/summary")
+def get_elster_submission_summary_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        return jsonify(elster_submission_summary(session=session, company_id=company_id)), 200
+
+
+@api_bp.get("/elster/submissions/<int:submission_id>")
+def get_elster_submission_via_api(submission_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        return jsonify(_submission_dict(submission, include_payload=True)), 200
+
+
+@api_bp.get("/elster/submissions/<int:submission_id>/payload.xml")
+def download_elster_payload_via_api(submission_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        response = make_response(submission.payload_xml)
+        response.headers["Content-Type"] = "application/xml; charset=utf-8"
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{elster_payload_filename(submission)}"'
+        )
+        return response
+
+
+@api_bp.post("/elster/submissions/<int:submission_id>/retry")
+def retry_elster_submission_via_api(submission_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        submission = get_elster_submission(
+            session=session, submission_id=submission_id
+        )
+        if (
+            submission is None
+            or api_scoped_company(session, submission.company_id) is None
+        ):
+            return jsonify({"error": "ELSTER submission not found."}), 404
+        try:
+            retry = retry_elster_submission(
+                session=session,
+                submission_id=submission.id,
+                changed_by=_api_changed_by(),
+                config=current_app.config,
+            )
+        except ElsterError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_submission_dict(retry)), 201
+
+
+@api_bp.post("/elster/ustva/submit")
+def submit_vat_return_elster_via_api():
+    return _submit_vat_return_elster_response()
+
+
+@api_bp.post("/elster/ustva/preflight")
+def preflight_vat_return_elster_via_api():
+    return _preflight_vat_return_elster_response()
+
+
+@api_bp.post("/elster/ust-jahreserklaerung/submit")
+def submit_vat_annual_return_elster_via_api():
+    return _submit_vat_return_elster_response(require_annual=True)
+
+
+@api_bp.post("/elster/ust-jahreserklaerung/preflight")
+def preflight_vat_annual_return_elster_via_api():
+    return _preflight_vat_return_elster_response(require_annual=True)

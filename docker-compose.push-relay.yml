@@ -1,0 +1,28 @@
+# Zentrales Push-Relay für die iOS-App (ADR-003). Läuft auf einem Host mit
+# Apple-Push-Schlüssel und wird per Reverse-Proxy (HTTPS) veröffentlicht, z. B.
+#   docker compose -f docker-compose.push-relay.yml up -d --build
+# Instanzschlüssel erzeugen: docker compose -f docker-compose.push-relay.yml run --rm
+#   relay python -m push_relay new-instance-key <name>
+# Vor dem ersten Start muss ${RELAY_APNS_KEY_PATH} als Datei existieren (im Trockenlauf
+# leer), sonst legt Docker an seiner Stelle ein Verzeichnis an.
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: push_relay/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${RELAY_PORT:-8095}:8095"
+    environment:
+      # Ohne Einträge bricht das Relay beim Start ab (ConfigError).
+      RELAY_INSTANCE_KEYS: ${RELAY_INSTANCE_KEYS:-}
+      RELAY_APNS_MODE: ${RELAY_APNS_MODE:-apns}
+      RELAY_APNS_KEY_FILE: /run/secrets/apns_key.p8
+      RELAY_APNS_KEY_ID: ${RELAY_APNS_KEY_ID:-}
+      RELAY_APNS_TEAM_ID: ${RELAY_APNS_TEAM_ID:-}
+      RELAY_APNS_TOPIC: ${RELAY_APNS_TOPIC:-de.openbuchhaltung.app}
+      RELAY_RATE_LIMIT_PER_MINUTE: ${RELAY_RATE_LIMIT_PER_MINUTE:-600}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Leere Datei genügt im Trockenlauf (RELAY_APNS_MODE=dry-run).
+      - ${RELAY_APNS_KEY_PATH:-./secrets/apns_key.p8}:/run/secrets/apns_key.p8:ro

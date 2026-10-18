@@ -1,0 +1,366 @@
+"""Beleg-OCR: Upload mit Analyse und Buchung des Eingangsrechnungs-Vorschlags."""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from uuid import uuid4
+
+from flask import current_app, flash, redirect, render_template, request, url_for
+from werkzeug.utils import secure_filename
+
+from app.services.audit_log import log_audit_event
+from app.services.documents import document_file_metadata
+from app.services.incoming_invoice import (
+    IncomingInvoiceError,
+    book_incoming_invoice,
+    invoice_gross_amount,
+    tax_splits_audit,
+)
+from app.services.journal_entries import JournalEntryCreationError, parse_decimal
+from app.services.llm_settings import PURPOSE_RECEIPT, receipt_analysis_options
+from app.services.receipt_ocr import (
+    ReceiptExtraction,
+    ReceiptOCRError,
+    analyze_document,
+)
+from app.services.receipt_proposals import (
+    account_choices,
+    booking_accounts,
+    propose_receipt_booking,
+)
+from app.services.scoping import scoped_select
+from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
+from app.web.blueprint import main_bp
+from app.web.helpers import (
+    changed_by,
+    company_context,
+    document_upload_error,
+    form_tax_splits,
+    form_tip_amount,
+    get_session_factory,
+    require_company_access,
+)
+from domain.models import Account, ControllingUnit, Document, TaxCode
+from domain.services.journal_entry_validation import JournalEntryValidationError
+
+
+def _receipt_account_context(session, company_id: int):
+    """Konten- und Steuercode-Listen für die OCR-Buchungsmaske."""
+    accounts = (
+        session.execute(
+            scoped_select(Account, company_id=company_id).order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
+    expense_accounts = booking_accounts(session, company_id)
+    creditor_accounts = [a for a in accounts if a.account_type in {"liability", "asset"}]
+    tax_codes = (
+        session.execute(
+            scoped_select(TaxCode, company_id=company_id)
+            .where(TaxCode.is_active.is_(True))
+            .order_by(TaxCode.code)
+        )
+        .scalars()
+        .all()
+    )
+    return expense_accounts, creditor_accounts, tax_codes
+
+
+def _render_receipt_ocr_page(
+    *,
+    extraction: ReceiptExtraction | None = None,
+    document_id: int | None = None,
+    document_name: str | None = None,
+    proposal: dict | None = None,
+):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = company_context(session)
+        expense_accounts: list = []
+        creditor_accounts: list = []
+        tax_codes: list = []
+        cost_centers: list = []
+        profit_centers: list = []
+        if selected_company_id:
+            expense_accounts, creditor_accounts, tax_codes = _receipt_account_context(
+                session, selected_company_id
+            )
+            controlling_units = (
+                session.execute(
+                    scoped_select(ControllingUnit, company_id=selected_company_id)
+                    .where(ControllingUnit.is_active.is_(True))
+                    .order_by(ControllingUnit.code)
+                )
+                .scalars()
+                .all()
+            )
+            cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
+            profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
+    return render_template(
+        "belege_ocr.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        expense_accounts=expense_accounts,
+        creditor_accounts=creditor_accounts,
+        default_creditor_account_id=standard_account_id(
+            creditor_accounts, VERBINDLICHKEITEN_LUL
+        ),
+        tax_codes=tax_codes,
+        cost_centers=cost_centers,
+        profit_centers=profit_centers,
+        extraction=extraction,
+        proposal=proposal or {},
+        document_id=document_id,
+        document_name=document_name,
+        today=date.today().isoformat(),
+    )
+
+
+@main_bp.get("/belege/ocr")
+def receipt_ocr_page():
+    return _render_receipt_ocr_page()
+
+
+@main_bp.post("/belege/ocr/vorschlag")
+def receipt_ocr_suggest():
+    company_id = request.form.get("company_id", type=int)
+    document_date_raw = request.form.get("document_date", "").strip()
+    uploaded_file = request.files.get("document_file")
+
+    if (
+        not company_id
+        or not document_date_raw
+        or uploaded_file is None
+        or not uploaded_file.filename
+    ):
+        flash("Gesellschaft, Belegdatum und Datei sind Pflichtfelder.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    try:
+        document_date = date.fromisoformat(document_date_raw)
+    except ValueError:
+        flash("Ungültiges Belegdatum.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    original_file_name = secure_filename(uploaded_file.filename)
+    if not original_file_name:
+        flash("Ungültiger Dateiname.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    upload_error = document_upload_error(uploaded_file, original_file_name)
+    if upload_error:
+        flash(upload_error, "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    file_bytes = uploaded_file.read()
+    mime_type = uploaded_file.mimetype or "application/octet-stream"
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+
+        unique_name = f"{uuid4().hex}_{original_file_name}"
+        company_dir = (
+            Path(current_app.config["DOCUMENT_UPLOAD_DIR"])
+            / str(company.tenant_id)
+            / str(company.id)
+        )
+        company_dir.mkdir(parents=True, exist_ok=True)
+        target_path = company_dir / unique_name
+        target_path.write_bytes(file_bytes)
+        metadata = document_file_metadata(file_bytes)
+
+        document = Document(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            file_name=original_file_name,
+            storage_key=str(target_path),
+            mime_type=mime_type,
+            file_sha256=metadata.file_sha256,
+            file_size_bytes=metadata.file_size_bytes,
+            document_date=document_date,
+            capture_source="web",
+        )
+        session.add(document)
+        session.flush()
+        document_id = document.id
+        choices = account_choices(session, company.id)
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="uploaded",
+            changed_by=changed_by(),
+            payload={"file_name": document.file_name, "mime_type": document.mime_type},
+        )
+        session.commit()
+
+    try:
+        extraction = analyze_document(
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            file_name=original_file_name,
+            account_choices=choices,
+            **receipt_analysis_options(llm_purpose=PURPOSE_RECEIPT),
+        )
+    except ReceiptOCRError as exc:
+        flash(f"OCR nicht möglich: {exc}", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        document = session.get(Document, document_id)
+        if document is None or document.company_id != company.id:
+            flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+        if extraction.invoice_date is not None:
+            document.document_date = extraction.invoice_date
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="document",
+            entity_id=str(document_id),
+            action="ocr_analyzed",
+            changed_by=changed_by(),
+            payload={
+                "source": extraction.source,
+                "confidence": extraction.confidence,
+                "llm_used": extraction.llm_used,
+                "control_status": extraction.control_status,
+                "gross_amount": str(extraction.gross_amount)
+                if extraction.gross_amount is not None
+                else None,
+                "tax_rate": str(extraction.tax_rate)
+                if extraction.tax_rate is not None
+                else None,
+                "supplier": extraction.supplier,
+                "invoice_number": extraction.invoice_number,
+                "document_date": (
+                    document.document_date.isoformat() if document.document_date else None
+                ),
+            },
+        )
+        proposal = propose_receipt_booking(session, company.id, extraction).as_dict()
+        session.commit()
+
+    if not extraction.has_booking_basis:
+        flash(
+            "Es konnte kein Betrag erkannt werden. Der Beleg ist gespeichert; "
+            "die Buchung bitte manuell erfassen.",
+            "error",
+        )
+    return _render_receipt_ocr_page(
+        extraction=extraction,
+        document_id=document_id,
+        document_name=original_file_name,
+        proposal=proposal,
+    )
+
+
+@main_bp.post("/belege/ocr/buchen")
+def receipt_ocr_book():
+    company_id = request.form.get("company_id", type=int)
+    document_id = request.form.get("document_id", type=int)
+    expense_account_id = request.form.get("expense_account_id", type=int)
+    creditor_account_id = request.form.get("creditor_account_id", type=int)
+    tax_code_id = request.form.get("tax_code_id", type=int)
+    partner_id = request.form.get("partner_id", type=int)
+    entry_date_raw = request.form.get("entry_date", "").strip()
+    description = request.form.get("description", "").strip()
+    cost_center_id = request.form.get("cost_center_id", type=int)
+    profit_center_id = request.form.get("profit_center_id", type=int)
+
+    try:
+        net_amount = parse_decimal(request.form.get("net_amount") or "0")
+        tax_amount = parse_decimal(request.form.get("tax_amount") or "0")
+        tax_splits = form_tax_splits(request.form)
+        tip_amount = form_tip_amount(request.form)
+    except (JournalEntryCreationError, ValueError):
+        flash("Netto-, Steuer- und Trinkgeldbeträge müssen gültige Zahlen sein.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    if not company_id or not expense_account_id or not creditor_account_id:
+        flash("Gesellschaft sowie Aufwands- und Kreditorenkonto sind Pflicht.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    try:
+        entry_date = date.fromisoformat(entry_date_raw) if entry_date_raw else date.today()
+    except ValueError:
+        flash("Ungültiges Buchungsdatum.", "error")
+        return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+    gross_amount = invoice_gross_amount(net_amount, tax_amount, tax_splits, tip_amount)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+
+        document = session.get(Document, document_id) if document_id else None
+        if document is None or document.company_id != company.id:
+            flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+        try:
+            entry = book_incoming_invoice(
+                session=session,
+                company=company,
+                entry_date=entry_date,
+                description=description or "Belegbuchung (OCR)",
+                expense_account_id=expense_account_id,
+                creditor_account_id=creditor_account_id,
+                net_amount=net_amount,
+                tax_amount=tax_amount,
+                gross_amount=gross_amount,
+                tax_code_id=tax_code_id,
+                expense_line_description=description or None,
+                cost_center_id=cost_center_id,
+                profit_center_id=profit_center_id,
+                partner_id=partner_id,
+                tax_splits=tax_splits,
+                tip_amount=tip_amount,
+                changed_by=changed_by(),
+                commit=False,
+            )
+        except IncomingInvoiceError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+        except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+            flash(f"Buchung fehlgeschlagen: {exc}", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+
+        document.journal_entry_id = entry.id
+        document.document_date = entry_date
+        log_audit_event(
+            session=session,
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            entity_type="document",
+            entity_id=str(document.id),
+            action="ocr_booked",
+            changed_by=changed_by(),
+            payload={
+                "journal_entry_id": entry.id,
+                "net_amount": str(net_amount),
+                "tax_amount": str(tax_amount),
+                "gross_amount": str(gross_amount),
+                "tax_lines": tax_splits_audit(tax_splits),
+                "tip_amount": str(tip_amount) if tip_amount else None,
+                "document_date": document.document_date.isoformat(),
+                "cost_center_id": cost_center_id,
+                "profit_center_id": profit_center_id,
+            },
+        )
+        session.commit()
+        posting_number = entry.posting_number
+
+    flash(
+        f"Beleg verbucht als {posting_number} (brutto {gross_amount} EUR) "
+        "und mit der Buchung verknüpft.",
+        "success",
+    )
+    return redirect(url_for("main.journal_page", company_id=company_id))

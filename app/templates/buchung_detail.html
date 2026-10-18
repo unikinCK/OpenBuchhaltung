@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% from "_journal.html" import partner_chips, entry_status, account_link %}
+
+{% block title %}Buchung {{ entry.posting_number }} – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.journal_page', company_id=entry.company_id) }}">‹ Zurück zum Journal</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Buchung {{ entry.posting_number }}</h1>
+      <p class="page-subtitle">{{ entry.entry_date | datum }} · {{ entry.description }}</p>
+    </div>
+    <div class="page-actions">
+      {{ entry_status(entry, reversed_by) }}
+      {% if not entry.is_finalized %}
+        <form method="post" action="{{ url_for('main.finalize_journal_entry_action', journal_entry_id=entry.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="next" value="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}" />
+          <button type="submit" class="secondary btn-sm" data-confirm="Buchung {{ entry.posting_number }} unwiderruflich festschreiben?">Festschreiben</button>
+        </form>
+      {% endif %}
+      {% if can_reverse %}
+        <form method="post" action="{{ url_for('main.reverse_journal_entry_action', journal_entry_id=entry.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="reversal_date" value="{{ today }}" />
+          <input type="hidden" name="next" value="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}" />
+          <button type="submit" class="danger btn-sm" data-confirm="Buchung {{ entry.posting_number }} per Gegenbuchung stornieren?">Stornieren</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="card">
+    <dl class="meta-grid">
+      <div><dt>Buchungsdatum</dt><dd>{{ entry.entry_date | datum }}</dd></div>
+      <div><dt>Leistungsdatum</dt><dd>{{ entry.service_date | datum if entry.service_date else "wie Buchungsdatum" }}</dd></div>
+      <div><dt>Betrag</dt><dd><strong>{{ overview.total | betrag }} {{ entry.company.currency_code if entry.company else "EUR" }}</strong></dd></div>
+      <div>
+        <dt>Geschäftspartner</dt>
+        <dd>
+          {% if overview.partners %}
+            {{ partner_chips(overview.partners) }}
+          {% else %}
+            <span class="muted">kein Partner zugeordnet</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div><dt>Periode</dt><dd>{{ fiscal_year.label if fiscal_year else "–" }}{% if period_number %} · Periode {{ period_number }}{% endif %}</dd></div>
+      <div><dt>Herkunft</dt><dd>{{ source_label or ("Bankumsatz" if overview.bank_transaction else "Erfassung") }}</dd></div>
+      {% if entry.reversal_of_id %}
+        <div><dt>Storno zu</dt><dd><a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.reversal_of_id) }}">{{ reversal_of_number or "?" }}</a></dd></div>
+      {% endif %}
+      {% if reversed_by %}
+        <div><dt>Storniert durch</dt><dd><a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=reversed_by.id) }}">{{ reversed_by.number }}</a></dd></div>
+      {% endif %}
+      <div><dt>Erfasst</dt><dd>{{ entry.created_at | datum_zeit }}</dd></div>
+      {% if entry.is_finalized %}
+        <div><dt>Festgeschrieben</dt><dd>{{ entry.finalized_at | datum_zeit }}{% if entry.finalized_by %} von {{ entry.finalized_by }}{% endif %}</dd></div>
+      {% endif %}
+    </dl>
+    {% if overview.bank_transaction %}
+      {% set tx = overview.bank_transaction %}
+      <p class="callout" style="margin:1rem 0 0;">
+        {{ "Zahlungseingang" if tx.amount > 0 else "Zahlungsausgang" }} vom {{ tx.booking_date | datum }} über {{ tx.amount | abs | betrag }} {{ tx.currency_code }}{% if tx.counterparty %} · Gegenseite laut Bank: <strong>{{ tx.counterparty }}</strong>{% endif %}<br />
+        <span class="small">{{ tx.purpose }}</span>
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="card" id="partner">
+    <div class="card-header">
+      <h2>Buchungszeilen</h2>
+      {% if amendable and all_partners %}
+        <div class="inline-form" data-partner-fill>
+          <label for="fill_partner" class="muted small">Partner für alle Zeilen:</label>
+          <select id="fill_partner" aria-label="Geschäftspartner für alle Zeilen übernehmen">
+            <option value="">– wählen –</option>
+            {% for partner in all_partners %}<option value="{{ partner.id }}">{{ partner.name }}</option>{% endfor %}
+          </select>
+          <button type="button" class="secondary btn-sm" data-partner-fill-apply>Übernehmen</button>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if amendable %}
+      <form method="post" action="{{ url_for('main.amend_journal_entry_action', journal_entry_id=entry.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+    {% endif %}
+    <div class="table-scroll">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Konto</th>
+            <th class="num">Soll</th>
+            <th class="num">Haben</th>
+            <th>Steuer</th>
+            <th>Geschäftspartner</th>
+            <th>Zeilentext</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+            <tr>
+              <td class="muted">{{ line.line_number }}</td>
+              <td>
+                {{ account_link(line.account_id, line.account_code, line.account_name) }}
+                {% if line.subledger %}<br /><span class="muted small">{{ "Debitoren" if line.subledger == "debtor" else "Kreditoren" }}-Sammelkonto (Nebenbuch)</span>{% endif %}
+                {% if amendable and (has_cost_centers or has_profit_centers) %}
+                  <div class="line-units">
+                    {% for unit_type, short, label in [("cost_center", "KST", "Kostenstelle"), ("profit_center", "PC", "Profitcenter")] %}
+                      {% set unit_choices = line[unit_type ~ "_choices"] %}
+                      {% if unit_choices %}
+                        <select name="line_{{ unit_type }}_{{ line.line_number }}" aria-label="{{ label }} Zeile {{ line.line_number }}" title="{{ label }}">
+                          <option value="">ohne {{ short }}</option>
+                          {% for unit in unit_choices %}
+                            <option value="{{ unit.id }}" {% if unit.id == line[unit_type ~ "_id"] %}selected{% endif %}>{{ short }} {{ unit.code }} – {{ unit.name }}{% if not unit.is_active %} (inaktiv){% endif %}</option>
+                          {% endfor %}
+                        </select>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% elif line.cost_center_code or line.profit_center_code %}<br /><span class="muted small">{% if line.cost_center_code %}KST {{ line.cost_center_code }}{% endif %}{% if line.cost_center_code and line.profit_center_code %} · {% endif %}{% if line.profit_center_code %}PC {{ line.profit_center_code }}{% endif %}</span>{% endif %}
+              </td>
+              <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount | betrag }}{% endif %}</td>
+              <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount | betrag }}{% endif %}</td>
+              <td>{{ line.tax_code or "" }}</td>
+              <td>
+                {% if amendable and line.partner_editable %}
+                  <select name="line_partner_{{ line.line_number }}" aria-label="Geschäftspartner Zeile {{ line.line_number }}" data-line-partner{% if line.subledger %} data-subledger="{{ line.subledger }}"{% endif %}>
+                    <option value="">Ohne Partner</option>
+                    {% for choice in line.partner_choices %}
+                      <option value="{{ choice.id }}" {% if choice.id == line.partner_id %}selected{% endif %}>{{ choice.label }}{% if not choice.is_active %} (inaktiv){% endif %}</option>
+                    {% endfor %}
+                  </select>
+                {% elif line.partner_id %}
+                  {{ partner_chips([{"id": line.partner_id, "name": line.partner_name, "number": line.partner_number}]) }}
+                {% elif amendable %}
+                  <span class="muted small">Steuerzeile</span>
+                {% else %}
+                  <span class="muted">–</span>
+                {% endif %}
+              </td>
+              <td>{{ line.description or "" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td></td>
+            <td>Summe</td>
+            <td class="num">{{ overview.total | betrag }}</td>
+            <td class="num">{{ overview.total | betrag }}</td>
+            <td colspan="3"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% if amendable %}
+        <div class="form-grid" style="margin-top:1rem;">
+          <div class="field">
+            <label for="service_date">Leistungsdatum</label>
+            <input id="service_date" name="service_date" type="date" value="{{ entry.service_date.isoformat() if entry.service_date else '' }}" />
+          </div>
+        </div>
+        <p class="hint">Vor der Festschreibung lassen sich Leistungsdatum, Geschäftspartner sowie Kostenstelle und Profitcenter je Zeile ergänzen.
+          Beträge, Konten und Buchungsdatum bleiben unverändert; jede Änderung steht mit altem und
+          neuem Wert im Audit-Log. Auf Debitoren-/Kreditoren-Sammelkonten bildet der Partner das
+          Nebenbuch, auf allen anderen Konten den Partnerbezug der Buchung.</p>
+        <div class="form-actions">
+          <button type="submit">Änderungen speichern</button>
+        </div>
+      </form>
+    {% elif entry.is_finalized %}
+      <p class="hint">Die Buchung ist festgeschrieben und unveränderbar; Korrekturen nur per Storno und Neubuchung.</p>
+    {% elif reversed_by %}
+      <p class="hint">Die Buchung ist storniert ({{ reversed_by.number }}); das Storno spiegelt den bisherigen Stand, deshalb lässt sie sich nicht mehr ergänzen.</p>
+    {% elif is_system_entry %}
+      <p class="hint">Vortragsbuchungen des Jahresabschlusses lassen sich nicht ergänzen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Belege <span class="count">{{ documents | length }}</span></h2>
+      <a class="button-secondary btn-sm" href="{{ url_for('main.documents_page', company_id=entry.company_id, journal_entry_id=entry.id) }}#beleg-hochladen">+ Beleg hinzufügen</a>
+    </div>
+    {% if documents %}
+      <ul class="change-list">
+        {% for document in documents %}
+          <li><a href="{{ url_for('main.download_document', document_id=document.id) }}">📎 {% if document.category_name %}{{ document.category_name }}: {% endif %}{{ document.file_name }}</a>{% if document.document_date %} <span class="muted">· Belegdatum {{ document.document_date | datum }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Noch kein Beleg verknüpft.</p>
+    {% endif %}
+  </section>
+
+  {% if history %}
+    <details class="card">
+      <summary>Änderungsprotokoll <span class="summary-hint">{{ history | length }} Einträge</span></summary>
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th><th>Details</th></tr></thead>
+          <tbody>
+            {% for event in history %}
+              <tr>
+                <td class="datetime">{{ event.changed_at | datum_zeit }}</td>
+                <td><span class="badge">{{ {"created": "erfasst", "amended": "ergänzt", "finalized": "festgeschrieben", "reversed": "storniert"}.get(event.action, event.action) }}</span></td>
+                <td>{{ event.changed_by }}</td>
+                <td class="small">
+                  {% set payload = event.payload or {} %}
+                  {% if event.action == "amended" %}
+                    {% if payload.service_date %}Leistungsdatum: {{ payload.service_date.old | datum or "leer" }} → {{ payload.service_date.new | datum or "leer" }}<br />{% endif %}
+                    {% for change in payload.partners or [] %}
+                      Zeile {{ change.line_number }} ({{ change.account_code }}): {{ partner_names.get(change.old_partner_id, "ohne Partner") }} → {{ partner_names.get(change.new_partner_id, "ohne Partner") }}<br />
+                    {% endfor %}
+                    {% for key, short in [("cost_centers", "Kostenstelle"), ("profit_centers", "Profitcenter")] %}
+                      {% for change in payload[key] or [] %}
+                        Zeile {{ change.line_number }} ({{ change.account_code }}): {{ short }} {{ change.old_code or "leer" }} → {{ change.new_code or "leer" }}<br />
+                      {% endfor %}
+                    {% endfor %}
+                  {% elif payload.posting_number %}
+                    {{ payload.posting_number }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  {% endif %}
+{% endblock %}

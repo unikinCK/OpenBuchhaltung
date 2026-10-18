@@ -1,0 +1,1965 @@
+import base64
+import hashlib
+import json
+import zipfile
+from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
+
+from document_files import pdf_document_bytes
+
+from app import create_app
+from app.auth import hash_password
+from app.services.audit_export import (
+    build_audit_export_package,
+    verify_audit_export_package,
+)
+from app.services.audit_log import log_audit_event
+from app.services.document_llm import DocumentLLMError
+from domain.models import (
+    Account,
+    AuditLog,
+    Company,
+    Document,
+    FiscalYear,
+    Period,
+    PeriodLock,
+    Tenant,
+    User,
+)
+
+
+def _create_test_app(tmp_path: Path, **extra_config):
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'test_app.db'}",
+            **extra_config,
+        }
+    )
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="Admin",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+    return app
+
+
+def _logged_in_client(app):
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    return client
+
+
+def test_index_page_loads(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = _logged_in_client(app)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert b"OpenBuchhaltung" in response.data
+
+
+def test_security_headers_are_set(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = _logged_in_client(app)
+    response = client.get("/")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_session_cookie_defaults_are_hardened(tmp_path):
+    app = _create_test_app(tmp_path, SESSION_COOKIE_SECURE=True)
+
+    client = app.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "admin123"},
+    )
+
+    cookie = response.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert "Secure" in cookie
+
+
+def test_index_redirects_to_login_when_not_authenticated(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = app.test_client()
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert "/auth/login" in response.headers["Location"]
+
+
+def test_login_with_valid_credentials(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = app.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "admin123"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Login erfolgreich" in response.data
+
+
+def test_login_with_wrong_password_is_rejected(tmp_path):
+    app = _create_test_app(tmp_path)
+
+    client = app.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "falsch"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Ungültige Zugangsdaten".encode() in response.data
+
+
+def test_pruefer_role_cannot_write(tmp_path):
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="pruefer",
+                password_hash=hash_password("lesen123"),
+                role="Pruefer",
+                tenant_id=None,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "pruefer", "password": "lesen123"})
+
+    response = client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant X", "company_name": "Mandant X GmbH"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"nur Lesezugriff" in response.data
+
+
+def test_can_create_tenant_and_company_via_form(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    response = client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant A", "company_name": "Mandant A GmbH"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Mandant und Gesellschaft wurden angelegt" in response.data
+    assert b"Mandanten:</strong> 1" in response.data
+
+
+def test_audit_log_page_lists_entries(tmp_path):
+    app = _create_test_app(tmp_path)
+    with app.extensions["db_session_factory"]() as session:
+        tenant = Tenant(name="Audit Mandant")
+        company = Company(name="Audit GmbH", currency_code="EUR", tenant=tenant)
+        session.add_all([tenant, company])
+        session.flush()
+        log_audit_event(
+            session=session,
+            tenant_id=tenant.id,
+            company_id=company.id,
+            entity_type="journal_entry",
+            entity_id="42",
+            action="created",
+            payload={"posting_number": "2026-0001"},
+            changed_by="pytest",
+        )
+        session.commit()
+
+    client = _logged_in_client(app)
+    response = client.get("/audit-log")
+
+    assert response.status_code == 200
+    assert b"Audit-Log" in response.data
+    assert b"journal_entry" in response.data
+    assert b"2026-0001" in response.data
+
+
+def test_can_create_account_via_form(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant B", "company_name": "Mandant B GmbH"},
+        follow_redirects=True,
+    )
+
+    index_response = client.get("/")
+    assert b"Mandant B GmbH" in index_response.data
+
+    response = client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Konto wurde angelegt" in response.data
+    assert "1 Konto im Kontenplan".encode() in response.data
+
+
+def test_duplicate_tenant_or_company_shows_validation_message(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    first_response = client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant C", "company_name": "Mandant C GmbH"},
+        follow_redirects=True,
+    )
+    assert first_response.status_code == 200
+
+    duplicate_response = client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant C", "company_name": "Mandant C GmbH"},
+        follow_redirects=True,
+    )
+
+    assert duplicate_response.status_code == 200
+    assert b"Mandant oder Gesellschaft existiert bereits" in duplicate_response.data
+    assert b"Mandanten:</strong> 1" in duplicate_response.data
+
+
+def test_duplicate_account_code_shows_validation_message(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant D", "company_name": "Mandant D GmbH"},
+        follow_redirects=True,
+    )
+
+    first_response = client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    assert first_response.status_code == 200
+
+    duplicate_response = client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank 2",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+
+    assert duplicate_response.status_code == 200
+    assert b"Konto mit dieser Nummer existiert bereits" in duplicate_response.data
+    assert "1 Konto im Kontenplan".encode() in duplicate_response.data
+
+
+def test_api_create_tenant_with_company(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    response = client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant", "company_name": "Api GmbH"},
+    )
+
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["tenant"]["name"] == "Api Mandant"
+    assert data["company"]["name"] == "Api GmbH"
+
+
+def test_api_create_account_and_validate_required_fields(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 2", "company_name": "Api GmbH 2"},
+    )
+
+    success_response = client.post(
+        "/api/v1/accounts",
+        json={
+            "company_id": 1,
+            "code": "1200",
+            "name": "Bank API",
+            "account_type": "asset",
+        },
+    )
+    assert success_response.status_code == 201
+    assert success_response.get_json()["code"] == "1200"
+
+    invalid_response = client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1300"},
+    )
+    assert invalid_response.status_code == 400
+    assert "required" in invalid_response.get_json()["error"]
+
+
+def test_api_mcp_call_lists_tools_in_process(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/v1/mcp/call", json={"id": "1", "method": "tools/list", "params": {}}
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["id"] == "1"
+    assert any(tool["name"] == "list_companies" for tool in payload["result"]["tools"])
+
+
+def test_api_mcp_call_requires_method(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+
+    response = client.post("/api/v1/mcp/call", json={"params": {}})
+
+    assert response.status_code == 400
+    assert "method" in response.get_json()["error"]
+
+
+def test_api_mcp_call_executes_tool_against_own_api(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = app.test_client()
+    client.post("/api/v1/tenants", json={"tenant_name": "MCP", "company_name": "MCP GmbH"})
+
+    response = client.post(
+        "/api/v1/mcp/call",
+        json={
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "list_companies", "arguments": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["isError"] is False
+    assert "MCP GmbH" in result["content"][0]["text"]
+
+
+def test_can_create_journal_entry_via_form_and_see_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant E", "company_name": "Mandant E GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Testbuchung",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Buchung 2026-0001 wurde gespeichert" in response.data
+    assert b"1200" in response.data
+    assert b"8400" in response.data
+
+
+def test_journal_entry_form_rejects_locked_period(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant F", "company_name": "Mandant F GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+
+    with app.extensions["db_session_factory"]() as session:
+        fiscal_year = FiscalYear(
+            tenant_id=1,
+            company_id=1,
+            label="2026",
+            start_date=datetime(2026, 1, 1, tzinfo=timezone.utc).date(),
+            end_date=datetime(2026, 12, 31, tzinfo=timezone.utc).date(),
+            is_closed=False,
+        )
+        session.add(fiscal_year)
+        session.flush()
+
+        period = Period(
+            tenant_id=1,
+            fiscal_year_id=fiscal_year.id,
+            period_number=4,
+            start_date=datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+            end_date=datetime(2026, 4, 30, tzinfo=timezone.utc).date(),
+            status="closed",
+        )
+        session.add(period)
+        session.flush()
+
+        session.add(
+            PeriodLock(
+                tenant_id=1,
+                period_id=period.id,
+                reason="Monatsabschluss",
+                locked_by="test",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Gesperrte Periode",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Periode ist gesperrt" in response.data
+    # Nach dem Fehler bleibt die Erfassungsmaske aufgeklappt.
+    assert b'id="neue-buchung" open' in response.data
+
+
+def test_api_create_journal_entry_and_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 3", "company_name": "Api GmbH 3"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "API Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "250.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "250.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    create_payload = create_response.get_json()
+    assert create_payload["posting_number"] == "2026-0001"
+    assert "created_at" in create_payload
+
+    journal_response = client.get(
+        "/api/v1/journal-entries",
+        query_string={"company_id": 1, "date_from": "2026-04-01", "date_to": "2026-04-30"},
+    )
+    assert journal_response.status_code == 200
+    journal_payload = journal_response.get_json()
+    assert journal_payload["entries"][0]["posting_number"] == "2026-0001"
+    assert journal_payload["entries"][0]["description"] == "API Buchung"
+    assert journal_payload["entries"][0]["lines"][0]["account_code"] == "1000"
+    assert journal_payload["entries"][0]["lines"][1]["account_code"] == "8400"
+
+    report_response = client.get("/api/v1/trial-balance", query_string={"company_id": 1})
+    assert report_response.status_code == 200
+    payload = report_response.get_json()
+    assert len(payload["rows"]) == 2
+
+
+def test_api_finalize_journal_entries_until(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Finalize Mandant", "company_name": "Finalize GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    for entry_date in ["2026-04-04", "2026-05-04"]:
+        response = client.post(
+            "/api/v1/journal-entries",
+            json={
+                "company_id": 1,
+                "entry_date": entry_date,
+                "description": f"Buchung {entry_date}",
+                "lines": [
+                    {"account_id": 1, "debit_amount": "100.00"},
+                    {"account_id": 2, "credit_amount": "100.00"},
+                ],
+            },
+        )
+        assert response.status_code == 201
+
+    finalize_response = client.post(
+        "/api/v1/journal-entries/finalize-until",
+        json={"company_id": 1, "up_to_date": "2026-04-30"},
+    )
+    assert finalize_response.status_code == 200
+    assert finalize_response.get_json()["finalized_count"] == 1
+
+    journal = client.get("/api/v1/journal-entries", query_string={"company_id": 1}).get_json()
+    finalized_by_date = {
+        entry["entry_date"]: entry["is_finalized"] for entry in journal["entries"]
+    }
+    assert finalized_by_date == {"2026-05-04": False, "2026-04-04": True}
+
+
+def test_api_create_journal_entry_by_account_code(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Code Mandant", "company_name": "Code GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    # Buchung ausschließlich über Kontonummern statt interner IDs.
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Buchung per Kontonummer",
+            "status": "posted",
+            "lines": [
+                {"account_code": "1200", "debit_amount": "250.00"},
+                {"account_code": "8400", "credit_amount": "250.00"},
+            ],
+        },
+    )
+    assert create_response.status_code == 201
+
+    report = client.get("/api/v1/trial-balance", query_string={"company_id": 1}).get_json()
+    codes = {row["code"] for row in report["rows"]}
+    assert {"1200", "8400"} <= codes
+
+    # Unbekannte Kontonummer -> Validierungsfehler (422).
+    unknown = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Falsche Kontonummer",
+            "status": "posted",
+            "lines": [
+                {"account_code": "9999", "debit_amount": "10.00"},
+                {"account_code": "8400", "credit_amount": "10.00"},
+            ],
+        },
+    )
+    assert unknown.status_code == 422
+
+    # Weder account_id noch account_code -> Validierungsfehler (422).
+    missing = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Kein Konto",
+            "status": "posted",
+            "lines": [
+                {"debit_amount": "10.00"},
+                {"account_code": "8400", "credit_amount": "10.00"},
+            ],
+        },
+    )
+    assert missing.status_code == 422
+
+
+def test_api_list_accounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Konten Mandant", "company_name": "Konten GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+
+    # company_id ist Pflicht.
+    assert client.get("/api/v1/accounts").status_code == 400
+
+    response = client.get("/api/v1/accounts", query_string={"company_id": 1})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["company_id"] == 1
+    # Nach Kontonummer sortiert, mit interner ID und Kontoart.
+    codes = [account["code"] for account in payload["accounts"]]
+    assert codes == ["1200", "8400"]
+    bank = payload["accounts"][0]
+    assert bank["name"] == "Bank"
+    assert bank["account_type"] == "asset"
+    assert bank["is_active"] is True
+    assert isinstance(bank["id"], int)
+
+
+def test_api_updates_account_with_before_after_history(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Kontenhistorie", "company_name": "Historie GmbH"},
+    )
+    created = client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    assert created.status_code == 201
+    account_id = created.get_json()["id"]
+
+    updated = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"name": "Hausbank", "is_active": False},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["name"] == "Hausbank"
+    assert updated.get_json()["is_active"] is False
+    assert updated.get_json()["changed"] is True
+
+    unchanged = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"name": "Hausbank", "is_active": False},
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.get_json()["changed"] is False
+
+    immutable = client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={"code": "1201"},
+    )
+    assert immutable.status_code == 400
+    assert "immutable" in immutable.get_json()["error"]
+
+    history = client.get(f"/api/v1/accounts/{account_id}/history")
+    assert history.status_code == 200
+    entries = history.get_json()["entries"]
+    assert [entry["action"] for entry in entries] == ["updated", "created"]
+    assert entries[0]["payload"]["before"]["name"] == "Bank"
+    assert entries[0]["payload"]["before"]["is_active"] is True
+    assert entries[0]["payload"]["after"]["name"] == "Hausbank"
+    assert entries[0]["payload"]["after"]["is_active"] is False
+    assert entries[1]["payload"]["before"] is None
+    assert entries[1]["payload"]["after"]["code"] == "1200"
+    assert all(len(entry["entry_hash"]) == 64 for entry in entries)
+
+
+def test_ui_updates_account_and_shows_history(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+    client.post(
+        "/tenants",
+        data={"tenant_name": "UI Kontenhistorie", "company_name": "UI Historie GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/accounts/1/update",
+        data={"name": "Hausbank", "is_active": "false"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Konto wurde geändert".encode() in response.data
+    assert "Kontenänderungshistorie".encode() in response.data
+    assert b"Hausbank" in response.data
+    assert b"updated" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        account = session.get(Account, 1)
+        assert account.name == "Hausbank"
+        assert account.is_active is False
+
+
+def test_api_income_statement_respects_date_range(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Zeitraum Mandant", "company_name": "Zeitraum GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "4200", "name": "Miete", "account_type": "expense"},
+    )
+    # Erlös im Januar, Aufwand im Februar.
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-01-15",
+            "description": "Erlös Januar",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-02-15",
+            "description": "Miete Februar",
+            "status": "posted",
+            "lines": [
+                {"account_id": 3, "debit_amount": "40.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "40.00"},
+            ],
+        },
+    )
+
+    # Ohne Zeitraum: beide Buchungen.
+    full = client.get("/api/v1/income-statement", query_string={"company_id": 1}).get_json()
+    assert full["period"] == {
+        "date_from": None,
+        "date_to": None,
+        "include_closing_entries": False,
+    }
+    assert full["totals"]["total_revenue"] == "100.00"
+    assert full["totals"]["total_expense"] == "40.00"
+    assert full["totals"]["net_income"] == "60.00"
+
+    # Nur Februar: kein Erlös, nur Aufwand.
+    feb = client.get(
+        "/api/v1/income-statement",
+        query_string={"company_id": 1, "date_from": "2026-02-01", "date_to": "2026-02-28"},
+    ).get_json()
+    assert feb["period"] == {
+        "date_from": "2026-02-01",
+        "date_to": "2026-02-28",
+        "include_closing_entries": False,
+    }
+    assert feb["totals"]["total_revenue"] == "0.00"
+    assert feb["totals"]["total_expense"] == "40.00"
+    assert feb["totals"]["net_income"] == "-40.00"
+
+    # Bilanz-Stichtag 31.01.: Miete (Februar) noch nicht enthalten.
+    jan_bs = client.get(
+        "/api/v1/balance-sheet",
+        query_string={"company_id": 1, "date_to": "2026-01-31"},
+    ).get_json()
+    assert jan_bs["period"] == {
+        "as_of": "2026-01-31",
+        "fiscal_year": "2026",
+        "include_closing_entries": False,
+    }
+    # Bank = 100 (nur Januar-Erlös), Jahresergebnis = 100.
+    bank = next(row for row in jan_bs["assets"] if row["code"] == "1200")
+    assert bank["amount"] == "100.00"
+
+    # Ungültiges Datum -> 400.
+    bad = client.get(
+        "/api/v1/income-statement",
+        query_string={"company_id": 1, "date_from": "01.02.2026"},
+    )
+    assert bad.status_code == 400
+
+
+def test_api_income_statement_and_balance_sheet(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 5", "company_name": "Api GmbH 5"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "2000", "name": "Eigenkapital", "account_type": "equity"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "4930", "name": "Buero", "account_type": "expense"},
+    )
+
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Startkapital",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "1000.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "1000.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Verkauf",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "200.00", "credit_amount": "0.00"},
+                {"account_id": 3, "debit_amount": "0.00", "credit_amount": "200.00"},
+            ],
+        },
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-05",
+            "description": "Buerobedarf",
+            "status": "posted",
+            "lines": [
+                {"account_id": 4, "debit_amount": "50.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "50.00"},
+            ],
+        },
+    )
+
+    income_statement_response = client.get(
+        "/api/v1/income-statement", query_string={"company_id": 1}
+    )
+    assert income_statement_response.status_code == 200
+    income_payload = income_statement_response.get_json()
+    assert income_payload["totals"]["total_revenue"] == "200.00"
+    assert income_payload["totals"]["total_expense"] == "50.00"
+    assert income_payload["totals"]["net_income"] == "150.00"
+
+    balance_sheet_response = client.get("/api/v1/balance-sheet", query_string={"company_id": 1})
+    assert balance_sheet_response.status_code == 200
+    balance_payload = balance_sheet_response.get_json()
+    assert balance_payload["totals"]["is_balanced"] is True
+    assert balance_payload["totals"]["difference"] == "0.00"
+    assert balance_payload["totals"]["total_assets"] == "1150.00"
+    assert balance_payload["totals"]["total_liabilities_and_equity"] == "1150.00"
+
+
+def test_api_csv_exports_for_journal_and_trial_balance(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 6", "company_name": "Api GmbH 6"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "CSV Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "75.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "75.00"},
+            ],
+        },
+    )
+
+    journal_response = client.get("/api/v1/exports/journal.csv", query_string={"company_id": 1})
+    assert journal_response.status_code == 200
+    assert "text/csv" in journal_response.headers["Content-Type"]
+    assert "posting_number,entry_date,entry_description" in journal_response.get_data(as_text=True)
+
+    trial_balance_response = client.get(
+        "/api/v1/exports/trial-balance.csv", query_string={"company_id": 1}
+    )
+    assert trial_balance_response.status_code == 200
+    trial_balance_csv = trial_balance_response.get_data(as_text=True)
+    assert "account_code,account_name,debit_total,credit_total,balance" in trial_balance_csv
+
+
+def test_api_audit_package_export_contains_manifest_hashes_and_documents(tmp_path):
+    app = _create_test_app(tmp_path, APP_COMMIT_SHA="test-commit")
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Audit Export Mandant", "company_name": "Audit Export GmbH"},
+    )
+    with app.extensions["db_session_factory"]() as session:
+        session.add(
+            User(
+                username="audit-user",
+                password_hash=hash_password("audit-pass"),
+                role="Pruefer",
+                tenant_id=1,
+            )
+        )
+        session.commit()
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Umsatz", "account_type": "revenue"},
+    )
+    account_update = client.patch(
+        "/api/v1/accounts/1",
+        json={"name": "Hausbank"},
+    )
+    assert account_update.status_code == 200
+    entry_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "Prueferexport Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00", "credit_amount": "0.00"},
+                {"account_id": 2, "debit_amount": "0.00", "credit_amount": "100.00"},
+            ],
+        },
+    )
+    entry_id = entry_response.get_json()["id"]
+    document_bytes = pdf_document_bytes(b"audit-export")
+    upload_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "journal_entry_id": entry_id,
+            "file_name": "rechnung.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(document_bytes).decode("ascii"),
+        },
+    )
+    assert upload_response.status_code == 201
+
+    manifest_response = client.get(
+        "/api/v1/exports/audit-package.zip",
+        query_string={"company_id": 1, "manifest_only": "true"},
+    )
+    assert manifest_response.status_code == 200
+    manifest_payload = manifest_response.get_json()
+    assert manifest_payload["commit_sha"] == "test-commit"
+    assert len(manifest_payload["package_sha256"]) == 64
+    assert (
+        manifest_response.headers["X-OpenBuchhaltung-SHA256"]
+        == manifest_payload["package_sha256"]
+    )
+
+    response = client.get("/api/v1/exports/audit-package.zip", query_string={"company_id": 1})
+    assert response.status_code == 200
+    assert response.content_type == "application/zip"
+    assert "prueferexport-company-1-" in response.headers["Content-Disposition"]
+    assert response.headers["X-OpenBuchhaltung-SHA256"] == hashlib.sha256(
+        response.data
+    ).hexdigest()
+
+    with zipfile.ZipFile(BytesIO(response.data)) as archive:
+        names = set(archive.namelist())
+        assert "manifest.json" in names
+        assert "README.txt" in names
+        assert "schema/field_catalog.json" in names
+        assert "data/accounts.json" in names
+        assert "data/account_history.json" in names
+        assert "data/journal_entries.json" in names
+        assert "data/documents.json" in names
+        assert "data/users.json" in names
+        document_paths = [name for name in names if name.startswith("documents/")]
+        assert len(document_paths) == 1
+        assert archive.read(document_paths[0]) == document_bytes
+        manifest = json.loads(archive.read("manifest.json"))
+        documents = json.loads(archive.read("data/documents.json"))
+        account_history = json.loads(archive.read("data/account_history.json"))
+        users = json.loads(archive.read("data/users.json"))
+        field_catalog = json.loads(archive.read("schema/field_catalog.json"))
+
+    assert manifest["export_format_version"] == "2"
+    assert manifest["table_counts"]["journal_entries"] == 1
+    assert manifest["table_counts"]["documents"] == 1
+    assert manifest["table_counts"]["account_history"] == 3
+    assert manifest["table_counts"]["users"] == 1
+    assert manifest["totals"]["document_file_count"] == 1
+    assert manifest["integrity"]["valid"] is True
+    assert manifest["dataset_sha256"] == manifest_payload["dataset_sha256"]
+    assert documents[0]["file_sha256"] == hashlib.sha256(document_bytes).hexdigest()
+    assert documents[0]["document_date"] == "2026-04-03"
+    assert [entry["action"] for entry in account_history] == [
+        "created",
+        "created",
+        "updated",
+    ]
+    assert account_history[-1]["payload"]["before"]["name"] == "Bank"
+    assert account_history[-1]["payload"]["after"]["name"] == "Hausbank"
+    assert "storage_key" not in documents[0]
+    assert users[0]["username"] == "audit-user"
+    assert users[0]["role"] == "Pruefer"
+    assert users[0]["api_token_configured"] is False
+    assert "password_hash" not in users[0]
+    assert "api_token_hash" not in users[0]
+    user_fields = {
+        field["name"] for field in field_catalog["tables"]["users"]["fields"]
+    }
+    assert {"username", "role", "api_token_configured"} <= user_fields
+    assert "password_hash" not in user_fields
+    document_fields = {
+        field["name"] for field in field_catalog["tables"]["documents"]["fields"]
+    }
+    assert {"file_sha256", "archive_path", "file_sha256_matches"} <= document_fields
+    assert "storage_key" not in document_fields
+    assert any(file["path"] == document_paths[0] for file in manifest["files"])
+
+    verification = verify_audit_export_package(response.data)
+    assert verification.valid is True
+    assert verification.dataset_sha256 == manifest["dataset_sha256"]["value"]
+    assert verification.files_checked == len(manifest["files"])
+
+    fixed_generated_at = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+    with app.extensions["db_session_factory"]() as session:
+        reproducible_a = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at,
+            commit_sha="test-commit",
+        )
+        reproducible_b = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at,
+            commit_sha="test-commit",
+        )
+        later_export = build_audit_export_package(
+            session=session,
+            company_id=1,
+            generated_at=fixed_generated_at + timedelta(seconds=2),
+            commit_sha="test-commit",
+        )
+    assert reproducible_a.payload == reproducible_b.payload
+    assert reproducible_a.package_sha256 == reproducible_b.package_sha256
+    assert (
+        reproducible_a.manifest["dataset_sha256"]
+        == later_export.manifest["dataset_sha256"]
+    )
+    assert reproducible_a.package_sha256 != later_export.package_sha256
+
+    package_path = tmp_path / "audit-package.zip"
+    package_path.write_bytes(response.data)
+    cli_result = app.test_cli_runner().invoke(
+        args=["verify-audit-package", str(package_path)]
+    )
+    assert cli_result.exit_code == 0
+    assert "Prüferexport ist intakt" in cli_result.output
+
+    tampered_buffer = BytesIO()
+    with zipfile.ZipFile(BytesIO(response.data)) as source, zipfile.ZipFile(
+        tampered_buffer, "w"
+    ) as target:
+        for info in source.infolist():
+            content = source.read(info.filename)
+            if info.filename == "data/accounts.json":
+                content += b"\n"
+            target.writestr(info, content)
+    tampered_result = verify_audit_export_package(tampered_buffer.getvalue())
+    assert tampered_result.valid is False
+    assert {issue.code for issue in tampered_result.issues} >= {
+        "hash_mismatch",
+        "dataset_hash_mismatch",
+    }
+
+
+def test_api_create_journal_entry_returns_422_with_field_details(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Mandant 4", "company_name": "Api GmbH 4"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1000", "name": "Kasse", "account_type": "asset"},
+    )
+
+    create_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "API Buchung",
+            "status": "posted",
+            "lines": [
+                {"account_id": 1, "debit_amount": "250.00", "credit_amount": "0.00"},
+                {"account_id": 1, "debit_amount": "0.00", "credit_amount": "0.00"},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 422
+    payload = create_response.get_json()
+    assert payload["error"] == "Validation failed."
+    assert payload["details"][0]["field"] == "journal_entry"
+    assert "Betrag muss größer 0" in payload["details"][0]["message"]
+
+
+def test_journal_entry_form_supports_multiple_lines(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant G", "company_name": "Mandant G GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1360",
+            "name": "Geldtransit",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Mehrzeilige Buchung",
+            "line_account_id": ["1", "2", "3"],
+            "line_side": ["debit", "debit", "credit"],
+            "line_amount": ["80.00", "20.00", "100.00"],
+            "line_description": ["Teil 1", "Teil 2", "Gegenkonto"],
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Buchung 2026-0001 wurde gespeichert" in response.data
+
+
+def test_can_upload_document_and_link_to_journal_entry(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant H", "company_name": "Mandant H GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Beleglink",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "journal_entry_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(pdf_document_bytes(b"rechnung")), "rechnung.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg wurde hochgeladen" in response.data
+    assert b"rechnung.pdf" in response.data
+
+    with app.extensions["db_session_factory"]() as session:
+        document = session.query(Document).one()
+        assert document.file_name == "rechnung.pdf"
+        assert document.journal_entry_id == 1
+        assert document.document_date == date(2026, 4, 3)
+
+
+def test_can_link_and_unlink_document_after_upload(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant HL", "company_name": "Mandant HL GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "1200", "name": "Bank", "account_type": "asset"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "8400", "name": "Erlöse", "account_type": "revenue"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "Nachträglich verknüpfen",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg")), "beleg.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+    link_response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": "1"},
+        follow_redirects=True,
+    )
+    assert link_response.status_code == 200
+    assert "Beleg wurde mit der Buchung verknüpft".encode() in link_response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id == 1
+
+    unlink_response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": ""},
+        follow_redirects=True,
+    )
+    assert unlink_response.status_code == 200
+    assert "Verknüpfung des Belegs wurde entfernt".encode() in unlink_response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+
+def test_link_document_rejects_missing_journal_entry(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant HM", "company_name": "Mandant HM GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg")), "beleg.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents/1/link",
+        data={"company_id": "1", "journal_entry_id": "999"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Ausgewählte Buchung wurde nicht gefunden".encode() in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).one().journal_entry_id is None
+
+
+def test_document_download_returns_file(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant I", "company_name": "Mandant I GmbH"},
+        follow_redirects=True,
+    )
+    upload_response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(pdf_document_bytes(b"testbeleg")), "beleg.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert upload_response.status_code == 200
+
+    response = client.get("/documents/1/download")
+    assert response.status_code == 200
+    assert response.data == pdf_document_bytes(b"testbeleg")
+
+
+def test_api_document_upload_link_list_and_download(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/api/v1/tenants",
+        json={"tenant_name": "Api Belege", "company_name": "Api Belege GmbH"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/api/v1/accounts",
+        json={"company_id": 1, "code": "8400", "name": "Erlöse", "account_type": "revenue"},
+    )
+    entry_response = client.post(
+        "/api/v1/journal-entries",
+        json={
+            "company_id": 1,
+            "entry_date": "2026-04-04",
+            "description": "API Belegbuchung",
+            "lines": [
+                {"account_id": 1, "debit_amount": "100.00"},
+                {"account_id": 2, "credit_amount": "100.00"},
+            ],
+        },
+    )
+    assert entry_response.status_code == 201
+    entry_id = entry_response.get_json()["id"]
+
+    file_bytes = pdf_document_bytes(b"api beleg")
+    missing_date_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+        },
+    )
+    assert missing_date_response.status_code == 400
+    assert "document_date" in missing_date_response.get_json()["error"]
+
+    upload_response = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "api-beleg.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+        },
+    )
+    assert upload_response.status_code == 201
+    upload_payload = upload_response.get_json()
+    document_id = upload_payload["id"]
+    assert upload_payload["file_sha256"] == hashlib.sha256(file_bytes).hexdigest()
+    assert upload_payload["file_size_bytes"] == len(file_bytes)
+    assert upload_payload["version_number"] == 1
+    assert upload_payload["is_current"] is True
+    assert upload_payload["delete_protected"] is True
+    assert upload_payload["document_date"] == "2026-04-03"
+
+    link_response = client.post(
+        f"/api/v1/documents/{document_id}/link",
+        json={"journal_entry_id": entry_id},
+    )
+    assert link_response.status_code == 200
+    assert link_response.get_json()["journal_entry_id"] == entry_id
+
+    list_response = client.get("/api/v1/documents", query_string={"company_id": 1})
+    assert list_response.status_code == 200
+    assert [document["id"] for document in list_response.get_json()["documents"]] == [
+        document_id
+    ]
+
+    content_response = client.get(f"/api/v1/documents/{document_id}/content")
+    assert content_response.status_code == 200
+    content_payload = content_response.get_json()
+    assert base64.b64decode(content_payload["content_base64"]) == file_bytes
+    assert content_payload["integrity"]["matches"] is True
+
+    download_response = client.get(f"/api/v1/documents/{document_id}/download")
+    assert download_response.status_code == 200
+    assert download_response.data == file_bytes
+
+    replacement_bytes = pdf_document_bytes(b"api beleg version 2")
+    replace_response = client.post(
+        f"/api/v1/documents/{document_id}/replace",
+        json={
+            "file_name": "api-beleg-v2.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(replacement_bytes).decode("ascii"),
+        },
+    )
+    assert replace_response.status_code == 201
+    replacement = replace_response.get_json()
+    assert replacement["replaces_document_id"] == document_id
+    assert replacement["version_number"] == 2
+    assert replacement["file_sha256"] == hashlib.sha256(replacement_bytes).hexdigest()
+    assert replacement["document_date"] == "2026-04-03"
+
+    delete_response = client.delete(f"/api/v1/documents/{document_id}")
+    assert delete_response.status_code == 409
+    assert "append-only" in delete_response.get_json()["error"]
+
+    with app.extensions["db_session_factory"]() as session:
+        original = session.get(Document, document_id)
+        new_document = session.get(Document, replacement["id"])
+        assert original.is_current is False
+        assert original.replaced_at is not None
+        assert new_document.is_current is True
+        assert new_document.replaces_document_id == original.id
+
+
+def test_trial_balance_csv_export_download(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant J", "company_name": "Mandant J GmbH"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "1200",
+            "name": "Bank",
+            "account_type": "asset",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/accounts",
+        data={
+            "company_id": "1",
+            "code": "8400",
+            "name": "Erlöse",
+            "account_type": "revenue",
+        },
+        follow_redirects=True,
+    )
+    client.post(
+        "/journal-entries",
+        data={
+            "company_id": "1",
+            "entry_date": "2026-04-04",
+            "description": "CSV Export Buchung",
+            "debit_account_id": "1",
+            "credit_account_id": "2",
+            "amount": "100.00",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.get("/reports/trial-balance.csv", query_string={"company_id": 1})
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/csv")
+    assert "attachment; filename=susa-1-" in response.headers["Content-Disposition"]
+    csv_text = response.data.decode("utf-8")
+    assert "Konto,Name,Soll,Haben,Saldo" in csv_text
+    assert "1200,Bank,100.00,0.00,100.00" in csv_text
+    assert "8400,Erlöse,0.00,100.00,-100.00" in csv_text
+
+
+def test_document_upload_writes_audit_log(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Audit", "company_name": "Mandant Audit GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(pdf_document_bytes(b"beleg-audit")), "audit.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        audit_events = (
+            session.query(AuditLog)
+            .filter_by(entity_type="document", entity_id="1")
+            .all()
+        )
+
+    uploaded_event = next(event for event in audit_events if event.action == "uploaded")
+    assert uploaded_event.payload["document_date"] == "2026-04-03"
+
+
+def test_document_upload_rejects_disallowed_extension(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Upload", "company_name": "Mandant Upload GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"kein beleg"), "notiz.txt", "text/plain"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Nur PDF-, JPG- und PNG-Belege" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_disallowed_mimetype(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant MIME", "company_name": "Mandant MIME GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"kein pdf"), "rechnung.pdf", "text/plain"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Dateityp des Belegs ist nicht erlaubt" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_oversized_file(tmp_path):
+    app = _create_test_app(tmp_path, DOCUMENT_MAX_UPLOAD_BYTES=8)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Size", "company_name": "Mandant Size GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"x" * 16), "gross.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg ist zu gro" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_too_small_file(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Klein", "company_name": "Mandant Klein GmbH"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(b"%PDF-1.4\n%%EOF\n"), "mini.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Beleg ist zu klein" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_rejects_content_not_matching_type(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Defekt", "company_name": "Mandant Defekt GmbH"},
+        follow_redirects=True,
+    )
+
+    broken_bytes = b"\x00" * 2048
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(broken_bytes), "kaputt.pdf", "application/pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"passt nicht zum Dateityp" in response.data
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_stores_file_bytes_unchanged(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant Original", "company_name": "Mandant Original GmbH"},
+        follow_redirects=True,
+    )
+
+    original_bytes = pdf_document_bytes(b"originalgetreu")
+    response = client.post(
+        "/documents",
+        data={
+            "company_id": "1",
+            "document_date": "2026-04-03",
+            "document_file": (BytesIO(original_bytes), "original.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app.extensions["db_session_factory"]() as session:
+        document = session.query(Document).one()
+        stored_bytes = Path(document.storage_key).read_bytes()
+        assert stored_bytes == original_bytes
+        assert document.file_size_bytes == len(original_bytes)
+        assert document.file_sha256 == hashlib.sha256(original_bytes).hexdigest()
+
+
+def test_api_document_upload_rejects_small_or_mismatched_content(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant API Val", "company_name": "Mandant API Val GmbH"},
+        follow_redirects=True,
+    )
+
+    too_small = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "mini.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(b"%PDF-1.4\n%%EOF\n").decode("ascii"),
+        },
+    )
+    assert too_small.status_code == 422
+    assert "too small" in too_small.get_json()["error"]
+
+    mismatched = client.post(
+        "/api/v1/documents",
+        json={
+            "company_id": 1,
+            "file_name": "kaputt.pdf",
+            "mime_type": "application/pdf",
+            "document_date": "2026-04-03",
+            "content_base64": base64.b64encode(b"\x00" * 2048).decode("ascii"),
+        },
+    )
+    assert mismatched.status_code == 422
+    assert "does not match" in mismatched.get_json()["error"]
+
+    with app.extensions["db_session_factory"]() as session:
+        assert session.query(Document).count() == 0
+
+
+def test_document_upload_calls_configured_llm_endpoint(tmp_path):
+    app = _create_test_app(tmp_path)
+    app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
+    app.config["DOCUMENT_LLM_MODEL"] = "gpt-4.1-mini"
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant LLM", "company_name": "Mandant LLM GmbH"},
+        follow_redirects=True,
+    )
+
+    with patch("app.web.documents.send_document_update") as llm_mock:
+        llm_mock.return_value = {"id": "resp_123", "status": "completed"}
+
+        response = client.post(
+            "/documents",
+            data={
+                "company_id": "1",
+                "document_date": "2026-04-03",
+                "document_file": (BytesIO(pdf_document_bytes(b"llm-beleg")), "llm.pdf"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    llm_mock.assert_called_once()
+
+    with app.extensions["db_session_factory"]() as session:
+        llm_audit = session.query(AuditLog).filter_by(action="llm_update_requested").one()
+
+    assert llm_audit.payload["status"] == "success"
+
+
+def test_document_upload_continues_when_llm_endpoint_fails(tmp_path):
+    app = _create_test_app(tmp_path)
+    app.config["DOCUMENT_LLM_ENDPOINT_URL"] = "http://llm.local/v1/responses"
+    client = _logged_in_client(app)
+
+    client.post(
+        "/tenants",
+        data={"tenant_name": "Mandant LLM2", "company_name": "Mandant LLM2 GmbH"},
+        follow_redirects=True,
+    )
+
+    with patch("app.web.documents.send_document_update") as llm_mock:
+        llm_mock.side_effect = DocumentLLMError("boom")
+
+        response = client.post(
+            "/documents",
+            data={
+                "company_id": "1",
+                "document_date": "2026-04-03",
+                "document_file": (
+                    BytesIO(pdf_document_bytes(b"llm-fehler")),
+                    "llm-fehler.pdf",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert b"Beleg wurde hochgeladen" in response.data

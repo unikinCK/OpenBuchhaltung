@@ -1,0 +1,10 @@
+[Unit]
+Description=OpenBuchhaltung: tägliche Integritätsprüfung
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

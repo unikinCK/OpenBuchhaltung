@@ -1,0 +1,699 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination, sort_attrs %}
+{% from "_journal.html" import partner_chips, account_link %}
+{% from "_filters.html" import filter_form %}
+
+{% block title %}Bank – OpenBuchhaltung{% endblock %}
+
+{% macro bank_account_options(selected_id) -%}
+  {% for account in bank_accounts %}
+    <option value="{{ account.id }}" {% if account.id == selected_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+  {% endfor %}
+{%- endmacro %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Bankumsätze</h1>
+      {% if selected_company_id %}
+        <p class="page-subtitle">{% if open_count == 1 %}1 offener Umsatz zu verbuchen{% elif open_count %}{{ open_count }} offene Umsätze zu verbuchen{% else %}Alle Umsätze sind verbucht oder zugeordnet.{% endif %}</p>
+      {% endif %}
+    </div>
+    {% if selected_company_id and bank_accounts %}
+      <div class="page-actions">
+        <a class="button" href="#kontoauszug-import" data-open-details="#kontoauszug-import">Kontoauszug importieren</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    {% if fints_challenge %}
+      <section class="card" style="border-color:#c60;">
+        <h2>TAN-Bestätigung erforderlich</h2>
+        <p>{{ fints_challenge.challenge }}</p>
+        <form method="post" action="{{ url_for('main.fints_tan_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ fints_challenge.company_id }}" />
+          <input type="hidden" name="dialog_id" value="{{ fints_challenge.dialog_id }}" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="fints_tan_pin">PIN (erneut eingeben, wird nicht gespeichert)</label>
+              <input id="fints_tan_pin" name="pin" type="password" autocomplete="off" required />
+            </div>
+            {% if not fints_challenge.decoupled %}
+              <div class="field">
+                <label for="fints_tan">TAN</label>
+                <input id="fints_tan" name="tan" type="text" autocomplete="one-time-code" required />
+              </div>
+            {% endif %}
+          </div>
+          {% if fints_challenge.decoupled %}
+            <p class="hint">Entkoppeltes Verfahren: Abruf in der Banking-App freigeben, dann fortsetzen.</p>
+          {% endif %}
+          <div class="form-actions">
+            <button type="submit">{% if fints_challenge.decoupled %}Freigabe prüfen{% else %}TAN senden{% endif %}</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('main.fints_tan_cancel_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ fints_challenge.company_id }}" />
+          <input type="hidden" name="dialog_id" value="{{ fints_challenge.dialog_id }}" />
+          <button type="submit" class="secondary btn-sm">Abbrechen</button>
+        </form>
+      </section>
+    {% endif %}
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Umsätze <span class="count">{{ transactions_total }}</span></h2>
+        <div class="row-actions">
+          <a class="{{ 'button btn-sm' if status_filter == 'open' else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">Offen ({{ open_count }})</a>
+          <a class="{{ 'button btn-sm' if not status_filter else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id) }}">Alle</a>
+        </div>
+      </div>
+      {{ filter_form('main.bank_page', selected_company_id, q, date_from, date_to,
+                     extra=dict({'status': status_filter} if status_filter else {}, **sort.url_args),
+                     placeholder="Verwendungszweck, Gegenseite, Referenz") }}
+      {% if transactions %}
+        <div class="table-scroll">
+          <table class="data" {{ sort_attrs(sort) }}>
+            <thead>
+              <tr>
+                <th data-sort-key="date">Datum</th>
+                <th data-sort-key="account">Konto</th>
+                <th data-sort-key="counterparty">Gegenseite und Verwendungszweck</th>
+                <th class="num" data-sort-key="amount">Betrag</th>
+                <th data-sort-key="status">Status</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for tx in transactions %}
+                {% set bank_account = bank_accounts_by_id.get(tx.bank_account_id) %}
+                {% set rule = rule_by_tx.get(tx.id) %}
+                {% set transfer = transfer_by_tx.get(tx.id) %}
+                {% set proposal = proposal_by_tx.get(tx.id) %}
+                {% set linked = entry_info.get(tx.journal_entry_id) if tx.journal_entry_id else none %}
+                <tr>
+                  <td class="date">{{ tx.booking_date | datum }}</td>
+                  <td class="nowrap" title="{{ bank_account.name if bank_account else '' }}">{% if bank_account %}{{ account_link(bank_account.id, bank_account.code) }}{% else %}{{ tx.bank_account_id }}{% endif %}</td>
+                  <td>
+                    <strong>{{ tx.counterparty or "–" }}</strong><br />
+                    <span class="muted small">{{ tx.purpose }}</span>
+                    {% if tx.status == 'open' and (rule or transfer or proposal) %}
+                      <div class="entry-meta small">
+                        {% if proposal and proposal.source == 'history' %}<span class="badge badge-info">Wie zuletzt</span> <span class="muted">→ {{ account_link(proposal.contra_account.id, proposal.contra_account.code) }}{% if proposal.tax_code %} ({{ proposal.tax_code.code }}){% endif %}</span>{% endif %}
+                        {% if rule %}<span class="badge badge-info">Regel</span> <span class="muted">„{{ rule.pattern }}“ → {{ account_link(rule.contra_account.id, rule.contra_account.code) }}</span>{% endif %}
+                        {% if transfer %}<span class="badge badge-info">Eigenübertrag?</span> <span class="muted">Gegenstück am {{ transfer.booking_date | datum }}</span>{% endif %}
+                      </div>
+                    {% endif %}
+                  </td>
+                  <td class="num{% if tx.amount < 0 %} negative{% endif %}">{{ tx.amount | betrag }}</td>
+                  <td class="nowrap">
+                    {% if tx.status == 'open' %}
+                      <span class="badge badge-warning">offen</span>
+                    {% elif tx.status == 'matched' %}
+                      <span class="badge badge-info">zugeordnet</span>
+                    {% else %}
+                      <span class="badge badge-success">verbucht</span>
+                    {% endif %}
+                    {% if linked %}
+                      <br /><a class="small" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=tx.journal_entry_id) }}">→ {{ linked.posting_number or "Buchung" }}</a>
+                      {% if linked.partners %}<div style="margin-top:0.2rem;">{{ partner_chips(linked.partners) }}</div>{% endif %}
+                    {% endif %}
+                  </td>
+                  <td class="actions">
+                    {% if tx.status == 'open' %}
+                      <button type="button" class="primary btn-sm" popovertarget="tx-panel-{{ tx.id }}">Buchen …</button>
+                    {% elif bank_accounts | length > 1 %}
+                      <button type="button" class="secondary btn-sm" popovertarget="tx-panel-{{ tx.id }}" title="Auf anderes Bankkonto umhängen">Konto …</button>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {{ pagination('main.bank_page', transactions_total, limit, offset, selected_company_id,
+                      extra=dict(filter_args, **sort.url_args)) }}
+
+        {% for tx in transactions if tx.status == 'open' or bank_accounts | length > 1 %}
+          {% set rule = rule_by_tx.get(tx.id) %}
+          {% set transfer = transfer_by_tx.get(tx.id) %}
+          {% set proposal = proposal_by_tx.get(tx.id) %}
+          {% set suggestions = suggestions_by_tx.get(tx.id, []) %}
+          <div popover id="tx-panel-{{ tx.id }}" class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>{{ "Zahlungseingang" if tx.amount > 0 else "Zahlungsausgang" }} {{ tx.amount | abs | betrag }} {{ tx.currency_code }}</h3>
+                <p class="muted small" style="margin:0.2rem 0 0;">{{ tx.booking_date | datum }} · {{ tx.counterparty or "ohne Gegenseite" }} · {{ tx.purpose }}</p>
+              </div>
+              <button type="button" class="panel-close" popovertarget="tx-panel-{{ tx.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
+            </div>
+
+            {% if tx.status == 'open' %}
+              {% if transfer %}
+                <p class="callout">
+                  Eigenübertrag? Gegenstück am {{ transfer.booking_date | datum }} auf
+                  {% set transfer_account = bank_accounts_by_id.get(transfer.bank_account_id) %}
+                  {{ transfer_account.code if transfer_account else transfer.bank_account_id }}
+                  {% if geldtransit_account %}
+                    — Geldtransit ({{ geldtransit_account.code }}) ist vorausgewählt.
+                  {% else %}
+                    — kein Geldtransit-Konto (SKR03 1360, SKR04 1460) vorhanden, bitte unter Konten anlegen.
+                  {% endif %}
+                </p>
+              {% endif %}
+
+              {% if suggestions %}
+                <div class="panel-section">
+                  <h4>Vorhandener Buchung zuordnen</h4>
+                  <form method="post" action="{{ url_for('main.bank_match_action', transaction_id=tx.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <select name="journal_entry_id" required aria-label="Buchung">
+                      {% for entry in suggestions %}
+                        <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="secondary">Zuordnen</button>
+                  </form>
+                </div>
+              {% endif %}
+
+              <div class="panel-section">
+                <h4>{% if suggestions %}Oder neu buchen{% else %}Buchen{% endif %}</h4>
+                <form method="post" action="{{ url_for('main.bank_book_action', transaction_id=tx.id) }}">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                  <div class="form-grid">
+                    <div class="field field-wide">
+                      <label for="contra-{{ tx.id }}">Gegenkonto</label>
+                      <select id="contra-{{ tx.id }}" name="contra_account_id" required>
+                        <option value="">Gegenkonto wählen</option>
+                        {% for account in contra_accounts if account.is_active %}
+                          <option value="{{ account.id }}"
+                            {% if proposal and account.id == proposal.contra_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="tax-{{ tx.id }}">Steuercode</label>
+                      <select id="tax-{{ tx.id }}" name="tax_code_id">
+                        <option value="">Ohne Steuer</option>
+                        {% for tax_code in tax_codes %}
+                          <option value="{{ tax_code.id }}"
+                            {% if proposal and proposal.tax_code and tax_code.id == proposal.tax_code.id %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="partner-{{ tx.id }}">Geschäftspartner</label>
+                      <select id="partner-{{ tx.id }}" name="partner_id">
+                        <option value="">Ohne Partner</option>
+                        {% for partner in partners %}<option value="{{ partner.id }}"{% if proposal and partner.id == proposal.partner_id %} selected{% endif %}>{{ partner.name }}</option>{% endfor %}
+                      </select>
+                    </div>
+                    {% if cost_centers %}
+                      <div class="field">
+                        <label for="cc-{{ tx.id }}">Kostenstelle</label>
+                        <select id="cc-{{ tx.id }}" name="cost_center_id">
+                          <option value="">Ohne Kostenstelle</option>
+                          {% for unit in cost_centers %}
+                            <option value="{{ unit.id }}"{% if proposal and unit.id == proposal.cost_center_id %} selected{% endif %}>KSt {{ unit.code }} – {{ unit.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    {% endif %}
+                    {% if profit_centers %}
+                      <div class="field">
+                        <label for="pc-{{ tx.id }}">Profitcenter</label>
+                        <select id="pc-{{ tx.id }}" name="profit_center_id">
+                          <option value="">Ohne Profitcenter</option>
+                          {% for unit in profit_centers %}
+                            <option value="{{ unit.id }}"{% if proposal and unit.id == proposal.profit_center_id %} selected{% endif %}>PC {{ unit.code }} – {{ unit.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    {% endif %}
+                    <div class="field field-full">
+                      <label for="text-{{ tx.id }}">Buchungstext <span class="muted">(optional)</span></label>
+                      <input id="text-{{ tx.id }}" name="description" maxlength="500" placeholder="Bank: {{ tx.purpose }}" />
+                    </div>
+                  </div>
+                  <p class="hint">Der Geschäftspartner steht auf Bank- und Gegenkontozeile (nicht auf der Steuerzeile); bei einem Sammelkonto als Gegenkonto muss seine Rolle passen.</p>
+                  <div class="form-actions">
+                    <button type="submit">Buchen</button>
+                  </div>
+                </form>
+              </div>
+            {% endif %}
+
+            {% if bank_accounts | length > 1 %}
+              <div class="panel-section">
+                <h4>Auf anderes Bankkonto umhängen</h4>
+                <form method="post" action="{{ url_for('main.bank_reassign_action', transaction_id=tx.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                  <select name="bank_account_id" required aria-label="Bankkonto">
+                    {{ bank_account_options(tx.bank_account_id) }}
+                  </select>
+                  <button type="submit" class="secondary">Umhängen</button>
+                </form>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% elif q or date_from or date_to or status_filter %}
+        <p class="empty-state">Keine Umsätze zu diesen Filtern.</p>
+      {% else %}
+        <p class="empty-state">Noch keine Bankumsätze importiert.</p>
+      {% endif %}
+    </section>
+
+    <details class="card" id="kontoauszug-import"{% if not transactions_total and not (q or date_from or date_to or status_filter) %} open{% endif %}>
+      <summary>Kontoumsätze importieren <span class="summary-hint">CSV, CAMT.053, MT940</span></summary>
+      {% if not bank_accounts %}
+        <p class="muted">Kein Bankkonto (Kontotyp asset) vorhanden — zuerst unter
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen.</p>
+      {% else %}
+        <form method="post" action="{{ url_for('main.bank_import_action') }}" enctype="multipart/form-data">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="bank_account_id">Bankkonto</label>
+              <select id="bank_account_id" name="bank_account_id" required>
+                {{ bank_account_options(default_bank_account_id) }}
+              </select>
+            </div>
+            <div class="field field-wide">
+              <label for="bank_file">Kontoauszugsdatei</label>
+              <input id="bank_file" name="bank_file" type="file" accept=".csv,.xml,.sta,.mt940,.940,text/csv,application/xml" required />
+            </div>
+          </div>
+          <p class="hint">Formate: CSV (Spalten-Aliasse Buchungstag/Datum, Betrag, Verwendungszweck, Auftraggeber/Empfänger; Finom-Export wird erkannt), CAMT.053-XML und MT940 (.sta) — Re-Importe werden dedupliziert.</p>
+          <div class="form-actions">
+            <button type="submit">Importieren</button>
+          </div>
+        </form>
+      {% endif %}
+    </details>
+
+    <details class="card" id="online-abruf"{% if fints_connections or open_banking_connections %} open{% endif %}>
+      <summary>Online-Abruf <span class="summary-hint">FinTS-Direktabruf und Open Banking (PSD2){% if fints_connections or open_banking_connections %} · {{ (fints_connections | length) + (open_banking_connections | length) }} Zugang/Zugänge{% endif %}</span></summary>
+
+      <h3 class="form-section-title">FinTS-Direktabruf</h3>
+      {% if not fints_configured %}
+        <p class="hint">Hinweis: Die Umgebungsvariable <code>FINTS_PRODUCT_ID</code> ist nicht gesetzt
+          (Produktregistrierung der Deutschen Kreditwirtschaft) — der Abruf ist erst danach möglich.</p>
+      {% endif %}
+      {% if fints_connections %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>BLZ</th>
+                <th>Login</th>
+                <th>IBAN</th>
+                <th>Abruf</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for conn in fints_connections %}
+                <tr>
+                  <td>{{ conn.name }}</td>
+                  <td>{{ conn.blz }}</td>
+                  <td>{{ conn.login }}</td>
+                  <td>{{ conn.sepa_iban or "–" }}</td>
+                  <td>
+                    <form method="post" action="{{ url_for('main.fints_sync_action', connection_id=conn.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                      <input name="pin" type="password" placeholder="PIN" aria-label="PIN" autocomplete="off" required style="width:7rem;" />
+                      <input name="from_date" type="date" title="Von (Standard: 30 Tage)" aria-label="Von-Datum" />
+                      <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
+                      <button type="submit" class="secondary">Umsätze abrufen</button>
+                    </form>
+                  </td>
+                  <td class="actions">
+                    <form method="post" action="{{ url_for('main.fints_connection_deactivate_action', connection_id=conn.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                      <button type="submit" class="secondary btn-sm">Deaktivieren</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Noch kein FinTS-Bankzugang hinterlegt.</p>
+      {% endif %}
+
+      {% if bank_accounts %}
+        <details class="line-details">
+          <summary class="muted small">Neuen FinTS-Bankzugang anlegen</summary>
+          <form method="post" action="{{ url_for('main.fints_connection_create_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <div class="form-grid" style="margin-top:0.5rem;">
+              <div class="field field-wide">
+                <label for="fints_name">Name</label>
+                <input id="fints_name" name="name" type="text" placeholder="z. B. Geschäftskonto Sparkasse" required />
+              </div>
+              <div class="field">
+                <label for="fints_blz">BLZ</label>
+                <input id="fints_blz" name="blz" type="text" pattern="[0-9]{8}" inputmode="numeric" required
+                  {% if fints_institute_status.count %}data-fints-lookup="{{ url_for('main.fints_institute_lookup') }}" data-fints-url-target="#fints_url" data-fints-info="#fints_blz_info"{% endif %} />
+                <span id="fints_blz_info" class="hint" aria-live="polite"></span>
+              </div>
+              <div class="field">
+                <label for="fints_login">FinTS-Login (Benutzerkennung)</label>
+                <input id="fints_login" name="login" type="text" required />
+              </div>
+              <div class="field field-full">
+                <label for="fints_url">FinTS-URL der Bank</label>
+                {% if fints_institute_status.count %}
+                  <input id="fints_url" name="fints_url" type="url" list="fints_url_options" placeholder="leer lassen = automatisch aus der FinTS-Bankenliste" />
+                  <datalist id="fints_url_options"></datalist>
+                  <span class="hint">FinTS-Bankenliste: {{ fints_institute_status.with_url }} Einträge mit PIN/TAN-Zugang{% if fints_institute_status.imported_at %}, importiert am {{ fints_institute_status.imported_at | datum }}{% endif %}. Es sind nur URLs aus der Liste zulässig.</span>
+                {% else %}
+                  <input id="fints_url" name="fints_url" type="url" placeholder="https://banking-xy.s-fints-pt-xy.de/fints30" required />
+                  <span class="hint">Keine FinTS-Bankenliste importiert — die URL steht in der Bankenliste der Deutschen Kreditwirtschaft oder bei der Bank. Ein Administrator kann die Liste unter Verwaltung importieren.</span>
+                {% endif %}
+              </div>
+              <div class="field">
+                <label for="fints_iban">IBAN (nur bei mehreren Konten)</label>
+                <input id="fints_iban" name="sepa_iban" type="text" />
+              </div>
+              <div class="field">
+                <label for="fints_bank_account">Bank-Sachkonto</label>
+                <select id="fints_bank_account" name="bank_account_id" required>
+                  {{ bank_account_options(default_bank_account_id) }}
+                </select>
+              </div>
+            </div>
+            <p class="hint">PIN und TAN werden nie gespeichert — die PIN wird bei jedem Abruf eingegeben.</p>
+            <div class="form-actions">
+              <button type="submit">Bankzugang anlegen</button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
+
+      <h3 class="form-section-title" style="margin-top:1.5rem;">Open Banking (PSD2)</h3>
+      <p class="hint">Für Banken ohne FinTS (z. B. Finom): Abruf über Enable Banking. Die Zustimmung erteilt der Kontoinhaber direkt bei der Bank; sie gilt je nach Bank bis zu 180 Tage.</p>
+      {% if not open_banking_configured %}
+        <p class="hint">Hinweis: <code>ENABLE_BANKING_APP_ID</code> und <code>ENABLE_BANKING_KEY_FILE</code> sind nicht gesetzt — Zustimmung und Abruf sind erst danach möglich.</p>
+      {% endif %}
+      {% if open_banking_connections %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Bank</th>
+                <th>IBAN</th>
+                <th>Zustimmung</th>
+                <th>Abruf</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for conn in open_banking_connections %}
+                {% set status = open_banking_status(conn) %}
+                <tr>
+                  <td>{{ conn.name }}</td>
+                  <td>{{ conn.aspsp_name }} ({{ conn.aspsp_country }}, {{ "Geschäftskonto" if conn.psu_type == "business" else "Privatkonto" }})</td>
+                  <td>{{ conn.iban or "–" }}</td>
+                  <td>
+                    {% if status == "authorized" %}
+                      gültig bis {{ conn.consent_valid_until | datum if conn.consent_valid_until else "–" }}
+                    {% elif status == "expired" %}
+                      <strong>abgelaufen</strong>
+                    {% else %}
+                      <strong>fehlt</strong>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('main.open_banking_authorize_action', connection_id=conn.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="secondary btn-sm">{% if status == "authorized" %}Erneuern{% else %}Bank-Zustimmung erteilen{% endif %}</button>
+                    </form>
+                  </td>
+                  <td>
+                    {% if status == "authorized" %}
+                      <form method="post" action="{{ url_for('main.open_banking_sync_action', connection_id=conn.id) }}" class="inline-form">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input name="from_date" type="date" title="Von (Standard: ab letztem Abruf bzw. letztem vorhandenen Umsatz)" aria-label="Von-Datum" />
+                        <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
+                        <button type="submit" class="secondary">Umsätze abrufen</button>
+                      </form>
+                      {% if conn.last_synced_to %}<span class="muted small">zuletzt bis {{ conn.last_synced_to | datum }}</span>{% endif %}
+                    {% else %}
+                      <span class="muted">erst nach Zustimmung</span>
+                    {% endif %}
+                  </td>
+                  <td class="actions">
+                    <form method="post" action="{{ url_for('main.open_banking_deactivate_action', connection_id=conn.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="secondary btn-sm">Deaktivieren</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Noch kein Open-Banking-Zugang hinterlegt.</p>
+      {% endif %}
+
+      {% if bank_accounts %}
+        <details class="line-details">
+          <summary class="muted small">Neuen Open-Banking-Zugang anlegen</summary>
+          <form method="post" action="{{ url_for('main.open_banking_connection_create_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <div class="form-grid" style="margin-top:0.5rem;">
+              <div class="field field-wide">
+                <label for="ob_name">Name</label>
+                <input id="ob_name" name="name" type="text" placeholder="z. B. Geschäftskonto Finom" required />
+              </div>
+              <div class="field">
+                <label for="ob_aspsp_name">Bank (Name laut Enable-Banking-Bankenliste)</label>
+                <input id="ob_aspsp_name" name="aspsp_name" type="text" placeholder="z. B. Finom" required />
+                <a class="small" href="{{ url_for('main.open_banking_institutes_page', company_id=selected_company_id) }}">Bankenliste durchsuchen</a>
+              </div>
+              <div class="field">
+                <label for="ob_country_new">Land der Bank (ISO-Code)</label>
+                <input id="ob_country_new" name="aspsp_country" type="text" value="DE" maxlength="2" required />
+              </div>
+              <div class="field">
+                <label for="ob_psu_type">Kontotyp</label>
+                <select id="ob_psu_type" name="psu_type">
+                  <option value="business" selected>Geschäftskonto</option>
+                  <option value="personal">Privatkonto</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="ob_iban">IBAN (nur bei mehreren Konten)</label>
+                <input id="ob_iban" name="iban" type="text" />
+              </div>
+              <div class="field">
+                <label for="ob_bank_account">Bank-Sachkonto</label>
+                <select id="ob_bank_account" name="bank_account_id" required>
+                  {{ bank_account_options(default_bank_account_id) }}
+                </select>
+              </div>
+            </div>
+            <p class="hint">Bank-Zugangsdaten sieht OpenBuchhaltung nie. Gespeichert wird nur die (verschlüsselte) Sitzung von Enable Banking.</p>
+            <div class="form-actions">
+              <button type="submit">Zugang anlegen</button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
+    </details>
+
+    {% if contra_accounts %}
+      <details class="card" id="regeln"{% if rule_by_tx %} open{% endif %}>
+        <summary>Auto-Kontierung (Regeln) <span class="summary-hint">{{ booking_rules | length }} aktiv{% if rule_by_tx %}, {{ rule_by_tx | length }} Treffer bei offenen Umsätzen{% endif %}</span></summary>
+        {% if booking_rules %}
+          <div class="table-scroll">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Muster</th>
+                  <th>Gegenkonto</th>
+                  <th>Steuer</th>
+                  <th class="actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for rule in booking_rules %}
+                  <tr>
+                    <td>{{ rule.pattern }}</td>
+                    <td>{{ account_link(rule.contra_account.id, rule.contra_account.code, rule.contra_account.name) }}</td>
+                    <td>{{ rule.tax_code.code if rule.tax_code else "–" }}</td>
+                    <td class="actions">
+                      <form method="post" action="{{ url_for('main.bank_rule_deactivate_action', rule_id=rule.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <button type="submit" class="secondary btn-sm">Deaktivieren</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <form method="post" action="{{ url_for('main.bank_rules_apply_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <button type="submit" data-confirm="Alle offenen Umsätze mit Regel-Treffer jetzt verbuchen?">Regel-Treffer verbuchen</button>
+          </form>
+        {% else %}
+          <p class="muted">Noch keine Regeln — Treffer in Verwendungszweck oder Gegenseite
+            kontieren Umsätze automatisch auf das hinterlegte Gegenkonto.</p>
+        {% endif %}
+
+        <details class="line-details" style="margin-top:1rem;">
+          <summary class="muted small">Neue Regel anlegen</summary>
+          <form method="post" action="{{ url_for('main.bank_rule_create_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <div class="form-grid" style="margin-top:0.5rem;">
+              <div class="field">
+                <label for="rule_pattern">Muster (Teilstring in Verwendungszweck/Gegenseite)</label>
+                <input id="rule_pattern" name="pattern" type="text" placeholder="z. B. Telekom" required minlength="3" />
+              </div>
+              <div class="field field-wide">
+                <label for="rule_contra">Gegenkonto</label>
+                <select id="rule_contra" name="contra_account_id" required>
+                  {% for account in contra_accounts if account.is_active %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="rule_tax">Steuercode (optional)</label>
+                <select id="rule_tax" name="tax_code_id">
+                  <option value="">Ohne Steuer</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
+                  {% endfor %}
+                </select>
+              </div>
+              {% if cost_centers %}
+                <div class="field">
+                  <label for="rule_cost_center">Kostenstelle (optional)</label>
+                  <select id="rule_cost_center" name="cost_center_id">
+                    <option value="">Ohne Kostenstelle</option>
+                    {% for unit in cost_centers %}
+                      <option value="{{ unit.id }}">KSt {{ unit.code }} – {{ unit.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              {% endif %}
+              {% if profit_centers %}
+                <div class="field">
+                  <label for="rule_profit_center">Profitcenter (optional)</label>
+                  <select id="rule_profit_center" name="profit_center_id">
+                    <option value="">Ohne Profitcenter</option>
+                    {% for unit in profit_centers %}
+                      <option value="{{ unit.id }}">PC {{ unit.code }} – {{ unit.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              {% endif %}
+            </div>
+            <div class="form-actions">
+              <button type="submit">Regel anlegen</button>
+            </div>
+          </form>
+        </details>
+      </details>
+    {% endif %}
+
+    {% if bank_accounts | length > 1 %}
+      <details class="card" id="umhaengen">
+        <summary>Umsätze auf anderes Bankkonto umhängen <span class="summary-hint">alle Umsätze eines Kontos auf einmal</span></summary>
+        <form method="post" action="{{ url_for('main.bank_move_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="source_bank_account_id">Von Bankkonto</label>
+              <select id="source_bank_account_id" name="source_bank_account_id" required>
+                {{ bank_account_options(none) }}
+              </select>
+            </div>
+            <div class="field">
+              <label for="target_bank_account_id">Auf Bankkonto</label>
+              <select id="target_bank_account_id" name="target_bank_account_id" required>
+                {{ bank_account_options(none) }}
+              </select>
+            </div>
+          </div>
+          <p style="margin:0.75rem 0 0;">
+            <label class="check">
+              <input type="checkbox" name="reclassify" value="1" checked />
+              Saldo verbuchter Umsätze per Umgliederungsbuchung mitziehen
+            </label>
+          </p>
+          <p class="hint">Verschoben wird die Zuordnung der Kontoauszugszeilen; bereits erzeugte Buchungen bleiben unverändert (GoBD). Mit gesetztem Haken wird der Saldo der verbuchten Umsätze automatisch per Umgliederungsbuchung (altes an neues Konto) mitgezogen.</p>
+          <div class="form-actions">
+            <button type="submit">Umhängen</button>
+          </div>
+        </form>
+      </details>
+    {% endif %}
+
+    {% if reconciliation %}
+      {% set differences = reconciliation | selectattr("difference") | list %}
+      <details class="card" id="saldenabgleich"{% if differences %} open{% endif %}>
+        <summary>Saldenabgleich je Bankkonto
+          {% if differences %}<span class="badge badge-warning">{{ differences | length }} mit Differenz</span>{% else %}<span class="badge badge-success">stimmt</span>{% endif %}
+        </summary>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Konto</th>
+                <th class="num">Buchsaldo</th>
+                <th class="num">Summe Umsätze</th>
+                <th class="num">Differenz</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in reconciliation %}
+                <tr>
+                  <td>{{ account_link(row.account_id, row.account_code, row.account_name) }}</td>
+                  <td class="num">{{ row.book_balance | betrag }}</td>
+                  <td class="num">{{ row.statement_total | betrag }}</td>
+                  <td class="num">
+                    {% if row.difference == 0 %}
+                      <span class="badge badge-success">0,00</span>
+                    {% else %}
+                      <strong class="negative">{{ row.difference | betrag }}</strong>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">Buchsaldo = Soll − Haben aller Buchungszeilen auf dem Konto;
+          Summe Umsätze = alle importierten Kontoauszugszeilen. Eine Differenz ist nicht
+          zwingend ein Fehler (z. B. Eröffnungsbuchungen oder noch unverbuchte Umsätze),
+          zeigt aber sofort, wo ein Konto schief hängt.</p>
+      </details>
+    {% endif %}
+  {% endif %}
+{% endblock %}

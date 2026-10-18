@@ -1,0 +1,372 @@
+"""Exporte: Journal-/SuSa-CSV, DATEV-Buchungsstapel und Prueferpaket."""
+
+from __future__ import annotations
+
+import csv
+from datetime import date, datetime, timezone
+from io import StringIO
+
+from flask import Response, current_app, jsonify, request
+from sqlalchemy.orm import aliased
+
+from app.api.blueprint import api_bp
+from app.api.helpers import (
+    DateArgError,
+    api_scoped_company,
+    bool_arg,
+    date_arg,
+    get_session_factory,
+)
+from app.services.audit_export import build_audit_export_package
+from app.services.controlling import ControllingError, controlling_result_report
+from app.services.datev_export import (
+    DatevExportError,
+    DatevExportOptions,
+    build_datev_export,
+    datev_export_file_name,
+    resolve_datev_export_period,
+)
+from app.services.reports import trial_balance_for_company
+from domain.models import (
+    Account,
+    BusinessPartner,
+    ControllingUnit,
+    JournalEntry,
+    JournalEntryLine,
+)
+
+
+@api_bp.get("/exports/trial-balance.csv")
+def export_trial_balance_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    include_closing_entries = bool_arg("include_closing_entries")
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        rows = trial_balance_for_company(
+            session=session,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            include_closing_entries=include_closing_entries,
+        )
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["account_code", "account_name", "debit_total", "credit_total", "balance"])
+    for row in rows:
+        writer.writerow(
+            [
+                row["code"],
+                row["name"],
+                row["debit_total"],
+                row["credit_total"],
+                row["balance"],
+            ]
+        )
+
+    file_name = f"trial-balance-company-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/journal.csv")
+def export_journal_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        cost_unit = aliased(ControllingUnit)
+        profit_unit = aliased(ControllingUnit)
+        journal_rows = (
+            session.query(
+                JournalEntry.id,
+                JournalEntry.posting_number,
+                JournalEntry.entry_date,
+                JournalEntry.description,
+                JournalEntryLine.line_number,
+                Account.code,
+                Account.name,
+                JournalEntryLine.debit_amount,
+                JournalEntryLine.credit_amount,
+                cost_unit.code.label("cost_center_code"),
+                profit_unit.code.label("profit_center_code"),
+                Account.subledger,
+                BusinessPartner.debtor_number,
+                BusinessPartner.creditor_number,
+                BusinessPartner.name.label("partner_name"),
+                JournalEntry.service_date,
+            )
+            .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
+            .join(Account, Account.id == JournalEntryLine.account_id)
+            .outerjoin(cost_unit, cost_unit.id == JournalEntryLine.cost_center_id)
+            .outerjoin(profit_unit, profit_unit.id == JournalEntryLine.profit_center_id)
+            .outerjoin(BusinessPartner, BusinessPartner.id == JournalEntryLine.partner_id)
+            .filter(JournalEntry.company_id == company_id)
+            .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
+            .all()
+        )
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(
+        [
+            "posting_number",
+            "entry_date",
+            "entry_description",
+            "line_number",
+            "account_code",
+            "account_name",
+            "debit_amount",
+            "credit_amount",
+            "cost_center_code",
+            "profit_center_code",
+            "partner_number",
+            "partner_name",
+            "service_date",
+        ]
+    )
+    for row in journal_rows:
+        partner_number = (
+            row.creditor_number if row.subledger == "creditor" else row.debtor_number
+        ) or row.debtor_number or row.creditor_number
+        writer.writerow(
+            [
+                row.posting_number,
+                row.entry_date.isoformat(),
+                row.description,
+                row.line_number,
+                row.code,
+                row.name,
+                row.debit_amount,
+                row.credit_amount,
+                row.cost_center_code,
+                row.profit_center_code,
+                partner_number,
+                row.partner_name,
+                row.service_date.isoformat() if row.service_date else "",
+            ]
+        )
+
+    file_name = f"journal-company-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/controlling.csv")
+def export_controlling_csv():
+    company_id = request.args.get("company_id", type=int)
+    unit_type = (request.args.get("unit_type") or "cost_center").strip()
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            report = controlling_result_report(
+                session=session,
+                company_id=company_id,
+                unit_type=unit_type,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except ControllingError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    csv_buffer = StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(
+        [
+            "unit_type",
+            "unit_code",
+            "unit_name",
+            "account_code",
+            "account_name",
+            "account_type",
+            "amount",
+            "total_revenue",
+            "total_expense",
+            "net_income",
+            "acquisition_cost",
+            "depreciation",
+            "book_value",
+            "total_acquisition_cost",
+            "total_depreciation",
+            "total_book_value",
+        ]
+    )
+    for bucket in [*report["units"], report["unassigned"]]:
+        unit = bucket["unit"] or {}
+        investments = bucket["investments"] or {}
+        totals = [
+            bucket["total_revenue"],
+            bucket["total_expense"],
+            bucket["net_income"],
+        ]
+        investment_totals = [
+            investments.get("acquisition_cost", ""),
+            investments.get("depreciation", ""),
+            investments.get("book_value", ""),
+        ]
+        prefix = [unit_type, unit.get("code", ""), unit.get("name", "Nicht zugeordnet")]
+        account_rows = [
+            [account["code"], account["name"], account["account_type"], account["amount"]]
+            + totals
+            + ["", "", ""]
+            for account in bucket["accounts"]
+        ] + [
+            [account["code"], account["name"], "asset", ""]
+            + totals
+            + [account["acquisition_cost"], account["depreciation"], account["book_value"]]
+            for account in investments.get("accounts", [])
+        ]
+        for row in account_rows or [["", "", "", "", *totals, "", "", ""]]:
+            writer.writerow([*prefix, *row, *investment_totals])
+    file_name = f"controlling-{unit_type}-{company_id}-{date.today().isoformat()}.csv"
+    return Response(
+        csv_buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/datev.csv")
+def export_datev_csv():
+    """Buchungsstapel eines Wirtschaftsjahres (``fiscal_year_id``) bzw. Zeitraums darin."""
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    raw_fiscal_year_id = (request.args.get("fiscal_year_id") or "").strip()
+    try:
+        fiscal_year_id = int(raw_fiscal_year_id) if raw_fiscal_year_id else None
+    except ValueError:
+        return jsonify({"error": "fiscal_year_id must be an integer."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    generated_at = datetime.now(timezone.utc)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            period = resolve_datev_export_period(
+                session=session,
+                company_id=company_id,
+                fiscal_year_id=fiscal_year_id,
+                date_from=date_from,
+                date_to=date_to,
+                today=generated_at.date(),
+            )
+        except DatevExportError as exc:
+            error: dict[str, object] = {"error": str(exc)}
+            if exc.fiscal_years:
+                error["fiscal_years"] = [year.as_dict() for year in exc.fiscal_years]
+            return jsonify(error), 400
+
+        options = DatevExportOptions(
+            consultant_number=current_app.config.get("DATEV_CONSULTANT_NUMBER") or 1000,
+            client_number=current_app.config.get("DATEV_CLIENT_NUMBER") or company_id,
+        )
+        content = build_datev_export(
+            session=session,
+            company_id=company_id,
+            options=options,
+            generated_at=generated_at,
+            period=period,
+        )
+
+    # DATEV erwartet Windows-1252; nicht abbildbare Zeichen werden ersetzt.
+    payload = content.encode("cp1252", errors="replace")
+    file_name = datev_export_file_name(company_id, period)
+    return Response(
+        payload,
+        content_type="text/csv; charset=windows-1252",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/audit-package.zip")
+def export_audit_package():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if date_from and date_to and date_from > date_to:
+        return jsonify({"error": "date_from must be before or equal to date_to."}), 400
+
+    include_documents = bool_arg("include_documents", default=True)
+    manifest_only = bool_arg("manifest_only", default=False)
+    generated_at = datetime.now(timezone.utc)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        package = build_audit_export_package(
+            session=session,
+            company_id=company.id,
+            generated_at=generated_at,
+            date_from=date_from,
+            date_to=date_to,
+            commit_sha=current_app.config.get("APP_COMMIT_SHA"),
+            include_documents=include_documents,
+        )
+
+    if manifest_only:
+        manifest_payload = {
+            **package.manifest,
+            "package_sha256": package.package_sha256,
+        }
+        response = jsonify(manifest_payload)
+        response.headers["X-OpenBuchhaltung-SHA256"] = package.package_sha256
+        return response, 200
+
+    return Response(
+        package.payload,
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{package.file_name}"',
+            "X-OpenBuchhaltung-SHA256": package.package_sha256,
+        },
+    )

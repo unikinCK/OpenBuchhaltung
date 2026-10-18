@@ -1,0 +1,41 @@
+# Overlay: öffentliche Demo-Instanz (docker-compose.demo.yml, eigener Checkout und
+# Compose-Projekt) über den nginx des nginx-Overlays einer anderen Instanz ausliefern —
+# unter einer eigenen Domain mit eigenem Let's-Encrypt-Zertifikat.
+#
+# Unter DEMO_DOMAIN leitet nginx alles an DEMO_UPSTREAM weiter (die App der Demo), /mcp an
+# DEMO_MCP_UPSTREAM (MCP-Server der Demo, Profil mcp im Demo-Stack). Dazu
+# tritt nginx dem Netz des Demo-Projekts bei (DEMO_NETWORK, Vorgabe obh-demo_default
+# für `docker compose -p obh-demo`). Die Instanz unter PUBLIC_DOMAIN bleibt unverändert.
+#
+# Einrichtung (setzt docker-compose.nginx.yml voraus, Demo-Stack läuft bereits):
+#   1. .env: COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml:docker-compose.demo-proxy.yml
+#            (ggf. mit docker-compose.website.yml davor) und DEMO_DOMAIN=demo.example.com
+#   2. DNS: A-Record für DEMO_DOMAIN auf die öffentliche IP, wie bei PUBLIC_DOMAIN
+#   3. docker compose up -d --no-deps --force-recreate certbot nginx
+#
+# nginx löst DEMO_UPSTREAM erst zur Laufzeit auf: Ist die Demo gestoppt, antwortet
+# DEMO_DOMAIN mit 502, die übrigen Domains laufen weiter (ebenso /mcp ohne Demo-MCP). Das Netz DEMO_NETWORK muss
+# beim Start von nginx existieren (legt der Demo-Stack an).
+services:
+  nginx:
+    environment:
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?DEMO_DOMAIN must be set}
+      DEMO_UPSTREAM: ${DEMO_UPSTREAM:-obh-demo-app-1:8000}
+      DEMO_MCP_UPSTREAM: ${DEMO_MCP_UPSTREAM:-obh-demo-mcp-1:8090}
+      # Umfasst auch WEBSITE_DOMAIN: dieses Overlay steht in COMPOSE_FILE ggf. hinter
+      # docker-compose.website.yml und ersetzt dessen Filter.
+      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|PUBLIC_DOMAIN_ALIASES|NGINX_CLIENT_MAX_BODY_SIZE|WEBSITE_DOMAIN|DEMO_DOMAIN|DEMO_UPSTREAM|DEMO_MCP_UPSTREAM)$$
+    volumes:
+      - ./deploy/nginx/templates/demo.conf.template:/etc/nginx/templates/demo.conf.template:ro
+    networks:
+      - default
+      - demo
+
+  certbot:
+    environment:
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?DEMO_DOMAIN must be set}
+
+networks:
+  demo:
+    name: ${DEMO_NETWORK:-obh-demo_default}
+    external: true

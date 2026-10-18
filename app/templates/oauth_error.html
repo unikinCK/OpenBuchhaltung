@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Autorisierung fehlgeschlagen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Autorisierung fehlgeschlagen</h1>
+  <section class="card">
+    <p>{{ error }}</p>
+    <p class="muted">Bitte die Verbindung in der aufrufenden Anwendung neu einrichten.</p>
+  </section>
+{% endblock %}

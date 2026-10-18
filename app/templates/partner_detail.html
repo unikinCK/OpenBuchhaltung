@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% from "_journal.html" import posting_record, audit_changes %}
+
+{% block title %}{{ partner.name }} – Geschäftspartner – OpenBuchhaltung{% endblock %}
+
+{% set field_labels = {
+  "name": "Name", "partner_kind": "Art", "street": "Straße", "postal_code": "PLZ", "city": "Ort",
+  "country_code": "Land", "vat_id": "USt-IdNr", "tax_number": "Steuernummer", "email": "E-Mail",
+  "phone": "Telefon", "contact_person": "Ansprechpartner", "iban": "IBAN", "bic": "BIC",
+  "payment_term_days": "Zahlungsziel", "notes": "Notizen", "is_active": "aktiv",
+  "debtor_number": "Debitorennummer", "creditor_number": "Kreditorennummer",
+  "is_customer": "Kunde", "is_supplier": "Lieferant",
+} %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.partners_page', company_id=partner.company_id) }}">‹ Alle Geschäftspartner</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">{{ partner.name }}</h1>
+      <p class="page-subtitle">
+        {% if partner.debtor_number %}<span class="badge badge-info">Kunde · Debitor {{ partner.debtor_number }}</span>{% endif %}
+        {% if partner.creditor_number %}<span class="badge badge-warning">Lieferant · Kreditor {{ partner.creditor_number }}</span>{% endif %}
+        {% if not partner.is_active %}<span class="badge">inaktiv</span>{% endif %}
+      </p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary btn-sm" href="#stammdaten" data-open-details="#stammdaten">Stammdaten bearbeiten</a>
+      <a class="button btn-sm" href="{{ url_for('main.journal_page', company_id=partner.company_id, partner_id=partner.id) }}">Buchungen im Journal</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <dl class="meta-grid">
+      <div><dt>Art</dt><dd>{{ "Natürliche Person" if partner.partner_kind == "person" else "Unternehmen" }}</dd></div>
+      <div>
+        <dt>Anschrift</dt>
+        <dd>
+          {% if partner.street or partner.postal_code or partner.city %}
+            {{ partner.street or "" }}{% if partner.street %}<br />{% endif %}
+            {{ [partner.postal_code, partner.city] | select | join(" ") }}
+          {% else %}<span class="muted">–</span>{% endif %}
+          {% if partner.country_code != "DE" %}<br />{{ partner.country_code }}{% endif %}
+        </dd>
+      </div>
+      <div><dt>USt-IdNr / Steuernummer</dt><dd>{{ partner.vat_id or "–" }}{% if partner.tax_number %} · {{ partner.tax_number }}{% endif %}</dd></div>
+      <div>
+        <dt>Kontakt</dt>
+        <dd>
+          {% if partner.contact_person or partner.email or partner.phone %}
+            {% if partner.contact_person %}{{ partner.contact_person }}<br />{% endif %}
+            {% if partner.email %}<a href="mailto:{{ partner.email }}">{{ partner.email }}</a><br />{% endif %}
+            {{ partner.phone or "" }}
+          {% else %}<span class="muted">–</span>{% endif %}
+        </dd>
+      </div>
+      <div><dt>Zahlungsziel</dt><dd>{{ partner.payment_term_days ~ " Tage" if partner.payment_term_days is not none else "–" }}</dd></div>
+      <div><dt>Bankverbindung</dt><dd>{{ partner.iban or "–" }}{% if partner.bic %}<br /><span class="muted small">BIC {{ partner.bic }}</span>{% endif %}</dd></div>
+      {% if partner.notes %}
+        <div style="grid-column: 1 / -1;"><dt>Notizen</dt><dd>{{ partner.notes }}</dd></div>
+      {% endif %}
+    </dl>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Buchungen <span class="count">{{ entries_total }}</span></h2>
+      {% if entries_total > entries | length %}
+        <a class="small" href="{{ url_for('main.journal_page', company_id=partner.company_id, partner_id=partner.id) }}">Alle {{ entries_total }} im Journal →</a>
+      {% endif %}
+    </div>
+    {% if entries %}
+      <div class="table-scroll">
+        <table class="data journal-table">
+          <thead>
+            <tr>
+              <th>Beleg-Nr.</th>
+              <th>Datum</th>
+              <th>Buchungstext</th>
+              <th>Kontierung <span class="th-hint">Soll an Haben</span></th>
+              <th class="num">Betrag</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              {% set info = overview.get(entry.id, {}) %}
+              <tr>
+                <td class="nowrap">
+                  <a class="posting-number" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.id) }}">{{ entry.posting_number }}</a>
+                  {% if entry.is_finalized %}<span class="status-icon" title="Festgeschrieben">🔒</span>{% endif %}
+                </td>
+                <td class="date">{{ entry.entry_date | datum }}</td>
+                <td class="entry-text">{{ entry.description }}</td>
+                <td class="col-posting">{{ posting_record(info.debit_lines, info.credit_lines) }}</td>
+                <td class="num">{{ info.total | betrag }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Noch keine Buchungen mit diesem Geschäftspartner. Partner lassen sich beim Buchen oder nachträglich im Journal („Partner zuordnen“) zuordnen, solange die Buchung nicht festgeschrieben ist.</p>
+    {% endif %}
+  </section>
+
+  <details class="card" id="stammdaten">
+    <summary>Stammdaten bearbeiten</summary>
+    <form method="post" action="{{ url_for('main.update_partner_from_form', partner_id=partner.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="name">Name / Firma</label>
+          <input id="name" name="name" value="{{ partner.name }}" required maxlength="255" />
+        </div>
+        <div class="field">
+          <label for="partner_kind">Art</label>
+          <select id="partner_kind" name="partner_kind">
+            <option value="organization" {% if partner.partner_kind == "organization" %}selected{% endif %}>Unternehmen</option>
+            <option value="person" {% if partner.partner_kind == "person" %}selected{% endif %}>Natürliche Person</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="is_active">Status</label>
+          <select id="is_active" name="is_active">
+            <option value="true" {% if partner.is_active %}selected{% endif %}>aktiv</option>
+            <option value="false" {% if not partner.is_active %}selected{% endif %}>inaktiv (für neue Buchungen gesperrt)</option>
+          </select>
+        </div>
+      </div>
+
+      <h3 class="form-section-title">Rolle und Personenkonten</h3>
+      <div class="form-grid">
+        <div class="field">
+          <label class="check"><input type="checkbox" name="is_customer" value="1" {% if partner.debtor_number %}checked{% endif %} /> Kunde (Debitor)</label>
+          <label for="debtor_number" class="sr-only">Debitorennummer</label>
+          <input id="debtor_number" name="debtor_number" value="{{ partner.debtor_number or '' }}" inputmode="numeric" placeholder="Debitorennummer automatisch" />
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" name="is_supplier" value="1" {% if partner.creditor_number %}checked{% endif %} /> Lieferant (Kreditor)</label>
+          <label for="creditor_number" class="sr-only">Kreditorennummer</label>
+          <input id="creditor_number" name="creditor_number" value="{{ partner.creditor_number or '' }}" inputmode="numeric" placeholder="Kreditorennummer automatisch" />
+        </div>
+      </div>
+      <p class="hint">Nummern und Rollen sind fest, sobald sie in Buchungen auf Sammelkonten verwendet werden.</p>
+
+      <h3 class="form-section-title">Anschrift, Steuer, Kontakt</h3>
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="street">Straße und Hausnummer</label>
+          <input id="street" name="street" value="{{ partner.street or '' }}" maxlength="255" />
+        </div>
+        <div class="field">
+          <label for="postal_code">PLZ</label>
+          <input id="postal_code" name="postal_code" value="{{ partner.postal_code or '' }}" maxlength="20" />
+        </div>
+        <div class="field">
+          <label for="city">Ort</label>
+          <input id="city" name="city" value="{{ partner.city or '' }}" maxlength="120" />
+        </div>
+        <div class="field">
+          <label for="country_code">Land (ISO-Code)</label>
+          <input id="country_code" name="country_code" value="{{ partner.country_code }}" maxlength="2" />
+        </div>
+        <div class="field">
+          <label for="vat_id">USt-IdNr</label>
+          <input id="vat_id" name="vat_id" value="{{ partner.vat_id or '' }}" />
+        </div>
+        <div class="field">
+          <label for="tax_number">Steuernummer</label>
+          <input id="tax_number" name="tax_number" value="{{ partner.tax_number or '' }}" maxlength="30" />
+        </div>
+        <div class="field">
+          <label for="contact_person">Ansprechpartner</label>
+          <input id="contact_person" name="contact_person" value="{{ partner.contact_person or '' }}" maxlength="255" />
+        </div>
+        <div class="field">
+          <label for="email">E-Mail</label>
+          <input id="email" name="email" type="email" value="{{ partner.email or '' }}" maxlength="255" />
+        </div>
+        <div class="field">
+          <label for="phone">Telefon</label>
+          <input id="phone" name="phone" value="{{ partner.phone or '' }}" maxlength="50" />
+        </div>
+        <div class="field">
+          <label for="payment_term_days">Zahlungsziel (Tage)</label>
+          <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" value="{{ partner.payment_term_days if partner.payment_term_days is not none else '' }}" />
+        </div>
+        <div class="field field-full">
+          <label for="notes">Notizen</label>
+          <textarea id="notes" name="notes" rows="3">{{ partner.notes or '' }}</textarea>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit">Stammdaten speichern</button>
+      </div>
+    </form>
+  </details>
+
+  <details class="card" id="bankverbindung">
+    <summary>Bankverbindung ändern <span class="summary-hint">{{ partner.iban or "keine hinterlegt" }}</span></summary>
+    <p class="hint" style="margin-top:0;">Bankdaten werden getrennt gespeichert und protokolliert; leere Felder löschen sie.</p>
+    <form method="post" action="{{ url_for('main.set_partner_bank_details_from_form', partner_id=partner.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="iban">IBAN</label>
+          <input id="iban" name="iban" value="{{ partner.iban or '' }}" />
+        </div>
+        <div class="field">
+          <label for="bic">BIC</label>
+          <input id="bic" name="bic" value="{{ partner.bic or '' }}" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit">Bankverbindung speichern</button>
+      </div>
+    </form>
+  </details>
+
+  <details class="card" id="historie">
+    <summary>Änderungshistorie <span class="summary-hint">{{ history | length }} Einträge</span></summary>
+    {% if history %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th><th>Änderungen</th></tr></thead>
+          <tbody>
+            {% for event in history %}
+              <tr>
+                <td class="datetime">{{ event.changed_at | datum_zeit }}</td>
+                <td><span class="badge" title="{{ event.action }}">{{ {"created": "angelegt", "updated": "geändert", "bank_details_changed": "Bankdaten geändert"}.get(event.action, event.action) }}</span></td>
+                <td>{{ event.changed_by }}</td>
+                <td>{{ audit_changes(event.payload, field_labels) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Noch keine protokollierten Änderungen.</p>
+    {% endif %}
+  </details>
+{% endblock %}

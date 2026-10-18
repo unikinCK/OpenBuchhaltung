@@ -1,0 +1,21 @@
+[project]
+name = "openbuchhaltung"
+version = "0.1.0"
+description = "Webbasierte Open-Source-Buchhaltung für deutsche Kapitalgesellschaften (HGB/GoBD)"
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+markers = [
+  "e2e: End-to-End Kernflows",
+  "performance: Performance smoke tests with synthetic accounting data",
+]

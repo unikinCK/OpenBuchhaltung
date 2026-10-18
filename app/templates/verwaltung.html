@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}Verwaltung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Verwaltung</h1>
+
+  <section class="card">
+    <h2>Mandant + Gesellschaft anlegen</h2>
+    {% if is_global_admin %}
+      <form method="post" action="{{ url_for('main.create_tenant_and_company') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="tenant_name">Mandant</label>
+        <input id="tenant_name" name="tenant_name" required />
+
+        <label for="company_name">Gesellschaft</label>
+        <input id="company_name" name="company_name" required />
+
+        <button type="submit">Anlegen</button>
+      </form>
+    {% else %}
+      <p class="muted">Neue Mandanten kann nur ein globaler Administrator anlegen.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Stammdaten</h2>
+    <p><strong>Mandanten:</strong> {{ tenants|length }}</p>
+    <p><strong>Gesellschaften:</strong> {{ companies|length }}</p>
+    <p><strong>Konten:</strong> {{ account_count }} <span class="muted">(ausgewählte Gesellschaft)</span></p>
+
+    {% if tenants %}
+      <table>
+        <thead>
+          <tr>
+            <th>Mandant</th>
+            <th>Gesellschaften</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tenant in tenants %}
+            <tr>
+              <td>{{ tenant.name }}</td>
+              <td>
+                {% for company in companies if company.tenant_id == tenant.id %}
+                  {{ company.name }}{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Benutzerverwaltung</h2>
+    {% if new_api_token %}
+      <p class="token-notice">
+        API-Token für {{ new_api_token.username }}: <code>{{ new_api_token.token }}</code>
+        — wird nur einmal angezeigt.
+      </p>
+    {% endif %}
+    {% if is_admin %}
+      <form method="post" action="{{ url_for('main.create_user_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+        <label for="username">Benutzername</label>
+        <input id="username" name="username" required />
+
+        <label for="password">Passwort</label>
+        <input id="password" name="password" type="password" required />
+
+        <label for="role">Rolle</label>
+        <select id="role" name="role" required>
+          {% for role in roles %}
+            <option value="{{ role }}">{{ role }}</option>
+          {% endfor %}
+        </select>
+
+        {% if is_global_admin %}
+          <label for="tenant_id">Mandant</label>
+          <select id="tenant_id" name="tenant_id">
+            <option value="">Global</option>
+            {% for tenant in tenants %}
+              <option value="{{ tenant.id }}">{{ tenant.name }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+
+        <button type="submit">Benutzer anlegen</button>
+      </form>
+
+      {% if users %}
+        <table>
+          <thead>
+            <tr>
+              <th>Benutzer</th>
+              <th>Rolle</th>
+              <th>Mandant</th>
+              <th>API</th>
+              <th>KI-Zugang</th>
+              <th>Status</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td>{{ user.username }}</td>
+                <td><span class="badge">{{ user.role }}</span></td>
+                <td>{{ user.tenant.name if user.tenant else "Global" }}</td>
+                <td>{{ "..." ~ user.api_token_last4 if user.api_token_last4 else "kein Token" }}</td>
+                {% set llm = llm_summaries[user.id] %}
+                <td>{{ llm.provider_label if llm.configured else "Instanz-Standard" }}</td>
+                <td>{{ "aktiv" if user.is_active else "inaktiv" }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('main.rotate_user_api_token_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit">Token rotieren</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.set_user_active_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}" />
+                    <button type="submit">{{ "Deaktivieren" if user.is_active else "Aktivieren" }}</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.unlock_user_action', user_id=user.id) }}" style="display:inline"
+                        title="Login-Sperre nach Fehlversuchen aufheben">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit">Entsperren</button>
+                  </form>
+                  <form method="post" action="{{ url_for('main.set_user_password_action', user_id=user.id) }}" style="display:inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="password" name="new_password" placeholder="Neues Passwort"
+                           autocomplete="new-password" minlength="8" required style="width:11rem" />
+                    <button type="submit">Passwort setzen</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% else %}
+      <p class="muted">Benutzer verwalten kann nur ein Administrator.</p>
+    {% endif %}
+  </section>
+
+  {% if is_admin %}
+    <section class="card" id="ki-zugang">
+      <h2>KI-Zugang (LLM) je Benutzer</h2>
+      <p class="muted">
+        KI-Chat, Beleg-OCR, KI-Kontrolle und Belegabgleich laufen mit dem KI-Zugang des
+        handelnden Benutzers. Standard ist OpenAI ({{ llm_openai_url }}); alternativ ein
+        anderer OpenAI-<code>/responses</code>-kompatibler Endpunkt (z.&nbsp;B. Azure OpenAI,
+        OpenRouter, lokales Ollama). Der API-Key wird verschlüsselt gespeichert und nie
+        wieder angezeigt. Ohne KI-Zugang gelten die Instanz-Endpunkte der Konfiguration.
+      </p>
+      {% if users %}
+        <form method="post" action="{{ url_for('main.set_user_llm_settings_action') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+          <label for="llm_user_id">Benutzer</label>
+          <select id="llm_user_id" name="user_id" required>
+            {% for user in users %}
+              <option value="{{ user.id }}">{{ user.username }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="llm_provider">Anbieter</label>
+          <select id="llm_provider" name="provider" data-show-when="custom" data-show-target="#llm-endpoint-field">
+            <option value="openai">OpenAI (Standard)</option>
+            <option value="custom">Anderer Endpunkt (OpenAI-/responses-kompatibel)</option>
+          </select>
+
+          <div id="llm-endpoint-field">
+            <label for="llm_endpoint_url">Endpunkt-URL (nur bei anderem Endpunkt)</label>
+            <input id="llm_endpoint_url" name="endpoint_url" type="url"
+                   placeholder="https://example.com/v1/responses" />
+          </div>
+
+          <label for="llm_model">Modell</label>
+          <input id="llm_model" name="model" placeholder="{{ llm_default_model }}" />
+          <p class="muted">„loaded“ verwendet das Modell, das der Server (LM Studio, Ollama) gerade geladen hat – es wird nie ein anderes nachgeladen.</p>
+
+          <label for="llm_api_key">API-Key</label>
+          <input id="llm_api_key" name="api_key" type="password" autocomplete="off"
+                 placeholder="leer lassen = gespeicherten Key behalten" />
+
+          <button type="submit">KI-Zugang speichern</button>
+        </form>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Benutzer</th>
+              <th>Anbieter</th>
+              <th>Endpunkt</th>
+              <th>Modell</th>
+              <th>API-Key</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              {% set llm = llm_summaries[user.id] %}
+              <tr>
+                <td>{{ user.username }}</td>
+                {% if llm.configured %}
+                  <td><span class="badge">{{ llm.provider_label }}</span></td>
+                  <td><code>{{ llm.endpoint_url }}</code></td>
+                  <td>{{ llm.model }}</td>
+                  <td>
+                    {% if llm.api_key_last4 %}
+                      ...{{ llm.api_key_last4 }}
+                      {% if llm.api_key_readable == false %}
+                        <span class="muted">(nicht lesbar – SECRET_KEY geändert? Bitte neu eintragen)</span>
+                      {% endif %}
+                    {% else %}
+                      kein Key
+                    {% endif %}
+                  </td>
+                  <td>
+                    <form method="post" action="{{ url_for('main.clear_user_llm_settings_action', user_id=user.id) }}" style="display:inline">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit">Entfernen</button>
+                    </form>
+                  </td>
+                {% else %}
+                  <td colspan="5" class="muted">kein eigener KI-Zugang – Instanz-Standard</td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="card" id="fints-bankenliste">
+    <h2>FinTS-Bankenliste</h2>
+    {% if fints_institute_status.count %}
+      <p>{{ fints_institute_status.count }} Einträge, davon {{ fints_institute_status.with_url }} mit PIN/TAN-URL{% if fints_institute_status.imported_at %} — importiert am {{ fints_institute_status.imported_at | datum_zeit }}{% endif %}.</p>
+      <p class="muted">Beim Anlegen eines FinTS-Bankzugangs wird die URL per BLZ vorgeschlagen; zulässig sind nur URLs aus dieser Liste.</p>
+    {% else %}
+      <p class="muted">Keine Bankenliste importiert. FinTS-URLs werden von Hand eingetragen und nur auf https und öffentliche Hosts geprüft.</p>
+    {% endif %}
+    <p class="muted">Die Liste („fints_institute“, CSV) verteilt die Registrierungsstelle der Deutschen Kreditwirtschaft an registrierte FinTS-Produkte; sie wird nicht mitgeliefert. Ein Import ersetzt den gesamten Bestand.</p>
+    {% if is_global_admin %}
+      <form method="post" action="{{ url_for('main.import_fints_institutes_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="fints_institute_csv">CSV-Datei der Bankenliste</label>
+        <input id="fints_institute_csv" name="fints_institute_csv" type="file" accept=".csv,text/csv" required />
+        <button type="submit">Bankenliste importieren</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Kontenrahmen &amp; Demo-Daten</h2>
+    <p class="muted">Per CLI verfügbar:</p>
+    <p><code>flask --app run.py import-kontenrahmen --company-id {{ selected_company_id or 1 }} --chart skr03</code></p>
+    <p><code>flask --app run.py seed-demo</code></p>
+    <p><code>flask --app run.py import-fints-institute --csv-path fints_institute.csv</code></p>
+  </section>
+{% endblock %}

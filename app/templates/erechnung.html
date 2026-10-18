@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}E-Rechnung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">E-Rechnung importieren</h1>
+
+  <section class="card">
+    <h2>XRechnung / ZUGFeRD (XML) verbuchen</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    {% elif not expense_accounts or not creditor_accounts %}
+      <p class="muted">Es werden ein Aufwandskonto und ein Kreditoren-/Verbindlichkeitskonto benötigt —
+        zuerst unter <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> anlegen oder SKR importieren.</p>
+    {% else %}
+      <p class="muted">
+        Die strukturierte Rechnung (XML) wird ausgelesen und als Eingangsrechnung gebucht:
+        Netto auf das Aufwandskonto (Soll), Steuer auf das Steuerkonto (Soll), Brutto auf das
+        Kreditorenkonto (Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
+      </p>
+      <form method="post" action="{{ url_for('main.einvoice_book_action') }}" enctype="multipart/form-data" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="einvoice_xml">Rechnungs-XML (XRechnung UBL oder ZUGFeRD/CII)</label>
+        <input id="einvoice_xml" name="einvoice_xml" type="file" accept=".xml,text/xml,application/xml" required />
+
+        <label for="expense_account_id">Aufwandskonto (Netto, Soll)</label>
+        <select id="expense_account_id" name="expense_account_id" required>
+          <option value="">Bitte wählen</option>
+          {% for account in expense_accounts %}
+            <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="cost_center_id">Kostenstelle (Aufwandszeile)</label>
+        <select id="cost_center_id" name="cost_center_id">
+          <option value="">Ohne Kostenstelle</option>
+          {% for unit in cost_centers %}
+            <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="profit_center_id">Profitcenter (Aufwandszeile)</label>
+        <select id="profit_center_id" name="profit_center_id">
+          <option value="">Ohne Profitcenter</option>
+          {% for unit in profit_centers %}
+            <option value="{{ unit.id }}">{{ unit.code }} – {{ unit.name }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="tax_code_id">Steuercode (für Vorsteuer)</label>
+        <select id="tax_code_id" name="tax_code_id">
+          <option value="">Ohne Steuer</option>
+          {% for tax_code in tax_codes %}
+            <option value="{{ tax_code.id }}" {% if tax_code.code == 'VSt19' %}selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+          {% endfor %}
+        </select>
+
+        {% if rate_tax_codes %}
+          <details>
+            <summary>Steuercodes bei mehreren Steuersätzen</summary>
+            <p class="muted">
+              Enthält die Rechnung mehrere Steuersätze (z. B. 7 % und 19 %), wird je Satz eine
+              Aufwands- und eine Vorsteuerzeile gebucht. Ohne Auswahl gilt der Steuercode oben,
+              wenn sein Satz passt, sonst der erste Vorsteuer-Code mit diesem Satz.
+            </p>
+            {% for rate, codes in rate_tax_codes %}
+              <input type="hidden" name="rate_tax_rate" value="{{ rate }}" />
+              <label for="rate_tax_code_id_{{ loop.index }}">Steuercode für {{ rate }} %</label>
+              <select id="rate_tax_code_id_{{ loop.index }}" name="rate_tax_code_id">
+                <option value="">Automatisch</option>
+                {% for tax_code in codes %}
+                  <option value="{{ tax_code.id }}">{{ tax_code.code }}{% if tax_code.description %} – {{ tax_code.description }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            {% endfor %}
+          </details>
+        {% endif %}
+
+        <label for="creditor_account_id">Kreditoren-/Verbindlichkeitskonto (Brutto, Haben)</label>
+        <select id="creditor_account_id" name="creditor_account_id" required>
+          <option value="">Bitte wählen</option>
+          {% for account in creditor_accounts %}
+            <option value="{{ account.id }}" {% if account.id == default_creditor_account_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">E-Rechnung verbuchen</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Ausgangsrechnung als E-Rechnung exportieren</h2>
+    {% if not selected_company_id %}
+      <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
+    {% else %}
+      <p class="muted">Erzeugt eine XRechnung (UBL) oder ZUGFeRD/CII-Datei zum Download.
+        Die Verkäuferdaten stammen aus der Gesellschaft bzw. der Konfiguration
+        (<code>SELLER_*</code>-Variablen).</p>
+      <form method="post" action="{{ url_for('main.einvoice_export_action') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+
+        <label for="invoice_number">Rechnungsnummer</label>
+        <input id="invoice_number" name="invoice_number" required />
+
+        <label for="issue_date">Rechnungsdatum</label>
+        <input id="issue_date" name="issue_date" type="date" value="{{ today }}" required />
+
+        <label for="buyer_name">Käufer (Name)</label>
+        <input id="buyer_name" name="buyer_name" required />
+
+        <label for="buyer_street">Käufer Straße</label>
+        <input id="buyer_street" name="buyer_street" />
+
+        <label for="buyer_postal_code">Käufer PLZ</label>
+        <input id="buyer_postal_code" name="buyer_postal_code" />
+
+        <label for="buyer_city">Käufer Ort</label>
+        <input id="buyer_city" name="buyer_city" />
+
+        <label for="buyer_vat_id">Käufer USt-IdNr. (optional)</label>
+        <input id="buyer_vat_id" name="buyer_vat_id" />
+
+        <label for="buyer_reference">Leitweg-ID / Käuferreferenz (optional)</label>
+        <input id="buyer_reference" name="buyer_reference" />
+
+        <div id="invoice-lines">
+          <p><strong>Positionen</strong></p>
+          {% for _ in range(2) %}
+            <div class="journal-line">
+              <div>
+                <label>Bezeichnung</label>
+                <input name="line_name" />
+              </div>
+              <div>
+                <label>Menge</label>
+                <input name="line_quantity" placeholder="1" />
+              </div>
+              <div>
+                <label>Einzelpreis netto</label>
+                <input name="line_unit_price" placeholder="100.00" />
+              </div>
+              <div>
+                <label>Steuersatz %</label>
+                <input name="line_tax_rate" placeholder="19" />
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="secondary" data-add-row="#invoice-lines" data-template="#invoice-line-template">+ Weitere Position</button>
+        <br />
+
+        <label for="syntax">Format</label>
+        <select id="syntax" name="syntax">
+          <option value="ubl">XRechnung (UBL)</option>
+          <option value="cii">ZUGFeRD / XRechnung (CII)</option>
+        </select>
+
+        <button type="submit">E-Rechnung erzeugen &amp; herunterladen</button>
+      </form>
+
+      <template id="invoice-line-template">
+        <div class="journal-line">
+          <div>
+            <label>Bezeichnung</label>
+            <input name="line_name" />
+          </div>
+          <div>
+            <label>Menge</label>
+            <input name="line_quantity" placeholder="1" />
+          </div>
+          <div>
+            <label>Einzelpreis netto</label>
+            <input name="line_unit_price" placeholder="100.00" />
+          </div>
+          <div>
+            <label>Steuersatz %</label>
+            <input name="line_tax_rate" placeholder="19" />
+          </div>
+        </div>
+      </template>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Unterstützte Formate</h2>
+    <ul>
+      <li><strong>XRechnung (UBL)</strong> — <code>Invoice</code> im OASIS-UBL-Format</li>
+      <li><strong>XRechnung (CII)</strong> und <strong>ZUGFeRD</strong> — <code>CrossIndustryInvoice</code> im UN/CEFACT-Format</li>
+    </ul>
+    <p class="muted">Beispieldateien: <code>data/demo/erechnung_ubl.xml</code>, <code>data/demo/erechnung_cii.xml</code>.
+      Ausgelesen werden Rechnungsnummer, Datum, Lieferant sowie Netto-, Steuer- und Bruttobetrag.</p>
+  </section>
+{% endblock %}
