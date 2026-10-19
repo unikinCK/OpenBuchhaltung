@@ -257,6 +257,12 @@
   color: var(--text-muted);
 }
 
+.chat-welcome-logo {
+  display: block;
+  margin: 0 auto 0.5rem;
+  border-radius: 15px;
+}
+
 .chat-welcome h2 {
   color: var(--text);
   margin-bottom: 0.5rem;
@@ -284,6 +290,13 @@
   font-weight: 700;
   color: #fff;
   background: var(--primary);
+}
+
+.chat-message-assistant .chat-avatar {
+  border-radius: 28%;
+  background: #16344a url("obi-icon.svg") center / cover no-repeat;
+  color: transparent;
+  font-size: 0;
 }
 
 .chat-message-user .chat-avatar {

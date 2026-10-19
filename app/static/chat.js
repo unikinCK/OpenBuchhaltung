@@ -272,7 +272,8 @@
       row.dataset.messageId = message.id;
       var avatar = document.createElement("div");
       avatar.className = "chat-avatar";
-      avatar.textContent = message.role === "user" ? "Du" : "KI";
+      avatar.textContent = message.role === "user" ? "Du" : "Obi";
+      if (message.role !== "user") avatar.title = "Obi";
       var bubble = document.createElement("div");
       bubble.className = "chat-bubble";
       if (message.attachments && message.attachments.length) {

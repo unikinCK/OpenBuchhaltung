@@ -14,7 +14,7 @@
     'rejected': 'abgelehnt',
   } %}
   <div class="chat-message chat-message-{{ message.role }}" data-message-id="{{ message.id }}">
-    <div class="chat-avatar">{{ 'Du' if message.role == 'user' else 'KI' }}</div>
+    <div class="chat-avatar"{% if message.role != 'user' %} title="Obi"{% endif %}>{{ 'Du' if message.role == 'user' else 'Obi' }}</div>
     <div class="chat-bubble">
       {% if message.attachments %}
         <div class="chat-attachments">
@@ -162,12 +162,14 @@
     {% else %}
       <div class="chat-messages" id="chat-messages" aria-live="polite" aria-relevant="additions">
         <div class="chat-welcome" id="chat-welcome" {% if messages %}hidden{% endif %}>
-          <h2>Wobei kann ich helfen?</h2>
+          <img class="chat-welcome-logo" src="{{ url_for('static', filename='obi-icon.svg') }}"
+               alt="" width="64" height="64" />
+          <h2>Obi hier, Ihr KI-Buchhalter. Wobei kann ich helfen?</h2>
           <p>
             Fragen zur Buchhaltung stellen, Auswertungen abrufen, Buchungen anlegen
-            oder Belege hochladen – der Assistent nutzt dafür direkt die
+            oder Belege hochladen – Obi nutzt dafür direkt die
             OpenBuchhaltung-Funktionen. Buchungen und Änderungen führt er erst nach
-            Ihrer Bestätigung aus.
+            Ihrer Bestätigung aus. Ordnung muss sein.
           </p>
           <div class="chat-suggestions">
             {% for suggestion in [
@@ -183,7 +185,7 @@
         </div>
         {% for message in messages %}{{ render_message(message) }}{% endfor %}
         <div class="chat-message chat-message-assistant chat-pending" id="chat-pending" hidden>
-          <div class="chat-avatar">KI</div>
+          <div class="chat-avatar" title="Obi">Obi</div>
           <div class="chat-bubble chat-progress">
             <div class="chat-progress-head">
               <div class="chat-typing" aria-hidden="true"><span></span><span></span><span></span></div>

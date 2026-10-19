@@ -8,6 +8,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### KI-Chat: Obi, der KI-Buchhalter
+- Der Chat-Assistent heißt jetzt Obi und hat ein eigenes Logo: Nickelbrille,
+  Scheitel, Pullunder mit Rautenmuster und Bleistift hinterm Ohr
+  (`app/static/obi-icon.svg`, mit Wortmarke `app/static/obi-logo.svg`).
+- Assistenten-Nachrichten zeigen Obi statt „KI“ als Avatar; die Begrüßung im
+  leeren Chat stellt Obi mit Logo vor.
+- Der System-Prompt nennt den Namen, damit sich der Assistent auf Nachfrage als
+  Obi vorstellt.
+
 ### KI-Chat: Konten gezielt abfragen, gekürzte Ergebnisse nicht mehr als „fehlt“ werten
 - „Rufe die Buchungen auf Konto 4985 ab“ endete mit „Konto 4985 gibt es nicht“: Der Chat
   rief den ganzen Kontenplan ab, das Ergebnis wurde für das Modell nach 20.000 Zeichen
