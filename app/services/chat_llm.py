@@ -6,6 +6,12 @@ Das Modell erhält die MCP-Tools als Funktionsdefinitionen, angeforderte
 Tool-Aufrufe werden über einen Callback ausgeführt und als
 ``function_call_output`` zurückgereicht, bis das Modell eine finale
 Textantwort liefert (oder das Aufruf-Limit erreicht ist).
+
+Gegen ausufernde Modelle (z. B. ein Denkprozess in der Endlosschleife) gilt je
+Modellaufruf ein Reasoning-Budget, das unabhängig vom Modell im Stream gezählt
+wird, plus eine Obergrenze der gesamten Ausgabe, die auch als
+``max_output_tokens`` an den Endpoint geht. Gegen tote Verbindungen bleibt nur ein
+Leerlauf-Timeout; ein Gesamt-Zeitlimit je Chat-Zug gibt es nicht mehr.
 """
 
 from __future__ import annotations
@@ -28,13 +34,29 @@ class ChatLLMError(ValueError):
 
 
 class ChatLLMTimeout(ChatLLMError):
-    """Das Chat-LLM hat nicht innerhalb des Zeitlimits geantwortet."""
+    """Das Chat-LLM hat zu lange keine Daten geliefert (Leerlauf-Timeout)."""
 
 
-# Gesamtdauer eines Chat-Zuges (alle Modell- und Tool-Aufrufe), siehe
-# ``CHAT_LLM_TIMEOUT_SECONDS``. Lokale Modelle brauchen für lange Antworten
-# viele Minuten; der Fortschritt kommt währenddessen über den Stream.
-DEFAULT_TURN_TIMEOUT_SECONDS = 1200.0
+class ChatLLMReasoningLimit(ChatLLMError):
+    """Das Modell hat das Reasoning- bzw. Ausgabebudget eines Modellaufrufs überschritten."""
+
+
+REASONING_LIMIT_TEXT = (
+    "Obi hat zu lange nachgedacht und wurde abgebrochen – bitte die Frage neu "
+    "oder genauer stellen."
+)
+
+# Leerlauf-Timeout je Modellaufruf (``CHAT_LLM_IDLE_TIMEOUT_SECONDS``): so lange
+# darf der Endpoint keine Daten liefern. Großzügig, weil während der
+# Prompt-Verarbeitung und solange ein lokaler Server (LM Studio: eine Anfrage
+# gleichzeitig) eine fremde Anfrage abarbeitet, minutenlang nichts kommt.
+DEFAULT_IDLE_TIMEOUT_SECONDS = 600.0
+# Reasoning-Token je Modellaufruf (``CHAT_LLM_MAX_REASONING_TOKENS``, 0 = aus).
+DEFAULT_MAX_REASONING_TOKENS = 16000
+# Spielraum für Antwort und Tool-Aufrufe über dem Reasoning-Budget. Die Summe
+# begrenzt die gesamte Ausgabe eines Modellaufrufs: clientseitig im Stream und als
+# ``max_output_tokens`` beim Endpoint.
+ANSWER_TOKEN_ALLOWANCE = 8000
 # Fortschritt aus dem LLM-Stream höchstens so oft melden.
 STREAM_PROGRESS_INTERVAL_SECONDS = 1.0
 # Länge des Denkprozess-Ausschnitts in der Fortschrittsanzeige.
@@ -103,7 +125,7 @@ def _post_json(
     payload: dict[str, Any],
     *,
     api_key: str | None = None,
-    timeout: float = DEFAULT_TURN_TIMEOUT_SECONDS,
+    timeout: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
     on_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """POST an den ``/responses``-Endpoint, liefert den Antwort-Body.
@@ -111,10 +133,11 @@ def _post_json(
     Mit ``on_event`` wird die Antwort gestreamt (``stream: true``, Server-Sent
     Events): Jedes Ereignis geht an ``on_event``, zurück kommt die vollständige
     Antwort aus ``response.completed``. Ein Endpoint ohne Stream-Unterstützung
-    antwortet mit JSON, das wie bisher gelesen wird. ``timeout`` begrenzt die
-    Gesamtdauer des Aufrufs.
+    antwortet mit JSON, das wie bisher gelesen wird. ``timeout`` ist ein
+    Leerlauf-Timeout: Er greift, wenn der Endpoint so lange keine Daten liefert.
+    Eine Ausnahme aus ``on_event`` bricht den Aufruf ab und schließt die
+    Verbindung (der Server hört dann auf zu generieren).
     """
-    deadline = time.monotonic() + timeout
     if on_event is not None:
         payload = {**payload, "stream": True}
     headers = {"Content-Type": "application/json"}
@@ -130,7 +153,7 @@ def _post_json(
         with urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type") or ""
             if on_event is not None and "text/event-stream" in content_type:
-                return _read_event_stream(response, on_event, deadline)
+                return _read_event_stream(response, on_event)
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         # Upstream-Fehlertexte nur ins Log, nicht an den Client (S10).
@@ -147,14 +170,10 @@ def _post_json(
         raise ChatLLMError("Chat-LLM lieferte kein gültiges JSON.") from exc
 
 
-def _read_event_stream(
-    response, on_event: Callable[[dict[str, Any]], None], deadline: float
-) -> dict[str, Any]:
+def _read_event_stream(response, on_event: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
     """Liest einen ``/responses``-Stream (SSE) bis ``response.completed``."""
     data_lines: list[str] = []
     for raw_line in response:
-        if time.monotonic() > deadline:
-            raise TimeoutError
         line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
         if line.startswith("data:"):
             data_lines.append(line[5:].removeprefix(" "))
@@ -171,7 +190,10 @@ def _read_event_stream(
         kind = event.get("type")
         if kind in {"response.completed", "response.incomplete"}:
             body = event.get("response")
-            return body if isinstance(body, dict) else {}
+            body = body if isinstance(body, dict) else {}
+            if kind == "response.incomplete":
+                body.setdefault("status", "incomplete")
+            return body
         if kind in {"response.failed", "error"}:
             logger.warning("Chat-LLM meldete im Stream einen Fehler: %s", str(event)[:500])
             raise ChatLLMError("Chat-LLM meldete einen Fehler.")
@@ -179,34 +201,75 @@ def _read_event_stream(
     raise ChatLLMError("Chat-LLM hat die Antwort nicht abgeschlossen.")
 
 
-class _StreamProgress:
-    """Übersetzt LLM-Stream-Ereignisse in gedrosselte Fortschrittsmeldungen.
+_REASONING_DELTA_TYPES = {
+    "response.reasoning_text.delta",  # LM Studio, vLLM u. a.
+    "response.reasoning_summary_text.delta",  # OpenAI (nur die Zusammenfassung)
+}
 
-    Meldet ``{"type": "generating", "round", "phase", "tokens", "seconds"}`` mit
-    ``phase`` ``reasoning`` (samt ``snippet``, dem Ende des Denkprozesses) oder
-    ``answer`` sowie ``{"type": "preparing_tool", "round", "name"}``, sobald das
-    Modell einen Tool-Aufruf beginnt. ``tokens`` zählt die Stream-Fragmente
-    (bei den gängigen Servern ein Token je Fragment).
+
+def _token_count(text: str) -> int:
+    """Token eines Stream-Fragments.
+
+    Die gängigen Server (LM Studio, OpenAI, Ollama, llama.cpp) streamen ein Token
+    je Fragment; bündelt ein Server mehrere, wird vorsichtig nach Länge geschätzt.
+    """
+    return max(1, len(text) // 6)
+
+
+class _StreamProgress:
+    """Beobachtet den LLM-Stream eines Modellaufrufs: Fortschritt und Reasoning-Schranke.
+
+    Meldet gedrosselt ``{"type": "generating", "round", "phase", "tokens",
+    "seconds"}`` mit ``phase`` ``reasoning`` (samt ``snippet``, dem Ende des
+    Denkprozesses) oder ``answer`` sowie ``{"type": "preparing_tool", "round",
+    "name"}``, sobald das Modell einen Tool-Aufruf beginnt.
+
+    Als Denkprozess zählen getypte Reasoning-Ereignisse und ``<think>``-Text in der
+    Antwort (siehe :class:`_ThinkSplitter`). Mit ``max_reasoning_tokens`` wirft der
+    Beobachter :class:`ChatLLMReasoningLimit`, sobald der Denkprozess das Budget
+    oder die gesamte Ausgabe (Denkprozess, Antwort, Tool-Argumente) das Budget plus
+    :data:`ANSWER_TOKEN_ALLOWANCE` überschreitet. Die zweite Grenze fängt Modelle,
+    deren ``<think>`` schon im Prompt-Template steht: Ihr Denkprozess ist erst am
+    ``</think>`` als solcher zu erkennen.
     """
 
-    def __init__(self, report: Callable[[dict[str, Any]], None], round_: int) -> None:
+    def __init__(
+        self,
+        report: Callable[[dict[str, Any]], None],
+        round_: int,
+        *,
+        max_reasoning_tokens: int = 0,
+    ) -> None:
         self.report = report
         self.round = round_
+        self.max_reasoning_tokens = max_reasoning_tokens
         self.started = time.monotonic()
         self.last_report = 0.0
         self.phase = ""
-        self.tokens = {"reasoning": 0, "answer": 0}
+        self.tokens = {"reasoning": 0, "answer": 0, "tool": 0}
         self.reasoning_tail = ""
+        self.think = _ThinkSplitter()
 
     def __call__(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
-        if kind in {"response.reasoning_text.delta", "response.reasoning_summary_text.delta"}:
-            delta = event.get("delta")
-            if isinstance(delta, str):
-                self.reasoning_tail = (self.reasoning_tail + delta)[-4 * REASONING_SNIPPET_CHARS:]
-            self._count("reasoning")
+        delta = event.get("delta")
+        text = delta if isinstance(delta, str) else ""
+        if kind in _REASONING_DELTA_TYPES:
+            self._count("reasoning", text)
         elif kind == "response.output_text.delta":
-            self._count("answer")
+            parts = self.think.feed(text) if text else [("answer", "")]
+            for phase, part in parts:
+                if phase == "close":
+                    # ``</think>`` ohne öffnendes Tag: Der bisherige Text war schon
+                    # Denkprozess. Kein nachträglicher Abbruch – das Modell hat das
+                    # Denken ja beendet; es gilt weiter die Obergrenze der Ausgabe.
+                    self.tokens["reasoning"] += self.tokens["answer"]
+                    self.tokens["answer"] = 0
+                else:
+                    self._count(phase, part)
+        elif kind == "response.function_call_arguments.delta":
+            self.tokens["tool"] += _token_count(text)
+            self._check_budget("tool")
         elif kind == "response.output_item.added":
             item = event.get("item")
             if isinstance(item, dict) and item.get("type") == "function_call" and item.get("name"):
@@ -214,8 +277,32 @@ class _StreamProgress:
                     {"type": "preparing_tool", "round": self.round, "name": str(item["name"])}
                 )
 
-    def _count(self, phase: str) -> None:
-        self.tokens[phase] += 1
+    def _check_budget(self, phase: str) -> None:
+        if self.max_reasoning_tokens <= 0:
+            return
+        if phase == "reasoning" and self.tokens["reasoning"] > self.max_reasoning_tokens:
+            self._abort("Reasoning-Budget")
+        if sum(self.tokens.values()) > self.max_reasoning_tokens + ANSWER_TOKEN_ALLOWANCE:
+            self._abort("Ausgabe-Obergrenze")
+
+    def _abort(self, limit: str) -> None:
+        logger.warning(
+            "Chat-LLM: Runde %s abgebrochen (%s überschritten): %s Reasoning-, %s Antwort-, "
+            "%s Tool-Token in %s s",
+            self.round,
+            limit,
+            self.tokens["reasoning"],
+            self.tokens["answer"],
+            self.tokens["tool"],
+            round(time.monotonic() - self.started),
+        )
+        raise ChatLLMReasoningLimit(REASONING_LIMIT_TEXT)
+
+    def _count(self, phase: str, text: str) -> None:
+        if phase == "reasoning" and text:
+            self.reasoning_tail = (self.reasoning_tail + text)[-4 * REASONING_SNIPPET_CHARS:]
+        self.tokens[phase] += _token_count(text)
+        self._check_budget(phase)
         now = time.monotonic()
         if phase == self.phase and now - self.last_report < STREAM_PROGRESS_INTERVAL_SECONDS:
             return
@@ -231,6 +318,58 @@ class _StreamProgress:
         if phase == "reasoning":
             event["snippet"] = _snippet(self.reasoning_tail)
         self.report(event)
+
+
+_THINK_TAG_RE = re.compile(r"<(/?)think>", re.IGNORECASE)
+_THINK_TAGS = ("<think>", "</think>")
+
+
+class _ThinkSplitter:
+    """Teilt gestreamten Antworttext in Denkprozess und Antwort (wie :func:`_strip_think`).
+
+    ``feed`` liefert je Fragment ``(art, text)``-Teile: ``reasoning`` innerhalb von
+    ``<think>…</think>``, ``answer`` außerhalb sowie ``("close", "")`` für ein
+    ``</think>`` ohne öffnendes Tag – dann war der bisherige Text schon
+    Denkprozess. Ein Tag, das über die Fragmentgrenze reicht, wird bis zum
+    nächsten Fragment zurückgehalten.
+    """
+
+    def __init__(self) -> None:
+        self.inside = False
+        self.pending = ""
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        text = self.pending + text
+        self.pending = ""
+        parts: list[tuple[str, str]] = []
+        while text:
+            match = _THINK_TAG_RE.search(text)
+            if match is None:
+                keep = _partial_tag_length(text)
+                self.pending = text[len(text) - keep:]
+                text = text[: len(text) - keep]
+                if text:
+                    parts.append(("reasoning" if self.inside else "answer", text))
+                break
+            if match.start():
+                parts.append(("reasoning" if self.inside else "answer", text[: match.start()]))
+            if not match.group(1):
+                self.inside = True
+            elif self.inside:
+                self.inside = False
+            else:
+                parts.append(("close", ""))
+            text = text[match.end():]
+        return parts
+
+
+def _partial_tag_length(text: str) -> int:
+    """Länge des längsten Textendes, mit dem ein ``<think>``-Tag beginnt."""
+    for length in range(min(len(text), len(_THINK_TAGS[1]) - 1), 0, -1):
+        tail = text[-length:].lower()
+        if any(tag.startswith(tail) for tag in _THINK_TAGS):
+            return length
+    return 0
 
 
 def _snippet(text: str) -> str:
@@ -358,6 +497,30 @@ def _parse_arguments(raw: object) -> dict[str, Any]:
     return {}
 
 
+def _output_limit_reached(body: dict[str, Any], limit: int | None) -> bool:
+    """Hat der Endpoint die Ausgabe bei ``max_output_tokens`` abgeschnitten?
+
+    OpenAI meldet das als ``status: incomplete`` mit Grund ``max_output_tokens``.
+    LM Studio schließt die Antwort dagegen normal ab (``completed``, ohne
+    ``incomplete_details``); erkennbar ist das nur an ``usage.output_tokens`` am
+    Limit (beobachtet: ein Token darunter, der Denkprozess zählt mit).
+    """
+    details = body.get("incomplete_details")
+    if (
+        body.get("status") == "incomplete"
+        and isinstance(details, dict)
+        and details.get("reason") == "max_output_tokens"
+    ):
+        return True
+    usage = body.get("usage")
+    output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+    return (
+        bool(limit)
+        and isinstance(output_tokens, int)
+        and output_tokens >= limit - max(8, limit // 100)
+    )
+
+
 def _format_minutes(seconds: float) -> str:
     if seconds < 120:
         return f"{round(seconds)} Sekunden"
@@ -373,7 +536,8 @@ def run_chat_turn(
     execute_tool: Callable[[str, dict[str, Any]], tuple[str, bool]],
     api_key: str | None = None,
     max_tool_calls: int = 15,
-    timeout: float = DEFAULT_TURN_TIMEOUT_SECONDS,
+    idle_timeout: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
+    max_reasoning_tokens: int = DEFAULT_MAX_REASONING_TOKENS,
     post_json: Callable[..., dict[str, Any]] | None = None,
     requires_confirmation: Callable[[str, dict[str, Any]], bool] | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
@@ -391,11 +555,20 @@ def run_chat_turn(
     ``preparing_tool``, siehe :class:`_StreamProgress`) und vor jeder
     Tool-Ausführung ``{"type": "tool", "name": …}``; eine Ausnahme daraus (z. B.
     Abbruch durch den Benutzer) beendet den Zug, auch mitten im Modellaufruf.
-    ``timeout`` begrenzt die Gesamtdauer des Zuges.
+
+    ``max_reasoning_tokens`` begrenzt den Denkprozess je Modellaufruf, die gesamte
+    Ausgabe je Aufruf zusätzlich auf das Budget plus :data:`ANSWER_TOKEN_ALLOWANCE`
+    (clientseitig im Stream und als ``max_output_tokens``); überschritten wirft
+    der Zug :class:`ChatLLMReasoningLimit`, ``0`` schaltet beides ab.
+    ``idle_timeout`` greift, wenn der Endpoint so lange keine Daten liefert; eine
+    Höchstdauer des ganzen Zuges gibt es nicht.
     """
     report = on_progress or (lambda _event: None)
     poster = post_json or _post_json
-    deadline = time.monotonic() + timeout
+    max_reasoning_tokens = max(0, max_reasoning_tokens)
+    output_limit = (
+        max_reasoning_tokens + ANSWER_TOKEN_ALLOWANCE if max_reasoning_tokens else None
+    )
     executed: list[ChatToolCall] = []
     limit_reached = False
 
@@ -410,24 +583,36 @@ def run_chat_turn(
         if tools and not limit_reached:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if output_limit:
+            # Serverseitige Schranke, auch für Anbieter, die den Denkprozess
+            # nicht streamen (OpenAI o-/gpt-5-Modelle); LM Studio zählt ihn mit.
+            payload["max_output_tokens"] = output_limit
 
         report({"type": "thinking", "round": _round})
-        remaining = deadline - time.monotonic()
         try:
-            if remaining <= 0:
-                raise ChatLLMTimeout("Zeitlimit erreicht.")
             body = poster(
                 endpoint_url,
                 payload,
                 api_key=api_key,
-                timeout=remaining,
-                on_event=_StreamProgress(report, _round),
+                timeout=idle_timeout,
+                on_event=_StreamProgress(
+                    report, _round, max_reasoning_tokens=max_reasoning_tokens
+                ),
             )
         except ChatLLMTimeout as exc:
             raise ChatLLMTimeout(
-                f"Chat-LLM hat nicht innerhalb von {_format_minutes(timeout)} "
-                "geantwortet. Bitte die Frage enger fassen oder später erneut versuchen."
+                f"Chat-LLM hat {_format_minutes(idle_timeout)} lang keine Daten geliefert "
+                "(KI-Server ausgelastet oder Verbindung unterbrochen). Bitte später "
+                "erneut versuchen."
             ) from exc
+        if _output_limit_reached(body, output_limit):
+            logger.warning(
+                "Chat-LLM: Runde %s am Ausgabelimit abgeschnitten (status=%s, usage=%s)",
+                _round,
+                body.get("status"),
+                body.get("usage"),
+            )
+            raise ChatLLMReasoningLimit(REASONING_LIMIT_TEXT)
         calls = _function_calls(body)
         if not calls:
             reply = _collect_message_text(body)

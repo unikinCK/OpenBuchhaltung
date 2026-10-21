@@ -35,11 +35,13 @@ from flask import current_app
 
 from app.services.chat_display import action_summary, tool_call_view
 from app.services.chat_llm import (
-    DEFAULT_TURN_TIMEOUT_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_MAX_REASONING_TOKENS,
     TOOL_CALL_STATUS_CONFIRMED,
     TOOL_CALL_STATUS_PENDING,
     TOOL_CALL_STATUS_REJECTED,
     ChatLLMError,
+    ChatLLMReasoningLimit,
     ChatTurnResult,
     run_chat_turn,
 )
@@ -636,6 +638,7 @@ def _run_turn(
     progress: ProgressCallback = _no_progress,
 ) -> ChatTurnResult:
     config = current_app.config
+    max_reasoning_tokens = config.get("CHAT_LLM_MAX_REASONING_TOKENS")
     return run_chat_turn(
         endpoint_url=endpoint.url,
         model=endpoint.model,
@@ -644,7 +647,14 @@ def _run_turn(
         execute_tool=build_tool_executor(api_user=api_user, global_access=global_access),
         api_key=endpoint.api_key,
         max_tool_calls=int(config.get("CHAT_LLM_MAX_TOOL_CALLS") or 15),
-        timeout=float(config.get("CHAT_LLM_TIMEOUT_SECONDS") or DEFAULT_TURN_TIMEOUT_SECONDS),
+        idle_timeout=float(
+            config.get("CHAT_LLM_IDLE_TIMEOUT_SECONDS") or DEFAULT_IDLE_TIMEOUT_SECONDS
+        ),
+        max_reasoning_tokens=(
+            DEFAULT_MAX_REASONING_TOKENS
+            if max_reasoning_tokens is None
+            else int(max_reasoning_tokens)
+        ),
         requires_confirmation=lambda name, _arguments: chat_tool_requires_confirmation(name),
         on_progress=lambda event: progress(
             {**event, "title": tool_title(event["name"])} if event.get("name") else event
@@ -668,6 +678,17 @@ def _store_cancelled_reply(session_factory, conversation_id: int) -> None:
     _store_assistant_turn(
         session_factory, conversation_id, ChatTurnResult(reply_text=CANCELLED_REPLY_TEXT)
     )
+
+
+def _store_reasoning_abort(
+    session_factory, conversation_id: int, exc: ChatLLMReasoningLimit
+) -> None:
+    """Hält den Abbruch eines ausufernden Modells im Verlauf fest.
+
+    Sonst stünde die abgebrochene Frage beim nächsten Zug unbeantwortet im
+    Verlauf, und das Modell würde sich womöglich erneut daran festbeißen.
+    """
+    _store_assistant_turn(session_factory, conversation_id, ChatTurnResult(reply_text=str(exc)))
 
 
 def _store_assistant_turn(session_factory, conversation_id: int, turn: ChatTurnResult) -> dict:
@@ -812,6 +833,9 @@ def run_chat_message(
             global_access=global_access,
             progress=progress,
         )
+    except ChatLLMReasoningLimit as exc:
+        _store_reasoning_abort(session_factory, conversation_id, exc)
+        raise
     except ChatLLMError:
         # Benutzer-Nachricht bleibt gespeichert; Fehler geht an den Aufrufer.
         raise
@@ -918,6 +942,9 @@ def resolve_chat_action(
             global_access=global_access,
             progress=progress,
         )
+    except ChatLLMReasoningLimit as exc:
+        _store_reasoning_abort(session_factory, conversation_id, exc)
+        raise
     except ChatCancelled:
         _store_cancelled_reply(session_factory, conversation_id)
         raise
