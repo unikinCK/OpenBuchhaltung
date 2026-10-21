@@ -376,7 +376,9 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `CHAT_LLM_ENDPOINT_URL`, `CHAT_LLM_MODEL` | Fallback | KI-Chat. |
 | `CHAT_LLM_API_KEY` | – | **Entfernt** – wird ignoriert (Warnung beim Start); API-Keys je Benutzer in der Verwaltung hinterlegen. |
 | `CHAT_LLM_MAX_TOOL_CALLS` | `15` | Tool-Aufrufe je Chat-Nachricht. |
-| `CHAT_LLM_TIMEOUT_SECONDS` | `1200` | Höchstdauer einer Chat-Nachricht (alle Modell- und Tool-Aufrufe zusammen). Die Modellantwort wird gestreamt; der Chat zeigt währenddessen Denk-/Schreibfortschritt. |
+| `CHAT_LLM_MAX_REASONING_TOKENS` | `16000` | Reasoning-Schranke je Modellaufruf: Denkt das Modell länger (getypte Reasoning-Ereignisse oder `<think>`-Text im Stream), bricht der Chat ab („Obi hat zu lange nachgedacht …“). Die gesamte Ausgabe je Aufruf ist auf diesen Wert + 8000 Token begrenzt, clientseitig und als `max_output_tokens` für Anbieter mit verdecktem Reasoning. `0` schaltet beides ab. |
+| `CHAT_LLM_IDLE_TIMEOUT_SECONDS` | `600` | Leerlauf-Timeout je Modellaufruf: Abbruch, wenn das Chat-LLM so lange keine Daten liefert. Großzügig, weil Prompt-Verarbeitung und Warteschlange lokaler Server minutenlang still sein können. Eine Höchstdauer je Chat-Nachricht gibt es nicht mehr. |
+| `CHAT_LLM_TIMEOUT_SECONDS` | – | **Entfernt** – wird ignoriert (Warnung beim Start); ersetzt durch `CHAT_LLM_MAX_REASONING_TOKENS` und `CHAT_LLM_IDLE_TIMEOUT_SECONDS`. |
 | `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich und Dokument-Update; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). |
 
 **Fachliche Schnittstellen**
@@ -1545,9 +1547,11 @@ er nur vor: Sie werden erst ausgeführt, wenn der Benutzer sie im Chat bestätig
 # Instanz-Endpoint ohne API-Key für Benutzer ohne eigenen KI-Zugang (optional)
 export CHAT_LLM_ENDPOINT_URL="http://localhost:11434/v1/responses"
 export CHAT_LLM_MODEL="gpt-4.1-mini"
-# Optional: Limits (Default 15 Tool-Aufrufe je Nachricht, 20 min je Nachricht)
+# Optional: Limits (Default 15 Tool-Aufrufe je Nachricht, 16000 Reasoning-Token
+# je Modellaufruf, Abbruch nach 10 min ohne Daten vom Modell)
 export CHAT_LLM_MAX_TOOL_CALLS=15
-export CHAT_LLM_TIMEOUT_SECONDS=1200
+export CHAT_LLM_MAX_REASONING_TOKENS=16000
+export CHAT_LLM_IDLE_TIMEOUT_SECONDS=600
 ```
 
 Ohne gesetzte `CHAT_LLM_*`-Variablen fällt der Chat auf

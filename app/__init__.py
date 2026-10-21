@@ -148,7 +148,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         # Timeout je Beleg-/Dokument-LLM-Aufruf (Standard 30 s, Dokument-Update 20 s).
         LLM_TIMEOUT_SECONDS=os.environ.get("LLM_TIMEOUT_SECONDS"),
         CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),
-        CHAT_LLM_TIMEOUT_SECONDS=float(os.environ.get("CHAT_LLM_TIMEOUT_SECONDS", "1200")),
+        CHAT_LLM_IDLE_TIMEOUT_SECONDS=float(
+            os.environ.get("CHAT_LLM_IDLE_TIMEOUT_SECONDS", "600")
+        ),
+        CHAT_LLM_MAX_REASONING_TOKENS=int(
+            os.environ.get("CHAT_LLM_MAX_REASONING_TOKENS", "16000")
+        ),
         # FinTS-Produktkennung: 25-stellige Registrierungsnummer der Deutschen
         # Kreditwirtschaft (HKVVB „Produktbezeichnung“), Voraussetzung für den
         # Direktabruf. Sie ist an den Betreiber gebunden und gehört nur in die
@@ -215,6 +220,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         logger.warning(
             "CHAT_LLM_API_KEY wird nicht mehr ausgewertet. API-Keys hinterlegt der "
             "Administrator je Benutzer (Verwaltung → KI-Zugang)."
+        )
+    if os.environ.get("CHAT_LLM_TIMEOUT_SECONDS"):
+        logger.warning(
+            "CHAT_LLM_TIMEOUT_SECONDS wird nicht mehr ausgewertet: Ausufernde Modelle "
+            "begrenzt jetzt CHAT_LLM_MAX_REASONING_TOKENS je Modellaufruf, tote "
+            "Verbindungen CHAT_LLM_IDLE_TIMEOUT_SECONDS (Leerlauf)."
         )
     # Fail-fast bei Tippfehlern in der Allowlist statt Fehler erst beim ersten Abruf.
     parse_allowed_hosts(app.config.get("DOCUMENT_FETCH_ALLOWED_HOSTS"))

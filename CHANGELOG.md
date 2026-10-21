@@ -8,6 +8,33 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### KI-Chat: Reasoning-Schranke statt Gesamt-Zeitlimit
+- Ein Modell, dessen Denkprozess in eine Endlosschleife geriet, blockierte den KI-Server
+  bis zum Abbrechen in der App oder bis zum Zeitlimit von 20 Minuten – bei lokalen
+  Servern, die nur eine Anfrage gleichzeitig bearbeiten, für alle Benutzer.
+- Neu: `CHAT_LLM_MAX_REASONING_TOKENS` (Standard `16000`, `0` = aus) begrenzt den
+  Denkprozess je Modellaufruf. Gezählt wird im Stream, unabhängig davon, wie das Modell
+  den Denkprozess liefert: getypte Reasoning-Ereignisse (`response.reasoning_text.delta`,
+  `response.reasoning_summary_text.delta`) und `<think>`-Text in der Antwort. Die
+  gesamte Ausgabe je Aufruf ist zusätzlich auf das Budget + 8000 Token begrenzt; das
+  fängt Modelle, deren `<think>` schon im Prompt-Template steht und deren Denkprozess
+  deshalb erst am `</think>` erkennbar ist.
+- Dieselbe Obergrenze geht als `max_output_tokens` an den Endpoint (Anbieter mit
+  verdecktem Reasoning wie OpenAI o-/gpt-5-Modelle; LM Studio zählt den Denkprozess mit).
+  Ein am Limit abgeschnittener Aufruf (`status: incomplete` mit Grund
+  `max_output_tokens`, bei LM Studio `usage.output_tokens` am Limit) gilt nicht mehr als
+  leere Antwort.
+- Bei Überschreitung schließt der Chat die Verbindung (der Server hört auf zu
+  generieren) und meldet „Obi hat zu lange nachgedacht und wurde abgebrochen – bitte die
+  Frage neu oder genauer stellen.“ – in der Weboberfläche, im NDJSON-Stream der REST-API
+  (iOS-App) und über MCP (`send_chat_message`). Der Hinweis wird wie ein Abbruch als
+  Antwort im Verlauf gespeichert, damit die abgebrochene Frage beim nächsten Zug nicht
+  unbeantwortet im Verlauf steht.
+- **Geändert:** `CHAT_LLM_TIMEOUT_SECONDS` entfällt (wird ignoriert, Warnung beim
+  Start). Gegen tote Verbindungen gilt nur noch ein Leerlauf-Timeout,
+  `CHAT_LLM_IDLE_TIMEOUT_SECONDS` (Standard `600`): Abbruch, wenn das Modell so lange
+  keine Daten liefert. `LLM_TIMEOUT_SECONDS` (Beleg-OCR usw.) bleibt unverändert.
+
 ### KI-Chat: Obi, der KI-Buchhalter
 - Der Chat-Assistent heißt jetzt Obi und hat ein eigenes Logo: Nickelbrille,
   Scheitel, Pullunder mit Rautenmuster und Bleistift hinterm Ohr
