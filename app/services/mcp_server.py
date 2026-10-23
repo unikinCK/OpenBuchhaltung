@@ -4795,7 +4795,7 @@ class MCPServer:
         # Pfad-Platzhalter wie {asset_id} aus den Argumenten füllen; die dafür
         # verbrauchten Werte nicht zusätzlich als Query/Body senden.
         path = tool.path
-        remaining = dict(arguments)
+        remaining = _coerce_to_schema(arguments, tool.input_schema)
         if "{" in path:
             for key in list(remaining):
                 placeholder = "{" + key + "}"
@@ -4824,6 +4824,33 @@ class _JsonRpcError(Exception):
         if self.data is not None:
             payload["data"] = self.data
         return payload
+
+
+def _coerce_to_schema(value: Any, schema: dict[str, Any]) -> Any:
+    """Gibt Zahlen in Textfeldern als Text weiter (z. B. PLZ '63628').
+
+    Manche MCP-Clients verlieren Typ-Unions wie ["string", "null"] und senden
+    ziffernartige Texte dann als JSON-Zahl, die die API ablehnt.
+    """
+    if isinstance(value, dict):
+        properties = schema.get("properties") or {}
+        return {
+            key: _coerce_to_schema(item, properties[key]) if key in properties else item
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        items = schema.get("items")
+        return [_coerce_to_schema(item, items) for item in value] if items else value
+    declared = schema.get("type")
+    types = set(declared) if isinstance(declared, list) else {declared}
+    if (
+        "string" in types
+        and not types & {"number", "integer"}
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    ):
+        return str(value)
+    return value
 
 
 def _tool_result(text: str, *, is_error: bool = False) -> dict[str, Any]:
