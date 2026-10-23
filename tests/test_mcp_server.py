@@ -457,6 +457,43 @@ def test_update_fixed_asset_forwards_plan_parameters() -> None:
     )
 
 
+def test_numeric_values_in_text_fields_are_sent_as_text() -> None:
+    # Clients, die ["string", "null"] nicht verstehen, schicken eine PLZ als Zahl.
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "create_partner",
+                "arguments": {
+                    "company_id": 7,
+                    "name": "Muster GmbH",
+                    "postal_code": 63628,
+                    "phone": 61811234,
+                    "payment_term_days": 14,
+                    "is_supplier": True,
+                },
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/partners",
+        None,
+        {
+            "company_id": 7,
+            "name": "Muster GmbH",
+            "postal_code": "63628",
+            "phone": "61811234",
+            "payment_term_days": 14,
+            "is_supplier": True,
+        },
+    )
+
+
 def test_path_placeholder_filled_from_arguments() -> None:
     http = RecordingHttp()
     server = MCPServer(http=http)

@@ -8,6 +8,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### MCP: Zahlen in Textfeldern werden als Text weitergegeben
+- MCP-Clients, die Typ-Unions wie `["string", "null"]` nicht auswerten, schickten
+  ziffernartige Texte als JSON-Zahl; die API lehnte etwa eine PLZ beim Anlegen eines
+  Partners mit „postal_code muss ein Text sein.“ ab. Der MCP-Server wandelt Zahlen in
+  Feldern, die laut Tool-Schema Text sind, jetzt vor dem API-Aufruf in Text um (auch in
+  verschachtelten Objekten und Listen, z. B. Buchungszeilen). Die REST-API bleibt streng.
+
 ### KI-Chat: Reasoning-Schranke statt Gesamt-Zeitlimit
 - Ein Modell, dessen Denkprozess in eine Endlosschleife geriet, blockierte den KI-Server
   bis zum Abbrechen in der App oder bis zum Zeitlimit von 20 Minuten – bei lokalen
