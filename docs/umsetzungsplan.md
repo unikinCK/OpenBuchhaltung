@@ -714,6 +714,13 @@ dann selbst betriebener Modellserver).
       Datenexport (Apple 5.1.1(v)).
 - [ ] **App-Store-Start**: Store-Texte und Keywords, Screenshots, Datenschutzangaben,
       Smart App Banner auf der Website.
+  - [x] App 1.0 vorbereitet *(2026-10-24)*: Team unikin GmbH, Privacy Manifest (App und
+        Share-Extension), KI-Zustimmung je Instanz vor Chat und Belegauswertung (widerrufbar),
+        Links zu Datenschutz und Impressum, iPad-Layout mit Spalten (Übersicht, Inbox, KI-Chat);
+        Datenschutzerklärung mit App-Abschnitt (`website/datenschutz.html#app`); Store-Texte,
+        Prüferhinweise, Datenschutz- und Altersangaben sowie Screenshots im iOS-Repository.
+  - [ ] App-ID, App Group und App-Store-Connect-Eintrag anlegen, Archiv hochladen,
+        TestFlight, Einreichung; danach Smart App Banner auf der Website.
 - [ ] **App 1.x**: Push, TAN/Open Banking, Freigaben mit Face ID, Widgets, Bewirtungs- und
       Reisebelege; danach App Intents und KI auf dem Gerät (Foundation Models).
 
