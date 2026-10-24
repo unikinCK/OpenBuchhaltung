@@ -8,6 +8,36 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Übersicht eine Ebene tiefer (iOS-App) und alle Bankkonten im Dashboard
+- **Bankstände aller Geldkonten:** `GET /api/v1/dashboard` (und MCP `get_dashboard`)
+  listete nur Konten mit importierten Umsätzen; Tages-, Festgeld- oder Girokonten, die
+  ohne Kontoauszugsimport gebucht werden, fehlten. Jetzt zählen auch Konten mit
+  Bankverbindung (FinTS, Open Banking) und – bei erkennbarem Kontenrahmen – bebuchte
+  Kassen- und Bankkonten (SKR03 1000–1299, SKR04 1600–1899; Geldtransit nicht). Neu je
+  Konto: `transaction_count` (importierte Umsätze) und `latest_entry_date` (letzte
+  Buchung).
+- **Behoben:** Der Buchsaldo im Saldenabgleich je Bankkonto (Bankseite,
+  `GET /api/v1/bank-reconciliation`, Dashboard) zählte nach einem Jahresabschluss die
+  Saldovorträge doppelt; sie wiederholen nur die Vorjahre und bleiben jetzt außen vor
+  (wie in Kontoblatt und Bilanz).
+- **Filter für den Drilldown:** `GET /api/v1/bank-transactions?bank_account_id=…`
+  (Umsätze eines Kontos; UI: Bankseite mit Absprung aus dem Saldenabgleich),
+  `GET /api/v1/documents?unlinked=1` mit `limit`/`offset` und `total` (aktuelle Belege
+  ohne Buchung), `GET /api/v1/open-items?overdue=1` (UI: Schalter „Überfällige“ auf der
+  OPOS-Seite); alle drei auch in den MCP-Tools. Die Dashboard-Kacheln der
+  Weboberfläche springen direkt in die gefilterten Listen.
+- **Belege ohne Buchung** zählen nur noch aktuelle Fassungen: Eine ersetzte Version
+  blieb sonst dauerhaft „ohne Buchung“, auch wenn ihre Nachfolgerin verknüpft war
+  (Dashboard-Kachel, Beleg-Seite, API).
+- **Belegabgleich-Vorschläge** liefern zusätzlich den Beleg (`document`), den
+  Bruttobetrag der vorgeschlagenen Buchung (`journal_entry.amount`) und im
+  `booking_proposal` Kontonummer/-bezeichnung, Steuercode, Partnername und das
+  vorgeschlagene Gegenkonto (`creditor_account_id`, Verbindlichkeiten aLuL wie in der
+  Freigabemaske) – Grundlage für Prüfen und Freigeben in der iOS-App.
+- **Demo-Beleg:** Die Musterrechnung der Demo-Daten ist jetzt ein vollständiges PDF mit
+  Querverweistabelle; PDF-Betrachter wie die Belegvorschau der App zeigten bisher eine leere
+  Seite.
+
 ### MCP: Zahlen in Textfeldern werden als Text weitergegeben
 - MCP-Clients, die Typ-Unions wie `["string", "null"]` nicht auswerten, schickten
   ziffernartige Texte als JSON-Zahl; die API lehnte etwa eine PLZ beim Anlegen eines

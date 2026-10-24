@@ -1673,7 +1673,9 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Kompakte Übersicht einer Gesellschaft: offene Aufgaben (unverbuchte "
             "Bankumsätze, unverknüpfte Belege, überfällige OPOS, offene "
-            "Abgleich-Vorschläge, fällige Vorlagen), Bankstände je Bankkonto, "
+            "Abgleich-Vorschläge, fällige Vorlagen), Bankstände je Geldkonto (Konten "
+            "mit Kontoauszugsimport oder Bankverbindung sowie bebuchte Kassen- und "
+            "Bankkonten des Kontenrahmens, mit letzter Buchung und letztem Umsatz), "
             "Ergebnis des laufenden Geschäftsjahres bis as_of (Format JJJJ-MM-TT, "
             "optional; Standard heute) und Bilanzsumme."
         ),
@@ -1819,8 +1821,9 @@ TOOLS: list[ToolSpec] = [
         name="list_documents",
         description=(
             "Listet Belege einer Gesellschaft, optional gefiltert nach Buchung, "
-            "Belegkategorie, Dateiname (q) und Belegdatum. Eine Buchung kann "
-            "mehrere Belege haben (z. B. Rechnung und Zahlungsbeleg)."
+            "Belegkategorie, Dateiname (q) und Belegdatum oder nur Belege ohne "
+            "Buchung (unlinked). Eine Buchung kann mehrere Belege haben (z. B. "
+            "Rechnung und Zahlungsbeleg)."
         ),
         input_schema={
             "type": "object",
@@ -1829,6 +1832,21 @@ TOOLS: list[ToolSpec] = [
                 "journal_entry_id": {
                     "type": "integer",
                     "description": "Optional: nur Belege zu dieser Buchung.",
+                },
+                "unlinked": {
+                    "type": "boolean",
+                    "description": (
+                        "Optional: nur aktuelle Belege ohne verknüpfte Buchung "
+                        "(wie die Dashboard-Kachel „Belege ohne Buchung“)."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Optional: Seitengröße (max. 1000); total nennt die Gesamtzahl.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Optional: Startposition für die Seitenblätterung.",
                 },
                 "category_id": {
                     "type": "integer",
@@ -2151,7 +2169,9 @@ TOOLS: list[ToolSpec] = [
         name="list_receipt_match_suggestions",
         description=(
             "Listet Belegabgleich-Vorschläge einer Gesellschaft, optional nach Status "
-            "(offen, freigegeben, abgelehnt) gefiltert."
+            "(offen, freigegeben, abgelehnt) gefiltert – je Vorschlag mit Beleg, "
+            "vorgeschlagener Buchung (inkl. Bruttobetrag) und Kontierungsvorschlag "
+            "samt vorgeschlagenem Kreditorenkonto (booking_proposal.creditor_account_id)."
         ),
         input_schema={
             "type": "object",
@@ -2210,7 +2230,10 @@ TOOLS: list[ToolSpec] = [
                 },
                 "creditor_account_id": {
                     "type": "integer",
-                    "description": "Nur New-Booking: Kreditorenkonto.",
+                    "description": (
+                        "Nur New-Booking: Kreditorenkonto, vorgeschlagen in "
+                        "booking_proposal.creditor_account_id."
+                    ),
                 },
                 "tax_code_id": {
                     "type": "integer",
@@ -2447,6 +2470,10 @@ TOOLS: list[ToolSpec] = [
                 "status": {
                     "type": "string",
                     "description": "Optional: open, matched oder booked.",
+                },
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": "Optional: nur Umsätze dieses Bankkontos (Konto-ID).",
                 },
                 "include_suggestions": {
                     "type": "boolean",
@@ -3127,7 +3154,8 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="list_open_items",
         description=(
-            "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener Posten."
+            "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener "
+            "Posten oder nur überfällige."
         ),
         input_schema={
             "type": "object",
@@ -3136,6 +3164,11 @@ TOOLS: list[ToolSpec] = [
                 "include_settled": {
                     "type": "boolean",
                     "description": "Auch ausgeglichene Posten einschließen.",
+                    "default": False,
+                },
+                "overdue": {
+                    "type": "boolean",
+                    "description": "Nur offene Posten mit Fälligkeit vor heute.",
                     "default": False,
                 },
                 "q": {

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 from sqlalchemy import func, select
 
 from app import create_app
 from app.services.bank_proposals import booking_proposals
-from app.services.demo import demo_block_reason
+from app.services.demo import _demo_invoice_pdf, demo_block_reason
 from app.services.journal_entries import finalize_journal_entry
 from domain.models import BankTransaction, Document, JournalEntry, OpenItem, User
 
@@ -207,3 +209,13 @@ def test_demo_mode_blocks_locked_areas_via_mcp(tmp_path):
 
     accounts = _mcp_tool(client, "list_accounts", {"company_id": 1})
     assert accounts["isError"] is False  # Lesen und Buchen bleiben erlaubt
+
+
+def test_demo_invoice_is_a_well_formed_pdf():
+    """Mit Querverweistabelle: PDF-Betrachter (Vorschau der App) zeigen den Text."""
+    pdf = _demo_invoice_pdf(date(2026, 10, 19))
+    assert len(pdf) >= 1024
+    assert b"startxref" in pdf and pdf.rstrip().endswith(b"%%EOF")
+    text = PdfReader(BytesIO(pdf), strict=True).pages[0].extract_text()
+    assert "Rechnungsdatum: 19.10.2026" in text
+    assert "Gesamtbetrag" in text

@@ -250,6 +250,7 @@ def list_bank_transactions_via_api():
         return jsonify({"error": "company_id is required."}), 400
 
     status = (request.args.get("status") or "").strip() or None
+    bank_account_id = request.args.get("bank_account_id", type=int)
     include_suggestions = (request.args.get("include_suggestions") or "").lower() in {
         "1",
         "true",
@@ -273,6 +274,8 @@ def list_bank_transactions_via_api():
         stmt = scoped_select(BankTransaction, company_id=company_id)
         if status is not None:
             stmt = stmt.where(BankTransaction.status == status)
+        if bank_account_id is not None:
+            stmt = stmt.where(BankTransaction.bank_account_id == bank_account_id)
         if query:
             pattern = f"%{query}%"
             stmt = stmt.where(

@@ -102,12 +102,14 @@ def documents_page():
                 documents_stmt = documents_stmt.where(Document.document_date >= date_from)
             if date_to:
                 documents_stmt = documents_stmt.where(Document.document_date <= date_to)
+            # Ohne Buchung zählen nur aktuelle Fassungen (wie die Dashboard-Kachel).
+            unlinked = (Document.journal_entry_id.is_(None), Document.is_current.is_(True))
             if unlinked_only:
-                documents_stmt = documents_stmt.where(Document.journal_entry_id.is_(None))
+                documents_stmt = documents_stmt.where(*unlinked)
             unlinked_total = session.execute(
                 select(func.count()).select_from(
                     scoped_select(Document, company_id=selected_company_id)
-                    .where(Document.journal_entry_id.is_(None))
+                    .where(*unlinked)
                     .subquery()
                 )
             ).scalar_one()

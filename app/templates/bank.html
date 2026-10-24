@@ -70,13 +70,18 @@
     <section class="card">
       <div class="card-header">
         <h2>Umsätze <span class="count">{{ transactions_total }}</span></h2>
+        {% set account_args = {'bank_account_id': bank_account_filter} if bank_account_filter else {} %}
         <div class="row-actions">
-          <a class="{{ 'button btn-sm' if status_filter == 'open' else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open') }}">Offen ({{ open_count }})</a>
-          <a class="{{ 'button btn-sm' if not status_filter else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id) }}">Alle</a>
+          {% if bank_account_filter %}
+            {% set filter_account = bank_accounts_by_id.get(bank_account_filter) %}
+            <a class="button-secondary btn-sm" title="Filter aufheben" href="{{ url_for('main.bank_page', company_id=selected_company_id, **({'status': status_filter} if status_filter else {})) }}">{{ filter_account.code ~ ' ' ~ filter_account.name if filter_account else 'Bankkonto' }} ✕</a>
+          {% endif %}
+          <a class="{{ 'button btn-sm' if status_filter == 'open' else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id, status='open', **account_args) }}">Offen ({{ open_count }})</a>
+          <a class="{{ 'button btn-sm' if not status_filter else 'button-secondary btn-sm' }}" href="{{ url_for('main.bank_page', company_id=selected_company_id, **account_args) }}">Alle</a>
         </div>
       </div>
       {{ filter_form('main.bank_page', selected_company_id, q, date_from, date_to,
-                     extra=dict({'status': status_filter} if status_filter else {}, **sort.url_args),
+                     extra=dict(dict({'status': status_filter} if status_filter else {}, **account_args), **sort.url_args),
                      placeholder="Verwendungszweck, Gegenseite, Referenz") }}
       {% if transactions %}
         <div class="table-scroll">
@@ -669,6 +674,7 @@
                 <th class="num">Buchsaldo</th>
                 <th class="num">Summe Umsätze</th>
                 <th class="num">Differenz</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -684,12 +690,14 @@
                       <strong class="negative">{{ row.difference | betrag }}</strong>
                     {% endif %}
                   </td>
+                  <td><a href="{{ url_for('main.bank_page', company_id=selected_company_id, bank_account_id=row.account_id) }}">Umsätze</a></td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-        <p class="hint">Buchsaldo = Soll − Haben aller Buchungszeilen auf dem Konto;
+        <p class="hint">Buchsaldo = Soll − Haben aller Buchungszeilen auf dem Konto
+          (ohne Saldovorträge, die nur die Vorjahre wiederholen);
           Summe Umsätze = alle importierten Kontoauszugszeilen. Eine Differenz ist nicht
           zwingend ein Fehler (z. B. Eröffnungsbuchungen oder noch unverbuchte Umsätze),
           zeigt aber sofort, wo ein Konto schief hängt.</p>

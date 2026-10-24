@@ -1197,3 +1197,79 @@ def test_booking_accounts_include_asset_accounts_but_not_depreciation(tmp_path):
         session.commit()
         codes = [code for code, _name in account_choices(session, company_id)]
     assert codes == ["0410", "6300"]
+
+
+def test_suggestion_payload_carries_document_and_entry_amount(tmp_path):
+    """Mobile Prüfung: Beleg, Betrag der vorgeschlagenen Buchung und Gegenkonto."""
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    entry_id = _create_entry(app, company_id, "238.00", date(2026, 7, 10), "Muster Lieferant")
+    document_id = _upload_document(app, company_id, RECEIPT_LINES, file_name="rechnung.pdf")
+    client = _logged_in_client(app)
+
+    created = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+    assert created["journal_entry"]["id"] == entry_id
+    assert created["journal_entry"]["amount"] == "238.00"
+    assert created["document"] == {
+        "id": document_id,
+        "file_name": "rechnung.pdf",
+        "mime_type": "application/pdf",
+        "document_date": "2026-07-08",
+        "journal_entry_id": None,
+    }
+    creditor_id = _account_id(app, company_id, "1600")
+    assert created["booking_proposal"]["creditor_account_id"] == creditor_id
+    assert created["booking_proposal"]["creditor_account_code"] == "1600"
+
+    [listed] = client.get(
+        f"/api/v1/receipt-matching/suggestions?company_id={company_id}&status=offen"
+    ).get_json()["items"]
+    assert listed["document"]["file_name"] == "rechnung.pdf"
+    assert listed["journal_entry"]["amount"] == "238.00"
+
+    approved = client.post(
+        f"/api/v1/receipt-matching/suggestions/{created['id']}/approve",
+        json={"company_id": company_id},
+    ).get_json()
+    assert approved["document"]["journal_entry_id"] == entry_id
+
+
+def test_new_booking_payload_names_proposed_accounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    partner_id, office_id = _seed_supplier_history(app, company_id)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+
+    created = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+    assert created["suggestion_type"] == "new_booking"
+    proposal = created["booking_proposal"]
+    assert proposal["expense_account_id"] == office_id
+    assert proposal["expense_account_code"] == "4930"
+    assert proposal["expense_account_name"] == "Bürobedarf"
+    assert proposal["tax_code"] == "VSt19"
+    assert proposal["partner_id"] == partner_id
+    assert proposal["partner_name"] == "Muster Lieferant GmbH"
+    assert proposal["creditor_account_id"] == _account_id(app, company_id, "1600")
+
+    # Mit den Werten des Vorschlags lässt sich die Buchung direkt freigeben.
+    booked = client.post(
+        f"/api/v1/receipt-matching/suggestions/{created['id']}/approve",
+        json={
+            "company_id": company_id,
+            "creditor_account_id": proposal["creditor_account_id"],
+            "net_amount": created["net_amount"],
+            "tax_amount": created["tax_amount"],
+        },
+    )
+    assert booked.status_code == 200, booked.get_json()
+    body = booked.get_json()
+    assert body["status"] == "freigegeben"
+    assert body["journal_entry"]["amount"] == "238.00"
+    assert body["document"]["journal_entry_id"] == body["journal_entry_id"]

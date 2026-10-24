@@ -699,7 +699,14 @@ dann selbst betriebener Modellserver).
         Geräte-Hash und Upload-Warteschlange; im Simulator gegen den Dev-Server geprüft.
   - [ ] Signierung und TestFlight, Push-Registrierung, Share Extension (brauchen den
         Apple-Developer-Account).
-  - [ ] Inbox-Aktionen, Belegdatum per Texterkennung, Demo-Modus, App-Icon.
+  - [x] Inbox-Aktionen, Belegdatum per Texterkennung, Demo-Modus, App-Icon *(App 0.2–0.4)*.
+  - [x] App 0.8 – Übersicht eine Ebene tiefer *(2026-10-24)*: Drilldowns für unverbuchte
+        Umsätze (geprüfte Sammelbuchung der Vorschläge), Belege ohne Buchung (Vorschau,
+        Vorschlag erstellen, zuordnen, neu buchen, Buchung suchen), überfällige Posten und
+        Abgleich-Vorschläge; alle Geldkonten mit letzten Umsätzen und Kontoblatt; Inbox mit
+        Belegen, fälligen Vorlagen, Regel aus einer Buchung, Suche und Badge. Server: Geldkonten
+        im Dashboard, Filter `bank_account_id`/`unlinked`/`overdue` (API, MCP, UI), erweiterte
+        Abgleich-Vorschläge, Saldovorträge im Saldenabgleich nicht mehr doppelt.
 - [ ] **Lokale KI**: `/responses`-kompatibler Modellserver auf eigener Hardware,
       Benchmark der Belegextraktion gegen Cloud-Modelle, Warteschlange und
       Fallback-Regeln, Betriebsdoku.

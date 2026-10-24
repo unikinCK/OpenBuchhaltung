@@ -48,6 +48,12 @@ def list_open_items(
     return session.execute(stmt).scalars().all()
 
 
+def is_overdue(item: OpenItem, today: date | None = None) -> bool:
+    """Offen und die Fälligkeit liegt vor heute (Dashboard-Kachel, Filter „überfällig“)."""
+    today = today or date.today()
+    return item.status == "open" and item.due_date is not None and item.due_date < today
+
+
 def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
     company = session.get(Company, payload.company_id)
     if company is None:

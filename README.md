@@ -796,6 +796,9 @@ optional mit Buchung verknüpfen und vollständig oder teilweise ausgleichen. Ei
 Ausgleich kann zusätzlich mit einem Bankumsatz oder einer Zahlungsbuchung verknüpft
 werden; die Aktion wird im Audit-Log protokolliert. Wird die verknüpfte
 Ausgleichsbuchung storniert, lebt der Posten um den Ausgleichsbetrag wieder auf.
+„Überfällige“ zeigt nur offene Posten mit Fälligkeit vor heute (Absprung aus der
+Dashboard-Kachel; API `GET /api/v1/open-items?overdue=1`, MCP `list_open_items` mit
+`overdue`).
 
 ## Buchungsvorlagen (wiederkehrende Buchungen)
 
@@ -1221,15 +1224,19 @@ Basis-Endpunkte:
 - `GET /api/v1/income-statement` — optional `date_from`/`date_to` (Zeitraum der GuV)
 - `GET /api/v1/balance-sheet` — optional `date_to` (Stichtag; Alias `as_of`)
 - `GET /api/v1/dashboard` — kompakte Übersicht (Startbildschirm der iOS-App): offene
-  Aufgaben, Bankstände je Bankkonto (Buchsaldo, Auszugssumme, offene Umsätze, letzter
-  Buchungstag), Ergebnis des laufenden Geschäftsjahres bis `as_of` (Standard heute) und
-  Bilanzsumme; MCP `get_dashboard`
+  Aufgaben, Bankstände je Geldkonto (Buchsaldo ohne Saldovorträge, Auszugssumme, Zahl
+  der importierten und der offenen Umsätze, letzter Umsatz, letzte Buchung), Ergebnis
+  des laufenden Geschäftsjahres bis `as_of` (Standard heute) und Bilanzsumme; MCP
+  `get_dashboard`. Geldkonten sind Konten mit Kontoauszugsimport oder Bankverbindung
+  sowie – bei erkennbarem Kontenrahmen – bebuchte Kassen- und Bankkonten (SKR03
+  1000–1299, SKR04 1600–1899), etwa Tages- oder Festgeld ohne Import
 
 Bank & FinTS:
 
 - `GET/POST /api/v1/bank-accounts` — Bankkonten (Kontoart `asset`) auflisten/anlegen
 - `GET /api/v1/bank-transactions` — paginiert (`limit` Standard 200, max. 1000;
-  `offset`; Antwortfeld `total`), optional `status` und `include_suggestions`
+  `offset`; Antwortfeld `total`), optional `status`, `bank_account_id` (Umsätze eines
+  Bankkontos; UI: Bankseite, Absprung aus dem Saldenabgleich) und `include_suggestions`
 - `POST /api/v1/bank-transactions/import` — Kontoauszug (CSV/CAMT.053/MT940) hochladen
 - `POST /api/v1/bank-transactions/<id>/match` bzw. `/book` — zuordnen/verbuchen
 - `POST /api/v1/bank-transactions/reassign`, `POST /api/v1/bank-transactions/<id>/bank-account`
@@ -1411,6 +1418,9 @@ API: `GET/POST /api/v1/document-categories`,
 `POST /api/v1/document-categories/<id>/active`, `POST /api/v1/documents/<id>/category`,
 `category_id` beim Upload (`POST /api/v1/documents`) und als Filter von
 `GET /api/v1/documents`; `GET /api/v1/journal-entries` liefert je Buchung `documents`.
+`GET /api/v1/documents?unlinked=1` liefert die aktuellen Belege ohne Buchung (wie die
+Dashboard-Kachel; ersetzte Fassungen zählen nicht), blättern mit `limit`/`offset`
+(Antwortfeld `total`).
 MCP-Tools: `list_document_categories`, `create_document_category`,
 `set_document_category_active`, `set_document_category`.
 
@@ -1500,7 +1510,12 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), RES
 (`POST/GET /api/v1/receipt-matching/suggestions`,
 `POST /api/v1/receipt-matching/suggestions/<id>/approve|reject`) und MCP-Tools
 (`create_receipt_match_suggestion`, `list_receipt_match_suggestions`,
-`approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`).
+`approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`). Jeder Vorschlag
+nennt den Beleg (`document`), bei Treffern den Bruttobetrag der Buchung
+(`journal_entry.amount`) und im `booking_proposal` Konto, Steuercode und Partner auch
+mit Nummer bzw. Namen sowie das vorgeschlagene Gegenkonto (`creditor_account_id`,
+Verbindlichkeiten aLuL wie in der Freigabemaske) – genug, um einen Vorschlag mobil zu
+prüfen und freizugeben.
 
 ## KI-Zugang (LLM) je Benutzer
 

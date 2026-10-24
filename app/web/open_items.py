@@ -11,6 +11,7 @@ from app.services.open_items import (
     OpenItemError,
     OpenItemInput,
     create_open_item,
+    is_overdue,
     list_open_items,
     settle_open_item,
 )
@@ -90,6 +91,7 @@ def open_items_page():
         bank_transactions = []
         open_items = []
         include_settled = request.args.get("include_settled") == "1"
+        overdue_only = request.args.get("overdue") == "1"
         totals = {"receivable": parse_decimal("0.00"), "payable": parse_decimal("0.00")}
         if selected_company_id:
             accounts = (
@@ -138,6 +140,8 @@ def open_items_page():
             if needle in (item.reference or "").lower()
             or needle in (item.counterparty or "").lower()
         ]
+    if overdue_only:
+        open_items = [item for item in open_items if is_overdue(item)]
     if date_from:
         open_items = [item for item in open_items if item.entry_date >= date_from]
     if date_to:
@@ -163,9 +167,14 @@ def open_items_page():
         date_from=date_from,
         date_to=date_to,
         filter_args=filter_url_args(
-            query, date_from, date_to, include_settled=1 if include_settled else None
+            query,
+            date_from,
+            date_to,
+            include_settled=1 if include_settled else None,
+            overdue=1 if overdue_only else None,
         ),
         include_settled=include_settled,
+        overdue_only=overdue_only,
         sort=sort,
         totals=totals,
         today=date.today().isoformat(),

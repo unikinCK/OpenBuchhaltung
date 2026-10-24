@@ -1130,6 +1130,24 @@ def test_document_tools_forward_arguments() -> None:
     server.handle(
         {
             "jsonrpc": "2.0",
+            "id": 380,
+            "method": "tools/call",
+            "params": {
+                "name": "list_documents",
+                "arguments": {"company_id": 7, "unlinked": True, "limit": 20, "offset": 40},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "GET",
+        "/documents",
+        {"company_id": 7, "unlinked": True, "limit": 20, "offset": 40},
+        None,
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
             "id": 39,
             "method": "tools/call",
             "params": {
@@ -1460,14 +1478,19 @@ def test_bank_tools_forward_arguments() -> None:
             "method": "tools/call",
             "params": {
                 "name": "list_bank_transactions",
-                "arguments": {"company_id": 7, "status": "open", "include_suggestions": True},
+                "arguments": {
+                    "company_id": 7,
+                    "status": "open",
+                    "bank_account_id": 4,
+                    "include_suggestions": True,
+                },
             },
         }
     )
     assert http.calls[-1] == (
         "GET",
         "/bank-transactions",
-        {"company_id": 7, "status": "open", "include_suggestions": True},
+        {"company_id": 7, "status": "open", "bank_account_id": 4, "include_suggestions": True},
         None,
     )
 
@@ -1606,6 +1629,16 @@ def test_open_item_tools_forward_arguments() -> None:
         {"company_id": 7, "include_settled": True},
         None,
     )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 420,
+            "method": "tools/call",
+            "params": {"name": "list_open_items", "arguments": {"company_id": 7, "overdue": True}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/open-items", {"company_id": 7, "overdue": True}, None)
 
     server.handle(
         {

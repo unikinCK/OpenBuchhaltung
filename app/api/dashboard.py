@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from flask import jsonify, request
 
 from app.api.blueprint import api_bp
 from app.api.helpers import DateArgError, api_scoped_company, date_arg, get_session_factory
 from app.services.dashboard import dashboard_summary
+
+
+def _iso(value: date | None) -> str | None:
+    return value.isoformat() if value else None
 
 
 @api_bp.get("/dashboard")
@@ -39,11 +45,8 @@ def get_dashboard():
                         **row,
                         "book_balance": str(row["book_balance"]),
                         "statement_total": str(row["statement_total"]),
-                        "latest_booking_date": (
-                            row["latest_booking_date"].isoformat()
-                            if row["latest_booking_date"]
-                            else None
-                        ),
+                        "latest_booking_date": _iso(row["latest_booking_date"]),
+                        "latest_entry_date": _iso(row["latest_entry_date"]),
                     }
                     for row in summary["bank_accounts"]
                 ],

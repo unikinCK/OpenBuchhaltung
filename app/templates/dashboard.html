@@ -60,12 +60,12 @@
             <div class="stat-value">{{ tasks.open_bank_transactions }}</div>
           </a>
           <a class="stat-card task-card {% if tasks.unlinked_documents %}task-open{% endif %}"
-             href="{{ url_for('main.documents_page', company_id=selected_company_id) }}">
+             href="{{ url_for('main.documents_page', company_id=selected_company_id, unlinked=1) }}">
             <div class="stat-label">Unverknüpfte Belege</div>
             <div class="stat-value">{{ tasks.unlinked_documents }}</div>
           </a>
           <a class="stat-card task-card {% if tasks.overdue_open_items %}task-open{% endif %}"
-             href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">
+             href="{{ url_for('main.open_items_page', company_id=selected_company_id, overdue=1) }}">
             <div class="stat-label">Überfällige offene Posten</div>
             <div class="stat-value">{{ tasks.overdue_open_items }}</div>
           </a>
