@@ -419,7 +419,11 @@ def seed_demo_activity(
 
 
 def _demo_invoice_pdf(issue_date: date) -> bytes:
-    """Kleine PDF-Rechnung mit Textebene (lesbar für Beleg-OCR und Texterkennung)."""
+    """Kleine PDF-Rechnung mit Textebene (lesbar für Beleg-OCR und Texterkennung).
+
+    Mit Querverweistabelle und Trailer: Ohne sie zeigen PDF-Betrachter wie die
+    Vorschau der iOS-App nur eine leere Seite.
+    """
     lines = [
         "Muster Buerobedarf GmbH",
         "Rechnung Nr. MB-2026-118",
@@ -430,18 +434,29 @@ def _demo_invoice_pdf(issue_date: date) -> bytes:
     ]
     shows = " ".join(f"({line}) Tj 0 -16 Td" for line in lines)
     content = f"BT /F1 12 Tf 50 780 Td {shows} ET".encode("latin-1")
-    pdf = (
-        b"%PDF-1.4\n"
-        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R"
-        b"/Resources<</Font<</F1 5 0 R>>>>>>endobj\n"
-        b"4 0 obj<</Length " + str(len(content)).encode("ascii") + b">>\nstream\n"
-        + content
-        + b"\nendstream endobj\n"
-        b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+    objects = [
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R"
+        b"/Resources<</Font<</F1 5 0 R>>>>>>",
+        b"<</Length %d>>\nstream\n" % len(content) + content + b"\nendstream",
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    # Auffüllen über die Mindestgröße für Belege (Kommentarzeile vor der Tabelle).
+    pdf += b"%" + b"0" * max(0, 1100 - len(pdf)) + b"\n"
+    xref = len(pdf)
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    pdf += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    pdf += b"trailer\n<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
     )
-    return pdf + b"%" + b"0" * max(0, 1100 - len(pdf)) + b"\n%%EOF"
+    return bytes(pdf)
 
 
 # ---------------------------------------------------------------------------

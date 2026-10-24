@@ -109,14 +109,15 @@
       <h2>Posten <span class="count">{{ open_items_total }}</span></h2>
       {% if selected_company_id %}
         <div class="row-actions">
-          <a class="{{ 'button-secondary btn-sm' if include_settled else 'button btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">Nur offene</a>
-          <a class="{{ 'button btn-sm' if include_settled else 'button-secondary btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id, include_settled=1) }}">Mit erledigten</a>
+          <a class="{{ 'button-secondary btn-sm' if include_settled or overdue_only else 'button btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">Nur offene</a>
+          <a class="{{ 'button btn-sm' if overdue_only else 'button-secondary btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id, overdue=1) }}">Überfällige</a>
+          <a class="{{ 'button btn-sm' if include_settled and not overdue_only else 'button-secondary btn-sm' }}" href="{{ url_for('main.open_items_page', company_id=selected_company_id, include_settled=1) }}">Mit erledigten</a>
         </div>
       {% endif %}
     </div>
     {% if selected_company_id %}
       {{ filter_form('main.open_items_page', selected_company_id, q, date_from, date_to,
-                     extra=dict({'include_settled': 1} if include_settled else {}, **sort.url_args),
+                     extra=dict(dict({'include_settled': 1} if include_settled else {}, **({'overdue': 1} if overdue_only else {})), **sort.url_args),
                      placeholder="Referenz oder Gegenpartei") }}
     {% endif %}
 

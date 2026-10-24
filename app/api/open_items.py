@@ -20,6 +20,7 @@ from app.services.open_items import (
     OpenItemError,
     OpenItemInput,
     create_open_item,
+    is_overdue,
     list_open_items,
     settle_open_item,
 )
@@ -71,6 +72,8 @@ def list_open_items_via_api():
     if not company_id:
         return jsonify({"error": "company_id is required."}), 400
     include_settled = request.args.get("include_settled", "").lower() in {"1", "true"}
+    # Überfällig: offen und Fälligkeit vor heute (wie die Dashboard-Kachel).
+    overdue = request.args.get("overdue", "").lower() in {"1", "true"}
     query = (request.args.get("q") or "").strip() or None
 
     session_factory = get_session_factory()
@@ -80,6 +83,8 @@ def list_open_items_via_api():
         items = list_open_items(
             session=session, company_id=company_id, include_settled=include_settled
         )
+        if overdue:
+            items = [item for item in items if is_overdue(item)]
         if query:
             needle = query.lower()
             items = [

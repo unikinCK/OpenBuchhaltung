@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from flask import current_app, jsonify, request, send_file
+from sqlalchemy import func, select
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
@@ -268,6 +269,10 @@ def list_documents_via_api():
     journal_entry_id = request.args.get("journal_entry_id", type=int)
     category_id = request.args.get("category_id", type=int)
     query = (request.args.get("q") or "").strip() or None
+    # Belege ohne Buchung: nur aktuelle Fassungen (wie die Dashboard-Kachel).
+    unlinked = (request.args.get("unlinked") or "").lower() in {"1", "true", "yes"}
+    limit = request.args.get("limit", type=int)
+    offset = max(0, request.args.get("offset", type=int) or 0)
     try:
         date_from = date_arg("date_from")
         date_to = date_arg("date_to")
@@ -278,11 +283,13 @@ def list_documents_via_api():
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
-        stmt = scoped_select(Document, company_id=company_id).order_by(
-            Document.document_date.desc(), Document.uploaded_at.desc()
-        )
+        stmt = scoped_select(Document, company_id=company_id)
         if journal_entry_id is not None:
             stmt = stmt.where(Document.journal_entry_id == journal_entry_id)
+        if unlinked:
+            stmt = stmt.where(
+                Document.journal_entry_id.is_(None), Document.is_current.is_(True)
+            )
         if category_id is not None:
             stmt = stmt.where(Document.category_id == category_id)
         if query:
@@ -291,11 +298,18 @@ def list_documents_via_api():
             stmt = stmt.where(Document.document_date >= date_from)
         if date_to is not None:
             stmt = stmt.where(Document.document_date <= date_to)
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        stmt = stmt.order_by(
+            Document.document_date.desc(), Document.uploaded_at.desc(), Document.id.desc()
+        )
+        if limit is not None:
+            stmt = stmt.limit(max(1, min(limit, 1000))).offset(offset)
         documents = session.execute(stmt).scalars().all()
         return (
             jsonify(
                 {
                     "company_id": company_id,
+                    "total": total,
                     "documents": [_document_dict(document) for document in documents],
                 }
             ),

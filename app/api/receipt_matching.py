@@ -17,10 +17,12 @@ from app.services.receipt_matching import (
     approve_match_suggestion,
     book_new_booking_suggestion,
     create_match_suggestion,
+    entry_gross_total,
     reject_suggestion,
 )
 from app.services.scoping import scoped_select
-from domain.models import JournalEntry, ReceiptMatchSuggestion
+from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, find_standard_account
+from domain.models import Account, BusinessPartner, ReceiptMatchSuggestion, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -28,9 +30,33 @@ def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
 
 
+def _default_creditor(session, company_id: int) -> Account | None:
+    """Gegenkonto, das die Freigabe einer neuen Buchung vorschlägt (wie die Maske)."""
+    return find_standard_account(
+        session=session, company_id=company_id, standard=VERBINDLICHKEITEN_LUL
+    )
+
+
 def _suggestion_dict(
-    suggestion: ReceiptMatchSuggestion, *, journal_entry: JournalEntry | None = None
+    session, suggestion: ReceiptMatchSuggestion, *, creditor: Account | None = None
 ) -> dict[str, object]:
+    """Vorschlag mit Beleg, vorgeschlagener Buchung und lesbarer Kontierung.
+
+    ``creditor`` ist das vorgeschlagene Gegenkonto einer neuen Buchung
+    (Verbindlichkeiten aLuL); Clients übergeben es bei der Freigabe als
+    ``creditor_account_id``.
+    """
+    expense_account = (
+        session.get(Account, suggestion.expense_account_id)
+        if suggestion.expense_account_id
+        else None
+    )
+    tax_code = session.get(TaxCode, suggestion.tax_code_id) if suggestion.tax_code_id else None
+    partner = (
+        session.get(BusinessPartner, suggestion.partner_id) if suggestion.partner_id else None
+    )
+    document = suggestion.document
+    journal_entry = suggestion.journal_entry
     data: dict[str, object] = {
         "id": suggestion.id,
         "company_id": suggestion.company_id,
@@ -61,12 +87,32 @@ def _suggestion_dict(
             "source": suggestion.proposal_source,
             "reason": suggestion.proposal_reason,
             "expense_account_id": suggestion.expense_account_id,
+            "expense_account_code": expense_account.code if expense_account else None,
+            "expense_account_name": expense_account.name if expense_account else None,
             "tax_code_id": suggestion.tax_code_id,
+            "tax_code": tax_code.code if tax_code else None,
             "partner_id": suggestion.partner_id,
+            "partner_name": partner.name if partner else None,
+            "creditor_account_id": creditor.id if creditor else None,
+            "creditor_account_code": creditor.code if creditor else None,
+            "creditor_account_name": creditor.name if creditor else None,
             # Aufteilung je Steuersatz (nur bei mehreren Sätzen), direkt als
             # tax_lines an die Freigabe übergebbar.
             "tax_lines": suggestion.tax_lines or [],
         },
+        "document": (
+            {
+                "id": document.id,
+                "file_name": document.file_name,
+                "mime_type": document.mime_type,
+                "document_date": (
+                    document.document_date.isoformat() if document.document_date else None
+                ),
+                "journal_entry_id": document.journal_entry_id,
+            }
+            if document is not None
+            else None
+        ),
         "created_at": suggestion.created_at.isoformat(),
         "decided_at": suggestion.decided_at.isoformat() if suggestion.decided_at else None,
         "decided_by": suggestion.decided_by,
@@ -77,6 +123,7 @@ def _suggestion_dict(
             "posting_number": journal_entry.posting_number,
             "entry_date": journal_entry.entry_date.isoformat(),
             "description": journal_entry.description,
+            "amount": str(entry_gross_total(journal_entry)),
         }
     return data
 
@@ -112,12 +159,8 @@ def create_receipt_match_suggestion_via_api():
         except ReceiptMatchError as exc:
             return jsonify({"error": str(exc)}), 422
 
-        journal_entry = (
-            session.get(JournalEntry, suggestion.journal_entry_id)
-            if suggestion.journal_entry_id
-            else None
-        )
-        return jsonify(_suggestion_dict(suggestion, journal_entry=journal_entry)), 201
+        creditor = _default_creditor(session, company.id)
+        return jsonify(_suggestion_dict(session, suggestion, creditor=creditor)), 201
 
 
 @api_bp.get("/receipt-matching/suggestions")
@@ -139,14 +182,11 @@ def list_receipt_match_suggestions_via_api():
             stmt = stmt.where(ReceiptMatchSuggestion.status == status)
         stmt = stmt.order_by(ReceiptMatchSuggestion.id.desc()).limit(max(1, min(limit, 200)))
         suggestions = session.execute(stmt).scalars().all()
-        items = []
-        for suggestion in suggestions:
-            journal_entry = (
-                session.get(JournalEntry, suggestion.journal_entry_id)
-                if suggestion.journal_entry_id
-                else None
-            )
-            items.append(_suggestion_dict(suggestion, journal_entry=journal_entry))
+        creditor = _default_creditor(session, company.id)
+        items = [
+            _suggestion_dict(session, suggestion, creditor=creditor)
+            for suggestion in suggestions
+        ]
         return jsonify({"items": items, "count": len(items)})
 
 
@@ -251,12 +291,8 @@ def approve_receipt_match_suggestion_via_api(suggestion_id: int):
                 return jsonify({"error": str(exc)}), 422
             return jsonify({"error": "Invalid payload format."}), 400
 
-        journal_entry = (
-            session.get(JournalEntry, suggestion.journal_entry_id)
-            if suggestion.journal_entry_id
-            else None
-        )
-        return jsonify(_suggestion_dict(suggestion, journal_entry=journal_entry))
+        creditor = _default_creditor(session, suggestion.company_id)
+        return jsonify(_suggestion_dict(session, suggestion, creditor=creditor))
 
 
 @api_bp.post("/receipt-matching/suggestions/<int:suggestion_id>/reject")
@@ -285,4 +321,5 @@ def reject_receipt_match_suggestion_via_api(suggestion_id: int):
         except ReceiptMatchError as exc:
             return jsonify({"error": str(exc)}), 422
 
-        return jsonify(_suggestion_dict(suggestion))
+        creditor = _default_creditor(session, suggestion.company_id)
+        return jsonify(_suggestion_dict(session, suggestion, creditor=creditor))

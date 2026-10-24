@@ -105,6 +105,7 @@ def bank_page():
     limit, offset = pagination_args()
     sort = sort_args(BANK_SORT_COLUMNS, "date", descending=True)
     status_filter = (request.args.get("status") or "").strip() or None
+    bank_account_filter = request.args.get("bank_account_id", type=int)
     query, date_from, date_to = search_args()
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -166,6 +167,10 @@ def bank_page():
             if status_filter:
                 transactions_stmt = transactions_stmt.where(
                     BankTransaction.status == status_filter
+                )
+            if bank_account_filter:
+                transactions_stmt = transactions_stmt.where(
+                    BankTransaction.bank_account_id == bank_account_filter
                 )
             if query:
                 pattern = f"%{query}%"
@@ -276,10 +281,13 @@ def bank_page():
         limit=limit,
         offset=offset,
         status_filter=status_filter,
+        bank_account_filter=bank_account_filter,
         q=query,
         date_from=date_from,
         date_to=date_to,
-        filter_args=filter_url_args(query, date_from, date_to, status=status_filter),
+        filter_args=filter_url_args(
+            query, date_from, date_to, status=status_filter, bank_account_id=bank_account_filter
+        ),
         sort=sort,
         suggestions_by_tx=suggestions_by_tx,
         transfer_by_tx=transfer_by_tx,

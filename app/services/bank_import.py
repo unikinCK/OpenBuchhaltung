@@ -27,6 +27,7 @@ from app.services.bank_statement import (
     parse_mt940,
 )
 from app.services.journal_entries import (
+    SOURCE_CARRYFORWARD,
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
@@ -523,6 +524,8 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
 
     Eine Differenz ist nicht zwingend ein Fehler (z. B. Eröffnungsbuchungen vor
     dem ersten Import), macht ein „schiefes“ Konto aber sofort sichtbar.
+    Saldovorträge zählen nicht mit: Sie wiederholen nur die Vorjahre, deren
+    Buchungen ohnehin in der Summe stehen.
     """
     zero = Decimal("0.00")
     statement_totals = dict(
@@ -544,6 +547,7 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
         .where(
             JournalEntry.company_id == company_id,
+            JournalEntry.source != SOURCE_CARRYFORWARD,
             JournalEntryLine.account_id.in_(statement_totals),
         )
         .group_by(JournalEntryLine.account_id)
