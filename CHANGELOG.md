@@ -8,6 +8,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Projekt-Webseite: App für iPhone und iPad
+- Smart App Banner: Startseite, Impressum und Datenschutzerklärung tragen
+  `<meta name="apple-itunes-app" content="app-id=6826612646">`, damit Safari auf iPhone und
+  iPad auf die App im App Store hinweist – ohne Skript, passend zur strikten CSP.
+- Neuer Abschnitt „App für iPhone und iPad“ (`#app`, auch in der Navigation) auf der
+  Startseite: Belege scannen, Inbox, KI-Chat, Übersicht und Spalten auf dem iPad, dazu
+  Anmeldung und Datenschutz mit Link auf `datenschutz.html#app` und auf die App im App Store.
+- `tests/test_website.py` prüft Banner und App-Store-Link. Ausgeliefert wird die Webseite
+  erst, wenn Apple die App freigegeben hat.
+
 ### Datenschutzerklärung für die iOS-App
 - `website/datenschutz.html` hat einen neuen Abschnitt „App für iPhone und iPad“ (Anker
   `#app`, verlinkt aus der App und als Datenschutz-URL im App Store): Die App spricht nur

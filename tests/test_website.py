@@ -17,6 +17,8 @@ WEBSITE = PROJECT_ROOT / "website"
 PAGES = sorted(WEBSITE.glob("*.html"))
 TEMPLATE = PROJECT_ROOT / "deploy" / "nginx" / "templates" / "website.conf.template"
 OVERLAY = PROJECT_ROOT / "docker-compose.website.yml"
+# Apple-ID der App „OpenBuchhaltung“ in App Store Connect
+APP_STORE_ID = "6826612646"
 
 
 class _Page(HTMLParser):
@@ -146,6 +148,24 @@ def test_tabs_control_existing_panels(pages):
     for path, page in pages.items():
         for panel_id in page.aria_controls:
             assert panel_id in page.ids, f"{path.name}: aria-controls={panel_id}"
+
+
+# --- App für iPhone und iPad ----------------------------------------------------
+
+
+def test_pages_offer_smart_app_banner(pages):
+    # Safari auf iPhone und iPad blendet damit den Hinweis auf die App ein (ohne Skript).
+    for path, page in pages.items():
+        if path.name != "404.html":
+            assert page.meta.get("apple-itunes-app") == f"app-id={APP_STORE_ID}", path.name
+
+
+def test_start_page_links_app_in_app_store(pages):
+    index = pages[WEBSITE / "index.html"]
+    assert "app" in index.ids
+    hrefs = {value for tag, _attr, value, _rel in index.refs if tag == "a"}
+    assert f"https://apps.apple.com/de/app/id{APP_STORE_ID}" in hrefs
+    assert "datenschutz.html#app" in hrefs
 
 
 # --- Datenschutz und Content-Security-Policy ------------------------------------
