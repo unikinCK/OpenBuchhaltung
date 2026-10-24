@@ -8,6 +8,14 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Datenschutzerklärung für die iOS-App
+- `website/datenschutz.html` hat einen neuen Abschnitt „App für iPhone und iPad“ (Anker
+  `#app`, verlinkt aus der App und als Datenschutz-URL im App Store): Die App spricht nur
+  mit der gewählten Instanz, ohne Tracking und Drittanbieter-Bausteine; was sie überträgt
+  (Anmeldung per OAuth, Belege mit Erfassungsangaben und Prüfsumme), was auf dem Gerät
+  bleibt, KI-Funktionen erst nach Zustimmung, Demo-Instanz und App Store. Rechte und
+  Änderungen rücken auf 6 und 7.
+
 ### Übersicht eine Ebene tiefer (iOS-App) und alle Bankkonten im Dashboard
 - **Bankstände aller Geldkonten:** `GET /api/v1/dashboard` (und MCP `get_dashboard`)
   listete nur Konten mit importierten Umsätzen; Tages-, Festgeld- oder Girokonten, die

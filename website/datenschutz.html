@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Datenschutz – OpenBuchhaltung</title>
-  <meta name="description" content="Datenschutzerklärung der Projekt-Webseite von OpenBuchhaltung: keine Cookies, kein Tracking, keine Inhalte von Drittanbietern.">
+  <meta name="description" content="Datenschutzerklärung von OpenBuchhaltung für die Projekt-Webseite und die App für iPhone und iPad: keine Cookies, kein Tracking, keine Inhalte von Drittanbietern.">
   <link rel="canonical" href="https://openbuchhaltung.de/datenschutz.html">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
@@ -54,6 +54,8 @@
           kommen ausschließlich von unserem eigenen Server. Der Webserver führt keine
           Zugriffsprotokolle. Verarbeitet werden nur die Verbindungsdaten, die für die Auslieferung
           der Seite technisch nötig sind, und Angaben, die Sie uns selbst per E-Mail schicken.
+          Für die App für iPhone und iPad gilt <a href="#app">Abschnitt 5</a>: Sie spricht nur mit
+          der OpenBuchhaltung-Instanz, an der Sie sich anmelden, und enthält ebenfalls kein Tracking.
         </p>
 
         <h2>1. Verantwortlicher</h2>
@@ -127,7 +129,82 @@
           (§ 25 Abs. 2 Nr. 2 TDDDG); eine Einwilligung ist dafür nicht erforderlich.
         </p>
 
-        <h2>5. Ihre Rechte</h2>
+        <h2 id="app">5. App „OpenBuchhaltung“ für iPhone und iPad</h2>
+        <p>
+          Die App ist eine Begleit-App zu OpenBuchhaltung. Sie verbindet sich ausschließlich mit der
+          OpenBuchhaltung-Instanz, deren Adresse Sie bei der Anmeldung eingeben, oder mit unserer
+          Demo-Instanz (demo.openbuchhaltung.de). Die App enthält keine Werbung, keine Analyse- oder
+          Trackingdienste und keine Software-Bausteine von Drittanbietern. Wir erhalten über die App
+          keine Daten, solange Sie keine Instanz nutzen, die wir selbst betreiben.
+        </p>
+        <h3>Verantwortlich für Ihre Buchhaltungsdaten</h3>
+        <p>
+          Für die Daten auf einer Instanz ist verantwortlich, wer sie betreibt – in der Regel Ihr
+          Unternehmen, Ihre Kanzlei oder ein von Ihnen beauftragter Dienstleister. Für diese Daten
+          gelten dessen Datenschutzhinweise. Für die Demo-Instanz ist die unikin GmbH verantwortlich
+          (Abschnitt 1).
+        </p>
+        <h3>Was die App überträgt</h3>
+        <ul>
+          <li>
+            <strong>Anmeldung:</strong> Sie melden sich auf der Login-Seite der Instanz im
+            System-Browser an (OAuth 2.1 mit PKCE). Ihr Passwort sieht die App nicht. Sie erhält
+            Zugangs-Tokens, die im Schlüsselbund (Keychain) Ihres Geräts liegen und sich jederzeit
+            widerrufen lassen – beim Abmelden in der App oder in der Weboberfläche unter „Apps“.
+          </li>
+          <li>
+            <strong>Buchhaltung:</strong> Übersicht, offene Aufgaben, Bankumsätze, Belege und
+            Vorschläge ruft die App von der Instanz ab; Ihre Aktionen (etwa Buchen oder Zuordnen)
+            überträgt sie dorthin.
+          </li>
+          <li>
+            <strong>Belege:</strong> Scans, Fotos und Dateien, die Sie erfassen oder über „Teilen“
+            an die App geben, lädt sie mit Erfassungszeitpunkt, Erfassungsweg, Gerätemodell und
+            Systemversion (nicht dem Namen Ihres Geräts) sowie einer auf dem Gerät berechneten
+            Prüfsumme (SHA-256) hoch. Diese Angaben dienen dem Nachweis der unveränderten Erfassung
+            (GoBD).
+          </li>
+        </ul>
+        <h3>Was auf dem Gerät bleibt</h3>
+        <p>
+          Das Belegdatum erkennt die App auf dem Gerät (Texterkennung von Apple); dafür verlässt
+          nichts das Gerät. Auf dem Gerät gespeichert werden Serveradresse, Benutzername, gewählte
+          Gesellschaft, Ihre Zustimmung zu den KI-Funktionen und Belege, die noch auf den Upload
+          warten. Kamera und Fotos nutzt die App erst nach Ihrer Freigabe in iOS und nur, wenn Sie
+          einen Beleg scannen oder ein Foto auswählen. Mit dem Löschen der App werden alle diese
+          Daten vom Gerät entfernt.
+        </p>
+        <h3>KI-Funktionen</h3>
+        <p>
+          KI-Chat und Belegauswertung („Vorschlag erstellen“) laufen nicht in der App, sondern auf
+          der Instanz. Vor der ersten Nutzung an einer Instanz fragt die App nach Ihrer Zustimmung;
+          widerrufen können Sie sie in den Einstellungen der App. Mit Zustimmung überträgt die App
+          Ihre Frage, Anhänge bzw. den Beleg an die Instanz. Diese gibt sie zusammen mit den dafür
+          nötigen Buchhaltungsdaten an den KI-Dienst weiter, den ihr Betreiber eingerichtet hat,
+          etwa einen eigenen Modellserver oder einen Cloud-Anbieter. Die Demo-Instanz nutzt einen
+          selbst betriebenen Modellserver der unikin GmbH in Deutschland; Daten gehen dabei nicht an
+          Cloud-Anbieter. Rechtsgrundlage für die Demo ist Ihre Einwilligung
+          (Art. 6 Abs. 1 lit. a DSGVO).
+        </p>
+        <h3>Demo-Instanz</h3>
+        <p>
+          Die Demo-Instanz ist öffentlich: Alle Eingaben sind für andere Besucher sichtbar und
+          werden täglich zurückgesetzt. Bitte geben Sie dort keine echten Belege oder
+          personenbezogenen Daten ein. Ihr Server verarbeitet die technisch nötigen
+          Verbindungsdaten (etwa IP-Adresse, Zeitpunkt und aufgerufene Adresse), um die Anfragen zu
+          beantworten und Missbrauch abzuwehren. Rechtsgrundlage ist
+          Art. 6 Abs. 1 lit. f DSGVO; unser berechtigtes Interesse liegt darin, OpenBuchhaltung
+          vorzuführen und die Demo vor Missbrauch zu schützen.
+        </p>
+        <h3>App Store</h3>
+        <p>
+          Für Download, Updates und die Bewertungen im App Store ist Apple verantwortlich; dafür
+          gelten die Datenschutzhinweise von Apple. Absturzberichte und Nutzungsdaten erhalten wir
+          nur, wenn Sie in iOS zugestimmt haben, sie mit App-Entwicklern zu teilen, und dann nur
+          anonymisiert über Apple.
+        </p>
+
+        <h2>6. Ihre Rechte</h2>
         <p>Sie haben uns gegenüber das Recht auf</p>
         <ul>
           <li>Auskunft über die zu Ihrer Person gespeicherten Daten (Art. 15 DSGVO),</li>
@@ -147,10 +224,15 @@
           (<a href="https://datenschutz.hessen.de" rel="noopener">datenschutz.hessen.de</a>).
         </p>
 
-        <h2>6. Änderungen</h2>
         <p>
-          Wir passen diese Datenschutzerklärung an, wenn sich die Website oder die Rechtslage
-          ändert. Es gilt die jeweils hier veröffentlichte Fassung.
+          Für Daten auf einer Instanz, die nicht wir betreiben, wenden Sie sich bitte an deren
+          Betreiber.
+        </p>
+
+        <h2>7. Änderungen</h2>
+        <p>
+          Wir passen diese Datenschutzerklärung an, wenn sich die Website, die App oder die
+          Rechtslage ändert. Es gilt die jeweils hier veröffentlichte Fassung.
         </p>
       </article>
     </div>
