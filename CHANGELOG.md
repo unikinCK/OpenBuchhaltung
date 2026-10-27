@@ -8,6 +8,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Beleg-OCR: PDFs ohne Textebene auch mit lokalen KI-Servern
+- **Behoben:** Belegabgleich und Beleg-OCR brachen bei manchen PDFs ohne brauchbare
+  Textebene mit „OCR-Endpoint antwortete mit HTTP 400“ ab. Lokale Server wie LM Studio
+  nehmen keine PDF-Dateien an; der Ausweg über Seitenbilder fand bisher nur JPEG- und
+  8-Bit-Bilder, die direkt auf der Seite liegen. Jetzt werden die Seiten mit pdfium
+  (neue Abhängigkeit `pypdfium2`) als Graustufenbilder gerendert. Das erfasst auch
+  Scans in Form-XObjects, 1-Bit-Scans (CCITT/JBIG2) und Vektor-PDFs ohne Text.
+- Lässt sich ein PDF gar nicht rendern, nennt die Meldung jetzt den Grund statt nur
+  den HTTP-Status.
+
 ### Dateien per Download-Link für KI-Chats und MCP
 - Belege und Exporte passten als Base64 oft nicht durch den Chat, und von Modellen
   selbst gebaute Links zeigten ins Leere (interne Adresse des MCP-Containers, fehlende

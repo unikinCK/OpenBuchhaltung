@@ -592,33 +592,12 @@ def test_llm_timeout_is_configurable(tmp_path):
         assert llm_timeout(30) == 90.0
 
 
-def _pdf_with_images(*images: tuple[str, bytes, int, int]) -> bytes:
-    """Minimal-PDF mit je einer Seite pro Bild ``(filter, data, breite, höhe)``."""
-    pages: list[bytes] = []
-    kids = []
-    for index, (filter_name, data, width, height) in enumerate(images):
-        image_num = 3 + index * 2
-        kids.append(f"{image_num + 1} 0 R")
-        pages.append(
-            (
-                f"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} "
-                f"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /{filter_name} "
-                f"/Length {len(data)} >>\nstream\n"
-            ).encode()
-            + data
-            + b"\nendstream"
-        )
-        pages.append(
-            (
-                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
-                f"/Resources << /XObject << /Im0 {image_num} 0 R >> >> >>"
-            ).encode()
-        )
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode(),
-        *pages,
-    ]
+def _stream(entries: str, data: bytes) -> bytes:
+    return f"<< {entries} /Length {len(data)} >>\nstream\n".encode() + data + b"\nendstream"
+
+
+def _pdf(*objects: bytes) -> bytes:
+    """Minimal-PDF aus Objektrümpfen (Objekt 1 = Katalog, 2 = Seitenbaum)."""
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -634,13 +613,35 @@ def _pdf_with_images(*images: tuple[str, bytes, int, int]) -> bytes:
     return bytes(out)
 
 
-def test_ocr_retries_scan_pdf_as_page_images(monkeypatch):
+_CATALOG = b"<< /Type /Catalog /Pages 2 0 R >>"
+_ONE_PAGE = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
+
+
+def _png_gray_rows(png: bytes) -> list[bytes]:
+    """Pixelzeilen eines 8-Bit-Graustufen-PNGs aus ``_png_from_pixels``."""
+    import struct
     import zlib
+
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    width, height, depth, color_type = struct.unpack(">IIBB", png[16:26])
+    assert (depth, color_type) == (8, 0)
+    raw = zlib.decompress(png[png.index(b"IDAT") + 4 : png.index(b"IEND") - 8])
+    rows = [raw[y * (width + 1) : (y + 1) * (width + 1)] for y in range(height)]
+    assert all(row[0] == 0 for row in rows)
+    return [row[1:] for row in rows]
+
+
+def test_ocr_retries_vector_pdf_as_rendered_page(monkeypatch):
+    # PDF ohne Textebene und ohne eingebettetes Bild (z. B. Text als Pfade):
+    # Erst nach dem Rendern sieht der Endpoint überhaupt etwas.
     from urllib.error import HTTPError
 
-    jpeg = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
-    gray = zlib.compress(bytes([0, 128, 255, 64]))
-    pdf = _pdf_with_images(("DCTDecode", jpeg, 1, 1), ("FlateDecode", gray, 2, 2))
+    pdf = _pdf(
+        _CATALOG,
+        _ONE_PAGE,
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>",
+        _stream("", b"0 g 0 0 100 100 re f"),
+    )
     payloads = []
 
     def fake_urlopen(request, timeout=0):
@@ -656,18 +657,51 @@ def test_ocr_retries_scan_pdf_as_page_images(monkeypatch):
         model="m",
         file_bytes=pdf,
         mime_type="application/pdf",
-        file_name="scan.pdf",
+        file_name="vektor.pdf",
     )
     assert text == "Gesamt 19,98 EUR"
     blocks = payloads[1]["input"][1]["content"]
-    assert [block["type"] for block in blocks] == ["input_image", "input_image", "input_text"]
-    assert blocks[0]["image_url"] == "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
-    assert blocks[1]["image_url"].startswith("data:image/png;base64,")
-    png = base64.b64decode(blocks[1]["image_url"].split(",", 1)[1])
-    assert png.startswith(b"\x89PNG\r\n\x1a\n")
-    # Zeilen mit Filterbyte 0: [0, 0, 128] und [0, 255, 64]
-    idat = png[png.index(b"IDAT") + 4 : png.index(b"IEND") - 8]
-    assert zlib.decompress(idat) == bytes([0, 0, 128, 0, 255, 64])
+    assert [block["type"] for block in blocks] == ["input_image", "input_text"]
+    prefix, encoded = blocks[0]["image_url"].split(",", 1)
+    assert prefix == "data:image/png;base64"
+    rows = _png_gray_rows(base64.b64decode(encoded))
+    # Längere Kante auf 2000 px, höchstens Faktor 4: 200x100 pt -> 800x400 px.
+    assert (len(rows[0]), len(rows)) == (800, 400)
+    assert rows[200][100] < 64  # linke Hälfte schwarz gefüllt
+    assert rows[200][700] > 192  # rechte Hälfte weiß
+
+
+def test_pdf_page_images_render_scan_inside_form_xobject():
+    # Scanner legen das Seitenbild oft in ein Form-XObject statt direkt auf die Seite.
+    import zlib
+
+    pdf = _pdf(
+        _CATALOG,
+        _ONE_PAGE,
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 50] "
+        b"/Resources << /XObject << /Fm0 5 0 R >> >> /Contents 4 0 R >>",
+        _stream("", b"/Fm0 Do"),
+        _stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 50] "
+            "/Resources << /XObject << /Im0 6 0 R >> >>",
+            b"q 100 0 0 50 0 0 cm /Im0 Do Q",
+        ),
+        _stream(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray "
+            "/BitsPerComponent 8 /Filter /FlateDecode",
+            zlib.compress(bytes([0, 255])),
+        ),
+    )
+    [(mime, png)] = receipt_ocr._pdf_page_images(pdf)
+    assert mime == "image/png"
+    rows = _png_gray_rows(png)
+    assert (len(rows[0]), len(rows)) == (400, 200)
+    assert rows[100][50] < 64
+    assert rows[100][350] > 192
+
+
+def test_pdf_page_images_of_broken_pdf_are_empty():
+    assert receipt_ocr._pdf_page_images(b"%PDF-1.4 kaputt") == []
 
 
 def test_ocr_http_error_without_page_images_is_reported(monkeypatch):
