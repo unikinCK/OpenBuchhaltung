@@ -738,6 +738,49 @@ class ReceiptMatchSuggestion(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship()
 
 
+class ReceiptMatchJob(Base):
+    """Belegabgleich im Hintergrund: ein Auftrag je gestartetem Abgleich.
+
+    OCR und KI-Abgleich dauern mit lokalen Modellen mehrere Minuten – länger, als
+    ein Proxy auf die Antwort wartet. Der Auftrag läuft daher in einem Thread des
+    Workers, der ihn angenommen hat; der Stand liegt hier, damit jeder Worker ihn
+    abfragen kann. ``status``: ``running``, dann ``done`` (mit ``suggestion_id``)
+    oder ``failed`` (mit ``error``).
+    """
+
+    __tablename__ = "receipt_match_job"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'done', 'failed')", name="ck_receipt_match_job_status"
+        ),
+        Index("ix_receipt_match_job_document", "document_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    suggestion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("receipt_match_suggestion.id", ondelete="SET NULL")
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    document: Mapped[Document] = relationship()
+    suggestion: Mapped[ReceiptMatchSuggestion | None] = relationship()
+
+
 class BankTransaction(Base):
     __tablename__ = "bank_transaction"
     __table_args__ = (

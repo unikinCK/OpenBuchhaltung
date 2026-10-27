@@ -1549,11 +1549,23 @@ vorhandenen Buchungen abgeglichen. Jeder Vorschlag muss vom Anwender freigegeben
    Alle Schritte werden als Audit-Events protokolliert
    (`receipt_match_suggestion/created|approved|booked|rejected`).
 
+   **Im Hintergrund:** Mit lokalen Modellen dauern OCR und Abgleich oft länger, als ein
+   Proxy auf die Antwort wartet. „Abgleich starten“ legt deshalb nur einen Auftrag an
+   und kehrt sofort zurück; der Beleg zeigt „In Bearbeitung“. Ist der Abgleich fertig,
+   meldet sich der Browser mit einer Benachrichtigung (die Erlaubnis wird beim ersten
+   Klick erfragt) und, auch ohne Erlaubnis, mit einem Hinweis auf der gerade offenen
+   Seite. Ein fehlgeschlagener Abgleich nennt den Grund am Beleg. Bleibt ein Auftrag
+   über 20 Minuten stehen (Worker beim Redeploy beendet), gilt er als abgebrochen und
+   lässt sich neu starten.
+
 Die Funktion ist in allen drei Schichten verfügbar: UI (**Belegabgleich**), REST-API
 (`POST/GET /api/v1/receipt-matching/suggestions`,
-`POST /api/v1/receipt-matching/suggestions/<id>/approve|reject`) und MCP-Tools
-(`create_receipt_match_suggestion`, `list_receipt_match_suggestions`,
-`approve_receipt_match_suggestion`, `reject_receipt_match_suggestion`). Jeder Vorschlag
+`POST /api/v1/receipt-matching/suggestions/<id>/approve|reject`, im Hintergrund
+`POST /api/v1/receipt-matching/jobs` (202) und
+`GET /api/v1/receipt-matching/jobs/<id>?company_id=…`) und MCP-Tools
+(`create_receipt_match_suggestion`, `start_receipt_match_job`, `get_receipt_match_job`,
+`list_receipt_match_suggestions`, `approve_receipt_match_suggestion`,
+`reject_receipt_match_suggestion`). Jeder Vorschlag
 nennt den Beleg (`document`), bei Treffern den Bruttobetrag der Buchung
 (`journal_entry.amount`) und im `booking_proposal` Konto, Steuercode und Partner auch
 mit Nummer bzw. Namen sowie das vorgeschlagene Gegenkonto (`creditor_account_id`,

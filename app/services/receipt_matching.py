@@ -399,20 +399,10 @@ def _open_suggestion_exists(session: Session, document_id: int) -> bool:
     return count > 0
 
 
-def create_match_suggestion(
-    *,
-    session: Session,
-    company_id: int,
-    document_id: int,
-    changed_by: str,
-    ocr_endpoint: str | None = None,
-    ocr_model: str = "gpt-4.1-mini",
-    llm_endpoint: str | None = None,
-    llm_model: str = "gpt-4.1-mini",
-    ocr_api_key: str | None = None,
-    llm_api_key: str | None = None,
-) -> ReceiptMatchSuggestion:
-    """Analysiert einen unverknüpften Beleg und legt einen Abgleichsvorschlag an."""
+def check_matchable_document(
+    session: Session, company_id: int, document_id: int
+) -> tuple[Company, Document]:
+    """Gesellschaft und Beleg laden; Fehler, wenn der Beleg nicht abgeglichen werden kann."""
     company = session.get(Company, company_id)
     if company is None:
         raise ReceiptMatchError("Gesellschaft nicht gefunden.")
@@ -428,6 +418,24 @@ def create_match_suggestion(
         raise ReceiptMatchError(
             "Für diesen Beleg existiert bereits ein offener Abgleichsvorschlag."
         )
+    return company, document
+
+
+def create_match_suggestion(
+    *,
+    session: Session,
+    company_id: int,
+    document_id: int,
+    changed_by: str,
+    ocr_endpoint: str | None = None,
+    ocr_model: str = "gpt-4.1-mini",
+    llm_endpoint: str | None = None,
+    llm_model: str = "gpt-4.1-mini",
+    ocr_api_key: str | None = None,
+    llm_api_key: str | None = None,
+) -> ReceiptMatchSuggestion:
+    """Analysiert einen unverknüpften Beleg und legt einen Abgleichsvorschlag an."""
+    company, document = check_matchable_document(session, company_id, document_id)
 
     storage_path = Path(document.storage_key)
     try:

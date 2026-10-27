@@ -1,4 +1,5 @@
-"""Belegabgleich über die API: Vorschläge erzeugen, listen, freigeben, ablehnen."""
+"""Belegabgleich über die API: Vorschläge erzeugen (direkt oder als Hintergrundauftrag),
+listen, freigeben, ablehnen."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from app.auth import current_api_user
 from app.services.incoming_invoice import parse_tax_splits
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.llm_settings import PURPOSE_RECEIPT_MATCH, receipt_analysis_options
+from app.services.receipt_match_jobs import get_job, job_dict, start_match_job
 from app.services.receipt_matching import (
     ReceiptMatchError,
     approve_match_suggestion,
@@ -323,3 +325,68 @@ def reject_receipt_match_suggestion_via_api(suggestion_id: int):
 
         creditor = _default_creditor(session, suggestion.company_id)
         return jsonify(_suggestion_dict(session, suggestion, creditor=creditor))
+
+
+def _job_response(session, job):
+    """Auftragsstand, nach Abschluss mit dem fertigen Vorschlag."""
+    data = job_dict(job)
+    data["suggestion"] = (
+        _suggestion_dict(
+            session, job.suggestion, creditor=_default_creditor(session, job.company_id)
+        )
+        if job.suggestion is not None
+        else None
+    )
+    return data
+
+
+@api_bp.post("/receipt-matching/jobs")
+def start_receipt_match_job_via_api():
+    """Abgleich im Hintergrund starten (202); Stand über GET …/jobs/<id>."""
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        document_id = int(payload.get("document_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id and document_id are required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+
+        try:
+            job = start_match_job(
+                session=session,
+                company_id=company.id,
+                document_id=document_id,
+                changed_by=_api_changed_by(),
+                analysis_options=receipt_analysis_options(
+                    llm_purpose=PURPOSE_RECEIPT_MATCH, session=session
+                ),
+            )
+        except ReceiptMatchError as exc:
+            return jsonify({"error": str(exc)}), 422
+
+        return jsonify(_job_response(session, job)), 202
+
+
+@api_bp.get("/receipt-matching/jobs/<int:job_id>")
+def get_receipt_match_job_via_api(job_id: int):
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        job = get_job(session, job_id)
+        if job is None or job.company_id != company.id:
+            return jsonify({"error": "Job not found."}), 404
+        return jsonify(_job_response(session, job))
