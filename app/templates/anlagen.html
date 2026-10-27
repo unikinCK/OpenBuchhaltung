@@ -17,8 +17,8 @@
 {% macro method_with_params(asset) -%}
   {{ method_labels.get(asset.method, asset.method) }}
   {%- if asset.method in ("linear", "degressive") and asset.useful_life_months %} · {{ asset.useful_life_months }} Monate{% endif %}
-  {%- if asset.method == "degressive" and asset.degressive_rate %} · {{ asset.degressive_rate }} % p. a.{% endif %}
-  {%- if asset.method == "leistung" and asset.total_units %} · {{ asset.total_units }} Einheiten{% endif %}
+  {%- if asset.method == "degressive" and asset.degressive_rate %} · {{ asset.degressive_rate | satz }} % p. a.{% endif %}
+  {%- if asset.method == "leistung" and asset.total_units %} · {{ asset.total_units | zahl }} Einheiten{% endif %}
 {%- endmacro %}
 
 {% block content %}
@@ -178,10 +178,10 @@
       <h2>Abschreibungsplan: {{ selected_asset.asset_number }} – {{ selected_asset.name }}</h2>
       <p class="muted">
         {{ method_labels.get(selected_asset.method, selected_asset.method) }} ·
-        AHK {{ selected_asset.acquisition_cost }}
+        AHK {{ selected_asset.acquisition_cost | betrag }}
         {% if selected_asset.useful_life_months %} · Nutzungsdauer {{ selected_asset.useful_life_months }} Monate{% endif %}
-        {% if selected_asset.degressive_rate %} · Satz {{ selected_asset.degressive_rate }} %{% endif %}
-        {% if selected_asset.residual_value and selected_asset.residual_value > 0 %} · Restwert {{ selected_asset.residual_value }}{% endif %}
+        {% if selected_asset.degressive_rate %} · Satz {{ selected_asset.degressive_rate | satz }} %{% endif %}
+        {% if selected_asset.residual_value and selected_asset.residual_value > 0 %} · Restwert {{ selected_asset.residual_value | betrag }}{% endif %}
       </p>
 
       {% if schedule %}
@@ -201,9 +201,9 @@
               <tr>
                 <td>{{ row.year }}</td>
                 <td class="num">{{ row.months if row.months else "–" }}</td>
-                <td class="num">{{ row.book_value_start }}</td>
-                <td class="num">{{ row.depreciation }}</td>
-                <td class="num">{{ row.book_value_end }}</td>
+                <td class="num">{{ row.book_value_start | betrag }}</td>
+                <td class="num">{{ row.depreciation | betrag }}</td>
+                <td class="num">{{ row.book_value_end | betrag }}</td>
                 <td class="muted">{{ row.note }}</td>
               </tr>
             {% endfor %}
@@ -275,7 +275,7 @@
         {% if selected_asset.status == "cancelled" %}
           <p class="muted">Storniert{% if selected_asset.notes %} – {{ selected_asset.notes }}{% endif %}.</p>
         {% else %}
-          <p class="muted">Abgegangen am {{ selected_asset.disposal_date.isoformat() }}{% if selected_asset.disposal_proceeds %}, Erlös {{ selected_asset.disposal_proceeds }}{% endif %}.</p>
+          <p class="muted">Abgegangen am {{ selected_asset.disposal_date | datum }}{% if selected_asset.disposal_proceeds %}, Erlös {{ selected_asset.disposal_proceeds | betrag }}{% endif %}.</p>
         {% endif %}
       {% endif %}
 
@@ -290,8 +290,8 @@
               <tr>
                 <td>{{ entry.fiscal_year }}</td>
                 <td>{{ entry.kind }}</td>
-                <td class="num">{{ entry.amount }}</td>
-                <td class="num">{{ entry.book_value_after }}</td>
+                <td class="num">{{ entry.amount | betrag }}</td>
+                <td class="num">{{ entry.book_value_after | betrag }}</td>
                 <td class="muted">{{ entry.journal_entry_id or "–" }}</td>
               </tr>
             {% endfor %}

@@ -1069,7 +1069,7 @@ def test_datev_export_per_fiscal_year_in_api_and_ui(tmp_path):
     # Buchungen bzw. das des Auswertungszeitraums.
     page = client.get("/berichte", query_string={"company_id": 1}).get_data(as_text=True)
     assert 'id="datev_fiscal_year_id"' in page
-    assert "2025 (2025-01-01 – 2025-12-31, 1 Buchung)" in page
+    assert "2025 (01.01.2025 – 31.12.2025, 1 Buchung)" in page
     assert 'value="2" selected' in page
     page = client.get("/berichte", query_string={"company_id": 1, "date_to": "2025-12-31"})
     assert 'value="1" selected' in page.get_data(as_text=True)

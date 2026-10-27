@@ -92,22 +92,22 @@
                 {% set unit_args = dict(period_args, company_id=selected_company_id, **{unit_arg: unit_value}) %}
                 <tr>
                   <td><a href="{{ url_for('main.journal_page', **unit_args) }}" title="Buchungen anzeigen">{% if bucket.unit %}{{ bucket.unit.code }} – {{ bucket.unit.name }}{% else %}Nicht zugeordnet{% endif %}</a></td>
-                  <td class="num">{{ bucket.total_revenue }}</td>
-                  <td class="num">{{ bucket.total_expense }}</td>
-                  <td class="num"><strong>{{ bucket.net_income }}</strong></td>
+                  <td class="num">{{ bucket.total_revenue | betrag }}</td>
+                  <td class="num">{{ bucket.total_expense | betrag }}</td>
+                  <td class="num"><strong>{{ bucket.net_income | betrag }}</strong></td>
                   {% if bucket.investments %}
-                    <td class="num">{{ bucket.investments.acquisition_cost }}</td>
-                    <td class="num">{{ bucket.investments.depreciation }}</td>
-                    <td class="num"><strong>{{ bucket.investments.book_value }}</strong></td>
+                    <td class="num">{{ bucket.investments.acquisition_cost | betrag }}</td>
+                    <td class="num">{{ bucket.investments.depreciation | betrag }}</td>
+                    <td class="num"><strong>{{ bucket.investments.book_value | betrag }}</strong></td>
                   {% else %}
                     <td class="num muted">–</td><td class="num muted">–</td><td class="num muted">–</td>
                   {% endif %}
                 </tr>
                 {% for account in bucket.accounts %}
-                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount }}</td><td colspan="3"></td></tr>
+                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="2"></td><td class="num">{{ account.amount | betrag }}</td><td colspan="3"></td></tr>
                 {% endfor %}
                 {% for account in (bucket.investments.accounts if bucket.investments else []) %}
-                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="3"></td><td class="num">{{ account.acquisition_cost }}</td><td class="num">{{ account.depreciation }}</td><td class="num">{{ account.book_value }}</td></tr>
+                  <tr class="entry-lines" data-sort-child><td><a href="{{ url_for('main.journal_page', account_id=account.account_id, **unit_args) }}" title="Buchungen anzeigen">{{ account.code }} – {{ account.name }}</a> <a class="small muted" href="{{ url_for('main.account_detail_page', account_id=account.account_id) }}" title="Kontoblatt {{ account.code }}">Kontoblatt</a></td><td colspan="3"></td><td class="num">{{ account.acquisition_cost | betrag }}</td><td class="num">{{ account.depreciation | betrag }}</td><td class="num">{{ account.book_value | betrag }}</td></tr>
                 {% endfor %}
               {% endfor %}
             </tbody>

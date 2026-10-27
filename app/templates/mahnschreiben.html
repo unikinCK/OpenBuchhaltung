@@ -71,7 +71,7 @@
           <td>{{ item.reference }}</td>
           <td>{{ item.entry_date.strftime("%d.%m.%Y") }}</td>
           <td>{{ item.due_date.strftime("%d.%m.%Y") if item.due_date else "–" }}</td>
-          <td class="num">{{ item.open_amount }} {{ item.currency_code }}</td>
+          <td class="num">{{ item.open_amount | betrag }} {{ item.currency_code }}</td>
         </tr>
       </tbody>
     </table>

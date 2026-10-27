@@ -18,6 +18,7 @@ from app.services.partners import (
     find_partner_by_number,
     validate_partner_assignment,
 )
+from domain.formatting import format_number
 from domain.models import (
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
@@ -667,7 +668,7 @@ def parse_decimal(value: str, *, places: int | None = 2) -> Decimal:
         raise JournalEntryCreationError("Betrag ist zu groß.") from None
     if quantized != parsed:
         raise JournalEntryCreationError(
-            f"Betrag darf höchstens {places} Nachkommastellen haben ({parsed})."
+            f"Betrag darf höchstens {places} Nachkommastellen haben ({format_number(parsed)})."
         )
     return quantized
 

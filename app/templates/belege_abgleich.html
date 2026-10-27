@@ -32,7 +32,7 @@
               {% for document in unmatched_documents %}
                 <tr>
                   <td>{{ document.file_name }}</td>
-                  <td>{{ document.document_date.isoformat() if document.document_date else '–' }}</td>
+                  <td>{{ document.document_date | datum if document.document_date else '–' }}</td>
                   <td>{{ document.uploaded_at | datum_zeit }}</td>
                   <td>
                     <form method="post" action="{{ url_for('main.receipt_matching_suggest') }}">
@@ -74,15 +74,15 @@
             <tbody>
               <tr><th>Lieferant</th><td>{{ suggestion.supplier or '–' }}</td></tr>
               <tr><th>Rechnungsnummer</th><td>{{ suggestion.invoice_number or '–' }}</td></tr>
-              <tr><th>Rechnungsdatum</th><td>{{ suggestion.invoice_date.isoformat() if suggestion.invoice_date else '–' }}</td></tr>
-              <tr><th>Netto</th><td class="num">{{ suggestion.net_amount if suggestion.net_amount is not none else '–' }}</td></tr>
-              <tr><th>Steuer{% if suggestion.tax_rate is not none %} ({{ suggestion.tax_rate }}%){% endif %}</th><td class="num">{{ suggestion.tax_amount if suggestion.tax_amount is not none else '–' }}</td></tr>
-              <tr><th>Brutto</th><td class="num">{{ suggestion.gross_amount if suggestion.gross_amount is not none else '–' }}</td></tr>
+              <tr><th>Rechnungsdatum</th><td>{{ suggestion.invoice_date | datum if suggestion.invoice_date else '–' }}</td></tr>
+              <tr><th>Netto</th><td class="num">{{ suggestion.net_amount | betrag if suggestion.net_amount is not none else '–' }}</td></tr>
+              <tr><th>Steuer{% if suggestion.tax_rate is not none %} ({{ suggestion.tax_rate | satz }} %){% endif %}</th><td class="num">{{ suggestion.tax_amount | betrag if suggestion.tax_amount is not none else '–' }}</td></tr>
+              <tr><th>Brutto</th><td class="num">{{ suggestion.gross_amount | betrag if suggestion.gross_amount is not none else '–' }}</td></tr>
               {% for line in suggestion.tax_lines or [] %}
-                <tr><th>davon {{ line.rate }} %</th><td class="num">netto {{ line.net_amount }} · Steuer {{ line.tax_amount }}</td></tr>
+                <tr><th>davon {{ line.rate | satz }} %</th><td class="num">netto {{ line.net_amount | betrag }} · Steuer {{ line.tax_amount | betrag }}</td></tr>
               {% endfor %}
               {% if suggestion.tip_amount %}
-                <tr><th>Trinkgeld (ohne USt)</th><td class="num">{{ suggestion.tip_amount }}</td></tr>
+                <tr><th>Trinkgeld (ohne USt)</th><td class="num">{{ suggestion.tip_amount | betrag }}</td></tr>
               {% endif %}
               {% if suggestion.description %}
                 <tr><th>Leistung</th><td>{{ suggestion.description }}</td></tr>
@@ -98,8 +98,8 @@
             {% if proposed %}
               <p>
                 Vorgeschlagene Buchung: <strong>{{ proposed.posting_number }}</strong>
-                vom {{ proposed.entry_date.isoformat() }} – {{ proposed.description }}
-                (brutto {{ entry_gross_total(proposed) }} {{ suggestion.currency_code }})
+                vom {{ proposed.entry_date | datum }} – {{ proposed.description }}
+                (brutto {{ entry_gross_total(proposed) | betrag }} {{ suggestion.currency_code }})
               </p>
             {% endif %}
             <form method="post" action="{{ url_for('main.receipt_matching_approve', suggestion_id=suggestion.id) }}" class="stacked">
@@ -109,7 +109,7 @@
               <select id="journal_entry_id_{{ suggestion.id }}" name="journal_entry_id" required>
                 {% for entry in entry_options %}
                   <option value="{{ entry.id }}" {% if entry.id == suggestion.journal_entry_id %}selected{% endif %}>
-                    {{ entry.posting_number }} · {{ entry.entry_date.isoformat() }} · {{ entry.description }} · {{ entry_gross_total(entry) }}
+                    {{ entry.posting_number }} · {{ entry.entry_date | datum }} · {{ entry.description }} · {{ entry_gross_total(entry) | betrag }}
                   </option>
                 {% endfor %}
               </select>
@@ -160,7 +160,7 @@
                             or (not suggestion.tax_code_id and not suggestion.reverse_charge
                                 and suggestion.tax_rate is not none and tax_code.rate == suggestion.tax_rate
                                 and tax_code.kind == 'input') %}selected{% endif %}>
-                      {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                      {{ tax_code.code }} ({{ tax_code.rate | satz }} %)</option>
                   {% endfor %}
                 </select>
 

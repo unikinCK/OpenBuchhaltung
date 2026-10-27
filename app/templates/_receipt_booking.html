@@ -32,7 +32,7 @@
                   <option value="">Ohne Steuer</option>
                   {% for tax_code in tax_codes %}
                     <option value="{{ tax_code.id }}" {% if tax_code.id == line.tax_code_id %}selected{% endif %}>
-                      {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                      {{ tax_code.code }} ({{ tax_code.rate | satz }} %)</option>
                   {% endfor %}
                 </select>
               </td>

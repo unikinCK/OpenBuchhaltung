@@ -20,6 +20,7 @@ from app.services.journal_entries import (
 )
 from app.services.opening_balance import find_carryforward_account
 from app.services.standard_accounts import GEWINNVORTRAG, find_standard_account
+from domain.formatting import format_amount
 from domain.models import (
     Account,
     Company,
@@ -412,8 +413,8 @@ def _create_opening_balance_entry(
         )
         if carryforward_account is None:
             raise PeriodActionError(
-                f"Die Bestandskonten gehen nicht auf (Differenz {total}); vermutlich "
-                "haben Konten keine der Kontoarten asset/liability/equity/expense/"
+                f"Die Bestandskonten gehen nicht auf (Differenz {format_amount(total)}); "
+                "vermutlich haben Konten keine der Kontoarten asset/liability/equity/expense/"
                 "income. Bitte die Kontoarten prüfen oder ein Saldenvortragskonto "
                 "(9000 bzw. „Saldenvortrag“) anlegen."
             )

@@ -24,6 +24,7 @@ from app.services.fixed_assets import (
 from app.services.journal_entries import parse_decimal
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
+from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -206,7 +207,8 @@ def depreciate_fixed_asset_action(asset_id: int):
             )
 
     flash(
-        f"AfA {fiscal_year}: {entry.amount} gebucht. Neuer Buchwert: {entry.book_value_after}.",
+        f"AfA {fiscal_year}: {format_amount(entry.amount)} gebucht. "
+        f"Neuer Buchwert: {format_amount(entry.book_value_after)}.",
         "success",
     )
     return redirect(url_for("main.fixed_assets_page", company_id=company_id, asset_id=asset_id))

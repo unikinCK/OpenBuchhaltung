@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 import re
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.services.tool_titles import tool_title
+from domain.formatting import format_amount
 
 # Felder, die in der Zusammenfassung nichts beitragen (Kontext oder Rohdaten).
 _HIDDEN_KEYS = frozenset({"company_id", "content_base64", "client_sha256", "mime_type"})
@@ -104,20 +104,11 @@ def field_label(key: str) -> str:
     return _FIELD_LABELS.get(key) or key.replace("_", " ").capitalize()
 
 
-def _format_amount(value: Any) -> str:
-    try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return str(value)
-    text = f"{amount:,.2f}"
-    return text.replace(",", " ").replace(".", ",").replace(" ", ".")
-
-
 def format_value(key: str, value: Any) -> str:
     if isinstance(value, bool):
         return "Ja" if value else "Nein"
     if key in _AMOUNT_KEYS and isinstance(value, (int, float, str)) and value != "":
-        return _format_amount(value)
+        return format_amount(value)
     if isinstance(value, str):
         match = _ISO_DATE.match(value)
         if match and (key.endswith("_date") or key in {"valid_from", "valid_to", "next_run"}):

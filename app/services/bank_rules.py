@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.audit_log import log_audit_event
 from app.services.bank_import import BankImportError, book_transaction
 from app.services.journal_entries import JournalEntryCreationError
+from domain.formatting import format_amount
 from domain.models import (
     Account,
     BankBookingRule,
@@ -228,7 +229,7 @@ def apply_rules(
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             session.rollback()
             report.errors.append(
-                f"Umsatz {transaction.id} ({transaction.booking_date.isoformat()}, "
-                f"{transaction.amount}): {exc}"
+                f"Umsatz {transaction.id} ({transaction.booking_date:%d.%m.%Y}, "
+                f"{format_amount(transaction.amount)}): {exc}"
             )
     return report

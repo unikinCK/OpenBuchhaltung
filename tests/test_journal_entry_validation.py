@@ -33,6 +33,17 @@ def test_validator_rejects_unbalanced_entry() -> None:
         JournalEntryValidator.validate(draft)
 
 
+def test_validator_names_unbalanced_totals_in_german_format() -> None:
+    draft = JournalEntryDraft(
+        status="posted",
+        lines=[_line("1234.50", "0.00"), _line("0.00", "1000.00")],
+    )
+
+    with pytest.raises(JournalEntryValidationError) as exc_info:
+        JournalEntryValidator.validate(draft)
+    assert "(Soll: 1.234,50, Haben: 1.000,00)" in str(exc_info.value)
+
+
 def test_validator_rejects_single_line_entry() -> None:
     draft = JournalEntryDraft(status="draft", lines=[_line("100.00", "0.00")])
 

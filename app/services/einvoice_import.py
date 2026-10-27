@@ -29,6 +29,7 @@ from app.services.incoming_invoice import (
     book_incoming_invoice,
     invoice_gross_amount,
 )
+from domain.formatting import format_amount
 from domain.models import Company, JournalEntry, TaxCode
 
 
@@ -334,8 +335,8 @@ def einvoice_tax_splits(
     gross = invoice_gross_amount(Decimal("0"), Decimal("0"), splits)
     if gross != invoice.grand_total.quantize(cent):
         raise IncomingInvoiceError(
-            f"Die Steueraufteilung der E-Rechnung ({gross}) passt nicht zum "
-            f"Rechnungsbetrag ({invoice.grand_total}).",
+            f"Die Steueraufteilung der E-Rechnung ({format_amount(gross)}) passt nicht "
+            f"zum Rechnungsbetrag ({format_amount(invoice.grand_total)}).",
             code="tax_split_mismatch",
         )
     return splits

@@ -81,6 +81,7 @@ from app.services.tax_period import (
     SERVICE_DATE_LOOKBACK,
     tax_point,
 )
+from domain.formatting import format_amount, format_rate
 from domain.models import (
     TAX_KIND_INPUT,
     Account,
@@ -588,7 +589,7 @@ def compute_vat_return_details(
         rows.append(
             VatReturnRow(
                 "35",
-                f"Umsätze zu anderen Steuersätzen ({rate} %, Bemessungsgrundlage)",
+                f"Umsätze zu anderen Steuersätzen ({format_rate(rate)} %, Bemessungsgrundlage)",
                 _floor_euro(base_by_rate[rate]),
             )
         )
@@ -630,7 +631,7 @@ def compute_vat_return_details(
         total = sum((Decimal(item["amount"]) for item in unassigned), ZERO)
         warnings.append(
             f"Nicht in der UStVA: {len(unassigned)} Ertragszeile(n) ohne Umsatzsteuer auf "
-            f"Konten ohne UStVA-Funktion ({total.quantize(ZERO)} €, z. B. Zinsen). "
+            f"Konten ohne UStVA-Funktion ({format_amount(total)} €, z. B. Zinsen). "
             "Steuerfreie oder nicht steuerbare Umsätze auf das passende Konto buchen "
             "(z. B. 8125/4125 ig. Lieferung, 8336/4336 sonstige Leistung an EU-Unternehmer, "
             "8338/4338 Drittland, 8100/4100 § 4 Nr. 8 ff.) oder mit Steuercode „frei“ "

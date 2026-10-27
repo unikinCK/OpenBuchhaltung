@@ -15,7 +15,13 @@ from sqlalchemy import select
 from app import create_app
 from app.auth import hash_password
 from app.services.journal_entries import JournalEntryCreationError
-from app.web.formatting import format_amount, format_date, format_datetime, format_rate
+from app.web.formatting import (
+    format_amount,
+    format_date,
+    format_datetime,
+    format_number,
+    format_rate,
+)
 from app.web.helpers import parse_form_amount
 from domain.models import AuditLog, BankTransaction, JournalEntry, JournalEntryLine, User
 
@@ -33,6 +39,9 @@ def test_display_formats() -> None:
     assert format_datetime(datetime(2026, 10, 9, 9, 51)) == "09.10.2026 11:51"
     assert format_rate(Decimal("19.00")) == "19"
     assert format_rate(Decimal("10.70")) == "10,7"
+    assert format_number(Decimal("100000.00")) == "100.000"
+    assert format_number("1234.50") == "1.234,5"
+    assert format_number(None) == ""
 
 
 def test_datetimes_are_shown_in_german_local_time() -> None:

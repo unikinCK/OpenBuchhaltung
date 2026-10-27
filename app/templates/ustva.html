@@ -57,7 +57,7 @@
       {% if period_error %}
         <p class="muted">{{ period_error }}</p>
       {% elif rows %}
-        <p class="muted">{{ declaration_display_name }} {{ period_label }} · Zeitraum {{ date_from.isoformat() }} bis {{ date_to.isoformat() }} —
+        <p class="muted">{{ declaration_display_name }} {{ period_label }} · Zeitraum {{ date_from | datum }} bis {{ date_to | datum }} —
           Bemessungsgrundlagen in vollen Euro (abgerundet), Steuerbeträge centgenau aus der Buchhaltung.</p>
         <table>
           <thead>
@@ -72,7 +72,7 @@
               <tr {% if row.kennziffer == "83" %}style="font-weight:bold;"{% endif %}>
                 <td>{{ row.kennziffer }}</td>
                 <td>{{ row.label }}</td>
-                <td class="num">{{ row.amount }}</td>
+                <td class="num">{{ row.amount | betrag }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -95,9 +95,9 @@
                 {% for item in unassigned %}
                   <tr>
                     <td>{{ item.posting_number }}</td>
-                    <td>{{ item.entry_date }}</td>
+                    <td>{{ item.entry_date | datum }}</td>
                     <td>{{ item.account_code }} – {{ item.account_name }}</td>
-                    <td class="num">{{ item.amount }}</td>
+                    <td class="num">{{ item.amount | betrag }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -142,8 +142,8 @@
                 <td>{{ row.vat_id }}</td>
                 <td>{{ row.partner_name }}</td>
                 <td>{{ row.kind }} – {{ row.kind_label }}</td>
-                <td class="num">{{ row.amount }}</td>
-                <td class="num">{{ row.amount_euro }}</td>
+                <td class="num">{{ row.amount | betrag }}</td>
+                <td class="num">{{ row.amount_euro | betrag(0) }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -167,10 +167,10 @@
             {% for item in zm.missing %}
               <tr>
                 <td>{{ item.posting_number }}</td>
-                <td>{{ item.entry_date }}</td>
+                <td>{{ item.entry_date | datum }}</td>
                 <td>{{ item.account_code }}</td>
                 <td>{{ item.kind }}</td>
-                <td class="num">{{ item.amount }}</td>
+                <td class="num">{{ item.amount | betrag }}</td>
                 <td>{{ item.reason }}{% if item.partner_name %} ({{ item.partner_name }}){% endif %}</td>
               </tr>
             {% endfor %}
@@ -232,11 +232,11 @@
               <tr>
                 <td>{{ item.declaration_display_name }}</td>
                 <td><strong>{{ item.period_label }}</strong></td>
-                <td>{{ item.date_from.isoformat() }}</td>
-                <td>{{ item.date_to.isoformat() }}</td>
+                <td>{{ item.date_from | datum }}</td>
+                <td>{{ item.date_to | datum }}</td>
                 <td>{{ item.status }}</td>
                 <td class="num">
-                  {% for kz in item.kennzahlen %}{% if kz.kennziffer == "83" %}{{ kz.amount }}{% endif %}{% endfor %}
+                  {% for kz in item.kennzahlen %}{% if kz.kennziffer == "83" %}{{ kz.amount | betrag }}{% endif %}{% endfor %}
                 </td>
                 <td>
                   {% if item.elster_submissions %}
