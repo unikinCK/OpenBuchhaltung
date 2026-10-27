@@ -33,6 +33,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.services.llm_settings import llm_headers, llm_timeout
+from domain.formatting import format_amount, format_rate
 
 logger = logging.getLogger(__name__)
 
@@ -808,8 +809,9 @@ def _reconcile(
         expected = (net + tax).quantize(_CENT, rounding=ROUND_HALF_UP)
         if abs(expected - gross) > _CENT:
             warnings.append(
-                f"Netto ({net}) + Steuer ({tax}) ergibt {expected}, "
-                f"Beleg nennt aber Brutto {gross}. Bitte prüfen."
+                f"Netto ({format_amount(net)}) + Steuer ({format_amount(tax)}) ergibt "
+                f"{format_amount(expected)}, Beleg nennt aber Brutto "
+                f"{format_amount(gross)}. Bitte prüfen."
             )
 
     return net, tax, gross, rate, warnings
@@ -1211,10 +1213,6 @@ def _date_plausible(value: date | None) -> bool:
     return 2000 <= value.year <= date.today().year + 1
 
 
-def _format_rate(rate: Decimal) -> str:
-    return f"{rate.normalize():f}".replace(".", ",")
-
-
 def apply_llm_control(extraction: ReceiptExtraction, llm: LlmReceiptFields) -> None:
     """Führt LLM-Ergebnisse mit der Regelanalyse zusammen und prüft sie gegeneinander.
 
@@ -1301,14 +1299,16 @@ def apply_llm_control(extraction: ReceiptExtraction, llm: LlmReceiptFields) -> N
         elif use_llm_amounts:
             extraction.control_status = "korrigiert"
             extraction.warnings.append(
-                f"KI-Kontrolle: regelbasierte Beträge unplausibel (Brutto {det_gross}), "
-                f"KI-Werte übernommen (Brutto {gross}). Bitte prüfen."
+                "KI-Kontrolle: regelbasierte Beträge unplausibel "
+                f"(Brutto {format_amount(det_gross)}), KI-Werte übernommen "
+                f"(Brutto {format_amount(gross)}). Bitte prüfen."
             )
         else:
             extraction.control_status = "abweichung"
             extraction.warnings.append(
-                f"KI-Kontrolle: Bruttobetrag weicht ab (regelbasiert {det_gross}, "
-                f"KI {llm.gross_amount}). Bitte prüfen."
+                "KI-Kontrolle: Bruttobetrag weicht ab (regelbasiert "
+                f"{format_amount(det_gross)}, KI {format_amount(llm.gross_amount)}). "
+                "Bitte prüfen."
             )
     elif det_gross is None and llm.gross_amount is not None:
         extraction.control_status = "ergänzt"
@@ -1324,8 +1324,8 @@ def apply_llm_control(extraction: ReceiptExtraction, llm: LlmReceiptFields) -> N
         )
     if extraction.tip_amount:
         notes.append(
-            f"Trinkgeld {extraction.tip_amount} {extraction.currency_code} zusätzlich "
-            "gezahlt (ohne Umsatzsteuer)."
+            f"Trinkgeld {format_amount(extraction.tip_amount)} {extraction.currency_code} "
+            "zusätzlich gezahlt (ohne Umsatzsteuer)."
         )
     if extraction.reverse_charge or (
         extraction.tax_amount == 0 and llm.tax_rate is not None and llm.tax_rate == 0
@@ -1356,7 +1356,7 @@ def _apply_tax_lines(
     if len(rates) > 1:
         extraction.tax_rate = extraction.tax_lines[0][0]
         parts = ", ".join(
-            f"{_format_rate(rate)} % (netto {net}, USt {tax})"
+            f"{format_rate(rate)} % (netto {format_amount(net)}, USt {format_amount(tax)})"
             for rate, net, tax in extraction.tax_lines
         )
         return [f"Mehrere Steuersätze: {parts}. Der Buchungsvorschlag teilt je Steuersatz auf."]

@@ -317,6 +317,7 @@ def test_additional_receipt_matches_entry_that_already_has_documents(tmp_path):
     assert suggestion.journal_entry_id == entry_id
     assert suggestion.confidence == "niedrig"
     assert "bereits 1 Beleg(e)" in suggestion.reason
+    assert suggestion.reason.startswith("Betrag 238,00 stimmt")
 
     with app.extensions["db_session_factory"]() as session:
         receipt_matching.approve_match_suggestion(

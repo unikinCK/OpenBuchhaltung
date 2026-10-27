@@ -53,6 +53,7 @@ from app.services.receipt_ocr import (
     sanitize_text,
 )
 from app.services.receipt_proposals import account_choices, propose_receipt_booking
+from domain.formatting import format_amount
 from domain.models import (
     Company,
     Document,
@@ -312,7 +313,7 @@ def choose_match_rule_based(
             journal_entry_id=best.id,
             confidence="mittel",
             reason=(
-                f"Betrag {extraction.gross_amount} stimmt mit Buchung "
+                f"Betrag {format_amount(extraction.gross_amount)} stimmt mit Buchung "
                 f"{best.posting_number} überein (regelbasiert)."
             ),
             llm_used=False,
@@ -327,7 +328,8 @@ def choose_match_rule_based(
         journal_entry_id=best.id,
         confidence="niedrig",
         reason=(
-            f"{len(candidates)} Buchungen mit Betrag {extraction.gross_amount} gefunden; "
+            f"{len(candidates)} Buchungen mit Betrag "
+            f"{format_amount(extraction.gross_amount)} gefunden; "
             f"{best.posting_number} liegt dem Belegdatum am nächsten. Bitte prüfen."
         ),
         llm_used=False,
@@ -346,8 +348,8 @@ def _choose_additional_receipt(
             journal_entry_id=None,
             confidence="niedrig",
             reason=(
-                f"Betrag {extraction.gross_amount} passt nur zu Buchungen, die bereits "
-                "Belege haben; ohne erkanntes Belegdatum keine Zuordnung."
+                f"Betrag {format_amount(extraction.gross_amount)} passt nur zu Buchungen, "
+                "die bereits Belege haben; ohne erkanntes Belegdatum keine Zuordnung."
             ),
             llm_used=False,
         )
@@ -361,7 +363,7 @@ def _choose_additional_receipt(
             journal_entry_id=None,
             confidence="niedrig",
             reason=(
-                f"Betrag {extraction.gross_amount} passt nur zu Buchungen mit "
+                f"Betrag {format_amount(extraction.gross_amount)} passt nur zu Buchungen mit "
                 f"vorhandenen Belegen, die nächste ({best.posting_number}) liegt "
                 f"{distance} Tage vom Belegdatum entfernt."
             ),
@@ -372,9 +374,9 @@ def _choose_additional_receipt(
         journal_entry_id=best.id,
         confidence="niedrig",
         reason=(
-            f"Betrag {extraction.gross_amount} stimmt mit Buchung {best.posting_number} "
-            f"überein, die bereits {existing} Beleg(e) hat – als weiterer Beleg "
-            "(z. B. Zahlungsbeleg) vorgeschlagen. Bitte prüfen."
+            f"Betrag {format_amount(extraction.gross_amount)} stimmt mit Buchung "
+            f"{best.posting_number} überein, die bereits {existing} Beleg(e) hat – als "
+            "weiterer Beleg (z. B. Zahlungsbeleg) vorgeschlagen. Bitte prüfen."
         ),
         llm_used=False,
     )

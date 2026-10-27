@@ -20,7 +20,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Sichtbare Datumsangaben in ISO-Schreibweise (`2026-07-01`) erscheinen auf diesen Seiten
   sowie in Perioden und Berichten (Wirtschaftsjahr-Auswahl) als `01.07.2026`.
 - Erfolgsmeldungen nach Teilzahlung, AfA-Buchung, Beleg- und E-Rechnungs-Buchung nennen
-  Beträge im deutschen Format. CSV-Exporte, API und MCP bleiben unverändert technisch.
+  Beträge im deutschen Format.
+- Auch Hinweise und Fehlermeldungen der Fachlogik nennen Beträge deutsch – in Oberfläche,
+  API und MCP gleichermaßen: UStVA-Hinweis „Konten ohne UStVA-Funktion“ und Kennzahl-35-
+  Bezeichnung (Steuersatz), Begründungen des Belegabgleichs, Warnungen der Beleg-Analyse
+  (Netto + Steuer ≠ Brutto, KI-Kontrolle, Trinkgeld, mehrere Steuersätze), Soll/Haben-
+  Differenz bei unausgeglichenen Buchungen, zu viele Nachkommastellen, Saldovortrag
+  („Bestandskonten gehen nicht auf“), Steueraufteilung der E-Rechnung und Fehler beim
+  Anwenden von Bankregeln. Bereits gespeicherte Begründungen bleiben, wie sie sind.
+- Die Formatierung liegt zentral in `domain/formatting.py` (`format_amount`, `format_rate`,
+  `format_number`); Anzeigefilter, Chat-Zusammenfassungen und Fachlogik nutzen sie
+  gemeinsam. Felder in CSV-Exporten, API- und MCP-Antworten bleiben unverändert technisch,
+  ebenso Buchungstexte (z. B. Steuerzeilen aus Bankregeln).
 
 ### Projekt-Webseite: App für iPhone und iPad
 - Smart App Banner: Startseite, Impressum und Datenschutzerklärung tragen

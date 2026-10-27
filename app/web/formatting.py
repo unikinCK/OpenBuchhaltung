@@ -8,23 +8,15 @@ gespeichert und erst hier in deutsche Ortszeit (Europe/Berlin) umgerechnet.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from app.web.blueprint import main_bp
+from domain.formatting import format_amount, format_number, format_rate
 
-
-@main_bp.app_template_filter("betrag")
-def format_amount(value: object, places: int = 2) -> str:
-    """``1234.5`` → ``1.234,50``; leere Werte bleiben leer."""
-    if value is None or value == "":
-        return ""
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        return str(value)
-    text = f"{number:,.{places}f}"
-    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+# Zahlen: ``betrag`` 1.234,50 · ``satz`` 19 bzw. 10,7 · ``zahl`` 100.000
+main_bp.add_app_template_filter(format_amount, "betrag")
+main_bp.add_app_template_filter(format_rate, "satz")
+main_bp.add_app_template_filter(format_number, "zahl")
 
 
 DISPLAY_TIMEZONE = ZoneInfo("Europe/Berlin")
@@ -78,31 +70,3 @@ def format_datetime(value: object, seconds: bool = False) -> str:
     pattern = "%d.%m.%Y %H:%M:%S" if seconds else "%d.%m.%Y %H:%M"
     return to_local_time(parsed).strftime(pattern)
 
-
-@main_bp.app_template_filter("satz")
-def format_rate(value: object) -> str:
-    """Steuersatz ohne überflüssige Nachkommastellen: ``19.00`` → ``19``, ``10.70`` → ``10,7``."""
-    if value is None or value == "":
-        return ""
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        return str(value)
-    text = format(number.normalize(), "f")
-    return text.replace(".", ",")
-
-
-@main_bp.app_template_filter("zahl")
-def format_number(value: object) -> str:
-    """Menge mit Tausenderpunkt, ohne überflüssige Nachkommastellen.
-
-    ``100000.00`` → ``100.000``, ``1234.50`` → ``1.234,5``.
-    """
-    if value is None or value == "":
-        return ""
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        return str(value)
-    text = format(number.normalize(), ",f")
-    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")

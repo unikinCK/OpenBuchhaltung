@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from domain.formatting import format_amount
+
 
 class JournalEntryValidationError(ValueError):
     """Raised when a JournalEntry violates business validation rules."""
@@ -76,7 +78,7 @@ class JournalEntryValidator:
         if debit_total != credit_total:
             raise JournalEntryValidationError(
                 "Soll und Haben müssen identisch sein "
-                f"(Soll: {debit_total:.2f}, Haben: {credit_total:.2f})."
+                f"(Soll: {format_amount(debit_total)}, Haben: {format_amount(credit_total)})."
             )
 
         if entry.status == "posted" and debit_total == Decimal("0.00"):

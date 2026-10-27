@@ -27,6 +27,7 @@ from app.services.journal_entries import (
     create_journal_entry,
     parse_decimal,
 )
+from domain.formatting import format_rate
 from domain.models import Account, BusinessPartner, Company, JournalEntry, TaxCode
 
 
@@ -143,11 +144,6 @@ def tax_splits_audit(tax_splits: Sequence[InvoiceTaxSplit] | None) -> list[dict]
     ]
 
 
-def _format_rate(rate: Decimal) -> str:
-    text = format(rate.normalize(), "f")
-    return text.replace(".", ",")
-
-
 def book_incoming_invoice(
     *,
     session: Session,
@@ -224,7 +220,7 @@ def book_incoming_invoice(
         line_text = expense_line_description
         if multi_rate:
             rate = tax_code.rate if tax_code is not None else split.rate
-            label = f"{_format_rate(rate)} %" if rate is not None else "ohne USt"
+            label = f"{format_rate(rate)} %" if rate is not None else "ohne USt"
             line_text = (
                 f"{expense_line_description} ({label})"
                 if expense_line_description
@@ -302,7 +298,7 @@ def _split_tax_code(session: Session, company: Company, split: InvoiceTaxSplit) 
         tax_code = input_tax_code_for_rate(session, company.id, split.rate)
         if tax_code is None:
             raise IncomingInvoiceError(
-                f"Kein Vorsteuer-Code mit {_format_rate(split.rate)} % vorhanden.",
+                f"Kein Vorsteuer-Code mit {format_rate(split.rate)} % vorhanden.",
                 code="tax_code_not_found",
             )
     else:
