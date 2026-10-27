@@ -299,11 +299,16 @@ def _ocr_via_endpoint(
     try:
         body = _post_ocr_request(endpoint_url, model, document_blocks, file_name, api_key)
     except _OCRHTTPError as exc:
-        # Lokale Server (z. B. LM Studio) kennen kein input_file: Scan-PDFs
-        # dann als Seitenbilder schicken.
-        page_images = _pdf_page_images(file_bytes) if mime_type == "application/pdf" else []
-        if exc.code != 400 or not page_images:
+        # Lokale Server (z. B. LM Studio) kennen kein input_file: PDFs dann als
+        # Seitenbilder schicken.
+        if exc.code != 400 or mime_type != "application/pdf":
             raise ReceiptOCRError(f"OCR-Endpoint antwortete mit HTTP {exc.code}.") from exc
+        page_images = _pdf_page_images(file_bytes)
+        if not page_images:
+            raise ReceiptOCRError(
+                "Der OCR-Endpoint nimmt keine PDF-Dateien an (HTTP 400), und die Seiten "
+                "des PDFs ließen sich nicht als Bilder aufbereiten."
+            ) from exc
         image_blocks = [
             {
                 "type": "input_image",
@@ -387,6 +392,10 @@ def _post_ocr_request(
 
 
 _MAX_OCR_PAGES = 5
+# Längere Bildkante gerenderter Seiten: genug Auflösung auch für Kassenbons, ohne
+# Großformate zu Riesenbildern aufzublähen (Skalierung höchstens 4 = 288 dpi).
+_OCR_PAGE_PIXELS = 2000
+_OCR_MAX_SCALE = 4.0
 
 
 def _png_from_pixels(width: int, height: int, channels: int, pixels: bytes) -> bytes:
@@ -414,61 +423,37 @@ def _png_from_pixels(width: int, height: int, channels: int, pixels: bytes) -> b
     )
 
 
-def _image_channels(color_space: object) -> int | None:
-    if isinstance(color_space, list) and color_space:
-        if color_space[0] == "/ICCBased":
-            n = color_space[1].get_object().get("/N")
-            return n if n in (1, 3) else None
-        return None
-    return {"/DeviceGray": 1, "/DeviceRGB": 3}.get(color_space)
-
-
-def _xobject_image(xobject) -> tuple[str, bytes] | None:
-    """Bilddaten eines PDF-Bild-XObjects als ``(mime, bytes)``, sonst ``None``."""
-    filters = xobject.get("/Filter")
-    filters = list(filters) if isinstance(filters, list) else [filters]
-    if filters and filters[-1] == "/DCTDecode":
-        # JPEG: Rohdaten bis vor die DCT-Stufe sind die JPEG-Datei.
-        if len(filters) == 1:
-            return "image/jpeg", xobject._data
-        return None
-    if xobject.get("/BitsPerComponent") != 8 or not set(filters) <= {"/FlateDecode", None}:
-        return None
-    channels = _image_channels(xobject.get("/ColorSpace"))
-    width, height = int(xobject.get("/Width") or 0), int(xobject.get("/Height") or 0)
-    pixels = xobject.get_data()
-    if not channels or not width or not height or len(pixels) < width * height * channels:
-        return None
-    return "image/png", _png_from_pixels(width, height, channels, pixels)
-
-
 def _pdf_page_images(pdf_bytes: bytes) -> list[tuple[str, bytes]]:
-    """Größtes Bild je Seite (Scan) für OCR-Endpoints ohne PDF-Unterstützung."""
+    """Seiten als Graustufen-PNG für OCR-Endpoints ohne PDF-Unterstützung.
+
+    Die Seiten werden mit pdfium gerendert, statt eingebettete Bilder herauszulösen:
+    So kommen auch Scans in Form-XObjects oder mit 1-Bit-Kompression (CCITT/JBIG2)
+    und Vektor-PDFs ohne brauchbare Textebene beim OCR an.
+    """
     try:
-        from pypdf import PdfReader
+        import pypdfium2 as pdfium
+        import pypdfium2.raw as pdfium_c
     except ImportError:
         return []
-    from io import BytesIO
 
     images: list[tuple[str, bytes]] = []
     try:
-        reader = PdfReader(BytesIO(pdf_bytes))
-        for page in reader.pages[:_MAX_OCR_PAGES]:
-            xobjects = (page.get("/Resources") or {}).get("/XObject")
-            candidates = []
-            for ref in (xobjects.get_object().values() if xobjects else ()):
-                xobject = ref.get_object()
-                if xobject.get("/Subtype") != "/Image":
-                    continue
-                area = int(xobject.get("/Width") or 0) * int(xobject.get("/Height") or 0)
-                candidates.append((area, xobject))
-            for _area, xobject in sorted(candidates, key=lambda item: -item[0]):
-                image = _xobject_image(xobject)
-                if image is not None:
-                    images.append(image)
-                    break
-    except Exception:  # pypdf wirft je nach Defekt sehr unterschiedliche Fehler.
-        logger.warning("Seitenbilder des PDFs konnten nicht gelesen werden.", exc_info=True)
+        pdf = pdfium.PdfDocument(pdf_bytes)
+        try:
+            for index in range(min(len(pdf), _MAX_OCR_PAGES)):
+                page = pdf[index]
+                scale = min(_OCR_MAX_SCALE, _OCR_PAGE_PIXELS / max(page.get_size()))
+                bitmap = page.render(scale=scale, force_bitmap_format=pdfium_c.FPDFBitmap_Gray)
+                width, height, stride = bitmap.width, bitmap.height, bitmap.stride
+                buffer = bytes(bitmap.buffer)
+                pixels = b"".join(
+                    buffer[row * stride : row * stride + width] for row in range(height)
+                )
+                images.append(("image/png", _png_from_pixels(width, height, 1, pixels)))
+        finally:
+            pdf.close()
+    except Exception:  # pdfium wirft je nach Defekt sehr unterschiedliche Fehler.
+        logger.warning("Seitenbilder des PDFs konnten nicht gerendert werden.", exc_info=True)
         return []
     return images
 
