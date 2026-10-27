@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import current_app, jsonify, make_response, request
 
 from app.api.blueprint import api_bp
+from app.api.downloads import linkable_download
 from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
 from app.auth import current_api_user
 from app.services.elster import (
@@ -214,6 +215,7 @@ def get_elster_submission_via_api(submission_id: int):
 
 
 @api_bp.get("/elster/submissions/<int:submission_id>/payload.xml")
+@linkable_download
 def download_elster_payload_via_api(submission_id: int):
     session_factory = get_session_factory()
     with session_factory() as session:

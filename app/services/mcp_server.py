@@ -54,6 +54,24 @@ def current_api_token_override() -> str | None:
     return _REQUEST_API_TOKEN.get()
 
 
+# Öffentliche Basis-URL des MCP-Endpunkts für den laufenden Request: Der HTTP-Transport
+# setzt hier die Adresse, unter der der Client den Server erreicht. Download-Links aus
+# der API (download_path) zeigen dann dorthin statt auf die interne API-Adresse.
+_PUBLIC_BASE_URL: ContextVar[str | None] = ContextVar(
+    "openbuchhaltung_mcp_public_base_url", default=None
+)
+
+
+@contextmanager
+def public_base_url_override(base_url: str | None) -> Iterator[None]:
+    """Baut ``download_url`` im aktuellen Kontext aus ``base_url`` + ``download_path``."""
+    reset_token = _PUBLIC_BASE_URL.set(base_url)
+    try:
+        yield
+    finally:
+        _PUBLIC_BASE_URL.reset(reset_token)
+
+
 # Zeitlimit für den laufenden API-Aufruf, wenn ein Tool mehr braucht als der
 # Standard (Belege per source_url: der Server lädt die Datei erst selbst).
 _REQUEST_TIMEOUT: ContextVar[float | None] = ContextVar(
@@ -107,6 +125,31 @@ def _company_id_schema() -> dict[str, Any]:
         },
         "required": ["company_id"],
         "additionalProperties": False,
+    }
+
+
+_DOWNLOAD_URL_HINT = (
+    "download_url unverändert als Link an den Benutzer weitergeben (ohne Anmeldung "
+    "abrufbar, gültig expires_in_seconds Sekunden); keine eigenen Download-URLs bauen."
+)
+
+
+def _download_link_property() -> dict[str, Any]:
+    return {
+        "type": "boolean",
+        "description": (
+            "true = statt des Dateiinhalts einen zeitlich begrenzten Download-Link liefern "
+            "(file_name, download_url). Für große Dateien und immer, wenn der Benutzer die "
+            "Datei haben möchte. " + _DOWNLOAD_URL_HINT
+        ),
+    }
+
+
+def _with_download_link(schema: dict[str, Any]) -> dict[str, Any]:
+    """Ergänzt ein Export-Schema um ``download_link`` (Link statt Dateiinhalt)."""
+    return {
+        **schema,
+        "properties": {**schema["properties"], "download_link": _download_link_property()},
     }
 
 
@@ -1064,6 +1107,7 @@ TOOLS: list[ToolSpec] = [
                 },
                 "date_from": {"type": "string"},
                 "date_to": {"type": "string"},
+                "download_link": _download_link_property(),
             },
             "required": ["company_id", "unit_type"],
             "additionalProperties": False,
@@ -1724,7 +1768,7 @@ TOOLS: list[ToolSpec] = [
             "Exportiert die Summen- und Saldenliste als CSV (optional je Zeitraum, "
             "Saldovorträge als EB-Werte nur mit date_from)."
         ),
-        input_schema=_period_report_schema(),
+        input_schema=_with_download_link(_period_report_schema()),
         http_method="GET",
         path="/exports/trial-balance.csv",
         arg_location="query",
@@ -1732,7 +1776,7 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="export_journal_csv",
         description="Exportiert das Buchungsjournal als CSV.",
-        input_schema=_company_id_schema(),
+        input_schema=_with_download_link(_company_id_schema()),
         http_method="GET",
         path="/exports/journal.csv",
         arg_location="query",
@@ -1772,6 +1816,7 @@ TOOLS: list[ToolSpec] = [
                         "(JJJJ-MM-TT, optional; Standard: WJ-Ende)."
                     ),
                 },
+                "download_link": _download_link_property(),
             },
             "required": ["company_id"],
             "additionalProperties": False,
@@ -1785,7 +1830,8 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Erzeugt ein Prueferexport-Paket v2 mit JSON-Tabellen, Feldkatalog, "
             "Belegindex, Originalbelegen, Einzelhashes und stabilem Datenbestands-Hash. "
-            "Fuer MCP liefert manifest_only=true auch den SHA-256-Hash des ZIP-Pakets."
+            "Fuer MCP liefert manifest_only=true auch den SHA-256-Hash des ZIP-Pakets; "
+            "das ZIP selbst nur per download_link=true (mit manifest_only=false)."
         ),
         input_schema={
             "type": "object",
@@ -1809,6 +1855,7 @@ TOOLS: list[ToolSpec] = [
                     "description": "Nur das Exportmanifest als JSON zurueckgeben.",
                     "default": True,
                 },
+                "download_link": _download_link_property(),
             },
             "required": ["company_id"],
             "additionalProperties": False,
@@ -2042,8 +2089,10 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="download_document",
         description=(
-            "Liefert Beleg-Metadaten plus Dateiinhalt als Base64-JSON. Für direkten "
-            "Browserdownload gibt es zusätzlich GET /api/v1/documents/{id}/download."
+            "Liefert Beleg-Metadaten plus Dateiinhalt als Base64 (content_base64) zum "
+            "Auswerten, dazu einen zeitlich begrenzten Download-Link (download_url). Ist "
+            "die Datei für den Chat zu groß oder will der Benutzer sie nur herunterladen, "
+            "get_document_download_link verwenden (ohne Base64). " + _DOWNLOAD_URL_HINT
         ),
         input_schema={
             "type": "object",
@@ -2055,6 +2104,26 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="GET",
         path="/documents/{document_id}/content",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_document_download_link",
+        description=(
+            "Stellt einen Beleg zum Herunterladen bereit, ohne den Dateiinhalt zu "
+            "übertragen: Metadaten, Integritätsprüfung und ein zeitlich begrenzter "
+            "Download-Link (download_url). Für große Dateien und immer, wenn der Benutzer "
+            "den Beleg haben möchte. " + _DOWNLOAD_URL_HINT
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "integer", "description": "ID des Belegs."},
+            },
+            "required": ["document_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/documents/{document_id}/download-link",
         arg_location="query",
     ),
     ToolSpec(
@@ -3886,13 +3955,14 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "ID der ELSTER-Übermittlung.",
                 },
+                "download_link": _download_link_property(),
             },
             "required": ["submission_id"],
             "additionalProperties": False,
         },
         http_method="GET",
         path="/elster/submissions/{submission_id}/payload.xml",
-        arg_location="none",
+        arg_location="query",
     ),
     ToolSpec(
         name="retry_elster_submission",
@@ -4819,7 +4889,8 @@ class MCPServer:
             return _tool_result(str(exc), is_error=True)
 
         if response.json is not None:
-            text = json.dumps(response.json, ensure_ascii=False, indent=2)
+            payload = _with_public_download_url(response.json)
+            text = json.dumps(payload, ensure_ascii=False, indent=2)
         else:
             text = response.text
         return _tool_result(text, is_error=not response.ok)
@@ -4884,6 +4955,21 @@ def _coerce_to_schema(value: Any, schema: dict[str, Any]) -> Any:
     ):
         return str(value)
     return value
+
+
+def _with_public_download_url(payload: Any) -> Any:
+    """``download_url`` auf die öffentliche Adresse des MCP-Endpunkts setzen.
+
+    Die API kennt nur die Adresse, unter der der MCP-Server sie intern aufruft
+    (z. B. ``http://app:8000``); ein Link dorthin ist für den Benutzer wertlos.
+    """
+    base_url = _PUBLIC_BASE_URL.get()
+    if not base_url or not isinstance(payload, dict):
+        return payload
+    download_path = payload.get("download_path")
+    if not isinstance(download_path, str) or not download_path.startswith("/"):
+        return payload
+    return {**payload, "download_url": f"{base_url.rstrip('/')}{download_path}"}
 
 
 def _tool_result(text: str, *, is_error: bool = False) -> dict[str, Any]:

@@ -191,7 +191,8 @@ def require_api_token():
     lesenden Zugriff (GET/HEAD) im eigenen Tenant-Scope — dafür sind z. B. die
     CSV-Downloadlinks der Berichte-Seite gedacht.
     """
-    if request.endpoint == "api.health":
+    # Download-Links tragen ihre Berechtigung im signierten Token (app/api/downloads.py).
+    if request.endpoint in {"api.health", "api.download_via_link"}:
         return None
 
     # Interne In-Process-Aufrufe (KI-Chat-Tools, MCP-Bridge) übergeben den
@@ -275,6 +276,13 @@ def _lookup_user_by_api_token(token: str) -> dict | None:
                 db_session.commit()
                 return _api_user_dict(legacy_user)
     return None
+
+
+def active_api_user(user_id: int) -> dict | None:
+    """API-Benutzerdaten eines aktiven Benutzers (Rolle und Mandant frisch aus der DB)."""
+    with _get_session_factory()() as db_session:
+        user = db_session.get(User, user_id)
+        return _api_user_dict(user) if user is not None and user.is_active else None
 
 
 def _api_user_dict(user: User) -> dict:

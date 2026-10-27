@@ -110,6 +110,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         DOCUMENT_FETCH_TIMEOUT_SECONDS=float(
             os.environ.get("DOCUMENT_FETCH_TIMEOUT_SECONDS", "30")
         ),
+        # Gültigkeit der Download-Links für Chats/MCP (app/services/download_links.py).
+        DOWNLOAD_LINK_TTL_SECONDS=int(os.environ.get("DOWNLOAD_LINK_TTL_SECONDS", "900")),
         DOCUMENT_LLM_ENDPOINT_URL=os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
         DOCUMENT_LLM_MODEL=os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini"),
         # OCR-Pipeline: fällt auf den Beleg-LLM-Endpoint zurück, wenn nicht separat gesetzt.
