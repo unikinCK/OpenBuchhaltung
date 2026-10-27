@@ -355,7 +355,7 @@ def test_receipt_ocr_ui_shows_split_rows_and_books_them(tmp_path, monkeypatch):
         follow_redirects=True,
     )
     assert booked.status_code == 200
-    assert "brutto 130.00" in booked.data.decode("utf-8")
+    assert "brutto 130,00" in booked.data.decode("utf-8")
     with app.extensions["db_session_factory"]() as session:
         entry = session.query(JournalEntry).one()
         _assert_restaurant_entry(

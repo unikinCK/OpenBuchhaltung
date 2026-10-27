@@ -32,6 +32,7 @@ from app.services.receipt_proposals import (
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
+from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -359,7 +360,7 @@ def receipt_ocr_book():
         posting_number = entry.posting_number
 
     flash(
-        f"Beleg verbucht als {posting_number} (brutto {gross_amount} EUR) "
+        f"Beleg verbucht als {posting_number} (brutto {format_amount(gross_amount)} EUR) "
         "und mit der Buchung verknüpft.",
         "success",
     )

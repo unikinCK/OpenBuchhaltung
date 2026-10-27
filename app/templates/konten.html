@@ -60,7 +60,7 @@
               <th>Typ</th>
               <th>Status</th>
               <th>Buchungen</th>
-              <th>Saldo</th>
+              <th class="num">Saldo</th>
               <th>Richtig im SKR04</th>
               <th>SKR04-Konto</th>
             </tr>
@@ -72,7 +72,7 @@
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
-                <td>{{ row.balance }}</td>
+                <td class="num">{{ row.balance | betrag }}</td>
                 <td>{{ row.skr04_code }} – {{ row.skr04_name }}</td>
                 <td>
                   {% if row.skr04_status == "occupied" %}
@@ -103,7 +103,7 @@
               <th>Typ</th>
               <th>Status</th>
               <th>Buchungen</th>
-              <th>Saldo</th>
+              <th class="num">Saldo</th>
               <th>Richtig im SKR03</th>
               <th>SKR03-Konto</th>
             </tr>
@@ -119,7 +119,7 @@
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
-                <td>{{ row.balance }}</td>
+                <td class="num">{{ row.balance | betrag }}</td>
                 <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
                 <td>{{ skr03_target(row) }}</td>
               </tr>
@@ -144,7 +144,7 @@
               <th>Typ</th>
               <th>Status</th>
               <th>Buchungen</th>
-              <th>Saldo</th>
+              <th class="num">Saldo</th>
               <th>SKR03-Standardkonto</th>
               <th>Standardkonto</th>
             </tr>
@@ -159,7 +159,7 @@
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
-                <td>{{ row.balance }}</td>
+                <td class="num">{{ row.balance | betrag }}</td>
                 <td>{{ row.skr03_code }} – {{ row.skr03_name }}</td>
                 <td>{{ skr03_target(row) }}</td>
               </tr>
@@ -182,7 +182,7 @@
               <th>Typ</th>
               <th>Status</th>
               <th>Buchungen</th>
-              <th>Saldo</th>
+              <th class="num">Saldo</th>
             </tr>
           </thead>
           <tbody>
@@ -192,7 +192,7 @@
                 <td><span class="badge">{{ row.account_type }}</span></td>
                 <td>{{ "aktiv" if row.is_active else "inaktiv" }}</td>
                 <td>{{ row.posting_count }}</td>
-                <td>{{ row.balance }}</td>
+                <td class="num">{{ row.balance | betrag }}</td>
               </tr>
             {% endfor %}
           </tbody>

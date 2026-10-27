@@ -353,8 +353,11 @@ def test_controlling_report_counts_skr03_income_accounts_as_revenue(tmp_path: Pa
     page = client.get(f"/controlling?company_id={company_id}")
     assert page.status_code == 200
     html = page.get_data(as_text=True)
-    # Ergebnis 700.00 je einmal in Kostenstellenrechnung und Profitcenter-GuV
-    assert html.count("<strong>700.00</strong>") == 2
+    # Ergebnis 700,00 je einmal in Kostenstellenrechnung und Profitcenter-GuV –
+    # im deutschen Format mit Tausenderpunkt, der CSV-Export bleibt technisch.
+    assert html.count("<strong>700,00</strong>") == 2
+    assert '<td class="num">1.000,00</td>' in html
+    assert "1000.00" not in html
 
 
 def test_journal_entries_filter_by_controlling_units(tmp_path: Path) -> None:
@@ -606,7 +609,7 @@ def test_controlling_report_shows_investments_with_depreciation(tmp_path: Path) 
     page = client.get(f"/controlling?company_id={company_id}")
     assert page.status_code == 200
     assert "Anschaffungswert".encode() in page.data
-    assert b"14600.00" in page.data
+    assert b"14.600,00" in page.data
 
     # Storno der AfA-Buchung hebt die Abschreibung wieder auf.
     reversal = client.post(

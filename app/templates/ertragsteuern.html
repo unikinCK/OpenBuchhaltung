@@ -17,7 +17,7 @@
           <select id="fiscal_year_id" name="fiscal_year_id" style="width:auto;">
             {% for fiscal_year in fiscal_years %}
               <option value="{{ fiscal_year.id }}" {% if params.fiscal_year_id == fiscal_year.id %}selected{% endif %}>
-                {{ fiscal_year.label }} ({{ fiscal_year.start_date }}–{{ fiscal_year.end_date }})
+                {{ fiscal_year.label }} ({{ fiscal_year.start_date | datum }}–{{ fiscal_year.end_date | datum }})
               </option>
             {% endfor %}
           </select>
@@ -78,14 +78,14 @@
             </tr>
           </thead>
           <tbody>
-            <tr><td>Jahresergebnis laut GuV</td><td class="num">{{ preview.basis.net_income }}</td></tr>
-            <tr><td>Hinzurechnungen</td><td class="num">{{ preview.basis.additions_total }}</td></tr>
-            <tr><td>Kürzungen</td><td class="num">{{ preview.basis.reductions_total }}</td></tr>
-            <tr><td>Verlustvortrag</td><td class="num">{{ preview.basis.loss_carryforward }}</td></tr>
+            <tr><td>Jahresergebnis laut GuV</td><td class="num">{{ preview.basis.net_income | betrag }}</td></tr>
+            <tr><td>Hinzurechnungen</td><td class="num">{{ preview.basis.additions_total | betrag }}</td></tr>
+            <tr><td>Kürzungen</td><td class="num">{{ preview.basis.reductions_total | betrag }}</td></tr>
+            <tr><td>Verlustvortrag</td><td class="num">{{ preview.basis.loss_carryforward | betrag }}</td></tr>
             {% for row in preview.calculation.rows %}
               <tr {% if row.code in ["payable", "tax_total"] %}style="font-weight:bold;"{% endif %}>
                 <td>{{ row.label }}</td>
-                <td class="num">{{ row.amount }}</td>
+                <td class="num">{{ row.amount | betrag }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -133,8 +133,8 @@
                 <td>{{ display_declaration_type(item.declaration_type) }}</td>
                 <td>{{ item.period_label }}</td>
                 <td>{{ item.status }}</td>
-                <td class="num">{{ item.calculation.calculation.tax_total }}</td>
-                <td class="num">{{ item.calculation.calculation.payable }}</td>
+                <td class="num">{{ item.calculation.calculation.tax_total | betrag }}</td>
+                <td class="num">{{ item.calculation.calculation.payable | betrag }}</td>
                 <td>{{ item.created_at | datum_zeit }} ({{ item.created_by }})</td>
               </tr>
             {% endfor %}

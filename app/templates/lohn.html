@@ -149,10 +149,10 @@
                 <td>{{ employee.first_name }} {{ employee.last_name }}</td>
                 <td>{{ employee.status }}</td>
                 <td>{{ employee.tax_class }}</td>
-                <td class="num">{{ employee.gross_monthly_salary }}</td>
-                <td class="num">{{ employee.wage_tax_rate }}</td>
-                <td class="num">{{ employee.employee_social_security_rate }}</td>
-                <td class="num">{{ employee.employer_social_security_rate }}</td>
+                <td class="num">{{ employee.gross_monthly_salary | betrag }}</td>
+                <td class="num">{{ employee.wage_tax_rate | satz }}</td>
+                <td class="num">{{ employee.employee_social_security_rate | satz }}</td>
+                <td class="num">{{ employee.employer_social_security_rate | satz }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -170,12 +170,12 @@
             <div>
               <strong>{{ run.period_label }}</strong>
               <span class="badge">{{ run.status }}</span>
-              <span class="muted">Zahlung {{ run.payment_date.isoformat() }}</span>
+              <span class="muted">Zahlung {{ run.payment_date | datum }}</span>
             </div>
             <div>
-              <span>Brutto {{ run.gross_total }}</span>
-              <span>Netto {{ run.net_total }}</span>
-              <span>AG-SV {{ run.employer_social_security_total }}</span>
+              <span>Brutto {{ run.gross_total | betrag }}</span>
+              <span>Netto {{ run.net_total | betrag }}</span>
+              <span>AG-SV {{ run.employer_social_security_total | betrag }}</span>
               {% if run.journal_entry_id %}
                 <span class="badge">Buchung #{{ run.journal_entry_id }}</span>
               {% else %}
@@ -200,11 +200,11 @@
                 {% for line in run.lines %}
                   <tr>
                     <td>{{ line.employee.employee_number }} – {{ line.employee.first_name }} {{ line.employee.last_name }}</td>
-                    <td class="num">{{ line.gross_pay }}</td>
-                    <td class="num">{{ line.wage_tax + line.church_tax + line.solidarity_surcharge }}</td>
-                    <td class="num">{{ line.employee_social_security }}</td>
-                    <td class="num">{{ line.net_pay }}</td>
-                    <td class="num">{{ line.employer_total }}</td>
+                    <td class="num">{{ line.gross_pay | betrag }}</td>
+                    <td class="num">{{ (line.wage_tax + line.church_tax + line.solidarity_surcharge) | betrag }}</td>
+                    <td class="num">{{ line.employee_social_security | betrag }}</td>
+                    <td class="num">{{ line.net_pay | betrag }}</td>
+                    <td class="num">{{ line.employer_total | betrag }}</td>
                   </tr>
                 {% endfor %}
               </tbody>

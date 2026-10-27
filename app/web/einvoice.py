@@ -39,6 +39,7 @@ from app.services.journal_entries import JournalEntryCreationError
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
+from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -244,7 +245,7 @@ def einvoice_book_action():
 
     flash(
         f"E-Rechnung {invoice.invoice_number} verbucht als {posting_number} "
-        f"(brutto {invoice.grand_total} {invoice.currency_code}).",
+        f"(brutto {format_amount(invoice.grand_total)} {invoice.currency_code}).",
         "success",
     )
     return redirect(url_for("main.journal_page", company_id=company_id))

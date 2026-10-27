@@ -90,3 +90,19 @@ def format_rate(value: object) -> str:
         return str(value)
     text = format(number.normalize(), "f")
     return text.replace(".", ",")
+
+
+@main_bp.app_template_filter("zahl")
+def format_number(value: object) -> str:
+    """Menge mit Tausenderpunkt, ohne überflüssige Nachkommastellen.
+
+    ``100000.00`` → ``100.000``, ``1234.50`` → ``1.234,5``.
+    """
+    if value is None or value == "":
+        return ""
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        return str(value)
+    text = format(number.normalize(), ",f")
+    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")

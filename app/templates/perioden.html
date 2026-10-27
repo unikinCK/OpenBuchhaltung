@@ -74,7 +74,7 @@
           <h2>
             Geschäftsjahr {{ fiscal_year.label }}
             <span class="muted" style="font-weight:normal; font-size:0.85em;">
-              ({{ fiscal_year.start_date.isoformat() }} – {{ fiscal_year.end_date.isoformat() }})
+              ({{ fiscal_year.start_date | datum }} – {{ fiscal_year.end_date | datum }})
             </span>
             {% if fiscal_year.is_closed %}
               <span class="badge">abgeschlossen</span>
@@ -101,7 +101,7 @@
                       <span class="badge">Abschluss</span>
                     {% endif %}
                   </td>
-                  <td>{{ period.start_date.isoformat() }} – {{ period.end_date.isoformat() }}</td>
+                  <td>{{ period.start_date | datum }} – {{ period.end_date | datum }}</td>
                   <td>
                     {% if period.id in locked_period_ids %}
                       <span class="badge">gesperrt</span>

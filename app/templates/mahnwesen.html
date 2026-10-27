@@ -28,12 +28,12 @@
             <tr>
               <td>{{ item.reference }}</td>
               <td>{{ item.counterparty or "–" }}</td>
-              <td>{{ item.due_date.isoformat() }} ({{ proposal.days_overdue }} Tage)</td>
-              <td class="num">{{ item.open_amount }} {{ item.currency_code }}</td>
+              <td>{{ item.due_date | datum }} ({{ proposal.days_overdue }} Tage)</td>
+              <td class="num">{{ item.open_amount | betrag }} {{ item.currency_code }}</td>
               <td>
                 {% if item.dunning_level %}
                   <span class="badge">Stufe {{ item.dunning_level }}</span>
-                  {% if item.last_dunning_date %}<br /><span class="muted">{{ item.last_dunning_date.isoformat() }}</span>{% endif %}
+                  {% if item.last_dunning_date %}<br /><span class="muted">{{ item.last_dunning_date | datum }}</span>{% endif %}
                 {% else %}
                   <span class="muted">ungemahnt</span>
                 {% endif %}

@@ -65,15 +65,15 @@
         <tbody>
           <tr><th>Lieferant</th><td>{{ extraction.supplier or '–' }}</td></tr>
           <tr><th>Rechnungsnummer</th><td>{{ extraction.invoice_number or '–' }}</td></tr>
-          <tr><th>Rechnungsdatum</th><td>{{ extraction.invoice_date.isoformat() if extraction.invoice_date else '–' }}</td></tr>
-          <tr><th>Netto</th><td>{{ extraction.net_amount if extraction.net_amount is not none else '–' }}</td></tr>
-          <tr><th>Steuer{% if extraction.tax_rate is not none %} ({{ extraction.tax_rate }}%){% endif %}</th><td>{{ extraction.tax_amount if extraction.tax_amount is not none else '–' }}</td></tr>
-          <tr><th>Brutto</th><td>{{ extraction.gross_amount if extraction.gross_amount is not none else '–' }}</td></tr>
+          <tr><th>Rechnungsdatum</th><td>{{ extraction.invoice_date | datum if extraction.invoice_date else '–' }}</td></tr>
+          <tr><th>Netto</th><td>{{ extraction.net_amount | betrag if extraction.net_amount is not none else '–' }}</td></tr>
+          <tr><th>Steuer{% if extraction.tax_rate is not none %} ({{ extraction.tax_rate | satz }} %){% endif %}</th><td>{{ extraction.tax_amount | betrag if extraction.tax_amount is not none else '–' }}</td></tr>
+          <tr><th>Brutto</th><td>{{ extraction.gross_amount | betrag if extraction.gross_amount is not none else '–' }}</td></tr>
           {% for rate, net, tax in extraction.tax_lines if extraction.tax_lines | length > 1 %}
-            <tr><th>davon {{ rate }} %</th><td>netto {{ net }} · Steuer {{ tax }}</td></tr>
+            <tr><th>davon {{ rate | satz }} %</th><td>netto {{ net | betrag }} · Steuer {{ tax | betrag }}</td></tr>
           {% endfor %}
           {% if extraction.tip_amount %}
-            <tr><th>Trinkgeld (ohne USt)</th><td>{{ extraction.tip_amount }}</td></tr>
+            <tr><th>Trinkgeld (ohne USt)</th><td>{{ extraction.tip_amount | betrag }}</td></tr>
           {% endif %}
           {% if extraction.supplier_vat_id %}
             <tr><th>USt-IdNr. Lieferant</th><td>{{ extraction.supplier_vat_id }}</td></tr>
@@ -151,7 +151,7 @@
                         or (not proposal.tax_code_id and not extraction.reverse_charge
                             and extraction.tax_rate is not none and tax_code.rate == extraction.tax_rate
                             and tax_code.kind == 'input') %}selected{% endif %}>
-                  {{ tax_code.code }} ({{ tax_code.rate }} %)</option>
+                  {{ tax_code.code }} ({{ tax_code.rate | satz }} %)</option>
               {% endfor %}
             </select>
 

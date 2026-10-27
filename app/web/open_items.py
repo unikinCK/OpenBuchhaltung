@@ -17,6 +17,7 @@ from app.services.open_items import (
 )
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
+from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -272,5 +273,5 @@ def settle_open_item_action(open_item_id: int):
     if item.status == "settled":
         flash(f"Offener Posten {item.reference} wurde ausgeglichen.", "success")
     else:
-        flash(f"Teilzahlung erfasst. Offen: {item.open_amount}.", "success")
+        flash(f"Teilzahlung erfasst. Offen: {format_amount(item.open_amount)}.", "success")
     return redirect(url_for("main.open_items_page", company_id=company_id))

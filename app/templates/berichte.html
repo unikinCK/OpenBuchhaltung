@@ -84,7 +84,7 @@
           <select id="datev_fiscal_year_id" name="fiscal_year_id" style="width:auto;">
             {% for fiscal_year in datev_fiscal_years %}
               <option value="{{ fiscal_year.id }}" {% if fiscal_year.id == datev_selection.fiscal_year_id %}selected{% endif %}>
-                {{ fiscal_year.label }} ({{ fiscal_year.start_date.isoformat() }} – {{ fiscal_year.end_date.isoformat() }}, {{ fiscal_year.entry_count }} {{ 'Buchung' if fiscal_year.entry_count == 1 else 'Buchungen' }})
+                {{ fiscal_year.label }} ({{ fiscal_year.start_date | datum }} – {{ fiscal_year.end_date | datum }}, {{ fiscal_year.entry_count }} {{ 'Buchung' if fiscal_year.entry_count == 1 else 'Buchungen' }})
               </option>
             {% endfor %}
           </select>
