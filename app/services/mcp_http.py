@@ -21,6 +21,11 @@ Mandanten-Scope und Protokoll des jeweiligen Benutzers gelten. Dazu zählen auch
 OAuth-Access-Tokens der App (ChatGPT-/Claude-Connectoren): Ein 401 trägt dann
 ``WWW-Authenticate: Bearer resource_metadata=…`` (öffentliche Basis-URL aus
 ``MCP_PUBLIC_URL`` bzw. X-Forwarded-Proto/Host), über das Clients den Login finden.
+
+Download-Links: Tools wie ``download_document`` liefern ``download_url`` unter der
+öffentlichen Basis-URL dieses Endpunkts (``/api/v1/downloads/<token>``). Hinter nginx
+landet der Pfad direkt bei der App; zeigt die Adresse dagegen nur auf den MCP-Server
+(Tailscale Serve, Caddy), reicht dieser den Abruf per ``GET`` an die REST-API durch.
 """
 
 from __future__ import annotations
@@ -34,12 +39,17 @@ import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
+from app.services.download_links import DOWNLOAD_ROUTE_PREFIX
 from app.services.mcp_server import (
     MCPServer,
     MCPTransportError,
     api_token_override,
     build_server_from_env,
+    public_base_url_override,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -54,6 +64,16 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 # die Vorab-Prüfung (gesperrte Benutzer scheitern also sofort am API-Aufruf).
 DEFAULT_USER_TOKEN_CACHE_SECONDS = 60.0
 _USER_TOKEN_CACHE_MAX_ENTRIES = 1024
+# Durchgereichte Downloads: Zeitlimit des API-Abrufs und Blockgröße beim Weiterleiten.
+DOWNLOAD_PROXY_TIMEOUT_SECONDS = 120.0
+_DOWNLOAD_CHUNK_BYTES = 64 * 1024
+_DOWNLOAD_PASSTHROUGH_HEADERS = (
+    "Content-Type",
+    "Content-Disposition",
+    "Cache-Control",
+    "Referrer-Policy",
+    "X-OpenBuchhaltung-SHA256",
+)
 
 
 @dataclass(slots=True)
@@ -271,13 +291,16 @@ def _make_handler(
                 headers = {"WWW-Authenticate": challenge}
             self._reject(401, "Unauthorized.", headers)
 
-        def _resource_metadata_url(self) -> str:
+        def _public_base_url(self) -> str:
             base = public_url
             if not base:
                 proto = (self.headers.get("X-Forwarded-Proto") or "http").split(",")[0].strip()
                 host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
                 base = f"{proto}://{host.split(',')[0].strip()}"
-            return f"{base.rstrip('/')}/.well-known/oauth-protected-resource{path}"
+            return base.rstrip("/")
+
+        def _resource_metadata_url(self) -> str:
+            return f"{self._public_base_url()}/.well-known/oauth-protected-resource{path}"
 
         def do_POST(self) -> None:  # noqa: N802 (stdlib-Namenskonvention)
             if self.path.split("?", 1)[0] != path:
@@ -308,15 +331,52 @@ def _make_handler(
                 self._reject(413, "Request body too large.")
                 return
             raw_body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
-            with api_token_override(api_token):
+            with api_token_override(api_token), public_base_url_override(self._public_base_url()):
                 result = process_post(server, raw_body, self.headers.get("Accept"))
             self._send(result)
 
+        def _proxy_download(self, token: str) -> None:
+            """Reicht einen Download-Link an die REST-API durch (Token = Berechtigung)."""
+            api_base_url = getattr(server.http, "base_url", None)
+            if not api_base_url or not token or "/" in token:
+                self._reject(404, "Not found.")
+                return
+            upstream_request = Request(
+                f"{api_base_url}/downloads/{quote(token, safe='')}", method="GET"
+            )
+            try:
+                upstream = urlopen(upstream_request, timeout=DOWNLOAD_PROXY_TIMEOUT_SECONDS)
+            except HTTPError as exc:
+                upstream = exc
+            except URLError:
+                self._reject(502, "OpenBuchhaltung API not reachable.")
+                return
+            with upstream:
+                status = getattr(upstream, "status", None) or upstream.code
+                length = upstream.headers.get("Content-Length")
+                body = None if length else upstream.read()
+                self.send_response(status)
+                for name in _DOWNLOAD_PASSTHROUGH_HEADERS:
+                    value = upstream.headers.get(name)
+                    if value:
+                        self.send_header(name, value)
+                self.send_header("Content-Length", length or str(len(body)))
+                self.end_headers()
+                if body is not None:
+                    self.wfile.write(body)
+                    return
+                while chunk := upstream.read(_DOWNLOAD_CHUNK_BYTES):
+                    self.wfile.write(chunk)
+
         def do_GET(self) -> None:  # noqa: N802
+            request_path = self.path.split("?", 1)[0]
+            if request_path.startswith(DOWNLOAD_ROUTE_PREFIX):
+                self._proxy_download(request_path.removeprefix(DOWNLOAD_ROUTE_PREFIX))
+                return
             # Unbekannte Pfade (u. a. OAuth-Discovery unter /.well-known/…) sauber mit
             # 404 beantworten. So erkennt ein MCP-Client, dass der Server keinen
             # Autorisierungsdienst anbietet, und verbindet ohne OAuth.
-            if self.path.split("?", 1)[0] != path:
+            if request_path != path:
                 self._reject(404, "Not found.")
                 return
             # /mcp selbst bietet keinen server-initiierten SSE-Stream (GET) an.

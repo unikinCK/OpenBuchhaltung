@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Dateien per Download-Link für KI-Chats und MCP
+- Belege und Exporte passten als Base64 oft nicht durch den Chat, und von Modellen
+  selbst gebaute Links zeigten ins Leere (interne Adresse des MCP-Containers, fehlende
+  Anmeldung). Die API stellt jetzt signierte, 15 Minuten gültige Links
+  `GET /api/v1/downloads/<token>` aus, die ohne Anmeldung funktionieren; beim Abruf
+  gelten weiter Mandant, Rolle und Sperre des anfordernden Benutzers.
+- Neu: `GET /api/v1/documents/<id>/download-link` und MCP-Tool
+  `get_document_download_link` (Beleg ohne Base64). `download_document` liefert wie
+  bisher `content_base64` und zusätzlich `download_url`.
+- Datei-Exporte (Journal, SuSa, Controlling, DATEV, Prüferpaket, ELSTER-Nutzlast)
+  liefern mit `download_link=1` bzw. dem MCP-Parameter `download_link` einen Link statt
+  der Datei; Fehler kommen weiterhin sofort zurück.
+- Der MCP-HTTP-Server setzt in `download_url` seine öffentliche Adresse ein und reicht
+  `/api/v1/downloads/…` an die App durch, wenn unter seiner Adresse nur er erreichbar ist
+  (Tailscale Serve, Caddy). Der KI-Chat erzeugt Links mit der Adresse der Seite und macht
+  absolute Links auf die eigene App klickbar.
+- Neue Variable `DOWNLOAD_LINK_TTL_SECONDS` (Standard 900).
+
 ### Zahlen und Datumsangaben überall im deutschen Format
 - **Behoben:** Kostenstellenrechnung und Profitcenter-GuV zeigten Beträge technisch
   (`12345.67` statt `12.345,67`). Dasselbe galt für Anlagen (Abschreibungsplan, verbuchte

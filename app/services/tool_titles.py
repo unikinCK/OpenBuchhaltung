@@ -81,6 +81,7 @@ TOOL_TITLES: dict[str, str] = {
     "set_document_category_active": "Belegkategorie aktivieren/deaktivieren",
     "replace_document": "Beleg ersetzen",
     "download_document": "Beleg abrufen",
+    "get_document_download_link": "Download-Link für Beleg",
     "create_receipt_ocr_suggestion": "Beleg auslesen (OCR)",
     "book_receipt_ocr_suggestion": "Beleg-Vorschlag buchen",
     "create_receipt_match_suggestion": "Beleg abgleichen",

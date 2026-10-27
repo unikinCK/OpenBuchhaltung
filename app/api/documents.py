@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
+from app.api.downloads import download_link_payload, linkable_download
 from app.api.helpers import (
     DateArgError,
     api_can_write,
@@ -702,6 +703,7 @@ def delete_document_via_api(document_id: int):
 
 
 @api_bp.get("/documents/<int:document_id>/download")
+@linkable_download
 def download_document_via_api(document_id: int):
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -735,6 +737,30 @@ def get_document_content_via_api(document_id: int):
                     **_document_dict(document),
                     "integrity": verify_document_file(document),
                     "content_base64": base64.b64encode(document_path.read_bytes()).decode("ascii"),
+                    **download_link_payload(f"/documents/{document.id}/download"),
+                }
+            ),
+            200,
+        )
+
+
+@api_bp.get("/documents/<int:document_id>/download-link")
+def get_document_download_link_via_api(document_id: int):
+    """Beleg-Metadaten plus zeitlich begrenzter Download-Link (für Chats und MCP-Clients)."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        document = session.get(Document, document_id)
+        if document is None or api_scoped_company(session, document.company_id) is None:
+            return jsonify({"error": "Document not found."}), 404
+        document_path = Path(document.storage_key)
+        if not document_path.exists():
+            return jsonify({"error": "Document file not found."}), 404
+        return (
+            jsonify(
+                {
+                    **_document_dict(document),
+                    "integrity": verify_document_file(document),
+                    **download_link_payload(f"/documents/{document.id}/download"),
                 }
             ),
             200,

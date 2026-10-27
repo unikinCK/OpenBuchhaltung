@@ -58,6 +58,23 @@ function text(nodes) {
   assert.match(text(nodes), /z \(javascript:alert\(1/);
 }
 
+// Absolute Links nur auf den Ursprung der Seite (Download-Links der API).
+{
+  globalThis.location = { protocol: "https:", origin: "https://buch.example.de" };
+  try {
+    const nodes = md.parseInline(
+      "[Download](https://buch.example.de/api/v1/downloads/abc.def) " +
+        "[a](https://buch.example.de.evil.example/x) [b](https://buch.example.de@evil.example/)"
+    );
+    const links = nodes.filter((node) => node.type === "link");
+    assert.equal(links.length, 1);
+    assert.equal(links[0].href, "https://buch.example.de/api/v1/downloads/abc.def");
+    assert.match(text(nodes), /a \(https:\/\/buch\.example\.de\.evil\.example\/x\)/);
+  } finally {
+    delete globalThis.location;
+  }
+}
+
 // HTML bleibt Text.
 {
   const [paragraph] = md.parse("<img src=x onerror=alert(1)> <b>fett</b>");

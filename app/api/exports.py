@@ -10,6 +10,7 @@ from flask import Response, current_app, jsonify, request
 from sqlalchemy.orm import aliased
 
 from app.api.blueprint import api_bp
+from app.api.downloads import linkable_download
 from app.api.helpers import (
     DateArgError,
     api_scoped_company,
@@ -37,6 +38,7 @@ from domain.models import (
 
 
 @api_bp.get("/exports/trial-balance.csv")
+@linkable_download
 def export_trial_balance_csv():
     company_id = request.args.get("company_id", type=int)
     if not company_id:
@@ -85,6 +87,7 @@ def export_trial_balance_csv():
 
 
 @api_bp.get("/exports/journal.csv")
+@linkable_download
 def export_journal_csv():
     company_id = request.args.get("company_id", type=int)
     if not company_id:
@@ -177,6 +180,7 @@ def export_journal_csv():
 
 
 @api_bp.get("/exports/controlling.csv")
+@linkable_download
 def export_controlling_csv():
     company_id = request.args.get("company_id", type=int)
     unit_type = (request.args.get("unit_type") or "cost_center").strip()
@@ -261,6 +265,7 @@ def export_controlling_csv():
 
 
 @api_bp.get("/exports/datev.csv")
+@linkable_download
 def export_datev_csv():
     """Buchungsstapel eines Wirtschaftsjahres (``fiscal_year_id``) bzw. Zeitraums darin."""
     company_id = request.args.get("company_id", type=int)
@@ -321,6 +326,7 @@ def export_datev_csv():
 
 
 @api_bp.get("/exports/audit-package.zip")
+@linkable_download
 def export_audit_package():
     company_id = request.args.get("company_id", type=int)
     if not company_id:

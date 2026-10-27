@@ -12,6 +12,7 @@ from flask import Response, current_app, jsonify, request
 
 from app.services.chat import ChatCancelled, ChatError
 from app.services.chat_llm import ChatLLMError
+from app.services.internal_api import internal_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +46,13 @@ def stream_job(job: Job, *, error_status: int = 400) -> Response:
     der Client die Verbindung (Abbrechen), bricht der Zug vor dem nächsten Schritt
     ab; ein bereits laufender Modell- oder Tool-Aufruf wird noch zu Ende geführt.
     Der Job läuft in einem eigenen Thread: Angaben aus dem Request (Benutzer,
-    Formulardaten) muss er vorher auslesen.
+    Formulardaten) muss er vorher auslesen. Die Basis-URL des Requests reicht der
+    Thread an die Tool-Aufrufe weiter (Download-Links auf die richtige Adresse).
     """
     events: queue.Queue = queue.Queue()
     cancelled = threading.Event()
     app = current_app._get_current_object()
+    base_url = request.url_root
 
     def report(event: dict[str, Any]) -> None:
         if cancelled.is_set():
@@ -57,7 +60,7 @@ def stream_job(job: Job, *, error_status: int = 400) -> Response:
         events.put({"type": "progress", "event": event})
 
     def worker() -> None:
-        with app.app_context():
+        with app.app_context(), internal_api_base_url(base_url):
             try:
                 events.put({"type": "done", "result": job(report)})
             except ChatCancelled:

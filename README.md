@@ -357,6 +357,7 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `DOCUMENT_MIN_UPLOAD_BYTES` | `1024` | Mindestgröße hochgeladener Belege. |
 | `DOCUMENT_FETCH_ALLOWED_HOSTS` | – (aus) | Hosts (`host:port`, kommagetrennt), von denen Belege per `source_url` geladen werden dürfen; siehe [Belege per Link](#belege-per-link-source_url). |
 | `DOCUMENT_FETCH_TIMEOUT_SECONDS` | `30` | Zeitlimit für den Abruf über `source_url`. |
+| `DOWNLOAD_LINK_TTL_SECONDS` | `900` | Gültigkeit der Download-Links für Belege und Exporte; siehe [Dateien per Download-Link](#dateien-per-download-link). |
 
 **LLM-Endpunkte** (OpenAI-/responses-kompatibel). API-Keys werden nicht per Umgebung
 gesetzt, sondern vom Administrator je Benutzer hinterlegt (siehe
@@ -410,7 +411,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `MCP_HTTP_ALLOWED_ORIGINS` | – | Erlaubte Browser-Origins (kommagetrennt, `*` = alle). |
 | `MCP_HTTP_MAX_BODY_BYTES` | `16777216` | Maximale Request-Größe des MCP-HTTP-Endpunkts (größer → 413). |
 | `MCP_HTTP_ALLOW_USER_TOKENS` | `1` | Benutzer-API-Tokens am MCP-HTTP-Endpunkt annehmen und durchreichen (`0` = nur `MCP_HTTP_AUTH_TOKEN`). |
-| `MCP_PUBLIC_URL` | – | Öffentliche Basis-URL für den OAuth-Hinweis (`WWW-Authenticate`) im 401; leer = aus `X-Forwarded-Proto`/`Host`. |
+| `MCP_PUBLIC_URL` | – | Öffentliche Basis-URL für den OAuth-Hinweis (`WWW-Authenticate`) im 401 und für Download-Links; leer = aus `X-Forwarded-Proto`/`Host`. |
 
 **OAuth für MCP-Connectoren**
 
@@ -1397,6 +1398,48 @@ Scheitert der Abruf, antwortet die API mit einer Meldung, die den Grund nennt, u
 liefert `not_found`; das Modell holt dann einen neuen Link oder sendet die Datei als
 Base64. Das Audit-Log vermerkt beim Upload `source_host` (ohne Pfad, der Link kann
 ein Token enthalten).
+
+## Dateien per Download-Link
+
+Die Gegenrichtung: Belege und Exporte gibt die API auch als zeitlich begrenzten Link
+heraus, den ein KI-Chat (MCP-Connector, In-App-Chat, iOS-App) dem Benutzer anzeigt. Der
+Base64-Weg bleibt daneben bestehen — für Modelle, die den Inhalt selbst auswerten.
+
+| Endpunkt | MCP-Tool | Antwort |
+|---|---|---|
+| `GET /api/v1/documents/<id>/download-link` | `get_document_download_link` | Beleg-Metadaten, Integritätsprüfung, Link (ohne Dateiinhalt) |
+| `GET /api/v1/documents/<id>/content` | `download_document` | wie bisher mit `content_base64`, zusätzlich der Link |
+| Datei-Exporte mit `?download_link=1` | Parameter `download_link` der Export-Tools | `file_name`, `mime_type`, `file_size_bytes` und Link statt der Datei |
+
+Datei-Exporte sind `exports/journal.csv`, `exports/trial-balance.csv`,
+`exports/controlling.csv`, `exports/datev.csv`, `exports/audit-package.zip`,
+`elster/submissions/<id>/payload.xml` und `documents/<id>/download`. Der Link steht in
+`download_url` (absolut), `download_path` (relativ), `expires_at` und
+`expires_in_seconds`:
+
+```json
+{"file_name": "journal_1.csv", "mime_type": "text/csv", "file_size_bytes": 2048,
+ "download_url": "https://buch.example.de/api/v1/downloads/eyJw…",
+ "download_path": "/api/v1/downloads/eyJw…",
+ "expires_at": "2026-10-27T10:15:00+00:00", "expires_in_seconds": 900}
+```
+
+- `GET /api/v1/downloads/<token>` braucht keine Anmeldung: Der Token ist mit dem
+  `SECRET_KEY` signiert und enthält API-Pfad, Parameter und den Benutzer, der ihn
+  angefordert hat. Beim Abruf läuft der Pfad mit dessen Rechten erneut durch die API
+  (Mandant, Rolle, Sperre); ein gesperrter Benutzer bekommt `403`, ein abgelaufener Link
+  `410`, ein veränderter `404`. Nur Datei-Exporte sind per Link abrufbar.
+- Gültigkeit `DOWNLOAD_LINK_TTL_SECONDS` (Standard 15 Minuten). Wer den Link hat, kann
+  die Datei so lange laden — wie bei signierten Mail-Anhängen; danach einen neuen Link
+  anfordern. Antworten tragen `Cache-Control: no-store`.
+- Der Exportendpunkt läuft beim Anfordern einmal vollständig, damit Fehler (etwa ein
+  fehlendes Wirtschaftsjahr beim DATEV-Export) sofort zurückkommen.
+- Adresse: `download_url` zeigt dorthin, wo der Aufrufer die App erreicht. Der
+  MCP-HTTP-Server setzt seine eigene öffentliche Adresse ein (`MCP_PUBLIC_URL` bzw.
+  `X-Forwarded-Proto`/`Host`), denn die App kennt nur die interne Adresse
+  (`http://app:8000`). Hinter nginx geht `/api/v1/downloads/…` direkt an die App; liegt
+  unter der Adresse nur der MCP-Server (Tailscale Serve, Caddy), reicht er den Abruf an
+  die App durch. Der KI-Chat übernimmt die Adresse der Seite, über die er läuft.
 
 ## Belegkategorien & mehrere Belege je Buchung
 

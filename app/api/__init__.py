@@ -14,6 +14,7 @@ from app.api import (  # noqa: F401
     controlling,
     dashboard,
     documents,
+    downloads,
     einvoice,
     elster,
     exports,

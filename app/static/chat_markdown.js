@@ -5,7 +5,8 @@
  * toDom() baut daraus ausschließlich per createElement/createTextNode DOM-Knoten.
  * Unterstützt: Absätze, Überschriften, Listen (verschachtelt), Tabellen, Zitate,
  * Codeblöcke, Trennlinien sowie fett, kursiv, durchgestrichen, `Code` und Links auf
- * relative App-Pfade. Externe Links und Bilder werden nur als Text ausgegeben.
+ * App-Pfade (relativ oder absolut mit dem Ursprung der Seite, etwa Download-Links).
+ * Externe Links und Bilder werden nur als Text ausgegeben.
  *
  * Läuft im Browser (window.ObhChatMarkdown) und unter Node (Tests). */
 (function (root) {
@@ -72,9 +73,17 @@
     return -1;
   }
 
+  function appOrigin() {
+    var page = typeof location !== "undefined" ? location : null;
+    return page && /^https?:$/.test(page.protocol) ? page.origin : null;
+  }
+
   function isSafeHref(href) {
-    // Nur Pfade dieser App: kein Schema, kein protokollrelatives "//".
-    return /^\/(?!\/)[^\s\\]*$/.test(href);
+    // Nur Pfade dieser App: kein Schema, kein protokollrelatives "//" …
+    if (/^\/(?!\/)[^\s\\]*$/.test(href)) return true;
+    // … oder absolute Links auf genau diesen Ursprung (Download-Links der API).
+    var origin = appOrigin();
+    return !!origin && href.indexOf(origin + "/") === 0 && /^[^\s\\]*$/.test(href);
   }
 
   function parseInline(text) {

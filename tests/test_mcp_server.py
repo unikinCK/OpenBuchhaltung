@@ -95,6 +95,7 @@ EXPECTED_TOOL_NAMES = {
     "set_document_category_active",
     "replace_document",
     "download_document",
+    "get_document_download_link",
     "create_receipt_ocr_suggestion",
     "book_receipt_ocr_suggestion",
     "create_receipt_match_suggestion",
@@ -813,7 +814,7 @@ def test_elster_tools_forward_arguments() -> None:
             },
         }
     )
-    assert http.calls[-1] == ("GET", "/elster/submissions/9/payload.xml", None, None)
+    assert http.calls[-1] == ("GET", "/elster/submissions/9/payload.xml", {}, None)
 
     server.handle(
         {
@@ -1202,6 +1203,16 @@ def test_document_tools_forward_arguments() -> None:
         }
     )
     assert http.calls[-1] == ("GET", "/documents/3/content", {}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {"name": "get_document_download_link", "arguments": {"document_id": 3}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/documents/3/download-link", {}, None)
 
 
 def test_receipt_ocr_tools_forward_arguments() -> None:
@@ -2069,6 +2080,18 @@ def test_mcp_tools_run_against_live_api(tmp_path: Path) -> None:
         call_tool("download_document", {"document_id": document_id})["content"][0]["text"]
     )
     assert base64.b64decode(downloaded_document["content_base64"]).startswith(b"%PDF-1.4")
+    assert downloaded_document["download_url"].startswith("http://localhost/api/v1/downloads/")
+
+    document_link = json.loads(
+        call_tool("get_document_download_link", {"document_id": document_id})["content"][0][
+            "text"
+        ]
+    )
+    assert "content_base64" not in document_link
+    assert document_link["file_name"] == "mcp-beleg.pdf"
+    link_response = client.get(document_link["download_path"])
+    assert link_response.status_code == 200
+    assert link_response.get_data().startswith(b"%PDF-1.4")
 
     replacement = json.loads(
         call_tool(
