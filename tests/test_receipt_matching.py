@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app import create_app
 from app.auth import hash_api_token, hash_password
-from app.services import receipt_matching, receipt_ocr
+from app.services import receipt_match_jobs, receipt_matching, receipt_ocr
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -32,6 +32,7 @@ from domain.models import (
     Document,
     FixedAsset,
     JournalEntry,
+    ReceiptMatchJob,
     ReceiptMatchSuggestion,
     TaxCode,
     Tenant,
@@ -687,7 +688,21 @@ def test_llm_hallucinated_entry_id_is_rejected(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_ui_flow_suggest_and_approve(tmp_path):
+@pytest.fixture
+def inline_match_jobs(monkeypatch):
+    """Hintergrundabgleich direkt im Request ausführen (kein Thread)."""
+    monkeypatch.setattr(receipt_match_jobs, "_start_thread", lambda target: target())
+
+
+@pytest.fixture
+def held_match_jobs(monkeypatch):
+    """Hintergrundabgleich anhalten; der Test startet ihn selbst (``jobs[i]()``)."""
+    jobs: list = []
+    monkeypatch.setattr(receipt_match_jobs, "_start_thread", jobs.append)
+    return jobs
+
+
+def test_ui_flow_suggest_and_approve(tmp_path, inline_match_jobs):
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)
     entry_id = _create_entry(app, company_id, "238.00", date(2026, 7, 10), "Muster Lieferant")
@@ -728,7 +743,7 @@ def test_ui_flow_suggest_and_approve(tmp_path):
     assert "freigegeben" in page.get_data(as_text=True)
 
 
-def test_ui_new_booking_form_books_suggestion(tmp_path):
+def test_ui_new_booking_form_books_suggestion(tmp_path, inline_match_jobs):
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)
     document_id = _upload_document(app, company_id, RECEIPT_LINES)
@@ -842,6 +857,38 @@ def test_roles_and_tenant_scoping(tmp_path):
         json={"company_id": company_b_id},
     )
     assert cross_reject.status_code == 404
+
+    with app.extensions["db_session_factory"]() as session:
+        company_b = session.get(Company, company_b_id)
+        foreign_job = ReceiptMatchJob(
+            tenant_id=company_b.tenant_id,
+            company_id=company_b.id,
+            document_id=document_b_id,
+            status="running",
+            created_by="test",
+        )
+        session.add(foreign_job)
+        session.commit()
+        foreign_job_id = foreign_job.id
+
+    pruefer_job = client.post(
+        "/api/v1/receipt-matching/jobs",
+        headers={"Authorization": f"Bearer {pruefer_token}"},
+        json={"company_id": company_a_id, "document_id": 1},
+    )
+    assert pruefer_job.status_code == 403
+    cross_job_start = client.post(
+        "/api/v1/receipt-matching/jobs",
+        headers={"Authorization": f"Bearer {buchhalter_token}"},
+        json={"company_id": company_b_id, "document_id": document_b_id},
+    )
+    assert cross_job_start.status_code == 404
+    for company_id in (company_a_id, company_b_id):
+        cross_job = client.get(
+            f"/api/v1/receipt-matching/jobs/{foreign_job_id}?company_id={company_id}",
+            headers={"Authorization": f"Bearer {buchhalter_token}"},
+        )
+        assert cross_job.status_code == 404
 
 
 def test_suggestion_fields_are_sanitized_before_persisting(tmp_path, monkeypatch):
@@ -1274,3 +1321,207 @@ def test_new_booking_payload_names_proposed_accounts(tmp_path):
     assert body["status"] == "freigegeben"
     assert body["journal_entry"]["amount"] == "238.00"
     assert body["document"]["journal_entry_id"] == body["journal_entry_id"]
+
+
+# ---------------------------------------------------------------------------
+# Abgleich im Hintergrund (Proxy-Timeout bei langsamen KI-Modellen)
+# ---------------------------------------------------------------------------
+
+
+def test_ui_match_runs_in_background_and_reports_status(tmp_path, held_match_jobs):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    entry_id = _create_entry(app, company_id, "238.00", date(2026, 7, 10), "Muster Lieferant")
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+
+    start = client.post(
+        "/belege/abgleich/vorschlag",
+        data={"company_id": company_id, "document_id": document_id},
+        follow_redirects=True,
+    )
+    html = start.get_data(as_text=True)
+    assert "läuft im Hintergrund" in html
+    assert "In Bearbeitung" in html
+    assert "data-match-start" not in html  # kein zweiter Start-Button für den Beleg
+    with app.extensions["db_session_factory"]() as session:
+        job = session.query(ReceiptMatchJob).one()
+        job_id = job.id
+        assert (job.status, job.document_id, job.created_by) == ("running", document_id, "admin")
+        assert session.query(ReceiptMatchSuggestion).count() == 0
+    status_url = f"/belege/abgleich/auftraege/{job_id}"
+    assert f'data-match-job="{status_url}"' in html
+
+    running = client.get(status_url).get_json()
+    assert running["status"] == "running"
+    assert running["file_name"] == "beleg.pdf"
+    assert running["page_url"] == f"/belege/abgleich?company_id={company_id}"
+
+    again = client.post(
+        "/belege/abgleich/vorschlag",
+        data={"company_id": company_id, "document_id": document_id},
+        follow_redirects=True,
+    )
+    assert "läuft bereits ein Abgleich" in again.get_data(as_text=True)
+    assert len(held_match_jobs) == 1
+
+    held_match_jobs[0]()
+
+    done = client.get(status_url).get_json()
+    assert done["status"] == "done"
+    assert done["suggestion_type"] == "match"
+    assert done["finished_at"] is not None
+    with app.extensions["db_session_factory"]() as session:
+        suggestion = session.get(ReceiptMatchSuggestion, done["suggestion_id"])
+        assert suggestion.journal_entry_id == entry_id
+    page = client.get(f"/belege/abgleich?company_id={company_id}").get_data(as_text=True)
+    assert "Freigeben und verknüpfen" in page
+    assert "In Bearbeitung" not in page
+
+
+def test_background_match_failure_is_recorded(tmp_path, held_match_jobs, monkeypatch):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+    client.post(
+        "/belege/abgleich/vorschlag", data={"company_id": company_id, "document_id": document_id}
+    )
+
+    def broken(**kwargs):
+        raise ReceiptMatchError("Beleg konnte nicht ausgelesen werden: kaputt")
+
+    monkeypatch.setattr(receipt_match_jobs, "create_match_suggestion", broken)
+    held_match_jobs[0]()
+
+    with app.extensions["db_session_factory"]() as session:
+        job = session.query(ReceiptMatchJob).one()
+        assert job.status == "failed"
+        assert job.error == "Beleg konnte nicht ausgelesen werden: kaputt"
+    page = client.get(f"/belege/abgleich?company_id={company_id}").get_data(as_text=True)
+    assert "Letzter Abgleich fehlgeschlagen: Beleg konnte nicht ausgelesen werden" in page
+    assert "Abgleich starten" in page  # erneut startbar
+
+
+def test_background_match_unexpected_error_is_recorded(
+    tmp_path, held_match_jobs, monkeypatch, caplog
+):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+    client.post(
+        "/belege/abgleich/vorschlag", data={"company_id": company_id, "document_id": document_id}
+    )
+
+    def crash(**kwargs):
+        raise RuntimeError("Datenbank weg")
+
+    monkeypatch.setattr(receipt_match_jobs, "create_match_suggestion", crash)
+    held_match_jobs[0]()
+
+    with app.extensions["db_session_factory"]() as session:
+        job = session.query(ReceiptMatchJob).one()
+        assert (job.status, job.error) == ("failed", "Interner Fehler beim Abgleich.")
+    assert "Hintergrundauftrag" in caplog.text
+
+
+def test_stale_running_job_counts_as_failed(tmp_path, held_match_jobs):
+    from datetime import datetime, timedelta, timezone
+
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+    client.post(
+        "/belege/abgleich/vorschlag", data={"company_id": company_id, "document_id": document_id}
+    )
+    # Worker beim Redeploy beendet: der Auftrag bleibt auf running stehen.
+    with app.extensions["db_session_factory"]() as session:
+        job = session.query(ReceiptMatchJob).one()
+        job.created_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        session.commit()
+        job_id = job.id
+
+    status = client.get(f"/belege/abgleich/auftraege/{job_id}").get_json()
+    assert status["status"] == "failed"
+    assert "neu gestartet" in status["error"]
+    restart = client.post(
+        "/belege/abgleich/vorschlag",
+        data={"company_id": company_id, "document_id": document_id},
+        follow_redirects=True,
+    )
+    assert "läuft im Hintergrund" in restart.get_data(as_text=True)
+    assert len(held_match_jobs) == 2
+
+
+def test_job_status_of_unknown_job_is_404(tmp_path):
+    app = _create_test_app(tmp_path)
+    client = _logged_in_client(app)
+    assert client.get("/belege/abgleich/auftraege/999").status_code == 404
+
+
+def test_background_match_via_api(tmp_path, held_match_jobs):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+
+    start = client.post(
+        "/api/v1/receipt-matching/jobs",
+        json={"company_id": company_id, "document_id": document_id},
+    )
+    assert start.status_code == 202
+    job = start.get_json()
+    assert (job["status"], job["suggestion"]) == ("running", None)
+
+    url = f"/api/v1/receipt-matching/jobs/{job['id']}?company_id={company_id}"
+    assert client.get(url).get_json()["status"] == "running"
+    duplicate = client.post(
+        "/api/v1/receipt-matching/jobs",
+        json={"company_id": company_id, "document_id": document_id},
+    )
+    assert duplicate.status_code == 422
+
+    held_match_jobs[0]()
+
+    done = client.get(url).get_json()
+    assert done["status"] == "done"
+    assert done["suggestion"]["id"] == done["suggestion_id"]
+    assert done["suggestion"]["suggestion_type"] == "new_booking"
+    assert done["suggestion"]["booking_proposal"]["creditor_account_code"] == "1600"
+
+    other_company_id = _seed_company_with_accounts(
+        app, tenant_name="Anderer Mandant", company_name="Andere GmbH"
+    )
+    wrong_company = client.get(
+        f"/api/v1/receipt-matching/jobs/{job['id']}?company_id={other_company_id}"
+    )
+    assert wrong_company.status_code == 404
+    assert client.get(f"/api/v1/receipt-matching/jobs/{job['id']}").status_code == 400
+
+
+def test_background_match_runs_in_a_real_thread(tmp_path, monkeypatch):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    threads: list = []
+    start_thread = receipt_match_jobs._start_thread
+    monkeypatch.setattr(
+        receipt_match_jobs, "_start_thread", lambda target: threads.append(start_thread(target))
+    )
+    client = _logged_in_client(app)
+
+    start = client.post(
+        "/api/v1/receipt-matching/jobs",
+        json={"company_id": company_id, "document_id": document_id},
+    )
+    assert start.status_code == 202
+    threads[0].join(timeout=30)
+    assert not threads[0].is_alive()
+
+    job = client.get(
+        f"/api/v1/receipt-matching/jobs/{start.get_json()['id']}?company_id={company_id}"
+    ).get_json()
+    assert job["status"] == "done", job
+    assert job["suggestion"]["document_id"] == document_id

@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import select
 
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.llm_settings import PURPOSE_RECEIPT_MATCH, receipt_analysis_options
+from app.services.receipt_match_jobs import get_job, job_dict, latest_jobs, start_match_job
 from app.services.receipt_matching import (
     STATUS_OPEN,
     ReceiptMatchError,
     approve_match_suggestion,
     book_new_booking_suggestion,
-    create_match_suggestion,
     entry_gross_total,
     reject_suggestion,
 )
@@ -99,6 +99,7 @@ def receipt_matching_page():
         companies, selected_company_id = company_context(session)
 
         unmatched_documents: list[Document] = []
+        jobs_by_document: dict = {}
         open_suggestions: list[ReceiptMatchSuggestion] = []
         decided_suggestions: list[ReceiptMatchSuggestion] = []
         entry_options: list[JournalEntry] = []
@@ -129,6 +130,7 @@ def receipt_matching_page():
                 .scalars()
                 .all()
             )
+            jobs_by_document = latest_jobs(session, [d.id for d in unmatched_documents])
             open_suggestions = (
                 session.execute(
                     scoped_select(ReceiptMatchSuggestion, company_id=selected_company_id)
@@ -171,6 +173,7 @@ def receipt_matching_page():
             companies=companies,
             selected_company_id=selected_company_id,
             unmatched_documents=unmatched_documents,
+            jobs_by_document=jobs_by_document,
             open_suggestions=open_suggestions,
             decided_suggestions=decided_suggestions,
             entry_options=entry_options,
@@ -201,12 +204,12 @@ def receipt_matching_suggest():
     with session_factory() as session:
         company = require_company_access(session, company_id)
         try:
-            suggestion = create_match_suggestion(
+            start_match_job(
                 session=session,
                 company_id=company.id,
                 document_id=document_id,
                 changed_by=changed_by(),
-                **receipt_analysis_options(
+                analysis_options=receipt_analysis_options(
                     llm_purpose=PURPOSE_RECEIPT_MATCH, session=session
                 ),
             )
@@ -214,18 +217,26 @@ def receipt_matching_suggest():
             flash(f"Abgleich nicht möglich: {exc}", "error")
             return redirect(url_for("main.receipt_matching_page", company_id=company_id))
 
-        if suggestion.suggestion_type == "match":
-            flash(
-                "Passende Buchung gefunden – bitte den Vorschlag prüfen und freigeben.",
-                "success",
-            )
-        else:
-            flash(
-                "Keine passende Buchung gefunden – es liegt ein Vorschlag für eine "
-                "neue Buchung zur Freigabe bereit.",
-                "success",
-            )
+    flash(
+        "Der Abgleich läuft im Hintergrund und kann einige Minuten dauern. Sobald er "
+        "fertig ist, meldet sich OpenBuchhaltung – auch auf anderen Seiten.",
+        "info",
+    )
     return redirect(url_for("main.receipt_matching_page", company_id=company_id))
+
+
+@main_bp.get("/belege/abgleich/auftraege/<int:job_id>")
+def receipt_matching_job_status(job_id: int):
+    """Stand eines Hintergrundabgleichs (JSON für die Benachrichtigung in app.js)."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        job = get_job(session, job_id)
+        if job is None:
+            abort(404)
+        require_company_access(session, job.company_id)
+        data = job_dict(job)
+        data["page_url"] = url_for("main.receipt_matching_page", company_id=job.company_id)
+        return jsonify(data)
 
 
 @main_bp.post("/belege/abgleich/<int:suggestion_id>/freigeben")

@@ -85,6 +85,8 @@ TOOL_TITLES: dict[str, str] = {
     "create_receipt_ocr_suggestion": "Beleg auslesen (OCR)",
     "book_receipt_ocr_suggestion": "Beleg-Vorschlag buchen",
     "create_receipt_match_suggestion": "Beleg abgleichen",
+    "start_receipt_match_job": "Belegabgleich im Hintergrund starten",
+    "get_receipt_match_job": "Stand des Belegabgleichs abrufen",
     "list_receipt_match_suggestions": "Abgleich-Vorschläge auflisten",
     "approve_receipt_match_suggestion": "Abgleich-Vorschlag freigeben",
     "reject_receipt_match_suggestion": "Abgleich-Vorschlag ablehnen",

@@ -2235,6 +2235,50 @@ TOOLS: list[ToolSpec] = [
         timeout=LLM_TOOL_TIMEOUT,
     ),
     ToolSpec(
+        name="start_receipt_match_job",
+        description=(
+            "Startet den Belegabgleich wie create_receipt_match_suggestion, aber im "
+            "Hintergrund, und kehrt sofort mit einem Auftrag (status running) zurück. "
+            "Für langsame KI-Modelle, bei denen der direkte Abgleich in einen Timeout "
+            "läuft. Den Stand liefert get_receipt_match_job."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "document_id": {
+                    "type": "integer",
+                    "description": "ID des unverknüpften Belegs.",
+                },
+            },
+            "required": ["company_id", "document_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/receipt-matching/jobs",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_receipt_match_job",
+        description=(
+            "Stand eines Hintergrund-Belegabgleichs: status running, done (suggestion "
+            "enthält den fertigen Vorschlag wie create_receipt_match_suggestion) oder "
+            "failed (error nennt den Grund)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "integer", "description": "ID des Auftrags."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["job_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/receipt-matching/jobs/{job_id}",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="list_receipt_match_suggestions",
         description=(
             "Listet Belegabgleich-Vorschläge einer Gesellschaft, optional nach Status "

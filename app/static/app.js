@@ -36,6 +36,7 @@
     setupPartnerPanel();
     setupPartnerFill();
     setupLineTotals();
+    setupMatchJobs();
 
     // Auswahlfelder mit data-autosubmit senden ihr Formular bei Änderung ab.
     document.querySelectorAll("[data-autosubmit]").forEach(function (element) {
@@ -451,6 +452,148 @@
         );
       }
     });
+  }
+
+  // Belegabgleich im Hintergrund: laufende Aufträge auf jeder Seite verfolgen und
+  // bei Abschluss Bescheid geben (Browser-Benachrichtigung, sonst Hinweis oben).
+  // <form data-match-start>: fragt vor dem Absenden nach der Erlaubnis für
+  // Benachrichtigungen (geht nur bei einer Nutzeraktion).
+  // <span data-match-job="<Status-URL>" data-match-job-file="…">: laufender Auftrag;
+  // er wird in localStorage gemerkt, damit auch andere Seiten und Tabs melden.
+  var MATCH_JOBS_KEY = "obh.matchJobs";
+  var MATCH_JOB_POLL_MS = 5000;
+  // Danach nicht mehr nachfragen (z. B. abgemeldet: Status-URL liefert die Anmeldung).
+  var MATCH_JOB_MAX_AGE_MS = 30 * 60 * 1000;
+
+  function loadMatchJobs() {
+    try {
+      return JSON.parse(window.localStorage.getItem(MATCH_JOBS_KEY)) || {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function saveMatchJobs(jobs) {
+    try {
+      window.localStorage.setItem(MATCH_JOBS_KEY, JSON.stringify(jobs));
+    } catch (error) {
+      // Ohne Speicher meldet nur die Abgleichsseite selbst.
+    }
+  }
+
+  function setupMatchJobs() {
+    document.querySelectorAll("form[data-match-start]").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        if (!("Notification" in window) || Notification.permission !== "default") return;
+        event.preventDefault();
+        var send = function () {
+          form.submit();
+        };
+        try {
+          Notification.requestPermission().then(send, send);
+        } catch (error) {
+          send();
+        }
+      });
+    });
+
+    var jobs = loadMatchJobs();
+    document.querySelectorAll("[data-match-job]").forEach(function (element) {
+      var url = element.dataset.matchJob;
+      if (!jobs[url]) jobs[url] = { file: element.dataset.matchJobFile || "", since: Date.now() };
+    });
+    saveMatchJobs(jobs);
+    scheduleMatchJobPoll();
+  }
+
+  function scheduleMatchJobPoll() {
+    var jobs = loadMatchJobs();
+    var now = Date.now();
+    Object.keys(jobs).forEach(function (url) {
+      if (now - (jobs[url].since || 0) > MATCH_JOB_MAX_AGE_MS) delete jobs[url];
+    });
+    saveMatchJobs(jobs);
+    if (Object.keys(jobs).length) window.setTimeout(pollMatchJobs, MATCH_JOB_POLL_MS);
+  }
+
+  function pollMatchJobs() {
+    var requests = Object.keys(loadMatchJobs()).map(function (url) {
+      return fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+        .then(function (response) {
+          if (response.status === 403 || response.status === 404) return { status: "gone" };
+          var type = response.headers.get("Content-Type") || "";
+          if (!response.ok || type.indexOf("application/json") === -1) return null;
+          return response.json();
+        })
+        .then(function (job) {
+          if (job && job.status !== "running") finishMatchJob(url, job);
+        })
+        .catch(function () {
+          // Netzfehler: beim nächsten Durchlauf erneut versuchen.
+        });
+    });
+    Promise.all(requests).then(scheduleMatchJobPoll);
+  }
+
+  function finishMatchJob(url, job) {
+    var jobs = loadMatchJobs();
+    var known = jobs[url];
+    delete jobs[url];
+    saveMatchJobs(jobs);
+    // Fehlt der Eintrag, hat ein anderer Tab den Abschluss schon gemeldet.
+    if (!known || job.status === "gone") return;
+
+    var done = job.status === "done";
+    var title = done ? "Belegabgleich fertig" : "Belegabgleich fehlgeschlagen";
+    var detail = done
+      ? job.suggestion_type === "match"
+        ? "Passende Buchung gefunden – bitte prüfen und freigeben."
+        : "Vorschlag für eine neue Buchung liegt zur Freigabe bereit."
+      : job.error || "Unbekannter Fehler.";
+    var body = (job.file_name || known.file) + ": " + detail;
+    showMatchJobResult(url, job, title, body);
+
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      var notification = new Notification(title, { body: body, tag: "obh-match-" + job.id });
+      notification.onclick = function () {
+        window.focus();
+        window.location.href = job.page_url;
+        notification.close();
+      };
+    } catch (error) {
+      // Manche Mobilbrowser erlauben Benachrichtigungen nur über einen Service Worker.
+    }
+  }
+
+  // Auf der Abgleichsseite die Zeile aktualisieren, sonst einen Hinweis oben einblenden.
+  function showMatchJobResult(url, job, title, body) {
+    var link = document.createElement("a");
+    link.href = job.page_url;
+    var badge = null;
+    document.querySelectorAll("[data-match-job]").forEach(function (element) {
+      if (element.dataset.matchJob === url) badge = element;
+    });
+    if (badge) {
+      badge.className = job.status === "done" ? "badge badge-success" : "badge badge-danger";
+      badge.textContent = job.status === "done" ? "Fertig" : "Fehlgeschlagen";
+      link.textContent = "Seite neu laden";
+      var note = badge.nextElementSibling;
+      if (note) note.replaceChildren(link);
+      return;
+    }
+    var list = document.querySelector(".flash-list");
+    if (!list) {
+      list = document.createElement("ul");
+      list.className = "flash-list";
+      document.body.insertBefore(list, document.querySelector("main"));
+    }
+    var item = document.createElement("li");
+    item.className = job.status === "done" ? "success" : "error";
+    item.textContent = title + " – " + body + " ";
+    link.textContent = "Zum Belegabgleich";
+    item.appendChild(link);
+    list.appendChild(item);
   }
 
   document.addEventListener("change", function (event) {

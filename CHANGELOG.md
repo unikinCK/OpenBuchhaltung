@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Belegabgleich im Hintergrund mit Benachrichtigung
+- **Behoben:** Mit lokalen KI-Modellen dauerte „Abgleich starten“ teils über drei
+  Minuten; nginx brach dann mit 504 ab, obwohl der Vorschlag später entstand. Der
+  Abgleich läuft jetzt als Hintergrundauftrag (neue Tabelle `receipt_match_job`,
+  Migration 0052): Der Klick kehrt sofort zurück, der Beleg zeigt „In Bearbeitung“.
+- Ist der Abgleich fertig oder fehlgeschlagen, meldet sich der Browser mit einer
+  Benachrichtigung, auch auf anderen Seiten und Tabs von OpenBuchhaltung, ohne
+  Erlaubnis mit einem Hinweis auf der Seite. Fehler stehen danach am Beleg.
+- REST-API `POST /api/v1/receipt-matching/jobs` (202) und
+  `GET /api/v1/receipt-matching/jobs/<id>`, MCP-Tools `start_receipt_match_job` und
+  `get_receipt_match_job`. Der direkte Abgleich (`create_receipt_match_suggestion`)
+  bleibt.
+
 ### Beleg-OCR: PDFs ohne Textebene auch mit lokalen KI-Servern
 - **Behoben:** Belegabgleich und Beleg-OCR brachen bei manchen PDFs ohne brauchbare
   Textebene mit „OCR-Endpoint antwortete mit HTTP 400“ ab. Lokale Server wie LM Studio

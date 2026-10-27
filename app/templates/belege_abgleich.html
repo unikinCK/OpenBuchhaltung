@@ -30,17 +30,28 @@
             </thead>
             <tbody>
               {% for document in unmatched_documents %}
+                {% set job = jobs_by_document.get(document.id) %}
                 <tr>
                   <td>{{ document.file_name }}</td>
                   <td>{{ document.document_date | datum if document.document_date else '–' }}</td>
                   <td>{{ document.uploaded_at | datum_zeit }}</td>
                   <td>
-                    <form method="post" action="{{ url_for('main.receipt_matching_suggest') }}">
-                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-                      <input type="hidden" name="document_id" value="{{ document.id }}" />
-                      <button type="submit">Abgleich starten</button>
-                    </form>
+                    {% if job and job.status == 'running' %}
+                      <span class="badge badge-info"
+                            data-match-job="{{ url_for('main.receipt_matching_job_status', job_id=job.id) }}"
+                            data-match-job-file="{{ document.file_name }}">In Bearbeitung …</span>
+                      <span class="muted">seit {{ job.created_at | datum_zeit }}</span>
+                    {% else %}
+                      {% if job and job.status == 'failed' %}
+                        <p class="muted">Letzter Abgleich fehlgeschlagen: {{ job.error }}</p>
+                      {% endif %}
+                      <form method="post" action="{{ url_for('main.receipt_matching_suggest') }}" data-match-start>
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                        <input type="hidden" name="document_id" value="{{ document.id }}" />
+                        <button type="submit">Abgleich starten</button>
+                      </form>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

@@ -99,6 +99,8 @@ EXPECTED_TOOL_NAMES = {
     "create_receipt_ocr_suggestion",
     "book_receipt_ocr_suggestion",
     "create_receipt_match_suggestion",
+    "start_receipt_match_job",
+    "get_receipt_match_job",
     "list_receipt_match_suggestions",
     "approve_receipt_match_suggestion",
     "reject_receipt_match_suggestion",
@@ -1278,6 +1280,35 @@ def test_receipt_ocr_tools_forward_arguments() -> None:
             "net_amount": "100.00",
             "tax_amount": "19.00",
         },
+    )
+
+
+def test_receipt_match_job_tools_forward_arguments() -> None:
+    http = RecordingHttp()
+    server = MCPServer(http=http)
+
+    def call(name, arguments):
+        server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+        return http.calls[-1]
+
+    assert call("start_receipt_match_job", {"company_id": 7, "document_id": 3}) == (
+        "POST",
+        "/receipt-matching/jobs",
+        None,
+        {"company_id": 7, "document_id": 3},
+    )
+    assert call("get_receipt_match_job", {"job_id": 5, "company_id": 7}) == (
+        "GET",
+        "/receipt-matching/jobs/5",
+        {"company_id": 7},
+        None,
     )
 
 
