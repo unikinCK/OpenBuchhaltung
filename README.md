@@ -2056,7 +2056,7 @@ INSTANCE_PROXY_PROJECT=obh-zwei
 Erst die weitere Instanz mit `./redeploy.sh` starten (sie legt das Netz an), DNS-Record
 auf dieselbe IP, dann im Checkout mit nginx
 `docker compose up -d --no-deps --force-recreate certbot nginx`. Den ersten Benutzer
-legt `docker compose exec app flask --app run create-user --username … --role admin`
+legt `docker compose exec app flask --app run create-user --username … --role Admin`
 an.
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
