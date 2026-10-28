@@ -4,11 +4,12 @@
 # (erstes Let's-Encrypt-Zertifikat, Erneuerungen). Dazu gehören die Zertifikate der
 # weiteren Instanz-Domains (PUBLIC_DOMAIN_ALIASES) und mit dem Webseiten-Overlay
 # (WEBSITE_DOMAIN) das der Projekt-Webseite, mit dem Demo-Proxy-Overlay (DEMO_DOMAIN)
-# das der Demo-Instanz.
+# das der Demo-Instanz und mit dem Instanz-Proxy-Overlay (INSTANCE_PROXY_DOMAIN) das der
+# weiteren Instanz.
 set -eu
 
 CERTS=""
-for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-}; do
+for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-} ${INSTANCE_PROXY_DOMAIN:-}; do
   CERTS="${CERTS} /etc/letsencrypt/live/${domain}/fullchain.pem"
 done
 if [ -n "${WEBSITE_DOMAIN:-}" ]; then

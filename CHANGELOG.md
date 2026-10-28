@@ -8,6 +8,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Weitere Instanz über den nginx einer Instanz
+- Neues Overlay `docker-compose.instance-proxy.yml`: Der nginx einer öffentlichen
+  Instanz liefert zusätzlich eine weitere Produktions-Instanz auf demselben Host (eigener
+  Checkout und Compose-Projekt) unter `INSTANCE_PROXY_DOMAIN` mit eigenem
+  Let's-Encrypt-Zertifikat aus. Aus `INSTANCE_PROXY_PROJECT` ergeben sich App, MCP-Server
+  und Netz; nginx löst sie zur Laufzeit auf, eine gestoppte Instanz legt nur ihre eigene
+  Domain lahm.
+- certbot und der Reload-Hook von nginx berücksichtigen `INSTANCE_PROXY_DOMAIN`.
+
 ### Belegabgleich im Hintergrund mit Benachrichtigung
 - **Behoben:** Mit lokalen KI-Modellen dauerte „Abgleich starten“ teils über drei
   Minuten; nginx brach dann mit 504 ab, obwohl der Vorschlag später entstand. Der
