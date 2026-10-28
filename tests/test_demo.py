@@ -12,9 +12,23 @@ from sqlalchemy import func, select
 
 from app import create_app
 from app.services.bank_proposals import booking_proposals
-from app.services.demo import _demo_invoice_pdf, demo_block_reason
+from app.services.demo import (
+    DEMO_LOGIN_PASSWORD,
+    DEMO_LOGIN_USERNAME,
+    _demo_invoice_pdf,
+    demo_block_reason,
+)
 from app.services.journal_entries import finalize_journal_entry
-from domain.models import BankTransaction, Document, JournalEntry, OpenItem, User
+from domain.models import (
+    BankTransaction,
+    Document,
+    JournalEntry,
+    OAuthClient,
+    OAuthGrant,
+    OpenItem,
+    User,
+)
+from tests.test_oauth import BASE, _exchange, _obtain_code, _register
 
 
 def _create_app(tmp_path: Path, **overrides):
@@ -111,6 +125,47 @@ def test_demo_reset_wipes_finalized_entries_and_uploads(tmp_path):
         ).scalar_one()
     assert count_after == count_before
     assert finalized == 0
+
+
+def test_demo_reset_keeps_oauth_clients_but_drops_grants(tmp_path):
+    """Connectoren behalten ihre client_id über den Reset und melden sich nur neu an."""
+    app = _create_app(tmp_path)
+    _reset(app)
+
+    def _sign_in(client):
+        response = client.post(
+            "/auth/login",
+            data={"username": DEMO_LOGIN_USERNAME, "password": DEMO_LOGIN_PASSWORD},
+            base_url=BASE,
+        )
+        assert response.status_code == 302
+
+    client = app.test_client()
+    _sign_in(client)
+    client_id = _register(client)["client_id"]
+    tokens = _exchange(client, client_id, _obtain_code(client, client_id)["code"]).get_json()
+
+    _reset(app)
+    with app.extensions["db_session_factory"]() as session:
+        assert session.execute(select(OAuthClient.client_id)).scalars().all() == [client_id]
+        assert session.execute(select(func.count()).select_from(OAuthGrant)).scalar_one() == 0
+
+    refresh = app.test_client().post(
+        "/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": tokens["refresh_token"],
+            "client_id": client_id,
+        },
+        base_url=BASE,
+    )
+    assert refresh.status_code == 400
+    assert refresh.get_json()["error"] == "invalid_grant"
+
+    client = app.test_client()
+    _sign_in(client)
+    response = _exchange(client, client_id, _obtain_code(client, client_id)["code"])
+    assert response.status_code == 200, response.get_json()
 
 
 def test_demo_reset_refused_in_production_without_demo_mode(tmp_path):
