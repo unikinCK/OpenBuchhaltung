@@ -473,6 +473,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `DEMO_DOMAIN` | – | Domain der Demo-Instanz im Demo-Proxy-Overlay `docker-compose.demo-proxy.yml` (nginx einer anderen Instanz, eigenes Zertifikat). |
 | `DEMO_UPSTREAM`, `DEMO_NETWORK` | `obh-demo-app-1:8000`, `obh-demo_default` | App-Container der Demo und Netz ihres Compose-Projekts, dem nginx beitritt. |
 | `DEMO_MCP_UPSTREAM` | `obh-demo-mcp-1:8090` | MCP-Container der Demo (Profil `mcp` im Demo-Stack), an den nginx `https://<DEMO_DOMAIN>/mcp` weiterleitet. |
+| `INSTANCE_PROXY_DOMAIN`, `INSTANCE_PROXY_PROJECT` | – | Domain und Compose-Projektname einer weiteren Instanz auf demselben Host im Instanz-Proxy-Overlay `docker-compose.instance-proxy.yml` (nginx dieser Instanz, eigenes Zertifikat; Weiterleitung an `<Projekt>-app-1:8000`, `/mcp` an `<Projekt>-mcp-1:8090`). |
 | `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`; `COMPOSE_FILE` auch aus der `.env`, mehrere Dateien mit `:` getrennt. |
 
 ## Login & Benutzer
@@ -2026,6 +2027,38 @@ DEMO_DOMAIN=demo.openbuchhaltung.de
 
 Erst den Demo-Stack starten (er legt das Netz an), DNS-Record auf dieselbe IP, dann
 `docker compose up -d --no-deps --force-recreate certbot nginx`.
+
+**Weitere Instanz über denselben nginx.** Ports 80/443 hat ein Host nur einmal. Eine
+weitere Produktions-Instanz (eigener Checkout, eigene `.env` mit
+`COMPOSE_PROJECT_NAME`, eigene Datenbank, freie `APP_PORT`/`MCP_PORT`, kein
+nginx-Overlay) liefert das Overlay `docker-compose.instance-proxy.yml` im Checkout mit
+nginx unter `INSTANCE_PROXY_DOMAIN` aus: eigenes Let's-Encrypt-Zertifikat, Weiterleitung
+an `<INSTANCE_PROXY_PROJECT>-app-1:8000`, `/mcp` an `<INSTANCE_PROXY_PROJECT>-mcp-1:8090`;
+nginx tritt dazu dem Netz `<INSTANCE_PROXY_PROJECT>_default` bei und löst die Container
+zur Laufzeit auf — ist die Instanz gestoppt, antwortet nur ihre Domain mit 502. Das
+Overlay steht in `COMPOSE_FILE` zuletzt (es ersetzt den envsubst-Filter der übrigen).
+
+```dotenv
+# .env der weiteren Instanz (eigener Checkout)
+COMPOSE_FILE=docker-compose.production.yml
+COMPOSE_PROJECT_NAME=obh-zwei
+COMPOSE_PROFILES=mcp
+APP_PORT=8300
+MCP_PORT=8490
+```
+
+```dotenv
+# .env der Instanz mit nginx
+COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml:docker-compose.instance-proxy.yml
+INSTANCE_PROXY_DOMAIN=buchhaltung2.example.com
+INSTANCE_PROXY_PROJECT=obh-zwei
+```
+
+Erst die weitere Instanz mit `./redeploy.sh` starten (sie legt das Netz an), DNS-Record
+auf dieselbe IP, dann im Checkout mit nginx
+`docker compose up -d --no-deps --force-recreate certbot nginx`. Den ersten Benutzer
+legt `docker compose exec app flask --app run create-user --username … --role Admin`
+an.
 
 **Connector in Claude Desktop einrichten:** *Einstellungen → Connectors → Custom Connector
 hinzufügen* → die HTTPS-URL (`https://…/mcp`) eintragen, dann Claude Desktop neu starten.

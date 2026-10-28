@@ -11,15 +11,16 @@
 #           getrennt): je Domain ein eigenes Zertifikat,
 #           WEBSITE_DOMAIN (Projekt-Webseite, docker-compose.website.yml): zweites
 #           Zertifikat für die Domain und www.<Domain>,
-#           DEMO_DOMAIN (Demo-Instanz, docker-compose.demo-proxy.yml): eigenes
-#           Zertifikat wie eine Instanz-Domain.
+#           DEMO_DOMAIN (Demo-Instanz, docker-compose.demo-proxy.yml) und
+#           INSTANCE_PROXY_DOMAIN (weitere Instanz, docker-compose.instance-proxy.yml):
+#           eigenes Zertifikat wie eine Instanz-Domain.
 set -eu
 
 : "${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set}"
 WEBROOT=/var/www/certbot
 # Instanz-Domains: jede bekommt ein eigenes Zertifikat (keine Umleitung zwischen ihnen).
-# Die Domain der Demo-Instanz wird genauso behandelt.
-INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-}"
+# Die Domains der Demo und einer weiteren Instanz hinter diesem nginx ebenso.
+INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-} ${INSTANCE_PROXY_DOMAIN:-}"
 
 live_dir() {
   echo "/etc/letsencrypt/live/$1"

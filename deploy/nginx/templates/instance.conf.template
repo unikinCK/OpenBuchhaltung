@@ -1,0 +1,88 @@
+# Weitere Produktions-Instanz (docker-compose.instance-proxy.yml): ${INSTANCE_PROXY_DOMAIN}
+# leitet an die App eines anderen Compose-Projekts weiter (${INSTANCE_PROXY_UPSTREAM}),
+# /mcp an dessen MCP-Server (${INSTANCE_PROXY_MCP_UPSTREAM}). Wird nur mit dem
+# Instanz-Proxy-Overlay eingebunden. ${INSTANCE_PROXY_DOMAIN}, ${INSTANCE_PROXY_UPSTREAM}
+# und ${INSTANCE_PROXY_MCP_UPSTREAM} ersetzt das nginx-Image beim Start (envsubst), alle
+# anderen $-Variablen sind nginx-eigene. Die Drosselzonen obh_login/obh_general kommen aus
+# default.conf. Das Zertifikat holt der certbot-Service unter dem Namen
+# ${INSTANCE_PROXY_DOMAIN}.
+
+# Port 80: ACME-Challenge für certbot, sonst Umleitung auf HTTPS.
+server {
+    listen 80;
+    server_name ${INSTANCE_PROXY_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://${INSTANCE_PROXY_DOMAIN}$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${INSTANCE_PROXY_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${INSTANCE_PROXY_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${INSTANCE_PROXY_DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    client_max_body_size ${NGINX_CLIENT_MAX_BODY_SIZE};
+
+    # Sicherheits-Header (HSTS, nosniff, Referrer-Policy, CSP) setzt die App selbst.
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # Überschreiben statt anhängen: die App vertraut genau einem Proxy.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    # Die Instanz läuft in einem anderen Compose-Projekt: zur Laufzeit auflösen, damit
+    # nginx auch ohne sie startet (502 statt Startabbruch).
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $obh_proxied http://${INSTANCE_PROXY_UPSTREAM};
+    set $obh_proxied_mcp http://${INSTANCE_PROXY_MCP_UPSTREAM};
+
+    # MCP-Server der Instanz (Streamable HTTP). Ohne Profil mcp in ihrem Stack antwortet
+    # nur dieser Pfad mit 502. Wie in default.conf: Origin entfernen und – weil
+    # proxy_set_header hier die geerbten ersetzt – Host/X-Forwarded-* wiederholen (der
+    # MCP-Server baut daraus den OAuth-Hinweis im 401).
+    location = /mcp {
+        limit_req zone=obh_general burst=40 nodelay;
+        proxy_set_header Origin "";
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_pass $obh_proxied_mcp;
+    }
+
+    location = /auth/login {
+        limit_req zone=obh_login burst=5 nodelay;
+        proxy_pass $obh_proxied;
+    }
+
+    location / {
+        limit_req zone=obh_general burst=40 nodelay;
+        # Langläufer (OCR, FinTS, Prüferexport) wie in default.conf.
+        proxy_read_timeout 190s;
+        proxy_send_timeout 190s;
+        proxy_pass $obh_proxied;
+    }
+}

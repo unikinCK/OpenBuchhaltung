@@ -11,6 +11,7 @@ TEMPLATES = PROJECT_ROOT / "deploy" / "nginx" / "templates"
 NGINX_OVERLAY = PROJECT_ROOT / "docker-compose.nginx.yml"
 WEBSITE_OVERLAY = PROJECT_ROOT / "docker-compose.website.yml"
 DEMO_PROXY_OVERLAY = PROJECT_ROOT / "docker-compose.demo-proxy.yml"
+INSTANCE_PROXY_OVERLAY = PROJECT_ROOT / "docker-compose.instance-proxy.yml"
 
 # Großgeschriebene ${…}-Platzhalter ersetzt envsubst; nginx-Variablen sind klein.
 _PLACEHOLDER = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
@@ -42,6 +43,12 @@ def test_envsubst_filter_covers_every_template_placeholder():
     assert _placeholders("default.conf.template") | _placeholders(
         "website.conf.template"
     ) | _placeholders("demo.conf.template") <= _envsubst_filter(DEMO_PROXY_OVERLAY)
+    # Das Instanz-Proxy-Overlay steht zuletzt und ersetzt alle anderen Filter.
+    assert _placeholders("default.conf.template") | _placeholders(
+        "website.conf.template"
+    ) | _placeholders("demo.conf.template") | _placeholders(
+        "instance.conf.template"
+    ) <= _envsubst_filter(INSTANCE_PROXY_OVERLAY)
 
 
 def test_aliases_are_always_set_for_nginx_and_certbot():
@@ -79,8 +86,8 @@ def test_mcp_oauth_hint_follows_requested_domain():
 def test_certbot_and_reload_hook_handle_every_instance_domain():
     certbot = (PROJECT_ROOT / "deploy" / "nginx" / "certbot.sh").read_text(encoding="utf-8")
     assert (
-        'INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-}"'
-        in certbot
+        'INSTANCE_DOMAINS="${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-} '
+        '${INSTANCE_PROXY_DOMAIN:-}"' in certbot
     )
     # Platzhalter, erstes Zertifikat und `obtain` laufen über alle Instanz-Domains.
     assert certbot.count("for domain in ${INSTANCE_DOMAINS}; do") == 3
@@ -92,7 +99,8 @@ def test_certbot_and_reload_hook_handle_every_instance_domain():
     assert renew.lstrip().startswith("share_with_nginx")
     hook = (PROJECT_ROOT / "deploy" / "nginx" / "nginx-cert-watch.sh").read_text(encoding="utf-8")
     assert (
-        "for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-}; do" in hook
+        "for domain in ${PUBLIC_DOMAIN} ${PUBLIC_DOMAIN_ALIASES:-} ${DEMO_DOMAIN:-} "
+        "${INSTANCE_PROXY_DOMAIN:-}; do" in hook
     )
 
 
@@ -120,6 +128,36 @@ def test_demo_proxy_forwards_to_the_demo_project_at_runtime():
     assert "proxy_set_header X-Forwarded-Host $host;" in mcp_location
     assert "proxy_pass http://obh_app;" not in template
     assert "ssl_certificate     /etc/letsencrypt/live/${DEMO_DOMAIN}/fullchain.pem;" in template
+    assert "limit_req zone=obh_login" in template
+
+
+def test_instance_proxy_forwards_to_the_other_project_at_runtime():
+    overlay = INSTANCE_PROXY_OVERLAY.read_text(encoding="utf-8")
+    # App, MCP-Server und Netz folgen aus dem Compose-Projektnamen der weiteren Instanz.
+    project = "${INSTANCE_PROXY_PROJECT:?INSTANCE_PROXY_PROJECT must be set}"
+    assert f"INSTANCE_PROXY_UPSTREAM: {project}-app-1:8000" in overlay
+    assert f"INSTANCE_PROXY_MCP_UPSTREAM: {project}-mcp-1:8090" in overlay
+    assert "      - default\n      - proxied_instance\n" in overlay
+    assert f"name: {project}_default\n    external: true" in overlay
+    certbot = overlay.split("\n  certbot:", 1)[1]
+    assert "INSTANCE_PROXY_DOMAIN: ${INSTANCE_PROXY_DOMAIN:?INSTANCE_PROXY_DOMAIN must be set}" in (
+        certbot
+    )
+    template = (TEMPLATES / "instance.conf.template").read_text(encoding="utf-8")
+    assert "resolver 127.0.0.11" in template
+    assert "set $obh_proxied http://${INSTANCE_PROXY_UPSTREAM};" in template
+    assert "set $obh_proxied_mcp http://${INSTANCE_PROXY_MCP_UPSTREAM};" in template
+    mcp_location = template.split("location = /mcp {", 1)[1].split("\n    }", 1)[0]
+    assert "proxy_pass $obh_proxied_mcp;" in mcp_location
+    assert 'proxy_set_header Origin "";' in mcp_location
+    assert "proxy_set_header X-Forwarded-Host $host;" in mcp_location
+    # Weder die eigene Instanz noch die Demo: nur Laufzeit-Upstreams des anderen Projekts.
+    assert "obh_app" not in template and "obh_demo" not in template
+    assert not re.search(r"\b(?<!-)(app:8000|mcp:8090)\b", template)
+    assert (
+        "ssl_certificate     /etc/letsencrypt/live/${INSTANCE_PROXY_DOMAIN}/fullchain.pem;"
+        in template
+    )
     assert "limit_req zone=obh_login" in template
 
 

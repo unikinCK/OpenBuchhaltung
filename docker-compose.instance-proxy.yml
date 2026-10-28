@@ -1,0 +1,46 @@
+# Overlay: eine weitere Produktions-Instanz (eigener Checkout und Compose-Projekt, ohne
+# eigenen nginx) über den nginx des nginx-Overlays dieser Instanz ausliefern — unter einer
+# eigenen Domain mit eigenem Let's-Encrypt-Zertifikat. Gedacht für mehrere Instanzen auf
+# einem Host, der nur einmal Port 80/443 hat.
+#
+# Unter INSTANCE_PROXY_DOMAIN leitet nginx alles an die App des Compose-Projekts
+# INSTANCE_PROXY_PROJECT weiter (Container <Projekt>-app-1:8000), /mcp an dessen
+# MCP-Server (<Projekt>-mcp-1:8090, Profil mcp). Dazu tritt nginx dem Netz
+# <Projekt>_default bei. Die Instanz unter PUBLIC_DOMAIN bleibt unverändert.
+#
+# Einrichtung (setzt docker-compose.nginx.yml voraus, die weitere Instanz läuft bereits):
+#   1. .env: dieses Overlay als letztes in COMPOSE_FILE, z. B.
+#            COMPOSE_FILE=docker-compose.production.yml:docker-compose.nginx.yml:docker-compose.instance-proxy.yml
+#            INSTANCE_PROXY_DOMAIN=buchhaltung2.example.com
+#            INSTANCE_PROXY_PROJECT=obh-zwei
+#   2. DNS: A-Record für INSTANCE_PROXY_DOMAIN auf die öffentliche IP, wie bei PUBLIC_DOMAIN
+#   3. docker compose up -d --no-deps --force-recreate certbot nginx
+#
+# nginx löst die Container erst zur Laufzeit auf: Ist die weitere Instanz gestoppt,
+# antwortet INSTANCE_PROXY_DOMAIN mit 502, die übrigen Domains laufen weiter (ebenso /mcp
+# ohne MCP-Server). Das Netz <Projekt>_default muss beim Start von nginx existieren (legt
+# der Stack der weiteren Instanz an) — sie also nicht per `docker compose down` entfernen.
+services:
+  nginx:
+    environment:
+      INSTANCE_PROXY_DOMAIN: ${INSTANCE_PROXY_DOMAIN:?INSTANCE_PROXY_DOMAIN must be set}
+      INSTANCE_PROXY_UPSTREAM: ${INSTANCE_PROXY_PROJECT:?INSTANCE_PROXY_PROJECT must be set}-app-1:8000
+      INSTANCE_PROXY_MCP_UPSTREAM: ${INSTANCE_PROXY_PROJECT:?INSTANCE_PROXY_PROJECT must be set}-mcp-1:8090
+      # Umfasst auch die Variablen von docker-compose.website.yml und
+      # docker-compose.demo-proxy.yml: dieses Overlay steht in COMPOSE_FILE zuletzt und
+      # ersetzt deren Filter.
+      NGINX_ENVSUBST_FILTER: ^(PUBLIC_DOMAIN|PUBLIC_DOMAIN_ALIASES|NGINX_CLIENT_MAX_BODY_SIZE|WEBSITE_DOMAIN|DEMO_DOMAIN|DEMO_UPSTREAM|DEMO_MCP_UPSTREAM|INSTANCE_PROXY_DOMAIN|INSTANCE_PROXY_UPSTREAM|INSTANCE_PROXY_MCP_UPSTREAM)$$
+    volumes:
+      - ./deploy/nginx/templates/instance.conf.template:/etc/nginx/templates/instance.conf.template:ro
+    networks:
+      - default
+      - proxied_instance
+
+  certbot:
+    environment:
+      INSTANCE_PROXY_DOMAIN: ${INSTANCE_PROXY_DOMAIN:?INSTANCE_PROXY_DOMAIN must be set}
+
+networks:
+  proxied_instance:
+    name: ${INSTANCE_PROXY_PROJECT:?INSTANCE_PROXY_PROJECT must be set}_default
+    external: true
