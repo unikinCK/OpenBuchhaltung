@@ -5,10 +5,11 @@
 * :func:`seed_demo_activity` ergänzt Alltag für App und Weboberfläche: gebuchte und
   offene Bankumsätze (mit Vorschlägen „wie zuletzt“ und per Regel), einen
   überfälligen offenen Posten und einen Beleg ohne Buchung.
-* :func:`reset_demo_database` leert die Datenbank vollständig und spielt die
-  Demo-Daten neu ein (``flask demo-reset``). PostgreSQL wird per ``TRUNCATE``
-  geleert: Die GoBD-Trigger verhindern einzelne Löschungen (zu Recht), und das
-  Schema bleibt erhalten, sodass laufende App-Prozesse weiterarbeiten.
+* :func:`reset_demo_database` leert die Datenbank bis auf die registrierten
+  OAuth-Clients und spielt die Demo-Daten neu ein (``flask demo-reset``).
+  PostgreSQL wird per ``TRUNCATE`` geleert: Die GoBD-Trigger verhindern einzelne
+  Löschungen (zu Recht), und das Schema bleibt erhalten, sodass laufende
+  App-Prozesse weiterarbeiten.
 * :func:`demo_block_reason` sperrt in der Demo-Instanz alles, was Geheimnisse
   speichert oder nach außen wirkt (Benutzerverwaltung, KI-Schlüssel, FinTS, Open
   Banking, ELSTER-Übermittlung).
@@ -25,7 +26,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import MetaData, Table, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT, hash_password
@@ -56,6 +57,12 @@ from domain.models import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKR03_CHART = PROJECT_ROOT / "data" / "kontenrahmen" / "skr03.csv"
+
+# Bleiben beim Reset erhalten: Connectoren (Claude, ChatGPT) merken sich die per
+# Dynamic Client Registration erhaltene client_id dauerhaft; ohne den Stammsatz
+# scheitert jede neue Anmeldung mit invalid_client. Freigaben und Codes hängen am
+# Benutzer und werden mit ihm gelöscht.
+RESET_PRESERVED_TABLES = ("oauth_client",)
 
 DEMO_TENANT_NAME = "Demo Mandant"
 DEMO_COMPANY_NAME = "Demo GmbH"
@@ -464,12 +471,13 @@ def _demo_invoice_pdf(issue_date: date) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def wipe_database(engine) -> None:
-    """Leert alle Tabellen; das Schema steht danach wieder auf dem Alembic-Head.
+def wipe_database(engine, *, keep: tuple[str, ...] = ()) -> None:
+    """Leert alle Tabellen außer ``keep``; das Schema steht danach auf dem Alembic-Head.
 
     PostgreSQL: ``TRUNCATE … RESTART IDENTITY CASCADE`` (Schema und Trigger bleiben).
     SQLite: alle Tabellen löschen und neu migrieren (``DELETE`` scheitert an den
-    Unveränderbarkeits-Triggern).
+    Unveränderbarkeits-Triggern); die Zeilen aus ``keep`` werden danach wieder
+    eingefügt. Tabellen in ``keep`` dürfen nicht auf geleerte Tabellen verweisen.
     """
     from alembic import command
 
@@ -478,17 +486,29 @@ def wipe_database(engine) -> None:
     command.upgrade(_alembic_config(engine), "head")
     tables = [name for name in inspect(engine).get_table_names() if name != "alembic_version"]
     if engine.dialect.name == "postgresql":
-        if tables:
-            quoted = ", ".join(f'"{name}"' for name in tables)
+        wiped = [name for name in tables if name not in keep]
+        if wiped:
+            quoted = ", ".join(f'"{name}"' for name in wiped)
             with engine.begin() as connection:
                 connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
         return
+    kept: list[tuple[Table, list[dict[str, Any]]]] = []
+    with engine.connect() as connection:
+        for name in keep:
+            if name in tables:
+                table = Table(name, MetaData(), autoload_with=connection)
+                rows = [dict(row) for row in connection.execute(select(table)).mappings()]
+                kept.append((table, rows))
     with engine.begin() as connection:
         connection.execute(text("PRAGMA foreign_keys=OFF"))
         for name in [*tables, "alembic_version"]:
             connection.execute(text(f'DROP TABLE IF EXISTS "{name}"'))
         connection.execute(text("PRAGMA foreign_keys=ON"))
     command.upgrade(_alembic_config(engine), "head")
+    with engine.begin() as connection:
+        for table, rows in kept:
+            if rows:
+                connection.execute(table.insert(), rows)
 
 
 def reset_demo_database(
@@ -498,10 +518,10 @@ def reset_demo_database(
     public: bool,
     echo: Callable[[str], Any] = lambda _message: None,
 ) -> None:
-    """Datenbank und Uploads leeren, dann Demo-Daten neu einspielen."""
+    """Datenbank (bis auf OAuth-Clients) und Uploads leeren, dann Demo-Daten neu einspielen."""
     engine = session_factory.kw["bind"]
     engine.dispose()
-    wipe_database(engine)
+    wipe_database(engine, keep=RESET_PRESERVED_TABLES)
     if upload_dir.exists():
         for child in upload_dir.iterdir():
             if child.is_dir():
