@@ -17,6 +17,14 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   Domain lahm.
 - certbot und der Reload-Hook von nginx berücksichtigen `INSTANCE_PROXY_DOMAIN`.
 
+### Demo-MCP nach dem täglichen Reset
+- **Behoben:** Nach dem ersten nächtlichen Reset der Demo-Instanz ließ sich ein
+  MCP-Connector (Claude, ChatGPT) nicht mehr anmelden: Der Reset leerte auch die
+  Tabelle `oauth_client`, der Connector schickte aber weiter seine gespeicherte
+  `client_id` und bekam `invalid_client`. Registrierte OAuth-Clients bleiben jetzt
+  beim Reset erhalten; Freigaben, Codes und Tokens werden weiter gelöscht, der
+  Connector meldet sich also wie vorgesehen neu mit `demo`/`demo1234` an.
+
 ### Belegabgleich im Hintergrund mit Benachrichtigung
 - **Behoben:** Mit lokalen KI-Modellen dauerte „Abgleich starten“ teils über drei
   Minuten; nginx brach dann mit 504 ab, obwohl der Vorschlag später entstand. Der

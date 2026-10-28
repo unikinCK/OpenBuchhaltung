@@ -512,9 +512,9 @@ docker compose -p obh-demo up -d --build
   offener Posten und ein Beleg ohne Buchung. Angemeldet wird mit `demo`/`demo1234`
   (Buchhalter des Demo-Mandanten); Admin-Konten gibt es dort nicht.
 - **Zurücksetzen:** Der Dienst `demo-reset` (`flask demo-reset --loop`) leert täglich
-  zu `DEMO_RESET_TIME` Datenbank und Uploads und spielt die Daten neu ein. PostgreSQL wird
-  per `TRUNCATE` geleert, weil die GoBD-Trigger einzelne Löschungen verhindern; das Schema
-  bleibt, laufende App-Prozesse arbeiten weiter. `flask demo-reset` ohne `--loop` setzt
+  zu `DEMO_RESET_TIME` Datenbank (bis auf die registrierten OAuth-Clients) und Uploads und
+  spielt die Daten neu ein. PostgreSQL wird per `TRUNCATE` geleert, weil die GoBD-Trigger
+  einzelne Löschungen verhindern; das Schema bleibt, laufende App-Prozesse arbeiten weiter. `flask demo-reset` ohne `--loop` setzt
   sofort zurück. Der Befehl verweigert den Dienst ohne `DEMO_MODE` in Produktion.
 - **Gesperrt** (Schreibzugriffe, UI und API): Benutzer- und Mandantenverwaltung,
   Passwortänderung, KI-Zugang je Benutzer, FinTS/Open Banking, ELSTER-Übermittlung. Das
@@ -527,7 +527,8 @@ docker compose -p obh-demo up -d --build
   denselben Sperren. `MCP_HTTP_AUTH_TOKEN` muss trotzdem gesetzt sein (zufällig, wird
   nicht weitergegeben); läuft auf dem Host schon ein MCP-Server, ein freies `MCP_PORT`
   wählen. Der tägliche Reset löscht auch die OAuth-Freigaben: Connectoren melden sich
-  danach neu an.
+  danach neu an. Die per Dynamic Client Registration angemeldeten Clients bleiben
+  erhalten, weil Connectoren ihre `client_id` dauerhaft speichern.
 - **Öffentlich erreichbar** über den nginx einer anderen Instanz auf demselben Host:
   Overlay `docker-compose.demo-proxy.yml` dort zusätzlich in `COMPOSE_FILE`, dazu
   `DEMO_DOMAIN` (siehe Variante C unter „Deployment“). Ohne eigenen nginx braucht die
