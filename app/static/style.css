@@ -1630,3 +1630,7 @@ details.line-details > summary {
     content: none;
   }
 }
+
+/* Wissensbasis: Abschnittstexte sind Markdown-Rohtext */
+.knowledge-text { white-space: pre-wrap; line-height: 1.5; }
+.knowledge-hit h2 { margin-bottom: 0.25rem; }

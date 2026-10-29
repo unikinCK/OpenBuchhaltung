@@ -1,0 +1,81 @@
+# Anlagevermögen und Abschreibung (AfA)
+Rechtsstand: 2026-10
+Quellen: EStG §§ 6, 7, 7g, 9b; amtliche AfA-Tabellen; BMF 22.2.2022 (digitale Wirtschaftsgüter); Wachstumschancengesetz; Gesetz für ein steuerliches Investitionssofortprogramm (18.7.2025)
+
+## Aktivierung und Anschaffungskosten
+Schlagworte: Aktivierungspflicht, Anschaffungskosten, Herstellungskosten, Anschaffungsnebenkosten, Skonto, Rabatt, § 255 HGB, § 9b EStG, Nutzungsdauer, Anlageverzeichnis, selbständig nutzbar, Leasing, Erhaltungsaufwand, Herstellungsaufwand
+
+- Wirtschaftsgüter, die dem Betrieb länger als ein Jahr dienen, gehören ins Anlagevermögen und werden über die betriebsgewöhnliche Nutzungsdauer abgeschrieben, nicht sofort als Aufwand gebucht (auch bei der EÜR). Ausnahmen: GWG, Sammelposten, digitale Wirtschaftsgüter.
+- Anschaffungskosten (§ 255 Abs. 1 HGB): Kaufpreis plus Nebenkosten (Fracht, Montage, Zulassung, Notar beim Grundstück, Grunderwerbsteuer) minus Preisminderungen (Rabatt, Skonto, Bonus). Vorsteuer gehört nicht dazu, wenn sie abziehbar ist (§ 9b EStG); Kleinunternehmer und bei steuerfreien Umsätzen aktivieren brutto. Finanzierungskosten gehören nicht zu den Anschaffungskosten.
+- Herstellungskosten: Material- und Fertigungseinzelkosten plus angemessene Gemeinkosten; Eigenleistungen aktivieren.
+- Grund und Boden wird nicht abgeschrieben; beim Gebäudekauf Kaufpreis aufteilen (Arbeitshilfe BMF). Erhaltungsaufwand (Reparatur, Instandhaltung) ist sofort Aufwand; Herstellungsaufwand (Erweiterung, wesentliche Verbesserung) wird aktiviert. Anschaffungsnahe Herstellungskosten (§ 6 Abs. 1 Nr. 1a): Aufwendungen über 15 % der Gebäudeanschaffungskosten in den ersten drei Jahren werden aktiviert.
+- Anlageverzeichnis (Anlagenkartei) ist Pflicht: Bezeichnung, Anschaffungsdatum, Anschaffungskosten, Nutzungsdauer, AfA-Methode, Buchwert; auch für GWG über 250 € (§ 6 Abs. 2 Satz 4), sofern nicht aus der Buchführung ersichtlich.
+- Leasing: Beim Operating-Leasing bucht der Leasingnehmer nur die Raten als Aufwand (keine Aktivierung). Leasingsonderzahlung: bei EÜR im Zahlungsjahr abziehbar, bei Vertragsdauer über 5 Jahre gleichmäßig verteilen (§ 11 Abs. 2 Satz 3); bei Bilanzierung aktiver Rechnungsabgrenzungsposten über die Laufzeit.
+- Software: Standardsoftware (Lizenz) ist immaterielles Wirtschaftsgut; Trivialprogramme bis 800 € gelten als bewegliche GWG. SaaS-Abos sind laufender Aufwand.
+
+## Geringwertige Wirtschaftsgüter (GWG) und Sammelposten
+Schlagworte: GWG, geringwertige Wirtschaftsgüter, 800 Euro, 250 Euro, 1.000 Euro, Sammelposten, Poolabschreibung, 5 Jahre, Sofortabschreibung, § 6 Abs. 2, § 6 Abs. 2a, selbständig nutzbar, Wahlrecht, netto
+
+- GWG (§ 6 Abs. 2 EStG): abnutzbare, bewegliche, selbständig nutzbare Wirtschaftsgüter des Anlagevermögens mit Anschaffungskosten bis 800 € netto (ohne Vorsteuer, auch für Nicht-Vorsteuerabzugsberechtigte gilt der Nettowert, § 9b Abs. 1) können im Jahr der Anschaffung voll abgeschrieben werden. Grenze seit 2018 unverändert; die 2024 geplante Anhebung auf 1.000 € wurde nicht umgesetzt. Bis 250 € ohne Aufzeichnung als Aufwand buchbar; 250,01 bis 800 € ins GWG-Verzeichnis (Datum, Kosten).
+- Selbständig nutzbar: Ein Monitor, eine Tastatur oder ein Drucker sind nicht selbständig nutzbar (nur mit PC), gelten aber in der Praxis mit dem Rechner als Einheit; Kombigeräte (Drucker/Scanner/Fax) sind selbständig nutzbar. Software ab Trivialgrenze, Büromöbel je Stück, Werkzeuge einzeln.
+- Alternativ Sammelposten (§ 6 Abs. 2a): für alle Wirtschaftsgüter von 250,01 bis 1.000 € eines Wirtschaftsjahres einen Pool bilden und über 5 Jahre gleichmäßig mit je 20 % auflösen (im Zugangsjahr voll, nicht zeitanteilig). Abgänge mindern den Pool nicht. Wahlrecht gilt je Wirtschaftsjahr einheitlich für alle Güter zwischen 250 und 1.000 € (dann GWG-Sofortabschreibung nur bis 250 €). Die geplante Anhebung auf 5.000 € und 3 Jahre kam nicht.
+- Entscheidung: Sofortabschreibung (GWG) ist steuerlich meist günstiger; der Sammelposten lohnt sich bei vielen Gütern zwischen 800 und 1.000 €. Handelsrechtlich ist die GWG-Regel ebenfalls zulässig (Wesentlichkeit).
+- Buchung: Zugang auf GWG-Konto (SKR03 0480 / SKR04 0670) und Sofortabschreibung über Konto „Abschreibungen auf GWG“ (SKR03 4855 / SKR04 6260); Sammelposten auf SKR03 0485 / SKR04 0675 mit Abschreibung SKR03 4862 / SKR04 6264. In OpenBuchhaltung über create_fixed_asset mit method 'gwg' bzw. 'sammelposten'.
+
+## Lineare AfA und Nutzungsdauern (§ 7 Abs. 1 EStG)
+Schlagworte: lineare Abschreibung, Nutzungsdauer, AfA-Tabelle, zeitanteilig, monatsgenau, Pkw 6 Jahre, Büromöbel 13 Jahre, Computer, Notebook, Smartphone, Maschinen, Gebäude-AfA, 3 Prozent, 2 Prozent, Wohngebäude, Restbuchwert, Erinnerungswert, 1 Euro
+
+- Linear: Anschaffungskosten gleichmäßig über die Nutzungsdauer; im Jahr der Anschaffung zeitanteilig nach Monaten (angefangener Monat zählt voll, § 7 Abs. 1 Satz 4). Nutzungsdauer aus den amtlichen AfA-Tabellen (allgemein verwendbare Anlagegüter, BMF 15.12.2000, plus Branchentabellen); Abweichung bei nachgewiesener kürzerer Nutzung möglich. Gebrauchte Güter: Restnutzungsdauer schätzen.
+- Typische Nutzungsdauern (AfA-Tabelle AV): Pkw 6 Jahre, Lkw 9, Anhänger 11, Motorrad 7, Fahrrad/E-Bike 7, Büromöbel 13, Büromaschinen 7, Telefonanlagen 10, Mobiltelefon/Smartphone 5, Fotoapparate 7, Klimageräte 11, Werkzeuge 5, Werkstatteinrichtung 14, Ladeneinrichtung 8, Lagereinrichtung/Regale 14, Baucontainer 10, Messestände 6, Alarmanlagen 11, Photovoltaikanlagen 20, Küchengeräte 8, Kaffeemaschine 5, Fernseher 7, Musikinstrumente 15, Tresor 23. Computerhardware und Software: 1 Jahr (siehe digitale Wirtschaftsgüter).
+- Gebäude (§ 7 Abs. 4): Betriebsgebäude (nicht Wohnzwecke, Bauantrag nach 31.3.1985) 3 %; Wohngebäude mit Fertigstellung ab 1.1.2023 3 %, Fertigstellung 1925–2022 2 %, vor 1925 2,5 %. Degressive Gebäude-AfA 5 % für Wohnneubau mit Baubeginn 1.10.2023 bis 30.9.2029 (§ 7 Abs. 5a). Sonderabschreibung Mietwohnungsneubau § 7b.
+- Nach vollständiger Abschreibung bleibt ein Erinnerungswert von 1 €, solange das Wirtschaftsgut im Betrieb ist (keine gesetzliche Pflicht, aber übliche Praxis für das Anlageverzeichnis).
+- Absetzung für außergewöhnliche Abnutzung (AfaA, § 7 Abs. 1 Satz 7) bei Beschädigung oder Zerstörung; Teilwertabschreibung bei dauernder Wertminderung nur in der Bilanz (§ 6 Abs. 1 Nr. 1 Satz 2), nicht bei EÜR.
+- Buchung: Abschreibungsaufwand (SKR03 4830 / SKR04 6220, immaterielle Güter SKR03 4822 / SKR04 6200) an Anlagekonto; in OpenBuchhaltung post_depreciation je Anlagegut und Wirtschaftsjahr.
+
+## Degressive AfA und Investitionsbooster (§ 7 Abs. 2 EStG)
+Schlagworte: degressive Abschreibung, geometrisch-degressiv, 30 Prozent, dreifach, Investitionsbooster, Investitionssofortprogramm, 1.7.2025, 31.12.2027, 20 Prozent, Wechsel zur linearen AfA, bewegliche Wirtschaftsgüter
+
+- Für bewegliche Wirtschaftsgüter des Anlagevermögens, die nach dem 30.6.2025 und vor dem 1.1.2028 angeschafft oder hergestellt werden, ist eine degressive AfA von bis zu 30 % des jeweiligen Restbuchwerts zulässig, höchstens das Dreifache des linearen Satzes („Investitionsbooster“, Gesetz für ein steuerliches Investitionssofortprogramm vom 18.7.2025). Im Anschaffungsjahr zeitanteilig.
+- Vorher: Anschaffung 1.1.2020 bis 31.12.2022 bis 25 % (2,5-fach, Corona); 1.1.2023 bis 31.3.2024 keine degressive AfA; 1.4.2024 bis 31.12.2024 bis 20 % (2-fach, Wachstumschancengesetz); 1.1. bis 30.6.2025 keine degressive AfA.
+- Wechsel von degressiv zu linear ist jederzeit zulässig (Restbuchwert auf Restnutzungsdauer) und am Ende nötig, weil degressiv nie auf null kommt; umgekehrt nicht. Bei degressiver AfA keine AfaA. Mit Sonderabschreibung § 7g kombinierbar.
+- Beispiel: Maschine 30.000 €, Nutzungsdauer 10 Jahre, Kauf Juli 2025. Linear: 3.000 €/Jahr (2025: 1.500 €). Degressiv 30 %: 2025 zeitanteilig 6/12 × 9.000 = 4.500 €, 2026: 30 % von 25.500 = 7.650 €, usw.
+- In OpenBuchhaltung: create_fixed_asset mit method 'degressive' und degressive_rate (z. B. 30); die Anlagenbuchhaltung wechselt automatisch zur linearen AfA, sobald diese höher ist.
+
+## Digitale Wirtschaftsgüter (BMF 22.2.2022)
+Schlagworte: digitale Wirtschaftsgüter, Computerhardware, Software, Nutzungsdauer 1 Jahr, Sofortabzug, Notebook, PC, Drucker, Peripherie, ERP-Software, BMF-Schreiben, Wahlrecht, ohne Betragsgrenze
+
+- Für Computerhardware (PC, Notebook, Tablet, Workstation, Server, Dockingstation, externe Speicher, Monitore, Drucker, Scanner, Kameras, Headsets, Eingabegeräte, Netzwerkhardware) und Betriebs- und Anwendersoftware (auch ERP-Systeme, Warenwirtschaft, Individualsoftware) kann eine Nutzungsdauer von einem Jahr zugrunde gelegt werden (BMF 26.2.2021, ersetzt durch BMF 22.2.2022). Es ist ein Wahlrecht; die bisherigen AfA-Tabellen-Werte (PC 3 Jahre, Software 3–5 Jahre) dürfen weiter angewendet werden.
+- Wirkung: volle Abschreibung im Jahr der Anschaffung ohne zeitanteilige Kürzung (BMF akzeptiert den Sofortabzug im Anschaffungsjahr), ohne Betragsgrenze. Trotzdem Aktivierung und Aufnahme ins Anlageverzeichnis, da weiterhin Anlagevermögen.
+- Handelsrechtlich ist die einjährige Nutzungsdauer nur bei entsprechender tatsächlicher Nutzung vertretbar; Abweichung zwischen Handels- und Steuerbilanz möglich.
+- Nicht erfasst: Smartphones (5 Jahre), Telefonanlagen, Software-Abonnements (laufender Aufwand), Hardware ohne Computerfunktion.
+- In OpenBuchhaltung: create_fixed_asset mit method 'digital'.
+
+## Investitionsabzugsbetrag und Sonderabschreibung (§ 7g EStG)
+Schlagworte: Investitionsabzugsbetrag, IAB, 50 Prozent, Sonderabschreibung, 40 Prozent, 20 Prozent, Gewinngrenze 200.000, Investitionsfrist 3 Jahre, 90 Prozent betriebliche Nutzung, Rückgängigmachung, Verzinsung, Vermietung, außerbilanziell
+
+- Investitionsabzugsbetrag (§ 7g Abs. 1–4): Für geplante Anschaffung oder Herstellung abnutzbarer beweglicher Wirtschaftsgüter dürfen bis zu 50 % der voraussichtlichen Kosten gewinnmindernd abgezogen werden (außerbilanziell), maximal 200.000 € je Betrieb insgesamt. Voraussetzung: Gewinn im Abzugsjahr höchstens 200.000 € (vor IAB; nach BFH-Rechtsprechung 2025 der steuerliche Gewinn inklusive außerbilanzieller Korrekturen), Wirtschaftsgut wird im Anschaffungsjahr und im Folgejahr mindestens 90 % betrieblich genutzt oder vermietet (Pkw mit Fahrtenbuchnachweis). Investitionsfrist 3 Jahre nach Ablauf des Abzugsjahres. Elektronische Übermittlung mit der Steuererklärung.
+- Bei Anschaffung: IAB wird außerbilanziell hinzugerechnet und die Anschaffungskosten dürfen um bis zu 50 % gewinnmindernd herabgesetzt werden (AfA-Bemessung sinkt). Unterbleibt die Investition, wird der Abzug im Abzugsjahr rückgängig gemacht (Steuernachzahlung mit Zinsen § 233a).
+- Sonderabschreibung (§ 7g Abs. 5–6): Zusätzlich zur normalen AfA bis zu 40 % der Anschaffungskosten (für Anschaffungen ab 1.1.2024; vorher 20 %) beliebig verteilt auf das Anschaffungsjahr und die vier Folgejahre. Voraussetzung: Gewinn des Vorjahres höchstens 200.000 €, mindestens 90 % betriebliche Nutzung in Anschaffungs- und Folgejahr. Unabhängig vom IAB nutzbar. Nach Ablauf des Begünstigungszeitraums Restwert auf die Restnutzungsdauer verteilen.
+- Kombination: IAB 50 % im Vorjahr, Herabsetzung bei Anschaffung, dann Sonder-AfA 40 % und degressive AfA 30 % auf den Restbetrag ergeben eine sehr hohe Abschreibung im ersten Jahr. Sinnvoll bei hohem Gewinn im Planungsjahr.
+- In OpenBuchhaltung gibt es kein eigenes Feld für IAB/Sonder-AfA; Sonderabschreibungen als manuelle Buchung (method 'manuell' oder zusätzliche AfA-Buchung auf das Anlagekonto) erfassen und im Anlageverzeichnis dokumentieren.
+
+## Firmenwagen: Pkw im Betriebsvermögen, Privatnutzung
+Schlagworte: Firmenwagen, Dienstwagen, 1-Prozent-Regelung, Fahrtenbuch, Bruttolistenpreis, Elektroauto, 0,25 Prozent, 0,5 Prozent, 100.000 Euro, Hybrid, Privatnutzung, geldwerter Vorteil, Fahrten Wohnung Betrieb, 0,03 Prozent, Kostendeckelung, Sonderabschreibung Elektrofahrzeuge, 75 Prozent, notwendiges Betriebsvermögen, gewillkürtes Betriebsvermögen
+
+- Zuordnung: betriebliche Nutzung über 50 % → notwendiges Betriebsvermögen (alle Kosten Betriebsausgabe, Privatanteil als Entnahme); 10–50 % → Wahlrecht gewillkürtes Betriebsvermögen (Privatanteil nur nach Fahrtenbuch oder Schätzung, keine 1 %-Regel); unter 10 % → Privatvermögen (betriebliche Fahrten mit 0,30 €/km).
+- 1 %-Regelung (§ 6 Abs. 1 Nr. 4 Satz 2 EStG): monatlich 1 % des inländischen Bruttolistenpreises bei Erstzulassung (inkl. Sonderausstattung, gerundet auf volle 100 €) als Entnahme bzw. geldwerter Vorteil; zusätzlich für Fahrten Wohnung–Betrieb 0,03 % je Entfernungskilometer und Monat (oder 0,002 % je Fahrt bei weniger als 15 Fahrten im Monat). Kostendeckelung: nicht mehr als die tatsächlichen Gesamtkosten.
+- Elektrofahrzeuge (reine Batterie oder Brennstoffzelle): nur ein Viertel des Listenpreises (0,25 %) bei Bruttolistenpreis bis 100.000 € für Anschaffungen nach dem 30.6.2025 (Investitionssofortprogramm; vorher 70.000 € ab 2024, 60.000 € 2020–2023); darüber die Hälfte (0,5 %). Plug-in-Hybride: 0,5 % bei CO₂ höchstens 50 g/km oder elektrischer Mindestreichweite 80 km (Anschaffung ab 2025; 60 km für 2022–2024). Regelungen gelten für Anschaffungen bis 31.12.2030.
+- Fahrtenbuch: zeitnah, lückenlos, geschlossen (Datum, Kilometerstand Beginn/Ende, Ziel, Zweck, Geschäftspartner); elektronisch nur mit Änderungsprotokoll. Privatanteil = private Kilometer/Gesamtkilometer × Gesamtkosten (Kosten bei E-Fahrzeugen entsprechend gekürzt). Excel-Fahrtenbücher werden nicht anerkannt.
+- Umsatzsteuer auf die Privatnutzung (unentgeltliche Wertabgabe): 1 %-Wert abzüglich 20 % Pauschalabschlag für nicht vorsteuerbelastete Kosten, darauf 19 %; bei E-Fahrzeugen gilt umsatzsteuerlich der volle 1 %-Wert (keine Viertelung). Fahrten Wohnung–Betrieb unterliegen nicht der Umsatzsteuer.
+- Arbeitnehmer-Dienstwagen: geldwerter Vorteil nach denselben Regeln als Sachbezug lohnsteuer- und SV-pflichtig; Zuschüsse des Arbeitnehmers mindern den Vorteil; Laden beim Arbeitgeber steuerfrei (§ 3 Nr. 46), Pauschalen für privates Laden 30 €/70 € (mit/ohne Lademöglichkeit beim AG) bei E-Fahrzeugen.
+- Sonderabschreibung Elektrofahrzeuge (§ 7 Abs. 2a EStG, neu): für rein elektrische Fahrzeuge, die zwischen 1.7.2025 und 31.12.2027 angeschafft werden: 75 % im Jahr der Anschaffung, dann 10 %, 5 %, 5 %, 3 %, 2 % in den Folgejahren (arithmetisch-degressiv, nicht zeitanteilig). Nur Kauf, kein Leasing; nicht mit § 7g Sonder-AfA kombinierbar.
+- Kfz-Konten: Anschaffung SKR03 0320 / SKR04 0520; laufende Kosten SKR03 4500–4580 / SKR04 6500–6580 (Kfz-Steuer 4510/7685, Versicherung 4520/6520, Betriebskosten 4530/6530, Reparaturen 4540/6540, Leasing 4570/6560); Privatnutzung SKR03 8921 (19 %) und 8924 (ohne USt) / SKR04 4645 und 4639 gegen Privatentnahmen (1800/2100).
+
+## Anlagenabgang, Verkauf, Entnahme, Verlust
+Schlagworte: Anlagenabgang, Verkauf Anlagegut, Restbuchwert, Buchgewinn, Buchverlust, Entnahme, Teilwert, Verschrottung, Diebstahl, Versicherungsentschädigung, § 6b Rücklage, Erlöse aus Anlagenverkauf, 8820, 4845
+
+- Verkauf: Zum Verkaufszeitpunkt zeitanteilige AfA bis zum Abgangsmonat buchen, dann Restbuchwert ausbuchen (Konto „Anlagenabgänge Sachanlagen Restbuchwert“: bei Buchverlust SKR03 2310 / SKR04 6895, bei Buchgewinn SKR03 2315 / SKR04 4855) und Verkaufserlös als steuerpflichtigen Umsatz (19 %) erfassen (bei Buchgewinn SKR03 8820 / SKR04 4845, bei Buchverlust SKR03 8801 / SKR04 6885). Differenz ist Buchgewinn (sonstiger betrieblicher Ertrag) oder Buchverlust. Auch GWG-Verkäufe sind umsatzsteuerpflichtig.
+- Entnahme ins Privatvermögen: zum Teilwert (Verkehrswert) mit Umsatzsteuer (unentgeltliche Wertabgabe), Differenz zum Buchwert ist Gewinn.
+- Verschrottung, Zerstörung, Diebstahl: Restbuchwert als außerplanmäßige Abschreibung/AfaA ausbuchen; Versicherungsentschädigung ist Betriebseinnahme (ohne Umsatzsteuer, echter Schadensersatz). Nachweis (Entsorgungsbeleg, Polizeianzeige).
+- Übertragung stiller Reserven (§ 6b/§ 6c EStG) bei Grundstücken, Gebäuden und Binnenschiffen (6-Jahres-Besitzzeit) auf Reinvestition oder Rücklage (4 Jahre); Rücklage für Ersatzbeschaffung (R 6.6 EStR) bei höherer Gewalt.
+- In OpenBuchhaltung: dispose_fixed_asset bucht Abgang und Restbuchwert; den Verkaufserlös separat als Ausgangsrechnung/Bankumsatz erfassen.

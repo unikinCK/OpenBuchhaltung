@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Fachwissen für Obi (Wissensbasis und Tool `search_knowledge`)
+- Neue Wissensbasis `data/wissen/*.md` (Rechtsstand 2026-10): Umsatzsteuer (Kleinunternehmer
+  25.000/100.000 €, UStVA-Schwellen 9.000/2.000 €, § 13b, ig. Handel, E-Rechnung bis 2028,
+  Rechnungspflichtangaben), Buchführung/GoBD/Aufbewahrung (8 Jahre Belege), Anlagevermögen
+  und AfA (GWG 800 €, Sammelposten, degressive AfA 30 % 2025–2027, § 7g, digitale
+  Wirtschaftsgüter, Firmenwagen 0,25 % bis 100.000 €), Betriebsausgaben (Bewirtung 70 %,
+  Geschenke 50 €, Reisekosten, Entfernungspauschale 0,38 € ab 2026, Homeoffice), Lohn und
+  Sozialversicherung 2026 (Mindestlohn 13,90 €, Minijob 603 €, Beitragssätze, BBG),
+  Ertragsteuern und Fristen, Kontenrahmen SKR03/SKR04 (gegen die DATEV-Kontenfunktionen
+  geprüft), Buchungsmuster und die Arbeitsweise mit den OpenBuchhaltung-Tools.
+- Der Systemprompt des KI-Chats enthält das Kompaktwissen (`kompakt.md`) und die
+  Kernkonten des erkannten Kontenrahmens (`kompakt-skr03.md`/`kompakt-skr04.md`); Prompt
+  plus Tool-Definitionen bleiben unter rund 50.000 Token.
+- Neues lesendes Tool `search_knowledge` (MCP), `GET /api/v1/knowledge` (API) und Seite
+  **Wissen** (UI): BM25-Suche über die Abschnitte der Wissensbasis mit Rechtsstand je
+  Treffer, ohne Suchbegriff das Inhaltsverzeichnis. `KNOWLEDGE_EXTRA_DIR` nimmt
+  instanzeigene Wissensdateien auf.
+
 ### Weitere Instanz über den nginx einer Instanz
 - Neues Overlay `docker-compose.instance-proxy.yml`: Der nginx einer öffentlichen
   Instanz liefert zusätzlich eine weitere Produktions-Instanz auf demselben Host (eigener

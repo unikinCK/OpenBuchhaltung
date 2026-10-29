@@ -379,6 +379,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `CHAT_LLM_MAX_TOOL_CALLS` | `15` | Tool-Aufrufe je Chat-Nachricht. |
 | `CHAT_LLM_MAX_REASONING_TOKENS` | `16000` | Reasoning-Schranke je Modellaufruf: Denkt das Modell länger (getypte Reasoning-Ereignisse oder `<think>`-Text im Stream), bricht der Chat ab („Obi hat zu lange nachgedacht …“). Die gesamte Ausgabe je Aufruf ist auf diesen Wert + 8000 Token begrenzt, clientseitig und als `max_output_tokens` für Anbieter mit verdecktem Reasoning. `0` schaltet beides ab. |
 | `CHAT_LLM_IDLE_TIMEOUT_SECONDS` | `600` | Leerlauf-Timeout je Modellaufruf: Abbruch, wenn das Chat-LLM so lange keine Daten liefert. Großzügig, weil Prompt-Verarbeitung und Warteschlange lokaler Server minutenlang still sein können. Eine Höchstdauer je Chat-Nachricht gibt es nicht mehr. |
+| `KNOWLEDGE_EXTRA_DIR` | – | Zusätzliches Verzeichnis mit eigenen Wissensdateien (`*.md`, Aufbau wie `data/wissen/`) für Obi: `kompakt*.md` darin gehen in den Systemprompt, alle anderen in die Suche von `search_knowledge`. |
 | `CHAT_LLM_TIMEOUT_SECONDS` | – | **Entfernt** – wird ignoriert (Warnung beim Start); ersetzt durch `CHAT_LLM_MAX_REASONING_TOKENS` und `CHAT_LLM_IDLE_TIMEOUT_SECONDS`. |
 | `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich und Dokument-Update; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). |
 
@@ -1676,6 +1677,32 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 (`send_chat_message`, `list_chat_conversations`, `get_chat_conversation`,
 `rename_chat_conversation`, `delete_chat_conversation`, `confirm_chat_action`,
 `reject_chat_action`).
+
+## Fachwissen für Obi (Wissensbasis)
+
+Obi bekommt neben den Tool-Definitionen Fachwissen mit: Der Systemprompt enthält die
+Kompaktdateien `data/wissen/kompakt.md` (Umsatzsteuer, GoBD, AfA, Betriebsausgaben, Lohn,
+Ertragsteuern, Fristen, Buchungsmuster) und – je erkanntem Kontenrahmen der Gesellschaft
+(`detect_company_chart`) – `kompakt-skr03.md` oder `kompakt-skr04.md` mit den Kernkonten.
+Systemprompt und Tool-Definitionen zusammen bleiben unter rund 50.000 Token
+(`tests/test_knowledge.py` wacht über das Zeichenbudget); Anbieter mit Prompt-Caching
+cachen diesen festen Anfang.
+
+Details holt sich das Modell über das lesende Tool **`search_knowledge`** (API
+`GET /api/v1/knowledge?q=…&limit=…`, UI **Steuern & Berichte → Wissen**): eine lexikalische
+Suche (BM25 mit Umlaut-Faltung, Suffix-Kürzung und Präfix-Treffern für zusammengesetzte
+Wörter) über die `##`-Abschnitte aller übrigen Dateien in `data/wissen/`. Ohne Suchbegriff
+kommt das Inhaltsverzeichnis. Eine Vektordatenbank ist für die kuratierte Basis (rund 70
+Abschnitte) nicht nötig; sie entsteht beim Start aus den Dateien und braucht kein
+Embedding-Modell.
+
+Aufbau einer Wissensdatei: `# Titel`, Kopfzeilen `Rechtsstand: JJJJ-MM`, `Quellen: …`,
+`Hinweis: …`, dann `## Abschnitte`, jeweils optional mit einer ersten Zeile
+`Schlagworte: Begriff, Begriff, …` (nur für den Index, höher gewichtet). Der Rechtsstand
+steht in jeder Datei und wird im Prompt und in jedem Treffer ausgegeben; bei Gesetzesänderungen
+die betroffenen Dateien anpassen und den Rechtsstand hochsetzen. Instanzeigene Ergänzungen
+(Hinweise des Steuerberaters, Besonderheiten der Gesellschaft) kommen über
+`KNOWLEDGE_EXTRA_DIR` dazu, ohne das Repository zu ändern.
 
 ## End-to-End-Kernflows
 

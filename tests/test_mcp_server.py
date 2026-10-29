@@ -21,6 +21,7 @@ from app.services.mcp_server import (
 
 EXPECTED_TOOL_NAMES = {
     "health",
+    "search_knowledge",
     "list_companies",
     "create_tenant_with_company",
     "list_users",
