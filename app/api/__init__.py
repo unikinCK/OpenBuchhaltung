@@ -23,6 +23,7 @@ from app.api import (  # noqa: F401
     income_taxes,
     journal,
     journal_templates,
+    knowledge,
     mcp,
     oauth_grants,
     open_banking,

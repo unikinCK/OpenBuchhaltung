@@ -34,6 +34,7 @@ TOOL_TITLES: dict[str, str] = {
     "update_account": "Konto ändern",
     "import_account_chart": "Kontenrahmen importieren",
     "check_account_chart": "Kontenplan prüfen",
+    "search_knowledge": "Fachwissen nachschlagen",
     "list_accounts": "Konten auflisten",
     "get_account_history": "Kontohistorie abrufen",
     "get_account_ledger": "Kontoblatt abrufen",

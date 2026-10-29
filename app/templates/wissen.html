@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Wissen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Wissen</h1>
+  <p class="muted">
+    Fachwissen zu Umsatzsteuer, Buchführung, AfA, Betriebsausgaben, Lohn, Ertragsteuern,
+    Kontenrahmen und Buchungsmustern – dieselbe Wissensbasis, die Obi im KI-Chat nutzt
+    (Tool <code>search_knowledge</code>).{% if rechtsstand %} Rechtsstand {{ rechtsstand }}.{% endif %}
+  </p>
+
+  <section class="card">
+    <form method="get" action="{{ url_for('main.knowledge_page') }}" class="inline-form">
+      <label for="knowledge-q">Suche</label>
+      <input id="knowledge-q" name="q" value="{{ query }}" placeholder="z. B. GWG Grenze, Reverse Charge buchen, Aufbewahrungsfrist" size="48" autofocus />
+      <label for="knowledge-limit">Treffer</label>
+      <input id="knowledge-limit" name="limit" type="number" min="1" max="8" value="{{ limit }}" />
+      <button type="submit">Suchen</button>
+    </form>
+  </section>
+
+  {% if query %}
+    {% if results %}
+      {% for hit in results %}
+        <section class="card knowledge-hit">
+          <h2>{{ hit.title }}</h2>
+          <p class="muted">{{ hit.source_title }}{% if hit.rechtsstand %} · Rechtsstand {{ hit.rechtsstand }}{% endif %} · <code>{{ hit.id }}</code></p>
+          <div class="knowledge-text">{{ hit.text }}</div>
+        </section>
+      {% endfor %}
+    {% else %}
+      <section class="card"><p>Keine Treffer für „{{ query }}“. Mit Fachbegriffen suchen oder im Inhaltsverzeichnis stöbern.</p></section>
+    {% endif %}
+  {% endif %}
+
+  {% if toc %}
+    <section class="card">
+      <h2>Inhaltsverzeichnis</h2>
+      {% for document in toc %}
+        <h3>{{ document.title }}{% if document.rechtsstand %} <span class="muted">(Rechtsstand {{ document.rechtsstand }})</span>{% endif %}</h3>
+        <ul>
+          {% for section in document.sections %}
+            <li><a href="{{ url_for('main.knowledge_page', q=section.title) }}">{{ section.title }}</a></li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+    </section>
+  {% endif %}
+{% endblock %}

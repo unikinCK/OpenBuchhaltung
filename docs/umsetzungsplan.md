@@ -724,6 +724,23 @@ dann selbst betriebener Modellserver).
 - [ ] **App 1.x**: Push, TAN/Open Banking, Freigaben mit Face ID, Widgets, Bewirtungs- und
       Reisebelege; danach App Intents und KI auf dem Gerät (Foundation Models).
 
+## Phase 7 – Fachwissen für Obi (Stand 2026-10-29)
+- [x] **Wissensbasis** `data/wissen/*.md` mit Rechtsstand je Datei: Umsatzsteuer, Buchführung/
+      GoBD/Aufbewahrung, Anlagevermögen/AfA, Betriebsausgaben, Lohn/Sozialversicherung,
+      Ertragsteuern/Fristen, Kontenrahmen SKR03/SKR04, Buchungsmuster, Arbeitsweise mit den
+      Tools *(2026-10-29)*.
+- [x] **Kompaktwissen im Systemprompt** (`kompakt.md` + Kernkonten je erkanntem
+      Kontenrahmen), Budget Prompt + Tool-Definitionen < ~50.000 Token mit Test *(2026-10-29)*.
+- [x] **Tool `search_knowledge`** in MCP/API/UI: BM25-Suche über Abschnitte, Inhaltsverzeichnis
+      ohne Suchbegriff, `KNOWLEDGE_EXTRA_DIR` für instanzeigene Dateien *(2026-10-29)*.
+- [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
+      Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
+- [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf
+      Anforderung einblenden oder Schemas kürzen, um Platz für Fachwissen zu gewinnen.
+- [ ] Konto- und Steuercode-Beschreibungen aus der Datenbank in Tool-Antworten mitliefern
+      (`list_accounts`, `list_tax_codes`), damit instanzspezifisches Wissen ohne Pflege der
+      Wissensbasis beim Modell ankommt.
+
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)
 2. **Datenmodell v0** inkl. ER-Diagramm

@@ -4806,6 +4806,35 @@ TOOLS: list[ToolSpec] = [
         path="/chat/actions/{message_id}/reject",
         arg_location="json",
     ),
+    ToolSpec(
+        name="search_knowledge",
+        description=(
+            "Schlägt Fachwissen nach: durchsucht die mitgelieferte Wissensbasis (Umsatzsteuer, "
+            "Buchführung/GoBD/Aufbewahrung, Anlagevermögen/AfA, Betriebsausgaben, Lohn und "
+            "Sozialversicherung, Ertragsteuern und Fristen, Kontenrahmen SKR03/SKR04, "
+            "Buchungsmuster, Arbeitsweise in OpenBuchhaltung) und liefert die passendsten "
+            "Abschnitte samt Rechtsstand. Mit Fachbegriffen suchen (z. B. 'GWG Grenze', "
+            "'Reverse Charge buchen', 'Aufbewahrungsfrist Rechnungen'); ohne query das "
+            "Inhaltsverzeichnis."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Suchbegriffe (Fachbegriffe, Paragraf, Kontonummer).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Anzahl Treffer (1–8, Standard 3).",
+                },
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/knowledge",
+        arg_location="query",
+    ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {tool.name: tool for tool in TOOLS}

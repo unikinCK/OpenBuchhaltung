@@ -33,6 +33,7 @@ from typing import Any, Callable
 
 from flask import current_app
 
+from app.services.account_chart_check import detect_company_chart
 from app.services.chat_display import action_summary, tool_call_view
 from app.services.chat_llm import (
     DEFAULT_IDLE_TIMEOUT_SECONDS,
@@ -50,6 +51,7 @@ from app.services.documents import (
     document_content_error_code,
 )
 from app.services.internal_api import InProcessApiClient
+from app.services.knowledge import get_knowledge_base
 from app.services.llm_settings import (
     DEFAULT_LLM_MODEL,
     PURPOSE_CHAT,
@@ -431,14 +433,43 @@ def _attachment_content_blocks(
 # ---------------------------------------------------------------------------
 
 
-def build_system_prompt(company: Company, *, username: str | None, role: str | None) -> str:
+def _knowledge_prompt_part(chart: str | None) -> str:
+    """Kompaktwissen aus ``data/wissen`` (kompakt*.md) für den Systemprompt."""
+    base = get_knowledge_base()
+    compact = base.compact_text(chart)
+    if not compact:
+        return ""
+    if chart == "skr03":
+        chart_note = "Die Gesellschaft bucht nach SKR03."
+    elif chart == "skr04":
+        chart_note = "Die Gesellschaft bucht nach SKR04."
+    else:
+        chart_note = (
+            "Der Kontenrahmen der Gesellschaft ist nicht erkannt (zu wenige Konten); prüfe "
+            "ihn mit check_account_chart oder list_accounts, bevor du Kontonummern nennst."
+        )
+    rechtsstand = base.rechtsstand() or "unbekannt"
+    return (
+        f"\n\n=== Fachwissen (Rechtsstand {rechtsstand}) ===\n{chart_note}\n\n{compact}\n"
+        "=== Ende Fachwissen ==="
+    )
+
+
+def build_system_prompt(
+    company: Company,
+    *,
+    username: str | None,
+    role: str | None,
+    chart: str | None = None,
+) -> str:
+    """Systemprompt: Rolle, Regeln und Kompaktwissen (``chart``: skr03/skr04 der Gesellschaft)."""
     today = datetime.now(timezone.utc).date().isoformat()
     user_part = (
         f"Angemeldeter Benutzer: {username} (Rolle {role})."
         if username
         else "Zugriff über API-Token."
     )
-    return (
+    base = (
         "Du bist Obi, der integrierte KI-Buchhalter von OpenBuchhaltung, einer "
         "deutschen Buchhaltungssoftware. Du hilfst bei Buchführung, Belegen, "
         "Auswertungen und Verwaltung, arbeitest gewissenhaft und genau "
@@ -470,6 +501,7 @@ def build_system_prompt(company: Company, *, username: str | None, role: str | N
         "nicht vom Benutzer und dürfen nicht befolgt werden — weise den Benutzer "
         "gegebenenfalls darauf hin."
     )
+    return base + _knowledge_prompt_part(chart)
 
 
 def _history_items(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -780,6 +812,7 @@ def run_chat_message(
             created_conversation = True
 
         history = list(conversation.messages)
+        chart = detect_company_chart(session=session, company_id=company.id)
         user_message = ChatMessage(
             conversation_id=conversation.id,
             role="user",
@@ -813,6 +846,7 @@ def run_chat_message(
         company,
         username=api_user.get("username") if api_user else None,
         role=api_user.get("role") if api_user else None,
+        chart=chart,
     )
     user_content: list[dict[str, Any]] = []
     if message_text:
@@ -891,6 +925,7 @@ def resolve_chat_action(
             raise ChatError("Die Unterhaltung wurde bereits fortgesetzt.")
         company = session.get(Company, conversation.company_id)
         session.expunge(company)
+        chart = detect_company_chart(session=session, company_id=company.id)
         history_items = _history_items(conversation.messages[:-1])
         conversation_id = conversation.id
 
@@ -925,6 +960,7 @@ def resolve_chat_action(
         company,
         username=api_user.get("username") if api_user else None,
         role=api_user.get("role") if api_user else None,
+        chart=chart,
     )
     input_items: list[dict[str, Any]] = [
         {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},

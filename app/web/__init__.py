@@ -20,6 +20,7 @@ from app.web import (  # noqa: F401
     formatting,
     income_taxes,
     journal,
+    knowledge,
     open_banking,
     open_items,
     opening_balance,
