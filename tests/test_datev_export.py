@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.auth import hash_password
 from app.services.account_chart_check import detect_company_chart
+from app.services.controlling import create_controlling_unit
 from app.services.datev_export import (
     DatevExportError,
     DatevExportOptions,
@@ -682,6 +683,153 @@ def test_skr04_is_detected_and_uses_its_automatic_accounts(session: Session) -> 
         ("119,00", '"H"', "1800", "6815", '"401"'),
     ]
     assert _datev_balances(content, "skr04") == _ledger_balances(session, company)
+
+
+def _units(session: Session, company: Company) -> dict[str, int]:
+    """Kostenstellen 100 und KST-200, Profitcenter P1 (IDs nach Code)."""
+    return {
+        code: create_controlling_unit(
+            session=session,
+            company=company,
+            unit_type=unit_type,
+            code=code,
+            name=name,
+            changed_by="test",
+        ).id
+        for unit_type, code, name in (
+            ("cost_center", "100", "Vertrieb"),
+            ("cost_center", "KST-200", "Verwaltung"),
+            ("profit_center", "P1", "Produktlinie"),
+        )
+    }
+
+
+def _book_with_units(
+    session: Session,
+    company: Company,
+    description: str,
+    *lines,
+    day=date(2026, 4, 1),
+    service_date=None,
+):
+    """Bucht Zeilen (Konto, Soll, Haben, Kostenstelle-ID, Profitcenter-ID)."""
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=day,
+            service_date=service_date,
+            description=description,
+            status="posted",
+            expand_tax_lines=False,
+            lines=[
+                JournalLineInput(
+                    account_code=code,
+                    debit_amount=Decimal(debit),
+                    credit_amount=Decimal(credit),
+                    cost_center_id=cost_center_id,
+                    profit_center_id=profit_center_id,
+                )
+                for code, debit, credit, cost_center_id, profit_center_id in lines
+            ],
+        ),
+    )
+
+
+def _kost(content: str) -> list[tuple[str, str, str, str]]:
+    """(Konto, Gegenkonto, KOST1, KOST2) je Buchungssatz."""
+    return [(row[6], row[7], row[36], row[37]) for row in _rows(content)]
+
+
+def test_cost_centers_fill_kost1_and_kost2(session: Session) -> None:
+    company = _seed(session)
+    units = _units(session, company)
+    _book_with_units(
+        session,
+        company,
+        "Ausgangsrechnung Vertrieb",
+        ("1400", "1190.00", "0", None, None),
+        ("8400", "0", "1000.00", units["100"], units["P1"]),
+        ("1776", "0", "190.00", None, None),
+    )
+    _book_with_units(
+        session,
+        company,
+        "Bürobedarf aufgeteilt",
+        ("4930", "60.00", "0", units["KST-200"], None),
+        ("4930", "40.00", "0", units["100"], units["P1"]),
+        ("1200", "0", "100.00", None, None),
+    )
+    # Kostenstelle auf einem Bestandskonto: kein Erfolgskonto, KOST bleibt leer.
+    _book_with_units(
+        session,
+        company,
+        "Zahlungseingang",
+        ("1200", "1190.00", "0", units["100"], None),
+        ("1400", "0", "1190.00", None, None),
+    )
+    _book(session, company, "Ohne Kostenstelle", ("4930", "10.00", "0"), ("1000", "0", "10.00"))
+
+    content = _export(session, company)
+    columns = content.split("\r\n")[1].split(";")
+
+    # Der Stapel reicht bis KOST2 (Feld 38), alle Sätze gleich breit.
+    assert len(columns) == 38
+    assert columns[36:] == ['"KOST1 - Kostenstelle"', '"KOST2 - Kostenstelle"']
+    assert all(len(row) == 38 for row in _rows(content))
+    # Brutto-Satz: Die Einheiten der Erlöszeile gehen mit der Steuer in einen Satz.
+    # Zwei Kostenstellen auf demselben Konto ergeben zwei Sätze; DATEV erlaubt nur
+    # Wortzeichen und Leerzeichen, aus KST-200 wird KST_200.
+    assert _kost(content) == [
+        ("1400", "8400", '"100"', '"P1"'),
+        ("4930", "1200", '"KST_200"', '""'),
+        ("4930", "1200", '"100"', '"P1"'),
+        ("1200", "1400", '""', '""'),
+        ("4930", "1000", '""', '""'),
+    ]
+    assert _datev_balances(content, "skr03") == _ledger_balances(session, company)
+
+
+def test_rounding_row_keeps_the_cost_center(session: Session) -> None:
+    company = _seed(session)
+    units = _units(session, company)
+    # Steuer laut Rechnung 19,01 €; DATEV käme aus 119,01 € auf 19,00 €.
+    _book_with_units(
+        session,
+        company,
+        "Wareneingang laut Rechnung",
+        ("3400", "100.00", "0", units["100"], None),
+        ("1576", "19.01", "0", None, None),
+        ("1600", "0", "119.01", None, None),
+    )
+
+    content = _export(session, company)
+
+    assert _kost(content) == [
+        ("1600", "3400", '"100"', '""'),
+        ("1576", "3400", '"100"', '""'),
+    ]
+
+
+def test_cost_centers_with_service_date_use_all_116_fields(session: Session) -> None:
+    company = _seed(session)
+    units = _units(session, company)
+    _book_with_units(
+        session,
+        company,
+        "Beratung Juni",
+        ("1400", "119.00", "0", None, None),
+        ("8400", "0", "119.00", units["100"], units["P1"]),
+        day=date(2026, 7, 1),
+        service_date=date(2026, 6, 30),
+    )
+
+    content = _export(session, company)
+    (row,) = _rows(content)
+
+    assert len(row) == 116
+    assert row[36:38] == ['"100"', '"P1"']
+    assert row[114:] == ["30062026", "30062026"]
 
 
 def test_empty_company_produces_header_only(session: Session) -> None:
