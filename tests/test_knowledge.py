@@ -130,6 +130,13 @@ def test_search_finds_expected_sections():
         "Abgabefrist Steuererklärung 2025": "ertragsteuern-fristen/steuererklaerungen-fristen",
         "Geldtransit": "buchungsmuster/bank-kasse-geldtransit",
         "Aufbewahrungsfrist Buchungsbelege": "buchfuehrung-gobd/aufbewahrungsfristen",
+        "Vier-Augen-Prinzip Wertgrenze": "rechnungseingang-kontrolle/freigabe-vier-augen",
+        "Prokura Handlungsvollmacht": "rechnungseingang-kontrolle/vertretungsmacht",
+        "Kostenträger KOST2": "rechnungseingang-kontrolle/kostenstellen-kostentraeger",
+        "Versandkosten aufteilen": "rechnungseingang-kontrolle/kontierung-aufteilung",
+        "Kreditkartenabrechnung Vorsteuer": "rechnungseingang-kontrolle/firmenkreditkarten",
+        "Dublette Eingangsrechnung": "rechnungseingang-kontrolle/rechnungseingang-ablauf",
+        "Widerspruch Richtlinie": "rechnungseingang-kontrolle/unternehmensunterlagen",
     }
     for query, expected_prefix in expectations.items():
         hits = base.search(query)

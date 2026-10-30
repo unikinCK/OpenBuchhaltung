@@ -8,6 +8,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Wissensbasis: Rechnungseingang, Freigabe und Kontierung
+- Neue Wissensdatei `rechnungseingang-kontrolle.md`: Prüfschritte im Rechnungseingang
+  (Dubletten, formelle/sachliche/rechnerische Prüfung, Belegstatus), Freigabe mit
+  Vier-Augen-Prinzip, Funktionstrennung und Wertgrenzen-Staffeln, Vertretungsmacht
+  (Geschäftsführung, Prokura, Handlungsvollmacht), Kostenstellen/Kostenträger und DATEV
+  KOST1/KOST2, Kontierung mehrerer Positionen und Nebenkosten, Firmenkreditkarten,
+  Auslagen und Eigenbelege (Vorsteuer bei Rechnungen auf Mitarbeiter) sowie die Rangfolge
+  von Gesetz, Unternehmensrichtlinie, Anleitung und Entwurf.
+- Kompaktwissen im Systemprompt um eine Arbeitsregel für Unternehmensunterlagen ergänzt.
+
 ### Fachwissen für Obi (Wissensbasis und Tool `search_knowledge`)
 - Neue Wissensbasis `data/wissen/*.md` (Rechtsstand 2026-10): Umsatzsteuer (Kleinunternehmer
   25.000/100.000 €, UStVA-Schwellen 9.000/2.000 €, § 13b, ig. Handel, E-Rechnung bis 2028,

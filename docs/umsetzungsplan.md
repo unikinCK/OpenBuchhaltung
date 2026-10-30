@@ -733,6 +733,11 @@ dann selbst betriebener Modellserver).
       Kontenrahmen), Budget Prompt + Tool-Definitionen < ~50.000 Token mit Test *(2026-10-29)*.
 - [x] **Tool `search_knowledge`** in MCP/API/UI: BM25-Suche über Abschnitte, Inhaltsverzeichnis
       ohne Suchbegriff, `KNOWLEDGE_EXTRA_DIR` für instanzeigene Dateien *(2026-10-29)*.
+- [x] **Wissensdatei Rechnungseingang/IKS**: Prüfschritte, Freigabe und Vier-Augen-Prinzip,
+      Vollmachten, Kostenstellen/Kostenträger (KOST1/KOST2), Kontierung, Kreditkarten und
+      Auslagen, Gewichtung von Unternehmensunterlagen *(2026-10-30)*.
+- [ ] Firmenwissen je Gesellschaft (Quellen, Fundstellen, Wissenseinträge mit Freigabe und
+      Wiedervorlage, Import von Wissenspaketen) als Ergänzung zur Richtlinien-Entität.
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
       Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
 - [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf
