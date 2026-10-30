@@ -52,7 +52,13 @@ Aufbau des Exports:
    zerlegt und über das gemeinsame Belegfeld 1 (Buchungsnummer) gruppiert.
    Ein Buchungssatz mit Steuer führt das Sachkonto der Steuer als Gegenkonto
    (Konto des Steuerschlüssels, „BU Gegenkonto“ in DATEV).
-5. Steuerkonten des jeweils anderen Kontenrahmens (Altimport, z. B. SKR04 1406 in
+5. Kostenstelle und Profitcenter einer Zeile auf einem Erfolgskonto stehen als Code der
+   Controlling-Einheit in KOST1 bzw. KOST2 (Felder 37/38) jedes Buchungssatzes, an dem
+   die Zeile beteiligt ist; der Stapel wird dafür auf 38 Felder erweitert. Tragen
+   Konto und Gegenkonto verschiedene Einheiten, gilt die des Gegenkontos. Eine
+   Umbuchung zwischen zwei Kostenstellen auf demselben Konto lässt sich als
+   DATEV-Satz (Konto gleich Gegenkonto) nicht abbilden und entfällt.
+6. Steuerkonten des jeweils anderen Kontenrahmens (Altimport, z. B. SKR04 1406 in
    einer SKR03-Buchhaltung) stehen im Stapel unter der Nummer des erkannten
    Rahmens (1576); Sätze, die danach Konto und Gegenkonto gleich hätten (die
    Umbuchung 1406 → 1576), entfallen.
@@ -86,7 +92,7 @@ from io import StringIO
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.services.account_chart_check import detect_company_chart
 from app.services.datev_account_functions import (
@@ -94,6 +100,7 @@ from app.services.datev_account_functions import (
     datev_account_function,
 )
 from app.services.journal_entries import fiscal_year_bounds
+from app.services.periods import PROFIT_AND_LOSS_ACCOUNT_TYPES
 from app.services.tax_codes import (
     DEFAULT_TAX_CODES,
     TaxAccount,
@@ -113,6 +120,7 @@ from domain.models import (
     Account,
     BusinessPartner,
     Company,
+    ControllingUnit,
     FiscalYear,
     JournalEntry,
     JournalEntryLine,
@@ -205,6 +213,15 @@ SERVICE_DATE_COLUMNS = (
     "Datum Zuord. Steuerperiode",
 )
 
+ALL_COLUMNS = DATA_COLUMNS + SERVICE_DATE_COLUMNS
+# Felder 37/38: Über KOST1/KOST2 „erfolgt die Zuordnung des Geschäftsvorfalls für die
+# anschließende Kostenrechnung“; zulässig sind bis zu 36 Wortzeichen und Leerzeichen
+# (^(["][\w ]{0,36}["])$). Mit Kostenstellen wird der Stapel bis Feld 38 erweitert.
+KOST1_FIELD = ALL_COLUMNS.index("KOST1 - Kostenstelle")
+KOST2_FIELD = ALL_COLUMNS.index("KOST2 - Kostenstelle")
+KOST_LENGTH = 36
+KOST_INVALID = re.compile(r"[^\w ]")
+
 # Kopffeld 27 "Sachkontenrahmen".
 CHART_HEADER_CODES = {"skr03": "03", "skr04": "04"}
 
@@ -285,6 +302,12 @@ def _clip(value: str | None, length: int) -> str:
     return " ".join((value or "").split())[:length]
 
 
+def _kost(code: str | None) -> str:
+    """Code einer Controlling-Einheit als KOST1/KOST2: andere Zeichen als Buchstaben,
+    Ziffern, Unterstrich und Leerzeichen werden zu „_“ (aus „KST-10“ wird „KST_10“)."""
+    return KOST_INVALID.sub("_", _clip(code, KOST_LENGTH))
+
+
 def _header_row(
     *,
     options: DatevExportOptions,
@@ -356,6 +379,9 @@ class _Position:
     amount: Decimal
     text: str
     function: DatevAccountFunction
+    # KOST1/KOST2 (nur Erfolgskonten): Code von Kostenstelle und Profitcenter.
+    cost_center: str = ""
+    profit_center: str = ""
     # Nur Bruttopositionen: Steuergruppe, enthaltene Steuer und BU-Schlüssel
     # des Satzes ("" = das Automatikkonto rechnet die Steuer selbst).
     group: _TaxGroup | None = None
@@ -512,25 +538,30 @@ def _export_code(line, tax_accounts, chart: str | None) -> str:
 
 def _net_same_accounts(positions: list[_Position]) -> list[_Position]:
     """Verrechnet ein Konto, das auf Soll und Haben steht (z. B. die Umbuchung
-    1406 → 1576, die nach der Abbildung auf 1576 nichts mehr bewegt)."""
-    sides: dict[str, set[bool]] = {}
+    1406 → 1576, die nach der Abbildung auf 1576 nichts mehr bewegt); verschiedene
+    Kostenstellen oder Profitcenter auf einem Konto bleiben getrennt."""
+
+    def key(position: _Position) -> tuple[str, str, str]:
+        return position.code, position.cost_center, position.profit_center
+
+    sides: dict[tuple[str, str, str], set[bool]] = {}
     for position in positions:
         if not position.is_gross:
-            sides.setdefault(position.code, set()).add(position.is_debit)
-    both = {code for code, flags in sides.items() if len(flags) == 2}
+            sides.setdefault(key(position), set()).add(position.is_debit)
+    both = {account for account, flags in sides.items() if len(flags) == 2}
     result: list[_Position] = []
-    netted: set[str] = set()
+    netted: set[tuple[str, str, str]] = set()
     for position in positions:
-        if position.is_gross or position.code not in both:
+        if position.is_gross or key(position) not in both:
             result.append(position)
             continue
-        if position.code in netted:
+        if key(position) in netted:
             continue
-        netted.add(position.code)
+        netted.add(key(position))
         balance = sum(
             (other.amount if other.is_debit else -other.amount)
             for other in positions
-            if not other.is_gross and other.code == position.code
+            if not other.is_gross and key(other) == key(position)
         )
         if balance != ZERO:
             position.is_debit = balance > ZERO
@@ -562,6 +593,9 @@ def _positions(
             text=line.description or entry.description,
             function=function,
         )
+        if line.account_type in PROFIT_AND_LOSS_ACCOUNT_TYPES:
+            position.cost_center = _kost(line.cost_center_code)
+            position.profit_center = _kost(line.profit_center_code)
         if id(line) in tax_by_base:
             group, share = tax_by_base[id(line)]
             position.group = group
@@ -661,6 +695,8 @@ def _correction_booking(position: _Position, chart: str | None, entry) -> _Booki
         amount=amount,
         text=text,
         function=position.function,
+        cost_center=position.cost_center,
+        profit_center=position.profit_center,
     )
     if tax_position.is_debit:
         return _Booking(tax_position, base_position, amount)
@@ -739,12 +775,15 @@ def _booking_row(
     booking: _Booking,
     *,
     entry: JournalEntry,
+    width: int = len(DATA_COLUMNS),
     service_fields: tuple[str, str] | None = None,
 ) -> str | None:
-    """Ein Buchungssatz; das Soll-/Haben-Kennzeichen bezieht sich auf das Konto.
+    """Ein Buchungssatz mit ``width`` Feldern; das Soll-/Haben-Kennzeichen bezieht
+    sich auf das Konto.
 
-    ``service_fields`` (Leistungsdatum, Datum Zuord. Steuerperiode) erweitert den
-    Satz auf 116 Felder; leere Werte, wenn die Buchung kein Leistungsdatum trägt.
+    Ab 38 Feldern stehen KOST1/KOST2 des Satzes in Feld 37/38. ``service_fields``
+    (Leistungsdatum, Datum Zuord. Steuerperiode) füllt bei 116 Feldern die letzten
+    beiden; leere Werte, wenn die Buchung kein Leistungsdatum trägt.
     None für Sätze ohne Wirkung (Konto gleich Gegenkonto, ohne Steuer).
     """
     gross = next(
@@ -787,11 +826,15 @@ def _booking_row(
         "",  # Skonto
         _quote(_clip(contra.text, 60)),
     ]
-    if service_fields is not None:
-        # Felder 15–114 leer, dann 115 Leistungsdatum und 116 Steuerperiode.
-        fields.extend([""] * (len(SERVICE_DATE_COLUMNS) - 2))
-        fields.extend(service_fields)
-    return ";".join(fields)
+    if width > len(DATA_COLUMNS):
+        fields.extend([""] * (len(ALL_COLUMNS) - len(DATA_COLUMNS)))
+        # Die Einheit des Gegenkontos (meist das Erfolgskonto des Satzes) geht vor.
+        fields[KOST1_FIELD] = _quote(contra.cost_center or account.cost_center)
+        fields[KOST2_FIELD] = _quote(contra.profit_center or account.profit_center)
+        if service_fields is not None:
+            # 115 Leistungsdatum und 116 Steuerperiode.
+            fields[-2:] = service_fields
+    return ";".join(fields[:width])
 
 
 class DatevExportError(ValueError):
@@ -1015,6 +1058,8 @@ def build_datev_export(
         .all()
     )
 
+    cost_center = aliased(ControllingUnit)
+    profit_center = aliased(ControllingUnit)
     line_rows = session.execute(
         select(
             JournalEntryLine.journal_entry_id,
@@ -1027,8 +1072,12 @@ def build_datev_export(
             JournalEntryLine.description,
             JournalEntryLine.partner_id,
             Account.account_type,
+            cost_center.code.label("cost_center_code"),
+            profit_center.code.label("profit_center_code"),
         )
         .join(Account, Account.id == JournalEntryLine.account_id)
+        .outerjoin(cost_center, cost_center.id == JournalEntryLine.cost_center_id)
+        .outerjoin(profit_center, profit_center.id == JournalEntryLine.profit_center_id)
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
         .where(*in_period)
         .order_by(JournalEntryLine.journal_entry_id, JournalEntryLine.line_number)
@@ -1059,10 +1108,21 @@ def build_datev_export(
         )
     )
     buffer.write("\r\n")
-    # Mit Leistungsdatum (Feld 115/116) wird der ganze Stapel auf 116 Felder erweitert.
+    # Mit Leistungsdatum (Feld 115/116) wird der ganze Stapel auf 116 Felder erweitert,
+    # mit Kostenstellen oder Profitcentern auf Erfolgskonten bis KOST2 (Feld 38).
     with_service_date = any(entry.service_date is not None for entry in entries)
-    columns = DATA_COLUMNS + SERVICE_DATE_COLUMNS if with_service_date else DATA_COLUMNS
-    buffer.write(";".join(_quote(column) for column in columns))
+    with_cost_units = any(
+        (row.cost_center_code or row.profit_center_code)
+        and row.account_type in PROFIT_AND_LOSS_ACCOUNT_TYPES
+        for row in line_rows
+    )
+    if with_service_date:
+        width = len(ALL_COLUMNS)
+    elif with_cost_units:
+        width = KOST2_FIELD + 1
+    else:
+        width = len(DATA_COLUMNS)
+    buffer.write(";".join(_quote(column) for column in ALL_COLUMNS[:width]))
     buffer.write("\r\n")
     special_accounts = (
         company_special_tax_accounts(session=session, company_id=company_id)
@@ -1095,7 +1155,9 @@ def build_datev_export(
                     ),
                 )
         for booking in _entry_bookings(entry, lines, tax_codes, tax_accounts, chart):
-            row = _booking_row(booking, entry=entry, service_fields=service_fields)
+            row = _booking_row(
+                booking, entry=entry, width=width, service_fields=service_fields
+            )
             if row is not None:
                 buffer.write(row)
                 buffer.write("\r\n")

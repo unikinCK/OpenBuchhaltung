@@ -1034,6 +1034,17 @@ Steuerzeitpunkt wie in der UStVA (beide TTMMJJJJ, z. B. Rechnung vom 01.07. für
 `30062026`/`30062026`). Ohne Leistungsdatum bleibt es bei 14 Feldern. DATEV verlangt,
 den Einsatz des Leistungsdatums mit dem Steuerberater abzustimmen.
 
+**Kostenstellen.** Kostenstelle und Profitcenter einer Zeile auf einem Erfolgskonto
+stehen als Code der Controlling-Einheit in KOST1 (Feld 37) bzw. KOST2 (Feld 38) jedes
+Satzes, an dem die Zeile beteiligt ist – auch im Brutto-Satz mit Steuer und im
+Korrektursatz für Rundungscent; tragen Konto und Gegenkonto verschiedene Einheiten,
+gilt die des Gegenkontos. Der Stapel reicht dann bis Feld 38 (mit Leistungsdatum
+weiterhin 116 Felder). DATEV lässt in KOST1/KOST2 nur Buchstaben, Ziffern, Unterstrich
+und Leerzeichen zu (höchstens 36 Zeichen, die benutzte Länge ist in den KOST-Stammdaten
+einzustellen); andere Zeichen werden zu `_` (`KST-10` → `KST_10`). Eine Umbuchung
+zwischen zwei Kostenstellen auf demselben Konto ergäbe einen Satz mit Konto gleich
+Gegenkonto und entfällt.
+
 Noch offen: Personenkonten (Debitoren/Kreditoren) und Golden-File-Tests. Der Export
 ist DATEV-kompatibel, aber nicht zertifiziert.
 

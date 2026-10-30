@@ -18,6 +18,20 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   von Gesetz, Unternehmensrichtlinie, Anleitung und Entwurf.
 - Kompaktwissen im Systemprompt um eine Arbeitsregel für Unternehmensunterlagen ergänzt.
 
+### Kostenstellen im DATEV-Export (KOST1/KOST2)
+- Der DATEV-Buchungsstapel füllt KOST1 (Feld 37) mit dem Code der Kostenstelle und
+  KOST2 (Feld 38) mit dem Code des Profitcenters der Buchungszeile, sofern sie auf einem
+  Erfolgskonto steht; bisher gingen die Kostenstellen im Export verloren. Der Satz trägt
+  die Einheiten der Zeile, auch im Brutto-Satz mit Steuer und im Korrektursatz für
+  Steuer-Rundungsdifferenzen; tragen Konto und Gegenkonto verschiedene Einheiten, gilt
+  die des Gegenkontos.
+- Mit Kostenstellen oder Profitcentern wird der Stapel bis Feld 38 erweitert (mit
+  Leistungsdatum wie bisher auf 116 Felder). Zeichen, die DATEV in KOST1/KOST2 nicht
+  zulässt (erlaubt sind Buchstaben, Ziffern, Unterstrich und Leerzeichen, höchstens 36),
+  werden zu `_`; die Länge muss in den KOST-Stammdaten von DATEV eingestellt sein.
+- Zeilen mit verschiedenen Kostenstellen auf demselben Konto werden nicht mehr
+  miteinander verrechnet, sondern ergeben eigene Sätze.
+
 ### Fachwissen für Obi (Wissensbasis und Tool `search_knowledge`)
 - Neue Wissensbasis `data/wissen/*.md` (Rechtsstand 2026-10): Umsatzsteuer (Kleinunternehmer
   25.000/100.000 €, UStVA-Schwellen 9.000/2.000 €, § 13b, ig. Handel, E-Rechnung bis 2028,
