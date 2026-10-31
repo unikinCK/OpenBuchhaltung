@@ -19,6 +19,7 @@ from app.auth import current_user
 from app.services.mcp_connections import (
     AUTH_LABELS,
     CONFIRM_LABELS,
+    PROXY_LABELS,
     SCOPE_GLOBAL,
     SCOPE_LABELS,
     SCOPE_USER,
@@ -80,6 +81,7 @@ def _form_settings() -> dict:
         "oauth_authorization_url": form.get("oauth_authorization_url"),
         "oauth_token_url": form.get("oauth_token_url"),
         "confirm_mode": form.get("confirm_mode") or "write",
+        "proxy_mode": form.get("proxy_mode") or "off",
         "timeout_seconds": form.get("timeout_seconds"),
     }
 
@@ -153,6 +155,7 @@ def mcp_servers_page():
         auth_labels=AUTH_LABELS,
         scope_labels=SCOPE_LABELS,
         confirm_labels=CONFIRM_LABELS,
+        proxy_labels=PROXY_LABELS,
         status_badges=STATUS_BADGES,
         companies=[],
         selected_company_id=None,

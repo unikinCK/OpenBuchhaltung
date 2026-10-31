@@ -286,7 +286,9 @@ def build_tool_executor(
             current_app._get_current_object(),
             api_user=api_user,
             global_access=global_access,
-        )
+        ),
+        # Externe Werkzeuge führt der Chat selbst aus (mit Bestätigungspflicht).
+        proxy_external=False,
     )
 
     def execute_tool(name: str, arguments: dict[str, Any]) -> tuple[str, bool]:

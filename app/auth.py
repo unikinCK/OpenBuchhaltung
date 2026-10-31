@@ -22,6 +22,7 @@ from flask import (
 from sqlalchemy import delete, func, select
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.services.mcp_server import MCP_CHANNEL, MCP_CHANNEL_HEADER
 from app.services.security_events import record_security_event
 from domain.models import LoginAttempt, User
 
@@ -204,7 +205,13 @@ def require_api_token():
         if isinstance(internal_user, dict):
             g.api_user = dict(internal_user)
         g.api_global_access = bool(internal_context.get("global_access"))
+        g.api_channel = internal_context.get("channel")
         return None
+
+    # Aufrufe über den MCP-Server tragen einen Kanal-Header. Er kann nur einschränken
+    # (z. B. Firmenwissen ohne MCP-Freigabe), nie Rechte geben – fälschen ist also egal.
+    channel = request.headers.get(MCP_CHANNEL_HEADER, "").strip().lower()
+    g.api_channel = MCP_CHANNEL if channel == MCP_CHANNEL else None
 
     configured_token = current_app.config.get("API_AUTH_TOKEN")
     require_auth = bool(configured_token) or current_app.config.get("API_REQUIRE_AUTH", True)

@@ -80,6 +80,7 @@ def list_companies():
                     "tenant_id": company.tenant_id,
                     "name": company.name,
                     "currency_code": company.currency_code,
+                    "knowledge_mcp_enabled": company.knowledge_mcp_enabled,
                 }
                 for company in companies
             ]

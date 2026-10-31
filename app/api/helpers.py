@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import current_app, jsonify, request
+from flask import current_app, g, jsonify, request
 
 from app.auth import (
     ROLE_ADMIN,
@@ -64,6 +64,11 @@ def api_can_create_tenant() -> bool:
 
 def forbidden():
     return jsonify({"error": "Forbidden."}), 403
+
+
+def mcp_channel() -> bool:
+    """Ob der Aufruf über den MCP-Server kommt (HTTP-Transport oder JSON-RPC-Bridge)."""
+    return getattr(g, "api_channel", None) == "mcp"
 
 
 TRUE_VALUES = {"1", "true", "yes", "ja", "on"}

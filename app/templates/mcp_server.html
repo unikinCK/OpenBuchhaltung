@@ -84,6 +84,14 @@
       {% endfor %}
     </select>
 
+    <label for="mcp-proxy-{{ key }}">Über den MCP-Zugang von OpenBuchhaltung weiterreichen</label>
+    <select id="mcp-proxy-{{ key }}" name="proxy_mode">
+      {% for value, label in proxy_labels.items() %}
+        <option value="{{ value }}" {% if (server and server.proxy_mode == value) or (not server and value == 'off') %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <p class="muted">Dann sehen auch MCP-Clients, die mit OpenBuchhaltung verbunden sind (z. B. ChatGPT- oder Claude-Connectoren), diese Werkzeuge und rufen sie über OpenBuchhaltung auf – mit dem Zugang des jeweiligen Benutzers, ohne Bestätigung durch Obi.</p>
+
     <label for="mcp-timeout-{{ key }}">Zeitlimit je Aufruf (Sekunden)</label>
     <input id="mcp-timeout-{{ key }}" name="timeout_seconds" type="number" min="5" max="300"
            value="{{ server.timeout_seconds if server else 60 }}" />
@@ -136,7 +144,8 @@
         </h2>
         <p><code>{{ server.url }}</code></p>
         <p>Anmeldung: {{ server.auth_label }}{% if server.auth_type != 'none' %} · Zugang: {{ server.credential_scope_label }}{% endif %}
-          · {{ server.confirm_mode_label }}</p>
+          · {{ server.confirm_mode_label }}
+          {% if server.proxy_mode != 'off' %}<span class="badge badge-info">MCP-Proxy: {{ 'nur lesend' if server.proxy_mode == 'read' else 'alle Werkzeuge' }}</span>{% endif %}</p>
         {% if server.description %}<p class="muted">{{ server.description }}</p>{% endif %}
 
         {% if server.can_manage %}

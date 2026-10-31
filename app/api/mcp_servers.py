@@ -1,10 +1,14 @@
-"""Externe MCP-Server für Obi über die API: Verwaltung und Zugänge.
+"""Externe MCP-Server für Obi über die API: Verwaltung, Zugänge und Proxy.
 
 Anlegen, Ändern, Löschen und den zentralen Zugang (``scope=global``) pflegt ein
 Administrator; persönliche Zugänge (``scope=user``) jeder Benutzer selbst. Die
 OAuth-Anmeldung läuft im Browser: ``…/oauth/start`` liefert die Anmelde-URL, der
 Rücksprung landet auf der Weboberfläche (``/obi-verbindungen/oauth/callback``) und
 verlangt dort die Anmeldung desselben Benutzers.
+
+``/mcp-proxy/tools[/call]`` bedient den MCP-Server von OpenBuchhaltung: Er listet die
+Werkzeuge der Server mit ``proxy_mode`` mit und reicht Aufrufe mit dem Zugang des
+aufrufenden Benutzers durch (nur Benutzer mit Schreibrecht, wie der KI-Chat).
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from app.services.mcp_connections import (
     clear_credential,
     create_server,
     delete_server,
+    load_external_tools,
     oauth_redirect_uri,
     refresh_tools,
     serialize_server,
@@ -46,6 +51,7 @@ _SETTING_FIELDS = (
     "oauth_authorization_url",
     "oauth_token_url",
     "confirm_mode",
+    "proxy_mode",
     "allowed_tools",
     "timeout_seconds",
     "is_active",
@@ -307,3 +313,64 @@ def start_mcp_server_oauth(server_id: int):
                 ),
             }
         ), 200
+
+
+# ---------------------------------------------------------------------------
+# Proxy für den MCP-Server von OpenBuchhaltung
+# ---------------------------------------------------------------------------
+
+
+def _proxy_toolbox():
+    user = current_api_user()
+    return load_external_tools(
+        session_factory=get_session_factory(),
+        tenant_id=user.get("tenant_id") if user else None,
+        company_id=None,
+        user=user,
+        proxy=True,
+    )
+
+
+@api_bp.get("/mcp-proxy/tools")
+def list_mcp_proxy_tools():
+    """Werkzeuge, die der MCP-Server an seine Clients weiterreicht (Format von tools/list).
+
+    Nur Server mit ``proxy_mode`` und nur solche, für die der Aufrufer einen Zugang hat;
+    Benutzer ohne Schreibrecht bekommen keine (wie im KI-Chat).
+    """
+    if not api_can_write():
+        return jsonify({"tools": []}), 200
+    toolbox = _proxy_toolbox()
+    return jsonify({"tools": toolbox.mcp_tools()}), 200
+
+
+@api_bp.post("/mcp-proxy/tools/call")
+def call_mcp_proxy_tool():
+    """Ruft ein weitergereichtes Werkzeug mit dem Zugang des Aufrufers auf.
+
+    Antwortet mit dem Ergebnis des fremden Servers (``content``, ``isError``,
+    ``structuredContent``); nicht lesende Aufrufe landen im Audit-Log.
+    """
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name")
+    arguments = payload.get("arguments") if payload.get("arguments") is not None else {}
+    if not isinstance(name, str) or not name:
+        return jsonify({"error": "name is required."}), 400
+    if not isinstance(arguments, dict):
+        return jsonify({"error": "arguments must be an object."}), 400
+    toolbox = _proxy_toolbox()
+    try:
+        if not toolbox.handles(name):
+            return jsonify({"error": f"Das Werkzeug {name} wird nicht weitergereicht."}), 404
+        try:
+            result = toolbox.call(name, arguments)
+        except McpConnectionError as exc:
+            return jsonify({"error": str(exc)}), 502
+    finally:
+        toolbox.close()
+    body = {"content": result.content, "isError": result.is_error}
+    if result.structured_content is not None:
+        body["structuredContent"] = result.structured_content
+    return jsonify(body), 200

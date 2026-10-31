@@ -8,6 +8,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### OpenBuchhaltung als MCP-Proxy, Firmenwissen über MCP sperrbar
+- Je MCP-Server wählbar, ob der MCP-Server von OpenBuchhaltung dessen Werkzeuge an seine
+  Clients weiterreicht (`proxy_mode`: aus, nur lesende, alle freigegebenen): ChatGPT-,
+  Claude- oder andere MCP-Clients erreichen so Belegablage oder CRM über OpenBuchhaltung,
+  mit dem Zugang des angemeldeten Benutzers. Antworten gehen unverändert durch, nicht
+  lesende Aufrufe landen mit Kanal `mcp` im Audit-Log. Neue Endpunkte
+  `/api/v1/mcp-proxy/tools[/call]`, Migration `20261031_0055`.
+- Administratoren können das Firmenwissen einer Gesellschaft für MCP-Clients sperren
+  (Verwaltung → Firmenwissen, `POST /api/v1/companies/<id>/knowledge/mcp`); Obi im KI-Chat,
+  Oberfläche und REST-API bleiben unberührt. Aufrufe über den MCP-Server tragen dafür den
+  Header `X-OpenBuchhaltung-Channel: mcp`.
+
 ### Obi greift auf externe MCP-Server zu
 - Administratoren binden unter **Verwaltung → MCP-Server** externe MCP-Server ein (z. B.
   Belegablagen anderer Hersteller, CRM, Wissensdatenbanken): URL (Streamable HTTP), Präfix

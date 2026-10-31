@@ -1737,6 +1737,15 @@ Admin oder Buchhalter (im KI-Chat gesperrt). Jede Änderung geht in die Audit-Ha
   `set_company_knowledge_entry_status`, `list_company_knowledge_sources`,
   `get_company_knowledge_source`, `set_company_knowledge_source_active`,
   `import_company_knowledge`, `search_knowledge` mit `company_id`.
+- **Über MCP sperrbar:** Ein Administrator kann das Firmenwissen einer Gesellschaft für
+  MCP-Clients (ChatGPT-/Claude-Connectoren, alles über den MCP-Server von OpenBuchhaltung)
+  sperren – auf **Verwaltung → Firmenwissen** oder per
+  `POST /api/v1/companies/<id>/knowledge/mcp` (`{"enabled": false}`; Stand per `GET`, in
+  `list_companies` als `knowledge_mcp_enabled`). Die Tools melden dann „nicht freigegeben“,
+  `search_knowledge` liefert keine Firmentreffer. Obi im KI-Chat, Oberfläche und REST-API
+  ohne MCP nutzen es weiter. Den Schalter gibt es bewusst nicht als MCP-Tool, und über den
+  MCP-Kanal lässt er sich nicht umstellen – ein MCP-Client könnte sich sonst selbst
+  freischalten. Standard: freigegeben.
 
 Wissenspakete sind JSON-Dateien mit stabilen Schlüsseln; ein späterer Import desselben
 Pakets gleicht ab (neu, geändert, entfallen), setzt geänderte freigegebene Einträge auf
@@ -1814,6 +1823,21 @@ Anmeldung, nennt der Systemprompt den Server als „nicht verfügbar“, damit O
 **Obi-Verbindungen** hinweisen kann. Nicht lesende Aufrufe landen mit Server, Werkzeug und
 (maskierten) Argumenten im Audit-Log (`mcp_server`/`tool_called`); Anlegen, Ändern, Löschen
 sowie Zugänge setzen/entfernen ebenfalls.
+
+**OpenBuchhaltung als MCP-Proxy:** Mit **Über den MCP-Zugang weiterreichen** (`proxy_mode`:
+`off` Standard, `read` nur lesende, `all` alle freigegebenen Werkzeuge) listet der MCP-Server
+von OpenBuchhaltung die Werkzeuge eines Servers mit (`präfix__werkzeug`, samt
+`readOnlyHint`/`destructiveHint`) und reicht Aufrufe durch: ChatGPT-, Claude- oder andere
+MCP-Clients, die mit OpenBuchhaltung verbunden sind, erreichen so auch Belegablage oder CRM,
+ohne selbst einen Zugang dafür zu haben. OpenBuchhaltung ruft mit dem Zugang des
+angemeldeten Benutzers (zentral oder persönlich) auf und gibt die Antwort unverändert
+weiter, auch Bilder und Ressourcen. Eine Bestätigung durch Obi gibt es dabei nicht – das
+übernimmt der MCP-Client; deshalb ist `read` die vorsichtige Wahl. Nur Benutzer mit
+Schreibrecht bekommen die Werkzeuge (wie im KI-Chat), nicht lesende Aufrufe landen mit
+Kanal `mcp` im Audit-Log. Dahinter stehen die Endpunkte `GET /api/v1/mcp-proxy/tools` und
+`POST /api/v1/mcp-proxy/tools/call` (`{"name", "arguments"}`), die der MCP-Server (HTTP-,
+stdio-Transport und Bridge `/api/v1/mcp/call`) aufruft. Obi im KI-Chat braucht den Proxy
+nicht: Er nutzt alle freigegebenen Werkzeuge unabhängig davon, mit Bestätigung.
 
 **Geheimnisse:** Tokens, Client-Secrets und OAuth-Tokens liegen Fernet-verschlüsselt in der
 Datenbank (Schlüssel aus `SECRET_KEY` abgeleitet) und werden nie wieder ausgegeben. Wird

@@ -29,6 +29,19 @@
         <strong>{{ summary.retired }}</strong> ausgemustert ·
         <strong>{{ summary.sources }}</strong> aktive Quellen
       </p>
+      <p class="muted">
+        Über MCP (externe KI-Clients wie ChatGPT- oder Claude-Connectoren):
+        {% if knowledge_mcp_enabled %}<span class="badge badge-success">freigegeben</span>{% else %}<span class="badge badge-warning">gesperrt</span>{% endif %}
+        – Obi im KI-Chat nutzt das Firmenwissen in jedem Fall.
+        {% if is_admin %}
+          <form method="post" action="{{ url_for('main.set_company_knowledge_mcp_from_form') }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="enabled" value="{{ '0' if knowledge_mcp_enabled else '1' }}" />
+            <button type="submit" class="secondary">{{ 'Für MCP sperren' if knowledge_mcp_enabled else 'Für MCP freigeben' }}</button>
+          </form>
+        {% endif %}
+      </p>
       <nav class="filter-bar" aria-label="Ansicht">
         <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id) }}" {% if view == 'entries' %}class="active"{% endif %}>Einträge</a>
         <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='sources') }}" {% if view == 'sources' %}class="active"{% endif %}>Quellen</a>

@@ -61,6 +61,7 @@ class InProcessApiClient:
         api_user: dict | None,
         global_access: bool,
         base_url: str | None = None,
+        channel: str | None = None,
     ) -> None:
         self._app = app
         self._base_url = base_url or _default_base_url()
@@ -68,6 +69,8 @@ class InProcessApiClient:
             INTERNAL_API_ENVIRON_KEY: {
                 "user": dict(api_user) if api_user else None,
                 "global_access": global_access,
+                # ``mcp`` für die JSON-RPC-Bridge: gleiche Regeln wie der MCP-Server.
+                "channel": channel,
             }
         }
 
