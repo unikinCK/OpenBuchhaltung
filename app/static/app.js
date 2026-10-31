@@ -59,6 +59,27 @@
       sync();
     });
 
+    // Mehrere Feldgruppen je Auswahlwert einblenden:
+    // <select data-toggle-group="g"> + <div data-toggle-of="g" data-toggle-values="a b">
+    document.querySelectorAll("select[data-toggle-group]").forEach(function (select) {
+      var targets = document.querySelectorAll(
+        '[data-toggle-of="' + select.dataset.toggleGroup + '"]'
+      );
+      var sync = function () {
+        targets.forEach(function (target) {
+          target.hidden = target.dataset.toggleValues.split(" ").indexOf(select.value) < 0;
+        });
+      };
+      select.addEventListener("change", sync);
+      sync();
+    });
+
+    // Weiterleitung zur Anmeldung bei einem fremden Anbieter (OAuth): Ein Formular
+    // darf wegen CSP form-action nicht dorthin umleiten, ein Link schon.
+    // <a data-auto-follow href="…">
+    var autoFollow = document.querySelector("a[data-auto-follow]");
+    if (autoFollow) window.location.assign(autoFollow.href);
+
     document.querySelectorAll("[data-fints-lookup]").forEach(setupFintsLookup);
 
     document.querySelectorAll("table").forEach(setupTableSort);

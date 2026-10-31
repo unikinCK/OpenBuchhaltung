@@ -99,6 +99,8 @@ _DEMO_BLOCKED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^/api/v1/(fints-|open-banking)", "Bankverbindungen"),
         (r"^/bank/(fints|open-banking)(/|$)", "Bankverbindungen"),
         (r"^/verwaltung/fints-bankenliste$", "Bankverbindungen"),
+        (r"^/api/v1/mcp-servers(/|$)", "Externe MCP-Server"),
+        (r"^/(verwaltung/mcp-server|obi-verbindungen)(/|$)", "Externe MCP-Server"),
         (r"^/api/v1/elster/.*(submit|retry)$", "ELSTER-Übermittlung"),
         (r"^/ustva/.*(elster-test|retry)$", "ELSTER-Übermittlung"),
     )

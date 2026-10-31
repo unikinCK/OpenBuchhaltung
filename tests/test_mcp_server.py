@@ -195,6 +195,14 @@ EXPECTED_TOOL_NAMES = {
     "update_push_device",
     "revoke_push_device",
     "send_push_test",
+    "list_mcp_servers",
+    "create_mcp_server",
+    "update_mcp_server",
+    "delete_mcp_server",
+    "refresh_mcp_server_tools",
+    "set_mcp_server_token",
+    "clear_mcp_server_credential",
+    "start_mcp_server_oauth",
 }
 
 

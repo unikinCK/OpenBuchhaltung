@@ -219,6 +219,7 @@ def _indent_json_fragment(text: str, indent: str = "  ") -> str:
 def tool_call_view(call: dict[str, Any]) -> dict[str, Any]:
     """Gespeicherter Tool-Aufruf plus Anzeigefelder (title, result_display)."""
     view = dict(call)
-    view["title"] = tool_title(str(call.get("name") or ""))
+    # Externe Werkzeuge (MCP-Server) speichern ihren Anzeigenamen selbst.
+    view["title"] = call.get("title") or tool_title(str(call.get("name") or ""))
     view["result_display"] = display_result(call.get("result_text"))
     return view
