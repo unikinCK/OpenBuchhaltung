@@ -25,6 +25,7 @@ from app.api import (  # noqa: F401
     journal_templates,
     knowledge,
     mcp,
+    mcp_servers,
     oauth_grants,
     open_banking,
     open_items,

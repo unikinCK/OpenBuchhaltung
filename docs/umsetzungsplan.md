@@ -746,6 +746,21 @@ dann selbst betriebener Modellserver).
       (`list_accounts`, `list_tax_codes`), damit instanzspezifisches Wissen ohne Pflege der
       Wissensbasis beim Modell ankommt.
 
+## Phase 8 – Obi im Unternehmen (Stand 2026-10-31)
+- [x] **Externe MCP-Server (Obi als MCP-Client, ADR-004):** Administrator bindet Server ein
+      (Belegablage, CRM, Wissensdatenbank; instanzweit oder je Mandant), Anmeldung per Token
+      oder OAuth 2.1 (Discovery, DCR, PKCE, Refresh), wählbar als zentraler Zugang des
+      Administrators oder Zugang je Benutzer („Obi-Verbindungen“); Werkzeuge im Chat als
+      `präfix__werkzeug`, lesende sofort, übrige nach Bestätigung, Audit; UI/API/MCP
+      *(2026-10-31)*.
+- [ ] Belege aus fremden Systemen übernehmen: Binärinhalte und Ressourcen eines
+      MCP-Werkzeugs als Beleg ablegen, ohne sie durch den Modellkontext zu schleusen.
+- [ ] Token-Widerruf beim Abmelden (RFC 7009) und alter HTTP+SSE-Transport für ältere
+      MCP-Server.
+- [ ] Werkzeuge externer Server erst auf Anforderung einblenden (Kontextbudget bei vielen
+      Servern).
+- [ ] Kanäle (Mail, Teams) und Hintergrundläufe für Obi.
+
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)
 2. **Datenmodell v0** inkl. ER-Diagramm

@@ -99,6 +99,15 @@ EXPECTED_BLOCKED_TOOLS = {
     "create_sepa_payment_run",
     "set_company_bank_details",
     "set_partner_bank_details",
+    # Externe MCP-Server (Obi erweitert seine Werkzeuge nicht selbst)
+    "list_mcp_servers",
+    "create_mcp_server",
+    "update_mcp_server",
+    "delete_mcp_server",
+    "refresh_mcp_server_tools",
+    "set_mcp_server_token",
+    "clear_mcp_server_credential",
+    "start_mcp_server_oauth",
 }
 
 

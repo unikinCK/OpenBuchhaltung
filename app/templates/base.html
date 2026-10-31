@@ -55,6 +55,7 @@
           ]),
           ('Verwaltung', [
             ('main.admin_page', 'Verwaltung'),
+            ('main.mcp_servers_page', 'MCP-Server'),
             ('main.audit_log_page', 'Audit'),
           ]),
         ] %}
@@ -91,6 +92,7 @@
             <span class="menu-info">Angemeldet als <strong>{{ session['user']['username'] }}</strong> <span class="badge">{{ session['user']['role'] }}</span></span>
             <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort ändern</a>
             <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Verbundene Apps</a>
+            <a href="{{ url_for('main.obi_connections_page') }}" title="Externe Systeme, auf die Obi zugreift (MCP-Server)">Obi-Verbindungen</a>
             <form method="post" action="{{ url_for('auth.logout') }}">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="menu-button">Logout</button>

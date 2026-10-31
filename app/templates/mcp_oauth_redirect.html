@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Anmeldung bei {{ server_name }} – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Anmeldung bei {{ server_name }}</h1>
+
+  <section class="card">
+    <p>Sie werden zur Anmeldung bei <strong>{{ authorization_host }}</strong> weitergeleitet. Nach der
+      Anmeldung kehren Sie automatisch zu OpenBuchhaltung zurück.</p>
+    <p><a class="button" href="{{ authorization_url }}" data-auto-follow>Weiter zur Anmeldung</a></p>
+  </section>
+{% endblock %}

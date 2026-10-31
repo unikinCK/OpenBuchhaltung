@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}MCP-Server – OpenBuchhaltung{% endblock %}
+
+{% macro settings_form(server, action, submit_label, tenants, is_global_admin) %}
+  {% set key = server.id if server else "neu" %}
+  {% set oauth = server.oauth if server else {} %}
+  <form method="post" action="{{ action }}" class="stacked">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+
+    <label for="mcp-name-{{ key }}">Name</label>
+    <input id="mcp-name-{{ key }}" name="name" required maxlength="120"
+           value="{{ server.name if server else '' }}" placeholder="z. B. Belegablage" />
+
+    <label for="mcp-url-{{ key }}">URL des MCP-Servers (Streamable HTTP)</label>
+    <input id="mcp-url-{{ key }}" name="url" type="url" required maxlength="500"
+           value="{{ server.url if server else '' }}" placeholder="https://dms.example.com/mcp" />
+
+    <label for="mcp-prefix-{{ key }}">Präfix der Werkzeuge</label>
+    <input id="mcp-prefix-{{ key }}" name="tool_prefix" maxlength="16" pattern="[a-z][a-z0-9]{1,15}"
+           value="{{ server.tool_prefix if server else '' }}" placeholder="leer = aus dem Namen" />
+    <p class="muted">Im Chat heißen die Werkzeuge <code>präfix__werkzeug</code> (2–16 Kleinbuchstaben oder Ziffern).</p>
+
+    <label for="mcp-description-{{ key }}">Hinweise für Obi</label>
+    <textarea id="mcp-description-{{ key }}" name="description" rows="3" maxlength="2000"
+              placeholder="z. B. Eingangsrechnungen liegen im Ordner „Buchhaltung/Eingang“.">{{ server.description or '' if server else '' }}</textarea>
+
+    {% if not server and is_global_admin %}
+      <label for="mcp-tenant-{{ key }}">Mandant</label>
+      <select id="mcp-tenant-{{ key }}" name="tenant_id">
+        <option value="">Instanzweit (alle Mandanten)</option>
+        {% for tenant in tenants %}
+          <option value="{{ tenant.id }}">{{ tenant.name }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+
+    <label for="mcp-auth-{{ key }}">Anmeldung</label>
+    <select id="mcp-auth-{{ key }}" name="auth_type" data-toggle-group="mcp-auth-{{ key }}">
+      {% for value, label in auth_labels.items() %}
+        <option value="{{ value }}" {% if server and server.auth_type == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <div data-toggle-of="mcp-auth-{{ key }}" data-toggle-values="token oauth">
+      <label for="mcp-scope-{{ key }}">Zugang</label>
+      <select id="mcp-scope-{{ key }}" name="credential_scope">
+        <option value="global" {% if server and server.credential_scope == 'global' %}selected{% endif %}>Zentral – der Administrator meldet sich einmal für alle an</option>
+        <option value="user" {% if server and server.credential_scope == 'user' %}selected{% endif %}>Je Benutzer – jeder meldet sich unter „Obi-Verbindungen“ selbst an</option>
+      </select>
+    </div>
+
+    <div data-toggle-of="mcp-auth-{{ key }}" data-toggle-values="token">
+      <label for="mcp-header-{{ key }}">Header für das Token</label>
+      <input id="mcp-header-{{ key }}" name="token_header" maxlength="64"
+             value="{{ server.token_header or '' if server else '' }}" placeholder="Authorization (mit Bearer)" />
+    </div>
+
+    <div data-toggle-of="mcp-auth-{{ key }}" data-toggle-values="oauth">
+      <label for="mcp-client-id-{{ key }}">OAuth-Client-ID</label>
+      <input id="mcp-client-id-{{ key }}" name="oauth_client_id" maxlength="255" autocomplete="off"
+             value="{{ oauth.client_id or '' }}" placeholder="leer = automatische Registrierung" />
+      <label for="mcp-client-secret-{{ key }}">Client-Secret</label>
+      <input id="mcp-client-secret-{{ key }}" name="oauth_client_secret" type="password" autocomplete="off"
+             placeholder="{{ 'leer lassen = gespeichertes Secret behalten' if oauth.client_secret_set else 'optional' }}" />
+      {% if oauth.client_secret_set %}
+        <label><input type="checkbox" name="oauth_client_secret_clear" value="1" /> Gespeichertes Secret entfernen</label>
+      {% endif %}
+      <label for="mcp-oauth-scope-{{ key }}">Scopes</label>
+      <input id="mcp-oauth-scope-{{ key }}" name="oauth_scope" maxlength="500"
+             value="{{ oauth.scope or '' }}" placeholder="leer = laut Server" />
+      <label for="mcp-oauth-auth-url-{{ key }}">Autorisierungs-URL</label>
+      <input id="mcp-oauth-auth-url-{{ key }}" name="oauth_authorization_url" type="url" maxlength="500"
+             value="{{ oauth.authorization_url or '' }}" placeholder="leer = automatisch ermitteln" />
+      <label for="mcp-oauth-token-url-{{ key }}">Token-URL</label>
+      <input id="mcp-oauth-token-url-{{ key }}" name="oauth_token_url" type="url" maxlength="500"
+             value="{{ oauth.token_url or '' }}" placeholder="leer = automatisch ermitteln" />
+    </div>
+
+    <label for="mcp-confirm-{{ key }}">Bestätigung im Chat</label>
+    <select id="mcp-confirm-{{ key }}" name="confirm_mode">
+      {% for value, label in confirm_labels.items() %}
+        <option value="{{ value }}" {% if (server and server.confirm_mode == value) or (not server and value == 'write') %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="mcp-timeout-{{ key }}">Zeitlimit je Aufruf (Sekunden)</label>
+    <input id="mcp-timeout-{{ key }}" name="timeout_seconds" type="number" min="5" max="300"
+           value="{{ server.timeout_seconds if server else 60 }}" />
+
+    <button type="submit">{{ submit_label }}</button>
+  </form>
+{% endmacro %}
+
+{% macro credential_status(credential) %}
+  <span class="badge {{ status_badges.get(credential.status, '') }}">{{ credential.status_label }}</span>
+  {% if credential.status == 'connected' %}
+    {% if credential.token_last4 %}Token …{{ credential.token_last4 }}{% endif %}
+    {% if credential.connected_by %}– angemeldet von {{ credential.connected_by }}{% if credential.connected_at %} am {{ credential.connected_at | datum_zeit }}{% endif %}{% endif %}
+    {% if credential.expires_at %}· gültig bis {{ credential.expires_at | datum_zeit }}{% endif %}
+    {% if credential.last_used_at %}· zuletzt genutzt {{ credential.last_used_at | datum_zeit }}{% endif %}
+  {% endif %}
+  {% if credential.last_error %}<span class="muted">{{ credential.last_error }}</span>{% endif %}
+{% endmacro %}
+
+{% block content %}
+  <h1 class="page-title">MCP-Server für Obi</h1>
+
+  {% if not is_admin %}
+    <section class="card">
+      <p class="muted">MCP-Server verwalten kann nur ein Administrator. Ihre eigenen Anmeldungen
+        finden Sie unter <a href="{{ url_for('main.obi_connections_page') }}">Obi-Verbindungen</a>.</p>
+    </section>
+  {% else %}
+    <section class="card">
+      <p class="muted">Über MCP-Server greift Obi im KI-Chat auf andere Systeme des Unternehmens zu –
+        etwa die Belegablage eines anderen Herstellers, ein CRM oder eine Wissensdatenbank. Die
+        Werkzeuge erscheinen im Chat als <code>präfix__werkzeug</code>. Lesende Werkzeuge laufen
+        sofort, alle anderen erst nach Bestätigung im Chat; Ergebnisse gelten als Fremddaten.</p>
+      <p class="muted"><strong>Zentraler Zugang:</strong> Der Administrator meldet sich einmal an,
+        alle Benutzer arbeiten mit diesem Zugang. <strong>Je Benutzer:</strong> Jeder meldet sich
+        unter <a href="{{ url_for('main.obi_connections_page') }}">Obi-Verbindungen</a> selbst an;
+        Obi arbeitet im fremden System dann mit dessen Rechten. Tokens und Secrets werden
+        verschlüsselt gespeichert und nie wieder angezeigt.</p>
+      <p class="muted">Redirect-URI für OAuth-Clients: <code>{{ redirect_uri }}</code> – nur nötig,
+        wenn der Anbieter keine automatische Client-Registrierung anbietet und Sie eine Client-ID
+        eintragen.</p>
+    </section>
+
+    {% for server in servers %}
+      <section class="card" id="mcp-{{ server.id }}">
+        <h2>{{ server.name }}
+          <span class="badge">{{ server.tool_prefix }}__</span>
+          {% if not server.is_active %}<span class="badge badge-warning">inaktiv</span>{% endif %}
+          {% if server.tenant_id is none %}<span class="badge badge-info">instanzweit</span>{% endif %}
+        </h2>
+        <p><code>{{ server.url }}</code></p>
+        <p>Anmeldung: {{ server.auth_label }}{% if server.auth_type != 'none' %} · Zugang: {{ server.credential_scope_label }}{% endif %}
+          · {{ server.confirm_mode_label }}</p>
+        {% if server.description %}<p class="muted">{{ server.description }}</p>{% endif %}
+
+        {% if server.can_manage %}
+          {% if server.auth_type != 'none' and server.credential_scope == 'global' %}
+            <h3>Zentraler Zugang</h3>
+            <p>{{ credential_status(server.global_credential) }}</p>
+            <div class="mcp-actions">
+            {% if server.auth_type == 'token' %}
+              <form method="post" action="{{ url_for('main.set_mcp_server_global_token_action', server_id=server.id) }}" class="inline-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <input type="password" name="token" autocomplete="off" required placeholder="Token" aria-label="Token" />
+                <button type="submit">Token speichern</button>
+              </form>
+            {% else %}
+              <form method="post" action="{{ url_for('main.start_mcp_server_global_oauth_action', server_id=server.id) }}" class="inline-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit">{{ 'Neu anmelden' if server.global_credential.status == 'connected' else 'Mit OAuth anmelden' }}</button>
+              </form>
+            {% endif %}
+            {% if server.global_credential.status not in ('not_connected',) %}
+              <form method="post" action="{{ url_for('main.clear_mcp_server_global_credential_action', server_id=server.id) }}" class="inline-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit" class="secondary">Abmelden</button>
+              </form>
+            {% endif %}
+            </div>
+          {% elif server.auth_type != 'none' %}
+            <p class="muted">Persönliche Anmeldungen: {{ server.personal_credentials }}. Benutzer melden sich unter
+              „Obi-Verbindungen“ an; zum Abrufen der Werkzeuge braucht auch der Administrator eine eigene Anmeldung.</p>
+          {% endif %}
+
+          <h3>Werkzeuge</h3>
+          {% if server.last_error %}
+            <p><span class="badge badge-danger">Fehler</span> {{ server.last_error }}</p>
+          {% endif %}
+          <p class="muted">
+            {% if server.tools_refreshed_at %}{{ server.tools | length }} Werkzeuge, abgerufen am {{ server.tools_refreshed_at | datum_zeit }}{% if server.server_info and server.server_info.name %} von {{ server.server_info.name }}{% if server.server_info.version %} {{ server.server_info.version }}{% endif %}{% endif %}.
+            {% else %}Noch nicht abgerufen.{% endif %}
+          </p>
+          <div class="mcp-actions">
+            <form method="post" action="{{ url_for('main.refresh_mcp_server_tools_action', server_id=server.id) }}" class="inline-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit">Werkzeuge abrufen</button>
+            </form>
+            <form method="post" action="{{ url_for('main.set_mcp_server_active_action', server_id=server.id) }}" class="inline-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="is_active" value="{{ 'false' if server.is_active else 'true' }}" />
+              <button type="submit" class="secondary">{{ 'Deaktivieren' if server.is_active else 'Aktivieren' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('main.delete_mcp_server_action', server_id=server.id) }}" class="inline-form"
+                  data-confirm="MCP-Server „{{ server.name }}“ samt aller Anmeldungen löschen?">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="secondary">Löschen</button>
+            </form>
+          </div>
+
+          {% if server.tools %}
+            <details>
+              <summary>Freigabe der Werkzeuge ({{ server.tools | selectattr('enabled') | list | length }} von {{ server.tools | length }} freigegeben)</summary>
+              <form method="post" action="{{ url_for('main.set_mcp_server_tools_action', server_id=server.id) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                <label><input type="checkbox" name="all_tools" value="1" {% if server.allowed_tools is none %}checked{% endif %} />
+                  Alle Werkzeuge freigeben (auch künftig hinzukommende)</label>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Frei</th>
+                      <th>Werkzeug</th>
+                      <th>Beschreibung</th>
+                      <th>Im Chat</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for tool in server.tools %}
+                      <tr>
+                        <td><input type="checkbox" name="tools" value="{{ tool.name }}" {% if tool.enabled %}checked{% endif %} aria-label="{{ tool.name }} freigeben" /></td>
+                        <td><code>{{ tool.name }}</code>{% if tool.title %}<div class="muted">{{ tool.title }}</div>{% endif %}</td>
+                        <td>{{ tool.description }}</td>
+                        <td>{% if tool.requires_confirmation %}<span class="badge badge-warning">nach Bestätigung</span>{% else %}<span class="badge badge-success">sofort</span>{% endif %}
+                          {% if tool.read_only %}<div class="muted">lesend</div>{% endif %}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <button type="submit">Freigabe speichern</button>
+              </form>
+            </details>
+          {% endif %}
+
+          <details>
+            <summary>Einstellungen bearbeiten</summary>
+            {{ settings_form(server, url_for('main.update_mcp_server_action', server_id=server.id), 'Einstellungen speichern', tenants, is_global_admin) }}
+            <p class="muted">Eine andere URL, Anmeldeart, Zugangsart oder ein anderer OAuth-Client entfernt die bestehenden Anmeldungen.</p>
+          </details>
+        {% else %}
+          <p class="muted">Instanzweiter Server – Änderungen nur durch einen globalen Administrator.
+            {{ server.tools | selectattr('enabled') | list | length }} Werkzeuge freigegeben.</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+
+    <section class="card">
+      <h2>MCP-Server hinzufügen</h2>
+      {{ settings_form(none, url_for('main.create_mcp_server_action'), 'MCP-Server anlegen', tenants, is_global_admin) }}
+    </section>
+  {% endif %}
+{% endblock %}

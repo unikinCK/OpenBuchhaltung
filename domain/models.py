@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
@@ -1795,6 +1796,130 @@ class FinTSInstitute(Base):
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class McpServer(Base):
+    """Externer MCP-Server, auf den Obi im KI-Chat zugreift (z. B. Belegablage, CRM).
+
+    Der Administrator legt ihn an; ohne Mandant gilt er instanzweit. Die Werkzeuge
+    erscheinen im Chat unter ``<tool_prefix>__<werkzeug>``. ``credential_scope``
+    legt fest, ob ein zentraler Zugang des Administrators (``global``) oder der
+    eigene Zugang jedes Benutzers (``user``) verwendet wird, siehe
+    :class:`McpCredential`. Geheimnisse liegen nur Fernet-verschlüsselt vor
+    (app.services.mcp_connections).
+    """
+
+    __tablename__ = "mcp_server"
+    __table_args__ = (
+        UniqueConstraint("tool_prefix", name="uq_mcp_server_tool_prefix"),
+        CheckConstraint(
+            "auth_type IN ('none', 'token', 'oauth')", name="ck_mcp_server_auth_type"
+        ),
+        CheckConstraint(
+            "credential_scope IN ('global', 'user')", name="ck_mcp_server_credential_scope"
+        ),
+        CheckConstraint(
+            "confirm_mode IN ('write', 'all', 'none')", name="ck_mcp_server_confirm_mode"
+        ),
+        CheckConstraint(
+            "timeout_seconds BETWEEN 5 AND 300", name="ck_mcp_server_timeout_seconds"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenant.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    tool_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Hinweise des Administrators für Obi (Systemprompt), z. B. Ablagestruktur.
+    description: Mapped[str | None] = mapped_column(Text)
+    auth_type: Mapped[str] = mapped_column(String(10), nullable=False, default="none")
+    credential_scope: Mapped[str] = mapped_column(String(10), nullable=False, default="global")
+    # Header für Token-Zugänge (leer = Authorization mit Bearer-Schema).
+    token_header: Mapped[str | None] = mapped_column(String(64))
+    # OAuth: ohne Client-ID registriert sich die Instanz selbst (RFC 7591).
+    oauth_client_id: Mapped[str | None] = mapped_column(String(255))
+    oauth_client_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    oauth_scope: Mapped[str | None] = mapped_column(String(500))
+    oauth_authorization_url: Mapped[str | None] = mapped_column(String(500))
+    oauth_token_url: Mapped[str | None] = mapped_column(String(500))
+    # Selbst registrierte Clients je Redirect-URI (verschlüsseltes JSON).
+    oauth_registration_encrypted: Mapped[str | None] = mapped_column(Text)
+    # write = lesende Werkzeuge (readOnlyHint) sofort, andere nach Bestätigung;
+    # all = jeder Aufruf nach Bestätigung; none = ohne Bestätigung.
+    confirm_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="write")
+    # Freigegebene Werkzeuge (None = alle).
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    tools_cache: Mapped[list[Any] | None] = mapped_column(JSON)
+    server_info: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    tools_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    tools_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    tenant: Mapped[Tenant | None] = relationship()
+    credentials: Mapped[list[McpCredential]] = relationship(
+        back_populates="server", cascade="all, delete-orphan"
+    )
+
+
+class McpCredential(Base):
+    """Zugang zu einem MCP-Server: zentral (``user_id`` leer) oder je Benutzer.
+
+    ``secret_encrypted`` enthält das Token bzw. die OAuth-Tokens samt Client-Angaben
+    für den Refresh (verschlüsseltes JSON). Eine laufende OAuth-Anmeldung hält
+    ``auth_state`` (Rücksprung) und ``pending_encrypted`` (PKCE-Verifier) fest, ohne
+    einen bestehenden Zugang vorher zu verwerfen.
+    """
+
+    __tablename__ = "mcp_credential"
+    __table_args__ = (
+        UniqueConstraint("server_id", "user_id", name="uq_mcp_credential_server_user"),
+        UniqueConstraint("auth_state", name="uq_mcp_credential_auth_state"),
+        # Höchstens ein zentraler Zugang je Server (NULL zählt im Unique-Constraint nicht).
+        Index(
+            "uq_mcp_credential_global",
+            "server_id",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
+            postgresql_where=text("user_id IS NULL"),
+        ),
+        CheckConstraint("kind IN ('token', 'oauth')", name="ck_mcp_credential_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("mcp_server.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    secret_last4: Mapped[str | None] = mapped_column(String(4))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    auth_state: Mapped[str | None] = mapped_column(String(64))
+    auth_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auth_started_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    pending_encrypted: Mapped[str | None] = mapped_column(Text)
+    connected_by: Mapped[str | None] = mapped_column(String(120))
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    server: Mapped[McpServer] = relationship(back_populates="credentials")
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
 
 
 class ChatConversation(Base):

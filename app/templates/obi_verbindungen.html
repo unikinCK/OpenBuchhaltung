@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Obi-Verbindungen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Obi-Verbindungen</h1>
+
+  <section class="card">
+    <p class="muted">Externe Systeme, auf die Obi im KI-Chat zugreifen kann, etwa eine Belegablage
+      oder ein CRM. Bei Systemen mit Anmeldung <strong>je Benutzer</strong> melden Sie sich hier
+      selbst an – Obi arbeitet dort dann mit Ihren Rechten. Zentrale Zugänge pflegt der
+      Administrator{% if is_admin %} unter <a href="{{ url_for('main.mcp_servers_page') }}">Verwaltung → MCP-Server</a>{% endif %}.
+      Lesende Werkzeuge nutzt Obi sofort, alle anderen erst nach Ihrer Bestätigung im Chat.</p>
+
+    {% if servers %}
+      <table>
+        <thead>
+          <tr>
+            <th>System</th>
+            <th>Anmeldung</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for server in servers %}
+            {% set personal = server.auth_type != 'none' and server.credential_scope == 'user' %}
+            {% set credential = server.my_credential if personal else server.global_credential %}
+            <tr id="verbindung-{{ server.id }}">
+              <td>
+                <strong>{{ server.name }}</strong>
+                {% if server.description %}<div class="muted">{{ server.description }}</div>{% endif %}
+                <div class="muted">{{ server.tools | selectattr('enabled') | list | length }} Werkzeuge · <code>{{ server.tool_prefix }}__</code></div>
+              </td>
+              <td>
+                {% if server.auth_type == 'none' %}keine
+                {% elif personal %}persönlich ({{ server.auth_label }})
+                {% else %}zentral durch den Administrator{% endif %}
+              </td>
+              <td>
+                {% if server.auth_type == 'none' %}
+                  <span class="badge badge-success">Bereit</span>
+                {% elif credential %}
+                  <span class="badge {{ status_badges.get(credential.status, '') }}">{{ credential.status_label }}</span>
+                  {% if personal and credential.status == 'connected' %}
+                    <div class="muted">
+                      {% if credential.token_last4 %}Token …{{ credential.token_last4 }} · {% endif %}seit {{ credential.connected_at | datum_zeit }}
+                      {% if credential.last_used_at %}· zuletzt genutzt {{ credential.last_used_at | datum_zeit }}{% endif %}
+                    </div>
+                  {% endif %}
+                  {% if personal and credential.last_error %}<div class="muted">{{ credential.last_error }}</div>{% endif %}
+                {% endif %}
+              </td>
+              <td>
+                {% if personal %}
+                  {% if server.auth_type == 'token' %}
+                    <form method="post" action="{{ url_for('main.set_own_mcp_token_action', server_id=server.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <input type="password" name="token" autocomplete="off" required placeholder="Ihr Token" aria-label="Token für {{ server.name }}" />
+                      <button type="submit">Speichern</button>
+                    </form>
+                  {% else %}
+                    <form method="post" action="{{ url_for('main.start_own_mcp_oauth_action', server_id=server.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit">{{ 'Neu anmelden' if credential.status == 'connected' else 'Anmelden' }}</button>
+                    </form>
+                  {% endif %}
+                  {% if credential.status != 'not_connected' %}
+                    <form method="post" action="{{ url_for('main.clear_own_mcp_credential_action', server_id=server.id) }}" class="inline-form">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="secondary">Abmelden</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Es sind keine externen Systeme eingerichtet.{% if is_admin %} <a href="{{ url_for('main.mcp_servers_page') }}">MCP-Server anlegen</a>{% endif %}</p>
+    {% endif %}
+  </section>
+{% endblock %}

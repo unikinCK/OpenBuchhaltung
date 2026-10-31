@@ -8,6 +8,30 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Obi greift auf externe MCP-Server zu
+- Administratoren binden unter **Verwaltung → MCP-Server** externe MCP-Server ein (z. B.
+  Belegablagen anderer Hersteller, CRM, Wissensdatenbanken): URL (Streamable HTTP), Präfix
+  der Werkzeuge, Hinweise für Obi, Freigabe einzelner Werkzeuge, Bestätigungsregel und
+  Zeitlimit; instanzweit oder je Mandant. Neue Tabellen `mcp_server` und `mcp_credential`
+  (Migration `20261031_0053`).
+- Anmeldung per Token (frei wählbarer Header) oder OAuth 2.1 (Discovery nach RFC 9728/8414,
+  Dynamic Client Registration, PKCE, `resource`, automatischer Refresh). Je Server wählbar:
+  **zentraler Zugang**, den der Administrator pflegt, oder **Zugang je Benutzer**, den jeder
+  unter **Obi-Verbindungen** (Benutzermenü) selbst anlegt – Obi arbeitet dann mit dessen
+  Rechten. Geheimnisse liegen verschlüsselt vor und werden nie ausgegeben.
+- Im KI-Chat erscheinen die Werkzeuge als `präfix__werkzeug`: lesende (`readOnlyHint`) laufen
+  sofort, alle anderen erst nach Bestätigung; Ergebnisse gelten als Fremddaten, nicht lesende
+  Aufrufe landen im Audit-Log. Fehlt eine Anmeldung, weist Obi darauf hin.
+- Schutz bei fremden Servern: HTTPS-Pflicht für Server mit Anmeldung (außer localhost),
+  keine Weiterleitungen, Cloud-Metadaten-Adressen gesperrt, Frist je Aufruf, Prüfung von
+  Resource-/Server-Metadaten und `iss` (RFC 9728/8414/9207); interne Adressen trägt nur ein
+  globaler Administrator ein, die Werkzeugliste legt nur ein Administrator- oder zentraler
+  Zugang fest, die URL sehen nur Administratoren.
+- REST-API `/api/v1/mcp-servers…` und MCP-Tools `list_mcp_servers`, `create_mcp_server`,
+  `update_mcp_server`, `delete_mcp_server`, `refresh_mcp_server_tools`, `set_mcp_server_token`,
+  `clear_mcp_server_credential`, `start_mcp_server_oauth`; im KI-Chat gesperrt. Entscheidung
+  in ADR-004.
+
 ### Wissensbasis: Rechnungseingang, Freigabe und Kontierung
 - Neue Wissensdatei `rechnungseingang-kontrolle.md`: Prüfschritte im Rechnungseingang
   (Dubletten, formelle/sachliche/rechnerische Prüfung, Belegstatus), Freigabe mit

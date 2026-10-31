@@ -332,6 +332,90 @@ def _chat_action_schema() -> dict[str, Any]:
     }
 
 
+# Einstellungen externer MCP-Server (create_mcp_server/update_mcp_server).
+_MCP_SERVER_SETTINGS_SCHEMA: dict[str, Any] = {
+    "name": {"type": "string", "description": "Anzeigename, z. B. 'Belegablage'."},
+    "tool_prefix": {
+        "type": "string",
+        "description": (
+            "Präfix der Werkzeuge im Chat (2–16 Kleinbuchstaben/Ziffern, Werkzeuge heißen "
+            "<präfix>__<name>); leer = aus dem Namen gebildet."
+        ),
+    },
+    "url": {
+        "type": "string",
+        "description": "Endpunkt des MCP-Servers (Streamable HTTP), z. B. https://dms.example.com/mcp.",
+    },
+    "description": {
+        "type": "string",
+        "description": "Hinweise für Obi (Systemprompt), z. B. Ablagestruktur oder Zweck.",
+    },
+    "auth_type": {
+        "type": "string",
+        "enum": ["none", "token", "oauth"],
+        "description": "Anmeldung: keine, Token (Header) oder OAuth 2.1.",
+    },
+    "credential_scope": {
+        "type": "string",
+        "enum": ["global", "user"],
+        "description": (
+            "global = ein zentraler Zugang, den der Administrator pflegt; user = jeder "
+            "Benutzer meldet sich selbst an (Obi arbeitet dann mit dessen Rechten)."
+        ),
+    },
+    "token_header": {
+        "type": "string",
+        "description": "Header für Token-Zugänge (Standard: Authorization mit Bearer).",
+    },
+    "oauth_client_id": {
+        "type": "string",
+        "description": "OAuth-Client-ID; leer = automatische Client-Registrierung (RFC 7591).",
+    },
+    "oauth_client_secret": {
+        "type": ["string", "null"],
+        "description": "Client-Secret (verschlüsselt gespeichert, nie ausgegeben; null löscht es).",
+    },
+    "oauth_scope": {
+        "type": "string",
+        "description": "Angeforderte OAuth-Scopes, leerzeichengetrennt (leer = laut Server).",
+    },
+    "oauth_authorization_url": {
+        "type": "string",
+        "description": "Autorisierungs-URL, nur falls der Server keine OAuth-Metadaten anbietet.",
+    },
+    "oauth_token_url": {
+        "type": "string",
+        "description": "Token-URL, nur falls der Server keine OAuth-Metadaten anbietet.",
+    },
+    "confirm_mode": {
+        "type": "string",
+        "enum": ["write", "all", "none"],
+        "description": (
+            "write = lesende Werkzeuge (readOnlyHint) sofort, andere nach Bestätigung im "
+            "Chat; all = jeder Aufruf nach Bestätigung; none = ohne Bestätigung."
+        ),
+    },
+    "allowed_tools": {
+        "type": ["array", "null"],
+        "items": {"type": "string"},
+        "description": "Für Obi freigegebene Werkzeuge (Namen laut Server); null = alle.",
+    },
+    "timeout_seconds": {
+        "type": "integer",
+        "description": "Zeitlimit je Werkzeugaufruf in Sekunden (5–300, Standard 60).",
+    },
+    "is_active": {"type": "boolean", "description": "Server für Obi aktiv."},
+}
+
+_MCP_CREDENTIAL_SCOPE_PROPERTY: dict[str, Any] = {
+    "type": "string",
+    "enum": ["global", "user"],
+    "description": (
+        "global = zentraler Zugang (nur Administratoren), user = eigener Zugang; "
+        "Standard: die Zugangsart des Servers."
+    ),
+}
+
 # Gemeinsame Stammdatenfelder für create_partner/update_partner.
 _PARTNER_FIELD_SCHEMA: dict[str, Any] = {
     "partner_kind": {
@@ -676,6 +760,156 @@ TOOLS: list[ToolSpec] = [
         http_method="POST",
         path="/devices/{device_id}/test",
         arg_location="json",
+    ),
+    ToolSpec(
+        name="list_mcp_servers",
+        description=(
+            "Listet die externen MCP-Server, auf die Obi zugreift (z. B. Belegablagen oder "
+            "CRM anderer Hersteller), mit Werkzeugen und Zugangsstatus; Administratoren "
+            "sehen auch die Einstellungen."
+        ),
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        http_method="GET",
+        path="/mcp-servers",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="create_mcp_server",
+        description=(
+            "Legt einen externen MCP-Server für Obi an (nur Administratoren). Ohne tenant_id "
+            "gilt er instanzweit (nur globale Administratoren). Danach den zentralen Zugang "
+            "setzen bzw. die Benutzer sich selbst anmelden lassen und Werkzeuge abrufen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                **_MCP_SERVER_SETTINGS_SCHEMA,
+                "tenant_id": {
+                    "type": ["integer", "null"],
+                    "description": "Mandant; null = instanzweit.",
+                },
+            },
+            "required": ["name", "url"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_mcp_server",
+        description=(
+            "Ändert einen MCP-Server (nur Administratoren). Eine andere URL, Anmeldeart, "
+            "Zugangsart oder ein anderer OAuth-Client verwirft die bestehenden Zugänge."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."},
+                **_MCP_SERVER_SETTINGS_SCHEMA,
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/mcp-servers/{server_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="delete_mcp_server",
+        description="Löscht einen MCP-Server samt aller Zugänge (nur Administratoren).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."}
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers/{server_id}/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="refresh_mcp_server_tools",
+        description=(
+            "Ruft die Werkzeugliste eines MCP-Servers neu ab (Verbindungstest, nur "
+            "Administratoren); nutzt den zentralen bzw. den eigenen Zugang."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."}
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers/{server_id}/tools/refresh",
+        arg_location="json",
+        timeout=60.0,
+    ),
+    ToolSpec(
+        name="set_mcp_server_token",
+        description=(
+            "Hinterlegt ein Token für einen MCP-Server mit Token-Anmeldung: den zentralen "
+            "Zugang (scope global, nur Administratoren) oder den eigenen (scope user). Das "
+            "Token wird verschlüsselt gespeichert und nie wieder ausgegeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."},
+                "token": {"type": "string", "description": "API-Token des fremden Systems."},
+                "scope": _MCP_CREDENTIAL_SCOPE_PROPERTY,
+            },
+            "required": ["server_id", "token"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers/{server_id}/credential",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="clear_mcp_server_credential",
+        description=(
+            "Entfernt den zentralen (scope global, nur Administratoren) oder den eigenen "
+            "Zugang (scope user) zu einem MCP-Server."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."},
+                "scope": _MCP_CREDENTIAL_SCOPE_PROPERTY,
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers/{server_id}/credential/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="start_mcp_server_oauth",
+        description=(
+            "Beginnt die OAuth-Anmeldung bei einem MCP-Server (scope global: zentraler "
+            "Zugang, nur Administratoren; scope user: eigener Zugang). authorization_url im "
+            "Browser öffnen; der Rücksprung auf OpenBuchhaltung schließt die Anmeldung ab "
+            "und verlangt dort die Anmeldung desselben Benutzers."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_servers."},
+                "scope": _MCP_CREDENTIAL_SCOPE_PROPERTY,
+            },
+            "required": ["server_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/mcp-servers/{server_id}/oauth/start",
+        arg_location="json",
+        timeout=60.0,
     ),
     ToolSpec(
         name="unlock_user_login",
