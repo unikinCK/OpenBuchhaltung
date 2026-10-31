@@ -1849,3 +1849,157 @@ class ChatMessage(Base):
     )
 
     conversation: Mapped[ChatConversation] = relationship(back_populates="messages")
+
+
+class CompanyKnowledgeSource(Base):
+    """Quelle des Firmenwissens einer Gesellschaft (ADR-004).
+
+    Eine Richtlinie, Arbeitsanweisung, Systemanleitung, Stammdatenliste oder Notiz.
+    ``source_key`` ist der stabile Schlüssel aus dem Wissenspaket (oder manuell
+    vergeben), ``package_key`` das Paket, aus dem die Quelle zuletzt kam. Quellen werden
+    nicht gelöscht, sondern deaktiviert (``is_active``, Grund in ``inactive_reason``); das
+    Original bleibt außerhalb von OpenBuchhaltung maßgeblich, ``content_sha256`` hält seine
+    Prüfsumme fest.
+    """
+
+    __tablename__ = "company_knowledge_source"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "source_key", name="uq_company_knowledge_source_key"
+        ),
+        CheckConstraint(
+            "authority IN ('binding', 'reference', 'historical', 'unverified')",
+            name="ck_company_knowledge_source_authority",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    source_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    origin: Mapped[str | None] = mapped_column(String(500))
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    document_kind: Mapped[str | None] = mapped_column(String(80))
+    source_version: Mapped[str | None] = mapped_column(String(80))
+    source_date: Mapped[date | None] = mapped_column(Date)
+    valid_from: Mapped[date | None] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    authority: Mapped[str] = mapped_column(String(20), nullable=False, default="unverified")
+    note: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Warum inaktiv: entfallen im Paket (Import darf reaktivieren) oder manuell.
+    inactive_reason: Mapped[str | None] = mapped_column(String(80))
+    package_key: Mapped[str | None] = mapped_column(String(120))
+    package_revision: Mapped[str | None] = mapped_column(String(80))
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    excerpts: Mapped[list[CompanyKnowledgeExcerpt]] = relationship(
+        back_populates="source", order_by="CompanyKnowledgeExcerpt.id"
+    )
+
+
+class CompanyKnowledgeExcerpt(Base):
+    """Auszug aus einer Quelle mit Fundstelle (Seite, Abschnitt, Blatt/Zeilen)."""
+
+    __tablename__ = "company_knowledge_excerpt"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "excerpt_key", name="uq_company_knowledge_excerpt_key"
+        ),
+        Index("ix_company_knowledge_excerpt_source", "source_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("company_knowledge_source.id", ondelete="CASCADE"), nullable=False
+    )
+    excerpt_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    locator: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    package_key: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    source: Mapped[CompanyKnowledgeSource] = relationship(back_populates="excerpts")
+
+
+class CompanyKnowledgeEntry(Base):
+    """Wissenseintrag des Firmenwissens: zitierbare Regel oder offene Frage (ADR-004).
+
+    ``status``: ``draft`` (Entwurf, nicht freigegeben) → ``approved`` (von einem Menschen
+    freigegeben) → ``retired`` (ausgemustert). Importierte und von Obi vorgeschlagene
+    Einträge sind immer Entwürfe. ``review_reason`` markiert einen Prüfbedarf (z. B.
+    geänderte Quelle), ``review_due`` die Wiedervorlage. Einträge wirken nur über das
+    Modell; durchsetzbare Regeln sind Richtlinien (Stufe 2).
+    """
+
+    __tablename__ = "company_knowledge_entry"
+    __table_args__ = (
+        UniqueConstraint("company_id", "entry_key", name="uq_company_knowledge_entry_key"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'retired')",
+            name="ck_company_knowledge_entry_status",
+        ),
+        CheckConstraint(
+            "kind IN ('knowledge', 'open_question')",
+            name="ck_company_knowledge_entry_kind",
+        ),
+        Index("ix_company_knowledge_entry_company_status", "company_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    entry_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="knowledge")
+    topic: Mapped[str | None] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_knowledge_source.id", ondelete="SET NULL")
+    )
+    locator: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    review_due: Mapped[date | None] = mapped_column(Date)
+    review_note: Mapped[str | None] = mapped_column(Text)
+    review_reason: Mapped[str | None] = mapped_column(String(255))
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    package_key: Mapped[str | None] = mapped_column(String(120))
+    proposed_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(120))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    source: Mapped[CompanyKnowledgeSource | None] = relationship()

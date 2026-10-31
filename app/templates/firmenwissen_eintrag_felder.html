@@ -1,0 +1,33 @@
+{# Formularfelder eines Firmenwissen-Eintrags; ``entry`` ist beim Anlegen nicht gesetzt. #}
+<label for="kw-title">Titel</label>
+<input id="kw-title" name="title" value="{{ entry.title if entry else '' }}" required maxlength="255" size="70" />
+
+<label for="kw-content">Inhalt</label>
+<textarea id="kw-content" name="content" required rows="7" cols="90">{{ entry.content if entry else '' }}</textarea>
+
+<label for="kw-kind">Art</label>
+<select id="kw-kind" name="kind">
+  {% for value, label in kind_labels.items() %}
+    <option value="{{ value }}" {% if entry and entry.kind == value %}selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+</select>
+
+<label for="kw-topic">Thema</label>
+<input id="kw-topic" name="topic" value="{{ entry.topic or '' if entry else '' }}" maxlength="80" placeholder="z. B. Beschaffung" />
+
+<label for="kw-source">Quelle</label>
+<select id="kw-source" name="source_id">
+  <option value="">keine</option>
+  {% for source in sources if source.is_active or (entry and entry.source_id == source.id) %}
+    <option value="{{ source.id }}" {% if entry and entry.source_id == source.id %}selected{% endif %}>{{ source.title }}{% if not source.is_active %} (inaktiv){% endif %}</option>
+  {% endfor %}
+</select>
+
+<label for="kw-locator">Fundstelle</label>
+<input id="kw-locator" name="locator" value="{{ entry.locator or '' if entry else '' }}" maxlength="255" placeholder="z. B. Abschnitt 4.2, Seite 12" />
+
+<label for="kw-review-due">Wiedervorlage</label>
+<input id="kw-review-due" type="date" name="review_due" value="{{ entry.review_due.isoformat() if entry and entry.review_due else '' }}" />
+
+<label for="kw-review-note">Prüfhinweis</label>
+<textarea id="kw-review-note" name="review_note" rows="2" cols="90">{{ entry.review_note or '' if entry else '' }}</textarea>
