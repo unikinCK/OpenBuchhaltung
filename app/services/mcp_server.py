@@ -4812,10 +4812,12 @@ TOOLS: list[ToolSpec] = [
             "Schlägt Fachwissen nach: durchsucht die mitgelieferte Wissensbasis (Umsatzsteuer, "
             "Buchführung/GoBD/Aufbewahrung, Anlagevermögen/AfA, Betriebsausgaben, Lohn und "
             "Sozialversicherung, Ertragsteuern und Fristen, Kontenrahmen SKR03/SKR04, "
-            "Buchungsmuster, Arbeitsweise in OpenBuchhaltung) und liefert die passendsten "
-            "Abschnitte samt Rechtsstand. Mit Fachbegriffen suchen (z. B. 'GWG Grenze', "
-            "'Reverse Charge buchen', 'Aufbewahrungsfrist Rechnungen'); ohne query das "
-            "Inhaltsverzeichnis."
+            "Buchungsmuster, Rechnungseingang/Freigabe/Kontierung, Arbeitsweise in "
+            "OpenBuchhaltung) und liefert die passendsten Abschnitte samt Rechtsstand. Mit "
+            "company_id zusätzlich das Firmenwissen der Gesellschaft (company_results mit "
+            "Status, Quelle und Fundstelle; Entwürfe sind nicht freigegeben). Mit "
+            "Fachbegriffen suchen (z. B. 'GWG Grenze', 'Reverse Charge buchen', "
+            "'Aufbewahrungsfrist Rechnungen'); ohne query das Inhaltsverzeichnis."
         ),
         input_schema={
             "type": "object",
@@ -4824,9 +4826,13 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Suchbegriffe (Fachbegriffe, Paragraf, Kontonummer).",
                 },
+                "company_id": {
+                    "type": "integer",
+                    "description": "Gesellschaft, deren Firmenwissen mitdurchsucht wird.",
+                },
                 "limit": {
                     "type": "integer",
-                    "description": "Anzahl Treffer (1–8, Standard 3).",
+                    "description": "Anzahl Treffer je Bereich (1–8, Standard 3).",
                 },
             },
             "additionalProperties": False,
@@ -4834,6 +4840,205 @@ TOOLS: list[ToolSpec] = [
         http_method="GET",
         path="/knowledge",
         arg_location="query",
+    ),
+    ToolSpec(
+        name="list_company_knowledge_entries",
+        description=(
+            "Listet Wissenseinträge des Firmenwissens einer Gesellschaft (ohne Inhalt; "
+            "Inhalt per get_company_knowledge_entry). Standard: alle außer ausgemusterten. "
+            "due=true liefert die zu prüfenden (Entwurf, Prüfgrund oder Wiedervorlage fällig)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "status": {
+                    "type": "string",
+                    "enum": ["active", "all", "draft", "approved", "retired"],
+                    "description": "Statusfilter (Standard active = nicht ausgemustert).",
+                },
+                "kind": {"type": "string", "enum": ["knowledge", "open_question"]},
+                "due": {"type": "boolean", "description": "Nur zu prüfende Einträge."},
+                "q": {"type": "string", "description": "Text in Titel, Inhalt, Thema, Schlüssel."},
+                "source_id": {"type": "integer", "description": "Nur Einträge dieser Quelle."},
+                "limit": {"type": "integer", "description": "Höchstens (Standard 100, max 500)."},
+                "offset": {"type": "integer"},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/companies/{company_id}/knowledge/entries",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_company_knowledge_entry",
+        description="Liefert einen Wissenseintrag des Firmenwissens mit Inhalt, Quelle und Status.",
+        input_schema={
+            "type": "object",
+            "properties": {"entry_id": {"type": "integer", "description": "ID des Eintrags."}},
+            "required": ["entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/knowledge-entries/{entry_id}",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="create_company_knowledge_entry",
+        description=(
+            "Schlägt einen Wissenseintrag für das Firmenwissen vor; er wird immer als "
+            "Entwurf angelegt und erst von einem Menschen freigegeben. kind open_question "
+            "für eine offene Frage oder einen Widerspruch."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "title": {"type": "string", "description": "Kurzer Titel (max. 255 Zeichen)."},
+                "content": {"type": "string", "description": "Die Regel bzw. Frage."},
+                "kind": {"type": "string", "enum": ["knowledge", "open_question"]},
+                "topic": {"type": "string", "description": "Themenfeld, z. B. Beschaffung."},
+                "source_id": {"type": "integer", "description": "Quelle (optional)."},
+                "locator": {"type": "string", "description": "Fundstelle in der Quelle."},
+                "review_due": {"type": "string", "description": "Wiedervorlage JJJJ-MM-TT."},
+                "review_note": {"type": "string", "description": "Was zu prüfen ist."},
+            },
+            "required": ["company_id", "title", "content"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/knowledge/entries",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_company_knowledge_entry",
+        description=(
+            "Ändert einen Wissenseintrag. Neuer Titel, Inhalt, Fundstelle oder Quelle setzt "
+            "einen freigegebenen Eintrag auf Entwurf zurück; Wiedervorlage und Thema nicht."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "entry_id": {"type": "integer", "description": "ID des Eintrags."},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "kind": {"type": "string", "enum": ["knowledge", "open_question"]},
+                "topic": {"type": ["string", "null"]},
+                "source_id": {"type": ["integer", "null"]},
+                "locator": {"type": ["string", "null"]},
+                "review_due": {"type": ["string", "null"], "description": "JJJJ-MM-TT."},
+                "review_note": {"type": ["string", "null"]},
+            },
+            "required": ["entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/knowledge-entries/{entry_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_company_knowledge_entry_status",
+        description=(
+            "Gibt einen Wissenseintrag frei (approved; bestätigt auch einen freigegebenen "
+            "Eintrag mit Prüfgrund), setzt ihn auf Entwurf (draft) oder mustert ihn aus "
+            "(retired). Nur Admin und Buchhalter; im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "entry_id": {"type": "integer", "description": "ID des Eintrags."},
+                "status": {"type": "string", "enum": ["approved", "draft", "retired"]},
+            },
+            "required": ["entry_id", "status"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/knowledge-entries/{entry_id}/status",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_company_knowledge_sources",
+        description=(
+            "Listet die Quellen des Firmenwissens (Richtlinien, Anleitungen, Listen) mit "
+            "Verbindlichkeit, Stand, Gültigkeit und Anzahl Auszüge/Einträge."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch deaktivierte Quellen (Standard: true).",
+                },
+                "q": {"type": "string", "description": "Text in Titel oder Schlüssel."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/companies/{company_id}/knowledge/sources",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_company_knowledge_source",
+        description="Liefert eine Quelle des Firmenwissens mit allen Auszügen und Fundstellen.",
+        input_schema={
+            "type": "object",
+            "properties": {"source_id": {"type": "integer", "description": "ID der Quelle."}},
+            "required": ["source_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/knowledge-sources/{source_id}",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="set_company_knowledge_source_active",
+        description=(
+            "Aktiviert oder deaktiviert eine Quelle des Firmenwissens; Auszüge inaktiver "
+            "Quellen werden nicht gefunden, freigegebene Einträge daraus erhalten einen "
+            "Prüfgrund. Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "integer", "description": "ID der Quelle."},
+                "is_active": {"type": "boolean"},
+            },
+            "required": ["source_id", "is_active"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/knowledge-sources/{source_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="import_company_knowledge",
+        description=(
+            "Spielt ein Wissenspaket (format openbuchhaltung-firmenwissen, version 1: package, "
+            "sources, excerpts, entries mit stabilen key) in das Firmenwissen ein und gleicht "
+            "je Paket ab: neu, geändert, entfallen. Einträge kommen als Entwurf. dry_run=true "
+            "liefert nur den Bericht. Paket als package (Objekt) oder content_base64 (JSON). "
+            "Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "package": {"type": "object", "description": "Das Wissenspaket als Objekt."},
+                "content_base64": {
+                    "type": "string",
+                    "description": "Alternativ: Paketdatei (JSON, UTF-8) Base64-kodiert.",
+                },
+                "dry_run": {"type": "boolean", "description": "Nur Vorschau, nichts ändern."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/knowledge/import",
+        arg_location="json",
     ),
 ]
 

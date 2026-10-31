@@ -210,8 +210,16 @@ def test_system_prompt_contains_compact_knowledge_within_budget():
         currency_code = "EUR"
 
     tools_chars = len(json.dumps(chat_tool_definitions(), ensure_ascii=False))
+    # Mit Firmenwissen-Hinweis (ADR-004), also dem längsten Systemprompt.
+    company_knowledge = {"approved": 12, "drafts": 30, "retired": 0, "due": 30, "sources": 9}
     for chart in ("skr03", "skr04", None):
-        prompt = build_system_prompt(_Company(), username="admin", role="Admin", chart=chart)
+        prompt = build_system_prompt(
+            _Company(),
+            username="admin",
+            role="Admin",
+            chart=chart,
+            company_knowledge=company_knowledge,
+        )
         assert "=== Fachwissen (Rechtsstand" in prompt
         assert "search_knowledge" in prompt
         assert len(prompt) + tools_chars <= PROMPT_BUDGET_CHARS, (chart, len(prompt), tools_chars)

@@ -99,6 +99,10 @@ EXPECTED_BLOCKED_TOOLS = {
     "create_sepa_payment_run",
     "set_company_bank_details",
     "set_partner_bank_details",
+    # Firmenwissen: Freigabe, Quellen schalten, Paketimport nur durch Menschen
+    "set_company_knowledge_entry_status",
+    "set_company_knowledge_source_active",
+    "import_company_knowledge",
 }
 
 

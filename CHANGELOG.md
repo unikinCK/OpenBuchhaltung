@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Firmenwissen je Gesellschaft (ADR-004)
+- Neue Tabellen `company_knowledge_source`, `company_knowledge_excerpt` und
+  `company_knowledge_entry` (Migration `20261031_0053`): Quellen mit Verbindlichkeit, Stand und
+  Gültigkeit, Quellenauszüge mit Fundstelle, Wissenseinträge mit Status Entwurf → freigegeben →
+  ausgemustert, Wiedervorlage und Prüfgrund; alle Änderungen in der Audit-Hashkette.
+- Import von Wissenspaketen (`format: openbuchhaltung-firmenwissen`, Version 1) mit Vorschau und
+  Abgleich je Paket über stabile Schlüssel: neue Einträge als Entwurf, geänderte freigegebene
+  zurück auf Entwurf, Einträge geänderter oder entfallener Quellen mit Prüfgrund, entfallene
+  ausgemustert; von Hand Ausgemustertes bleibt es.
+- `search_knowledge` (MCP, `GET /api/v1/knowledge`, Seite **Wissen**) durchsucht mit
+  `company_id` auch das Firmenwissen der Gesellschaft (BM25 je Gesellschaft, freigegebene
+  Einträge höher gewichtet, Entwürfe gekennzeichnet); der Systemprompt nennt nur die Kennzahlen.
+- UI **Verwaltung → Firmenwissen**, REST unter `/api/v1/companies/<id>/knowledge/…`,
+  `/api/v1/knowledge-entries/<id>` und `/api/v1/knowledge-sources/<id>`, neun MCP-Tools.
+  Freigabe, Quellen schalten und Paketimport sind im KI-Chat gesperrt; Obi darf Einträge nur
+  als Entwurf vorschlagen.
+- ADR-004 beschreibt zusätzlich Stufe 2 (durchsetzbare Unternehmensrichtlinien).
+
 ### Wissensbasis: Rechnungseingang, Freigabe und Kontierung
 - Neue Wissensdatei `rechnungseingang-kontrolle.md`: Prüfschritte im Rechnungseingang
   (Dubletten, formelle/sachliche/rechnerische Prüfung, Belegstatus), Freigabe mit

@@ -736,8 +736,11 @@ dann selbst betriebener Modellserver).
 - [x] **Wissensdatei Rechnungseingang/IKS**: Prüfschritte, Freigabe und Vier-Augen-Prinzip,
       Vollmachten, Kostenstellen/Kostenträger (KOST1/KOST2), Kontierung, Kreditkarten und
       Auslagen, Gewichtung von Unternehmensunterlagen *(2026-10-30)*.
-- [ ] Firmenwissen je Gesellschaft (Quellen, Fundstellen, Wissenseinträge mit Freigabe und
-      Wiedervorlage, Import von Wissenspaketen) als Ergänzung zur Richtlinien-Entität.
+- [x] **Firmenwissen je Gesellschaft** (ADR-004): Quellen, Fundstellen, Wissenseinträge mit
+      Freigabe und Wiedervorlage, Import von Wissenspaketen mit Abgleich, Suche je Gesellschaft
+      in `search_knowledge`, UI/API/MCP *(2026-10-31)*.
+- [ ] Unternehmensrichtlinien als durchsetzbare Regeln (ADR-004 Stufe 2: `company_policy` mit
+      Versionen, `evaluate_tool_call` am Bestätigungs-Hook).
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
       Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
 - [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf

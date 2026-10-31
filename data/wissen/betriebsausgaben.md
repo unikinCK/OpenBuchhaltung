@@ -41,7 +41,7 @@ Schlagworte: Reisekosten, Verpflegungsmehraufwand, Verpflegungspauschale, 14 Eur
 - Übernachtung: Arbeitnehmer erhalten vom Arbeitgeber wahlweise die Pauschale 20 € (Inland) steuerfrei erstattet; der Unternehmer selbst kann nur tatsächliche Kosten absetzen. Längerfristige Auswärtstätigkeit: nach 48 Monaten höchstens 1.000 €/Monat. Doppelte Haushaltsführung: 1.000 €/Monat Unterkunft (ab 2026 im Ausland gedeckelt auf 2.000 €).
 - Arbeitgeber können Arbeitnehmern Reisekosten in Höhe der Pauschalen steuerfrei erstatten (§ 3 Nr. 16); Verpflegungspauschalen dürfen bis zum Doppelten mit 25 % pauschal versteuert erstattet werden (§ 40 Abs. 2 Nr. 4). Reisekostenabrechnung mit Datum, Ziel, Zweck, Zeiten, Belegen aufbewahren.
 - Buchung: Reisekosten Arbeitnehmer SKR03 4660–4668 / SKR04 6650–6668 (Fahrtkosten 4663/6663, Verpflegungsmehraufwand 4664/6664, Übernachtung 4666/6660); Reisekosten Unternehmer SKR03 4670–4678 / SKR04 6670–6678 (Fahrtkosten 4672/6672, Verpflegungsmehraufwand 4673/6673, Übernachtung 4676/6680). Verpflegungspauschalen des Unternehmers ohne Vorsteuer.
-- Auslagen, Firmenkreditkarte, Rechnungen auf den Namen des Mitarbeiters und Kostenstellen-Zuordnung von Reisekosten: siehe Wissensdatei rechnungseingang-kontrolle.
+- Auslagen, Firmenkreditkarte und Rechnungen auf den Namen des Mitarbeiters: siehe Wissensdatei rechnungseingang-kontrolle.
 
 ## Fahrten Wohnung–Betrieb, Entfernungspauschale, Homeoffice, Arbeitszimmer
 Schlagworte: Entfernungspauschale, Pendlerpauschale, 0,38 Euro, 0,30 Euro, ab erstem Kilometer, 2026, Mobilitätsprämie, Homeoffice-Pauschale, Tagespauschale, 6 Euro, 1.260 Euro, häusliches Arbeitszimmer, Mittelpunkt, Jahrespauschale, § 4 Abs. 5 Nr. 6, 6b, 6c
