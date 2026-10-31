@@ -17,7 +17,7 @@ from app.api.blueprint import api_bp
 from app.api.helpers import api_can_write, forbidden
 from app.auth import api_has_global_access, current_api_user
 from app.services.internal_api import InProcessApiClient
-from app.services.mcp_server import MCPServer
+from app.services.mcp_server import MCP_CHANNEL, MCPServer
 
 
 @api_bp.post("/mcp/call")
@@ -41,6 +41,7 @@ def mcp_call():
             current_app._get_current_object(),
             api_user=current_api_user(),
             global_access=api_has_global_access(),
+            channel=MCP_CHANNEL,
         )
     )
     response = server.handle(

@@ -652,6 +652,30 @@ def set_entry_status(
     return entry
 
 
+def set_knowledge_mcp(
+    *, session: Session, company: Company, enabled: bool, changed_by: str
+) -> bool:
+    """Gibt das Firmenwissen für MCP-Clients frei oder sperrt es (Audit-Log).
+
+    Gilt nur für Zugriffe über den MCP-Server; Obi im KI-Chat, Oberfläche und REST-API
+    bleiben unberührt. Liefert ``True``, wenn sich etwas geändert hat; Aufrufer committet.
+    """
+    if company.knowledge_mcp_enabled == enabled:
+        return False
+    company.knowledge_mcp_enabled = enabled
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="company",
+        entity_id=str(company.id),
+        action="knowledge_mcp_enabled" if enabled else "knowledge_mcp_disabled",
+        changed_by=changed_by,
+        payload={"knowledge_mcp_enabled": enabled},
+    )
+    return True
+
+
 def set_source_active(
     *, session: Session, source: CompanyKnowledgeSource, is_active: bool, changed_by: str
 ) -> CompanyKnowledgeSource:

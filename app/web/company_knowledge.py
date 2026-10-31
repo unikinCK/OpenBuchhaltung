@@ -6,7 +6,7 @@ import json
 
 from flask import abort, flash, redirect, render_template, request, url_for
 
-from app.auth import WRITE_ROLES, current_user
+from app.auth import ROLE_ADMIN, WRITE_ROLES, current_user
 from app.services.company_knowledge import (
     AUTHORITY_LABELS,
     KIND_LABELS,
@@ -22,6 +22,7 @@ from app.services.company_knowledge import (
     list_sources,
     parse_date_arg,
     set_entry_status,
+    set_knowledge_mcp,
     set_source_active,
     update_entry,
 )
@@ -32,6 +33,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
+from domain.models import Company
 
 STATUS_FILTERS = (
     ("active", "Alle (ohne ausgemusterte)"),
@@ -45,6 +47,11 @@ STATUS_FILTERS = (
 def _can_write() -> bool:
     user = current_user()
     return bool(user and user["role"] in WRITE_ROLES)
+
+
+def _is_admin() -> bool:
+    user = current_user()
+    return bool(user and user["role"] == ROLE_ADMIN)
 
 
 def _form_value(name: str) -> str | None:
@@ -73,8 +80,10 @@ def company_knowledge_page():
         entries = []
         total = 0
         sources = []
+        knowledge_mcp_enabled = False
         if selected_company_id:
             summary = company_knowledge_summary(session=session, company_id=selected_company_id)
+            knowledge_mcp_enabled = session.get(Company, selected_company_id).knowledge_mcp_enabled
             sources = list_sources(session=session, company_id=selected_company_id)
             if view != "sources":
                 try:
@@ -109,6 +118,8 @@ def company_knowledge_page():
             total=total,
             sources=sources,
             report=None,
+            knowledge_mcp_enabled=knowledge_mcp_enabled,
+            is_admin=_is_admin(),
             **_common_context(),
         )
 
@@ -325,3 +336,28 @@ def import_company_knowledge_from_form():
             report=report,
             **_common_context(),
         )
+
+
+@main_bp.post("/firmenwissen/mcp")
+def set_company_knowledge_mcp_from_form():
+    """Firmenwissen für MCP-Clients freigeben oder sperren (nur Administratoren)."""
+    company_id = request.form.get("company_id", type=int)
+    if not _is_admin():
+        flash("Die Freigabe für MCP kann nur ein Administrator ändern.", "error")
+        return redirect(url_for("main.company_knowledge_page", company_id=company_id))
+    enabled = request.form.get("enabled") == "1"
+    if not company_id:
+        abort(404)
+    with get_session_factory()() as session:
+        company = require_company_access(session, company_id)
+        set_knowledge_mcp(
+            session=session, company=company, enabled=enabled, changed_by=changed_by()
+        )
+        session.commit()
+    flash(
+        "Firmenwissen ist für MCP-Clients freigegeben."
+        if enabled
+        else "Firmenwissen ist für MCP-Clients gesperrt.",
+        "success",
+    )
+    return redirect(url_for("main.company_knowledge_page", company_id=company_id))

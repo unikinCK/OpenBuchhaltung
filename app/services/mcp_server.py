@@ -32,6 +32,14 @@ PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "openbuchhaltung"
 SERVER_VERSION = "1.0.0"
 DEFAULT_API_URL = "http://localhost:5000/api/v1"
+# Kennzeichnet Aufrufe der REST-API, die über den MCP-Server kommen: Die API sperrt dann
+# z. B. das Firmenwissen von Gesellschaften, die es nicht für MCP freigegeben haben.
+MCP_CHANNEL_HEADER = "X-OpenBuchhaltung-Channel"
+MCP_CHANNEL = "mcp"
+# Werkzeuge externer MCP-Server, die OpenBuchhaltung durchreicht (``<präfix>__<werkzeug>``);
+# eigene Tool-Namen enthalten nie zwei Unterstriche.
+EXTERNAL_TOOL_SEPARATOR = "__"
+PROXY_LIST_TIMEOUT = 60.0
 
 # API-Token für den laufenden Request (Thread/Kontext): der HTTP-Transport setzt hier
 # den Benutzer-Token des MCP-Clients; ohne Wert gilt OPENBUCHHALTUNG_API_TOKEN.
@@ -399,6 +407,14 @@ _MCP_SERVER_SETTINGS_SCHEMA: dict[str, Any] = {
         "type": ["array", "null"],
         "items": {"type": "string"},
         "description": "Für Obi freigegebene Werkzeuge (Namen laut Server); null = alle.",
+    },
+    "proxy_mode": {
+        "type": "string",
+        "enum": ["off", "read", "all"],
+        "description": (
+            "Werkzeuge über den MCP-Zugang von OpenBuchhaltung an dessen Clients "
+            "weiterreichen: off (Standard), read = nur lesende, all = alle freigegebenen."
+        ),
     },
     "timeout_seconds": {
         "type": "integer",
@@ -5308,7 +5324,7 @@ class HttpApiClient:
         if params:
             url = f"{url}?{urlencode(params)}"
 
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", MCP_CHANNEL_HEADER: MCP_CHANNEL}
         token = current_api_token_override() or self.token
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -5344,10 +5360,17 @@ class HttpApiClient:
 
 @dataclass(slots=True)
 class MCPServer:
-    """Übersetzt MCP-JSON-RPC-Nachrichten in API-Aufrufe."""
+    """Übersetzt MCP-JSON-RPC-Nachrichten in API-Aufrufe.
+
+    ``proxy_external`` listet zusätzlich die Werkzeuge externer MCP-Server, die
+    OpenBuchhaltung weiterreicht (``GET /mcp-proxy/tools``), und leitet ihre Aufrufe an
+    ``POST /mcp-proxy/tools/call``. Der KI-Chat führt externe Werkzeuge selbst aus und
+    schaltet das ab.
+    """
 
     http: HttpApiClient
     protocol_version: str = PROTOCOL_VERSION
+    proxy_external: bool = True
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """Verarbeitet eine JSON-RPC-Nachricht; gibt None für Notifications zurück."""
@@ -5381,19 +5404,68 @@ class MCPServer:
         if method == "ping":
             return {}
         if method == "tools/list":
-            return {"tools": [tool.to_mcp() for tool in TOOLS]}
+            return {"tools": [tool.to_mcp() for tool in TOOLS] + self._proxy_tools()}
         if method == "tools/call":
             return self._call_tool(params)
         raise _JsonRpcError(-32601, f"Unbekannte Methode: {method}")
+
+    def _proxy_tools(self) -> list[dict[str, Any]]:
+        """Weitergereichte Werkzeuge externer MCP-Server (leer bei Fehlern)."""
+        if not self.proxy_external:
+            return []
+        reset_timeout = _REQUEST_TIMEOUT.set(PROXY_LIST_TIMEOUT)
+        try:
+            response = self.http.call("GET", "/mcp-proxy/tools")
+        except MCPTransportError:
+            return []
+        finally:
+            _REQUEST_TIMEOUT.reset(reset_timeout)
+        tools = response.json.get("tools") if isinstance(response.json, dict) else None
+        if not response.ok or not isinstance(tools, list):
+            return []
+        return [
+            tool
+            for tool in tools
+            if isinstance(tool, dict)
+            and isinstance(tool.get("name"), str)
+            and EXTERNAL_TOOL_SEPARATOR in tool["name"]
+        ]
+
+    def _call_proxy_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        reset_timeout = _REQUEST_TIMEOUT.set(LLM_TOOL_TIMEOUT)
+        try:
+            response = self.http.call(
+                "POST", "/mcp-proxy/tools/call", json_body={"name": name, "arguments": arguments}
+            )
+        except MCPTransportError as exc:
+            return _tool_result(str(exc), is_error=True)
+        finally:
+            _REQUEST_TIMEOUT.reset(reset_timeout)
+        body = response.json if isinstance(response.json, dict) else {}
+        if response.ok and isinstance(body.get("content"), list):
+            result: dict[str, Any] = {
+                "content": body["content"],
+                "isError": bool(body.get("isError")),
+            }
+            if "structuredContent" in body:
+                result["structuredContent"] = body["structuredContent"]
+            return result
+        return _tool_result(str(body.get("error") or response.text or "Fehler"), is_error=True)
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments") or {}
         tool = TOOLS_BY_NAME.get(name)
-        if tool is None:
-            raise _JsonRpcError(-32602, f"Unbekanntes Tool: {name}")
         if not isinstance(arguments, dict):
             raise _JsonRpcError(-32602, "arguments muss ein Objekt sein.")
+        if tool is None:
+            if (
+                self.proxy_external
+                and isinstance(name, str)
+                and EXTERNAL_TOOL_SEPARATOR in name
+            ):
+                return self._call_proxy_tool(name, arguments)
+            raise _JsonRpcError(-32602, f"Unbekanntes Tool: {name}")
 
         try:
             response = self._request_for_tool(tool, arguments)

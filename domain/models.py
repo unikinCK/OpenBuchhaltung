@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     text,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
@@ -71,6 +72,10 @@ class Company(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     # Erster Monat des Wirtschaftsjahres (1 = Januar = Kalenderjahr, sonst abweichendes WJ).
     fiscal_year_start_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Firmenwissen über den MCP-Zugang (externe KI-Clients) lesbar; Obi und REST bleiben offen.
+    knowledge_mcp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     # Auftraggeber-Bankverbindung für SEPA-Zahlläufe (pain.001).
     iban: Mapped[str | None] = mapped_column(String(34))
     bic: Mapped[str | None] = mapped_column(String(11))
@@ -1824,6 +1829,7 @@ class McpServer(Base):
         CheckConstraint(
             "timeout_seconds BETWEEN 5 AND 300", name="ck_mcp_server_timeout_seconds"
         ),
+        CheckConstraint("proxy_mode IN ('off', 'read', 'all')", name="ck_mcp_server_proxy_mode"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1851,6 +1857,10 @@ class McpServer(Base):
     # Freigegebene Werkzeuge (None = alle).
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    # Über den MCP-Zugang von OpenBuchhaltung weiterreichen: off, read (nur lesende), all.
+    proxy_mode: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="off", server_default="off"
+    )
     tools_cache: Mapped[list[Any] | None] = mapped_column(JSON)
     server_info: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     tools_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

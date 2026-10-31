@@ -14,6 +14,10 @@ Im Chat (:class:`ExternalTools`) erscheinen die freigegebenen Werkzeuge als
 ``<präfix>__<werkzeug>``. Lesende Werkzeuge (``readOnlyHint``) laufen sofort, alle
 anderen erst nach Bestätigung des Benutzers (``confirm_mode``); Beschreibungen und
 Ergebnisse gelten als Fremddaten. Nicht lesende Aufrufe landen im Audit-Log.
+
+Mit ``proxy_mode`` reicht der MCP-Server von OpenBuchhaltung die Werkzeuge eines Servers
+an seine eigenen Clients weiter (z. B. ChatGPT- oder Claude-Connectoren): nur lesende
+oder alle freigegebenen, ausgeführt mit dem Zugang des aufrufenden Benutzers.
 """
 
 from __future__ import annotations
@@ -44,6 +48,7 @@ from app.services.mcp_client import (
     McpClientError,
     McpSession,
     McpTool,
+    McpToolResult,
     is_internal_url,
     origin,
 )
@@ -86,6 +91,21 @@ CONFIRM_LABELS = {
     CONFIRM_ALL: "Jeder Aufruf nach Bestätigung",
     CONFIRM_NONE: "Ohne Bestätigung (nur für rein lesende Server)",
 }
+
+PROXY_OFF = "off"
+PROXY_READ = "read"
+PROXY_ALL = "all"
+PROXY_MODES = (PROXY_OFF, PROXY_READ, PROXY_ALL)
+PROXY_LABELS = {
+    PROXY_OFF: "Nicht weiterreichen",
+    PROXY_READ: "Nur lesende Werkzeuge weiterreichen",
+    PROXY_ALL: "Alle freigegebenen Werkzeuge weiterreichen",
+}
+
+CHANNEL_CHAT = "chat"
+CHANNEL_MCP = "mcp"
+# Hinweise aus tools/list, die beim Durchreichen an MCP-Clients erhalten bleiben.
+_PASSED_ANNOTATIONS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 KIND_TOKEN = "token"
 KIND_OAUTH = "oauth"
@@ -475,6 +495,8 @@ def apply_server_settings(
         server.confirm_mode = _choice(data["confirm_mode"], CONFIRM_MODES, "confirm_mode")
     if "allowed_tools" in data:
         server.allowed_tools = _tool_list(data["allowed_tools"])
+    if "proxy_mode" in data:
+        server.proxy_mode = _choice(data["proxy_mode"], PROXY_MODES, "proxy_mode")
     if "timeout_seconds" in data and data["timeout_seconds"] not in (None, ""):
         server.timeout_seconds = _timeout(data["timeout_seconds"])
     if "is_active" in data:
@@ -509,6 +531,7 @@ def _settings_payload(server: McpServer) -> dict[str, Any]:
         "auth_type": server.auth_type,
         "credential_scope": server.credential_scope,
         "confirm_mode": server.confirm_mode,
+        "proxy_mode": server.proxy_mode,
         "allowed_tools": server.allowed_tools,
         "is_active": server.is_active,
         "tenant_id": server.tenant_id,
@@ -562,6 +585,7 @@ def create_server(
         auth_type=AUTH_NONE,
         credential_scope=SCOPE_GLOBAL,
         confirm_mode=CONFIRM_WRITE,
+        proxy_mode=PROXY_OFF,
         timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
         is_active=True,
         created_by=actor,
@@ -1380,6 +1404,7 @@ class _ExternalTool:
     input_schema: dict[str, Any]
     read_only: bool
     requires_confirmation: bool
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1421,6 +1446,11 @@ def _chat_tools(server: McpServer) -> list[_ExternalTool]:
                 input_schema=schema,
                 read_only=tool.read_only,
                 requires_confirmation=tool_requires_confirmation(server.confirm_mode, tool),
+                annotations={
+                    key: tool.annotations[key]
+                    for key in _PASSED_ANNOTATIONS
+                    if isinstance(tool.annotations.get(key), bool)
+                },
             )
         )
     return result
@@ -1435,7 +1465,8 @@ def _redacted_arguments(arguments: dict[str, Any]) -> str:
 
 
 class ExternalTools:
-    """Werkzeuge externer MCP-Server für einen Chat-Zug (bzw. eine Bestätigung).
+    """Werkzeuge externer MCP-Server für einen Chat-Zug (bzw. eine Bestätigung) oder für
+    das Durchreichen an MCP-Clients (``channel`` ``mcp``).
 
     Hält je Server eine MCP-Sitzung offen, solange der Zug läuft; :meth:`close`
     beendet sie. Zugangsdaten werden bei jedem Aufruf frisch aus der Datenbank
@@ -1451,6 +1482,7 @@ class ExternalTools:
         tenant_id: int | None = None,
         company_id: int | None = None,
         actor: str = "obi",
+        channel: str = CHANNEL_CHAT,
     ) -> None:
         self._session_factory = session_factory
         self._servers = servers or []
@@ -1458,6 +1490,7 @@ class ExternalTools:
         self._tenant_id = tenant_id
         self._company_id = company_id
         self._actor = actor
+        self._channel = channel
         self._tools = {
             tool.chat_name: (server, tool) for server in self._servers for tool in server.tools
         }
@@ -1519,20 +1552,45 @@ class ExternalTools:
         lines.append("=== Ende Externe Systeme ===")
         return "\n".join(lines)
 
-    def execute(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-        """Ruft ein externes Werkzeug auf; liefert ``(text, is_error)`` wie die Chat-Tools."""
+    def mcp_tools(self) -> list[dict[str, Any]]:
+        """Die Werkzeuge im Format von ``tools/list`` (Durchreichen an MCP-Clients)."""
+        return [
+            {
+                "name": tool.chat_name,
+                "title": tool.title,
+                "description": f"[Externes System {server.name}] {tool.description}".strip(),
+                "inputSchema": tool.input_schema,
+                "annotations": tool.annotations,
+            }
+            for server in self._servers
+            for tool in server.tools
+        ]
+
+    def call(self, name: str, arguments: dict[str, Any]) -> McpToolResult:
+        """Ruft ein externes Werkzeug auf und liefert das Ergebnis unverändert.
+
+        Wirft :class:`McpConnectionError`, wenn das Werkzeug fehlt oder der Server nicht
+        erreichbar ist bzw. die Anmeldung ablehnt.
+        """
         entry = self._tools.get(name)
         if entry is None:
-            return (f"Das externe Werkzeug {name!r} steht nicht zur Verfügung.", True)
+            raise McpConnectionError(f"Das externe Werkzeug {name!r} steht nicht zur Verfügung.")
         server, tool = entry
         try:
             result = self._call(server, tool, arguments)
         except (McpConnectionError, McpClientError) as exc:
-            text, is_error, reached = f"{server.name}: {exc}", True, False
-        else:
-            text, is_error, reached = result.as_text() or "(keine Ausgabe)", result.is_error, True
-        self._record(server, tool, arguments, is_error=is_error, reached=reached)
-        return text, is_error
+            self._record(server, tool, arguments, is_error=True, reached=False)
+            raise McpConnectionError(f"{server.name}: {exc}") from exc
+        self._record(server, tool, arguments, is_error=result.is_error, reached=True)
+        return result
+
+    def execute(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        """Ruft ein externes Werkzeug auf; liefert ``(text, is_error)`` wie die Chat-Tools."""
+        try:
+            result = self.call(name, arguments)
+        except McpConnectionError as exc:
+            return str(exc), True
+        return result.as_text() or "(keine Ausgabe)", result.is_error
 
     def close(self) -> None:
         sessions, self._sessions = self._sessions, {}
@@ -1619,7 +1677,7 @@ class ExternalTools:
                     if reached and credential.secret_encrypted:
                         credential.last_error = None
             db_server = session.get(McpServer, server.id)
-            if not tool.read_only and db_server is not None and self._tenant_id is not None:
+            if not tool.read_only and db_server is not None:
                 _audit(
                     session,
                     server=db_server,
@@ -1632,6 +1690,7 @@ class ExternalTools:
                         "tool": tool.remote_name,
                         "arguments": _redacted_arguments(arguments),
                         "is_error": is_error,
+                        "channel": self._channel,
                     },
                 )
             session.commit()
@@ -1685,9 +1744,10 @@ def _server_handle(
 def load_external_tools(
     *,
     session_factory,
-    tenant_id: int,
+    tenant_id: int | None,
     company_id: int | None,
     user: dict | None,
+    proxy: bool = False,
 ) -> ExternalTools:
     """Werkzeuge aller aktiven Server, die für die Gesellschaft und den Benutzer gelten.
 
@@ -1695,27 +1755,41 @@ def load_external_tools(
     veraltete Werkzeugliste wird hier (höchstens einmal je :data:`TOOLS_CACHE_TTL`)
     neu abgerufen, sofern der Zugang die gemeinsame Liste festlegen darf
     (:func:`may_store_tools`). Ein defekter Server legt die übrigen nicht lahm.
+
+    ``proxy`` lädt stattdessen die Werkzeuge, die der MCP-Server von OpenBuchhaltung an
+    seine Clients weiterreicht: alle für den Benutzer sichtbaren Server mit
+    ``proxy_mode`` (bei ``read`` nur lesende Werkzeuge); ``tenant_id`` dient dann nur dem
+    Audit-Log.
     """
     handles: list[_ServerHandle] = []
     notes: list[str] = []
     with session_factory() as session:
-        rows = session.execute(
-            select(McpServer.id, McpServer.name)
-            .where(
-                McpServer.is_active.is_(True),
-                or_(McpServer.tenant_id.is_(None), McpServer.tenant_id == tenant_id),
-            )
-            .order_by(McpServer.name, McpServer.id)
-        ).all()
+        if proxy:
+            rows = [
+                (server.id, server.name)
+                for server in visible_servers(session, user, active_only=True)
+                if server.proxy_mode != PROXY_OFF
+            ]
+        else:
+            rows = session.execute(
+                select(McpServer.id, McpServer.name)
+                .where(
+                    McpServer.is_active.is_(True),
+                    or_(McpServer.tenant_id.is_(None), McpServer.tenant_id == tenant_id),
+                )
+                .order_by(McpServer.name, McpServer.id)
+            ).all()
         for server_id, name in rows:
             try:
                 server = session.get(McpServer, server_id)
                 handle, note = _server_handle(session, server, user) if server else (None, None)
+                if handle is not None and proxy and server.proxy_mode == PROXY_READ:
+                    handle.tools = [tool for tool in handle.tools if tool.read_only]
             except Exception:  # noqa: BLE001 – übrige Server weiter anbieten
                 logger.exception("MCP-Server %s: Werkzeuge konnten nicht geladen werden", name)
                 session.rollback()
                 handle, note = None, f"{name} (derzeit nicht erreichbar)"
-            if handle is not None:
+            if handle is not None and handle.tools:
                 handles.append(handle)
             if note:
                 notes.append(note)
@@ -1726,6 +1800,7 @@ def load_external_tools(
         tenant_id=tenant_id,
         company_id=company_id,
         actor=(user or {}).get("username") or "api-token",
+        channel=CHANNEL_MCP if proxy else CHANNEL_CHAT,
     )
 
 
@@ -1751,6 +1826,8 @@ def serialize_server(session: Session, server: McpServer, *, user: dict | None) 
         "credential_scope_label": SCOPE_LABELS[server.credential_scope],
         "confirm_mode": server.confirm_mode,
         "confirm_mode_label": CONFIRM_LABELS[server.confirm_mode],
+        "proxy_mode": server.proxy_mode,
+        "proxy_mode_label": PROXY_LABELS[server.proxy_mode],
         "tools": tool_views(server),
         "tools_refreshed_at": _iso(server.tools_refreshed_at),
         "can_manage": manage,

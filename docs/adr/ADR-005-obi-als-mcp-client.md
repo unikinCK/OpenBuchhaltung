@@ -92,6 +92,22 @@ dessen Berechtigungen durchsetzt.
 - Die URL sehen nur Administratoren, Logs und Audit nur ihren Ursprung: Gehostete Server
   tragen ihren Schlüssel oft im Pfad.
 
+### 6. OpenBuchhaltung als MCP-Proxy (Nachtrag 2026-10-31)
+- Je Server wählbar (`proxy_mode`: `off`, `read`, `all`), ob der eigene MCP-Server die
+  Werkzeuge an seine Clients weiterreicht. Der MCP-Server bleibt ein Proxy auf die REST-API:
+  `GET /mcp-proxy/tools` liefert die Werkzeuge im Format von `tools/list`,
+  `POST /mcp-proxy/tools/call` führt sie mit dem Zugang des aufrufenden Benutzers aus. So
+  gelten Rollen, Mandant und persönliche Zugänge wie überall; Geheimnisse verlassen die
+  Instanz nicht, MCP-Clients sehen nur Werkzeuge und Ergebnisse.
+- Keine Bestätigung durch Obi: Das übernimmt der MCP-Client. `read` reicht nur Werkzeuge mit
+  `readOnlyHint` durch und ist die vorsichtige Wahl; Standard ist `off`.
+- Der KI-Chat nutzt den Proxy nicht (er führt externe Werkzeuge selbst aus, mit
+  Bestätigungspflicht); `MCPServer(proxy_external=False)`.
+- Aufrufe über den MCP-Server tragen den Kanal `mcp` (Header bzw. Kontext der Bridge). Die
+  REST-API kann damit Inhalte für MCP-Clients sperren, ohne Obi oder die Oberfläche zu
+  treffen – zuerst das Firmenwissen je Gesellschaft (`knowledge_mcp_enabled`). Der Kanal
+  kann nur einschränken, nie Rechte geben; den Schalter gibt es deshalb nicht als MCP-Tool.
+
 ## Konsequenzen
 - Positiv: Obi erreicht Unterlagen und Funktionen anderer Systeme, ohne dass dafür
   Konnektoren in OpenBuchhaltung programmiert werden; Berechtigungen setzt bei

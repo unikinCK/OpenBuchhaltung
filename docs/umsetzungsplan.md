@@ -756,6 +756,9 @@ dann selbst betriebener Modellserver).
       Administrators oder Zugang je Benutzer („Obi-Verbindungen“); Werkzeuge im Chat als
       `präfix__werkzeug`, lesende sofort, übrige nach Bestätigung, Audit; UI/API/MCP
       *(2026-10-31)*.
+- [x] **OpenBuchhaltung als MCP-Proxy** (`proxy_mode` je Server: aus, nur lesende, alle) und
+      **Firmenwissen über MCP sperrbar** je Gesellschaft; Kanal `mcp` für Aufrufe über den
+      MCP-Server *(2026-10-31)*.
 - [ ] Belege aus fremden Systemen übernehmen: Binärinhalte und Ressourcen eines
       MCP-Werkzeugs als Beleg ablegen, ohne sie durch den Modellkontext zu schleusen.
 - [ ] Token-Widerruf beim Abmelden (RFC 7009) und alter HTTP+SSE-Transport für ältere
