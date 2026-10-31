@@ -11,6 +11,7 @@ from app.api import (  # noqa: F401
     audit_log,
     bank,
     chat,
+    company_knowledge,
     controlling,
     dashboard,
     documents,

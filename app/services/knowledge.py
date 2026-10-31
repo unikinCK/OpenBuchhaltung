@@ -406,9 +406,10 @@ class KnowledgeBase:
         return weights
 
     def search(
-        self, query: str, *, limit: int = DEFAULT_SEARCH_LIMIT
+        self, query: str, *, limit: int = DEFAULT_SEARCH_LIMIT, cap: int = MAX_SEARCH_LIMIT
     ) -> list[tuple[KnowledgeSection, float]]:
-        limit = max(1, min(int(limit or DEFAULT_SEARCH_LIMIT), MAX_SEARCH_LIMIT))
+        """BM25-Treffer; ``cap`` begrenzt ``limit`` (Firmenwissen holt mehr Kandidaten)."""
+        limit = max(1, min(int(limit or DEFAULT_SEARCH_LIMIT), cap))
         query_tokens = tokenize(query)
         if not query_tokens or not self.sections:
             return []

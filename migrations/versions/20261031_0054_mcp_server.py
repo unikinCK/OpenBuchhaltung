@@ -1,16 +1,16 @@
 """Externe MCP-Server für Obi (``mcp_server``) und ihre Zugänge (``mcp_credential``,
 zentral oder je Benutzer).
 
-Revision ID: 20261031_0053
-Revises: 20261027_0052
-Create Date: 2026-10-31 10:00:00
+Revision ID: 20261031_0054
+Revises: 20261031_0053
+Create Date: 2026-10-31 18:00:00
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20261031_0053"
-down_revision = "20261027_0052"
+revision = "20261031_0054"
+down_revision = "20261031_0053"
 branch_labels = None
 depends_on = None
 

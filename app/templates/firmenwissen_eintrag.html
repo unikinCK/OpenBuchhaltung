@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ entry.title }} – Firmenwissen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <p><a href="{{ url_for('main.company_knowledge_page', company_id=entry.company_id) }}">← Firmenwissen</a></p>
+  <h1 class="page-title">{{ entry.title }}</h1>
+  <p>
+    {% if entry.status == 'approved' %}<span class="badge badge-success">freigegeben</span>
+    {% elif entry.status == 'draft' %}<span class="badge badge-warning">Entwurf – nicht freigegeben</span>
+    {% else %}<span class="badge">ausgemustert</span>{% endif %}
+    {% if entry.kind == 'open_question' %}<span class="badge badge-info">offene Frage</span>{% endif %}
+    {% if entry.review_reason %}<span class="badge badge-danger" title="Prüfgrund">{{ entry.review_reason }}</span>{% endif %}
+    <span class="muted small">Schlüssel <code>{{ entry.entry_key }}</code>{% if entry.package_key %} · Paket <code>{{ entry.package_key }}</code>{% endif %}</span>
+  </p>
+
+  <section class="card">
+    <div class="knowledge-text">{{ entry.content }}</div>
+    <p class="muted small">
+      Thema: {{ entry.topic or '–' }} ·
+      Quelle:
+      {% if source %}
+        <a href="{{ url_for('main.company_knowledge_source_page', source_id=source.id) }}">{{ source.title }}</a>
+        ({{ authority_labels.get(source.authority, source.authority) }}{% if not source.is_active %}, inaktiv{% endif %})
+      {% else %}–{% endif %}
+      {% if entry.locator %} · Fundstelle: {{ entry.locator }}{% endif %}
+    </p>
+    <p class="muted small">
+      Vorgeschlagen von {{ entry.proposed_by }}
+      {% if entry.approved_by %} · freigegeben von {{ entry.approved_by }} am {{ entry.approved_at | datum_zeit }}{% endif %}
+      {% if entry.review_due %} · Wiedervorlage {{ entry.review_due | datum }}{% endif %}
+    </p>
+    {% if entry.review_note %}<p><strong>Prüfhinweis:</strong> {{ entry.review_note }}</p>{% endif %}
+  </section>
+
+  {% if can_write %}
+    <section class="card">
+      <h2>Status</h2>
+      <div class="inline-form">
+        {% if entry.status == 'draft' or (entry.status == 'approved' and entry.review_reason) %}
+          <form method="post" action="{{ url_for('main.set_company_knowledge_entry_status_from_form', entry_id=entry.id) }}" data-confirm="Eintrag als Unternehmensregel freigeben? Obi zitiert ihn dann als freigegeben.">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="status" value="approved" />
+            <button type="submit">{% if entry.status == 'approved' %}Geprüft – Freigabe bestätigen{% else %}Freigeben{% endif %}</button>
+          </form>
+        {% endif %}
+        {% if entry.status == 'approved' %}
+          <form method="post" action="{{ url_for('main.set_company_knowledge_entry_status_from_form', entry_id=entry.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="status" value="draft" />
+            <button type="submit" class="secondary">Freigabe zurücknehmen</button>
+          </form>
+        {% endif %}
+        {% if entry.status == 'retired' %}
+          <form method="post" action="{{ url_for('main.set_company_knowledge_entry_status_from_form', entry_id=entry.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="status" value="draft" />
+            <button type="submit" class="secondary">Wieder als Entwurf aufnehmen</button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ url_for('main.set_company_knowledge_entry_status_from_form', entry_id=entry.id) }}" data-confirm="Eintrag ausmustern? Obi findet ihn danach nicht mehr.">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="status" value="retired" />
+            <button type="submit" class="secondary">Ausmustern</button>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if entry.status != 'retired' %}
+      <section class="card">
+        <h2>Bearbeiten</h2>
+        <p class="muted small">Neuer Titel, Inhalt, Fundstelle oder Quelle setzen einen freigegebenen Eintrag auf Entwurf zurück.</p>
+        <form method="post" action="{{ url_for('main.update_company_knowledge_entry_from_form', entry_id=entry.id) }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          {% include "firmenwissen_eintrag_felder.html" %}
+          <p><button type="submit">Speichern</button></p>
+        </form>
+      </section>
+    {% endif %}
+  {% endif %}
+
+  <section class="card">
+    <h2>Verlauf</h2>
+    {% if history %}
+      <table>
+        <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th></tr></thead>
+        <tbody>
+          {% for event in history %}
+            <tr><td>{{ event.changed_at | datum_zeit(seconds=True) }}</td><td>{{ event.action }}</td><td>{{ event.changed_by }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Noch keine protokollierten Änderungen.</p>
+    {% endif %}
+  </section>
+{% endblock %}

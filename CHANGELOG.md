@@ -13,7 +13,7 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   Belegablagen anderer Hersteller, CRM, Wissensdatenbanken): URL (Streamable HTTP), Präfix
   der Werkzeuge, Hinweise für Obi, Freigabe einzelner Werkzeuge, Bestätigungsregel und
   Zeitlimit; instanzweit oder je Mandant. Neue Tabellen `mcp_server` und `mcp_credential`
-  (Migration `20261031_0053`).
+  (Migration `20261031_0054`).
 - Anmeldung per Token (frei wählbarer Header) oder OAuth 2.1 (Discovery nach RFC 9728/8414,
   Dynamic Client Registration, PKCE, `resource`, automatischer Refresh). Je Server wählbar:
   **zentraler Zugang**, den der Administrator pflegt, oder **Zugang je Benutzer**, den jeder
@@ -30,7 +30,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - REST-API `/api/v1/mcp-servers…` und MCP-Tools `list_mcp_servers`, `create_mcp_server`,
   `update_mcp_server`, `delete_mcp_server`, `refresh_mcp_server_tools`, `set_mcp_server_token`,
   `clear_mcp_server_credential`, `start_mcp_server_oauth`; im KI-Chat gesperrt. Entscheidung
-  in ADR-004.
+  in ADR-005.
+
+### Firmenwissen je Gesellschaft (ADR-004)
+- Neue Tabellen `company_knowledge_source`, `company_knowledge_excerpt` und
+  `company_knowledge_entry` (Migration `20261031_0053`): Quellen mit Verbindlichkeit, Stand und
+  Gültigkeit, Quellenauszüge mit Fundstelle, Wissenseinträge mit Status Entwurf → freigegeben →
+  ausgemustert, Wiedervorlage und Prüfgrund; alle Änderungen in der Audit-Hashkette.
+- Import von Wissenspaketen (`format: openbuchhaltung-firmenwissen`, Version 1) mit Vorschau und
+  Abgleich je Paket über stabile Schlüssel: neue Einträge als Entwurf, geänderte freigegebene
+  zurück auf Entwurf, Einträge geänderter oder entfallener Quellen mit Prüfgrund, entfallene
+  ausgemustert; von Hand Ausgemustertes bleibt es.
+- `search_knowledge` (MCP, `GET /api/v1/knowledge`, Seite **Wissen**) durchsucht mit
+  `company_id` auch das Firmenwissen der Gesellschaft (BM25 je Gesellschaft, freigegebene
+  Einträge höher gewichtet, Entwürfe gekennzeichnet); der Systemprompt nennt nur die Kennzahlen.
+- UI **Verwaltung → Firmenwissen**, REST unter `/api/v1/companies/<id>/knowledge/…`,
+  `/api/v1/knowledge-entries/<id>` und `/api/v1/knowledge-sources/<id>`, neun MCP-Tools.
+  Freigabe, Quellen schalten und Paketimport sind im KI-Chat gesperrt; Obi darf Einträge nur
+  als Entwurf vorschlagen.
+- ADR-004 beschreibt zusätzlich Stufe 2 (durchsetzbare Unternehmensrichtlinien).
 
 ### Wissensbasis: Rechnungseingang, Freigabe und Kontierung
 - Neue Wissensdatei `rechnungseingang-kontrolle.md`: Prüfschritte im Rechnungseingang

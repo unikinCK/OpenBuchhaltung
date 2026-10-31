@@ -736,8 +736,11 @@ dann selbst betriebener Modellserver).
 - [x] **Wissensdatei Rechnungseingang/IKS**: Prüfschritte, Freigabe und Vier-Augen-Prinzip,
       Vollmachten, Kostenstellen/Kostenträger (KOST1/KOST2), Kontierung, Kreditkarten und
       Auslagen, Gewichtung von Unternehmensunterlagen *(2026-10-30)*.
-- [ ] Firmenwissen je Gesellschaft (Quellen, Fundstellen, Wissenseinträge mit Freigabe und
-      Wiedervorlage, Import von Wissenspaketen) als Ergänzung zur Richtlinien-Entität.
+- [x] **Firmenwissen je Gesellschaft** (ADR-004): Quellen, Fundstellen, Wissenseinträge mit
+      Freigabe und Wiedervorlage, Import von Wissenspaketen mit Abgleich, Suche je Gesellschaft
+      in `search_knowledge`, UI/API/MCP *(2026-10-31)*.
+- [ ] Unternehmensrichtlinien als durchsetzbare Regeln (ADR-004 Stufe 2: `company_policy` mit
+      Versionen, `evaluate_tool_call` am Bestätigungs-Hook).
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
       Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
 - [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf
@@ -747,7 +750,7 @@ dann selbst betriebener Modellserver).
       Wissensbasis beim Modell ankommt.
 
 ## Phase 8 – Obi im Unternehmen (Stand 2026-10-31)
-- [x] **Externe MCP-Server (Obi als MCP-Client, ADR-004):** Administrator bindet Server ein
+- [x] **Externe MCP-Server (Obi als MCP-Client, ADR-005):** Administrator bindet Server ein
       (Belegablage, CRM, Wissensdatenbank; instanzweit oder je Mandant), Anmeldung per Token
       oder OAuth 2.1 (Discovery, DCR, PKCE, Refresh), wählbar als zentraler Zugang des
       Administrators oder Zugang je Benutzer („Obi-Verbindungen“); Werkzeuge im Chat als

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% macro status_badge(status) -%}
+  {%- if status == 'approved' -%}<span class="badge badge-success">freigegeben</span>
+  {%- elif status == 'draft' -%}<span class="badge badge-warning">Entwurf</span>
+  {%- else -%}<span class="badge">ausgemustert</span>{%- endif -%}
+{%- endmacro %}
+
+{% block title %}Firmenwissen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Firmenwissen</h1>
+  <p class="muted">
+    Richtlinien, Arbeitsanweisungen und Regeln dieser Gesellschaft, die Obi im KI-Chat mit
+    Quelle und Fundstelle zitiert (Tool <code>search_knowledge</code> mit
+    <code>company_id</code>). Importierte und vorgeschlagene Einträge sind Entwürfe, bis ein
+    Admin oder Buchhalter sie freigibt. Firmenwissen ist vertraulich und nur für Benutzer
+    dieser Gesellschaft sichtbar.
+  </p>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <p>
+        <strong>{{ summary.approved }}</strong> freigegeben ·
+        <strong>{{ summary.drafts }}</strong> Entwürfe ·
+        <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, due='1') }}"><strong>{{ summary.due }}</strong> zu prüfen</a> ·
+        <strong>{{ summary.retired }}</strong> ausgemustert ·
+        <strong>{{ summary.sources }}</strong> aktive Quellen
+      </p>
+      <nav class="filter-bar" aria-label="Ansicht">
+        <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id) }}" {% if view == 'entries' %}class="active"{% endif %}>Einträge</a>
+        <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='sources') }}" {% if view == 'sources' %}class="active"{% endif %}>Quellen</a>
+        {% if can_write %}
+          <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='import') }}" {% if view == 'import' %}class="active"{% endif %}>Import</a>
+          <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='new') }}" {% if view == 'new' %}class="active"{% endif %}>Neuer Eintrag</a>
+        {% endif %}
+      </nav>
+    </section>
+
+    {% if view == 'entries' %}
+      <section class="card">
+        <form method="get" action="{{ url_for('main.company_knowledge_page') }}" class="filter-bar">
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <select name="status" aria-label="Status">
+            {% for value, label in status_filters %}
+              <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <label><input type="checkbox" name="due" value="1" {% if due_only %}checked{% endif %} /> nur zu prüfende</label>
+          <input name="q" value="{{ query }}" placeholder="Text in Titel, Inhalt, Thema" size="32" />
+          <button type="submit" class="secondary">Filtern</button>
+        </form>
+        {% if entries %}
+          <p class="muted small">{{ total }} Einträge{% if total > entries|length %}, die ersten {{ entries|length }} angezeigt{% endif %}.</p>
+          <table>
+            <thead><tr><th>Thema</th><th>Titel</th><th>Status</th><th>Quelle</th><th>Wiedervorlage</th></tr></thead>
+            <tbody>
+              {% for row in entries %}
+                {% set entry = row.entry %}
+                <tr>
+                  <td>{{ entry.topic or '–' }}</td>
+                  <td>
+                    <a href="{{ url_for('main.company_knowledge_entry_page', entry_id=entry.id) }}">{{ entry.title }}</a>
+                    {% if entry.kind == 'open_question' %} <span class="badge badge-info">offene Frage</span>{% endif %}
+                  </td>
+                  <td>
+                    {{ status_badge(entry.status) }}
+                    {% if entry.review_reason %} <span class="badge badge-danger" title="Prüfgrund">{{ entry.review_reason }}</span>{% endif %}
+                  </td>
+                  <td>{{ row.source_title or '–' }}</td>
+                  <td>{{ entry.review_due | datum if entry.review_due else '–' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">Keine Einträge für diesen Filter.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if view == 'sources' %}
+      <section class="card">
+        <h2>Quellen</h2>
+        {% if sources %}
+          <table>
+            <thead><tr><th>Titel</th><th>Art</th><th>Stand</th><th>Verbindlichkeit</th><th>Auszüge</th><th>Einträge</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for source in sources %}
+                <tr>
+                  <td><a href="{{ url_for('main.company_knowledge_source_page', source_id=source.id) }}">{{ source.title }}</a></td>
+                  <td>{{ source.document_kind or '–' }}</td>
+                  <td>{{ source.source_version or '' }}{% if source.source_date %} {{ source.source_date }}{% endif %}</td>
+                  <td>{{ source.authority_label }}</td>
+                  <td>{{ source.excerpt_count }}</td>
+                  <td>{{ source.entry_count }}</td>
+                  <td>{% if source.is_active %}<span class="badge badge-success">aktiv</span>{% else %}<span class="badge">inaktiv</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">Noch keine Quellen. Quellen kommen über ein Wissenspaket (Import).</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if view == 'import' and can_write %}
+      <section class="card">
+        <h2>Wissenspaket importieren</h2>
+        <p class="muted small">
+          JSON-Datei im Format <code>openbuchhaltung-firmenwissen</code>, Version 1 (siehe
+          ADR-004). Der Import gleicht je Paket über stabile Schlüssel ab: neue Einträge
+          kommen als Entwurf, geänderte freigegebene Einträge fallen auf Entwurf zurück,
+          entfallene werden ausgemustert. Die Vorschau ändert nichts.
+        </p>
+        <form method="post" action="{{ url_for('main.import_company_knowledge_from_form') }}" enctype="multipart/form-data" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <input type="file" name="package_file" accept=".json,application/json" required />
+          <label><input type="checkbox" name="dry_run" value="1" checked /> nur Vorschau</label>
+          <button type="submit">Prüfen bzw. importieren</button>
+        </form>
+      </section>
+      {% if report %}
+        <section class="card">
+          <h2>{% if report.dry_run %}Vorschau (nichts geändert){% else %}Import abgeschlossen{% endif %}</h2>
+          <p>Paket <code>{{ report.package.key }}</code>{% if report.package.revision %}, Revision {{ report.package.revision }}{% endif %}{% if report.package.title %} – {{ report.package.title }}{% endif %}</p>
+          <table>
+            <thead><tr><th></th><th>neu</th><th>geändert</th><th>unverändert</th><th>entfallen</th></tr></thead>
+            <tbody>
+              {% for label, key in [('Quellen', 'sources'), ('Auszüge', 'excerpts'), ('Einträge', 'entries')] %}
+                <tr><td>{{ label }}</td><td>{{ report[key].created }}</td><td>{{ report[key].updated }}</td><td>{{ report[key].unchanged }}</td><td>{{ report[key].removed }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="muted small">
+            Einträge zurück auf Entwurf: {{ report.entries.back_to_draft }} ·
+            mit Prüfgrund markiert: {{ report.entries.flagged }} ·
+            wieder aufgenommen: {{ report.entries.revived }}
+          </p>
+          {% if report.changes %}
+            <details>
+              <summary>Änderungen im Einzelnen ({{ report.changes|length }})</summary>
+              <table>
+                <thead><tr><th>Art</th><th>Schlüssel</th><th>Aktion</th><th>Titel</th></tr></thead>
+                <tbody>
+                  {% for change in report.changes %}
+                    <tr><td>{{ 'Quelle' if change.type == 'source' else 'Eintrag' }}</td><td><code>{{ change.key }}</code></td><td>{{ change.action }}</td><td>{{ change.title or '' }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          {% endif %}
+        </section>
+      {% endif %}
+    {% endif %}
+
+    {% if view == 'new' and can_write %}
+      <section class="card">
+        <h2>Neuer Eintrag (Entwurf)</h2>
+        <form method="post" action="{{ url_for('main.create_company_knowledge_entry_from_form') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          {% include "firmenwissen_eintrag_felder.html" %}
+          <p><button type="submit">Als Entwurf anlegen</button></p>
+        </form>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

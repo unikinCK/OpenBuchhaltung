@@ -8,6 +8,8 @@
     Fachwissen zu Umsatzsteuer, Buchführung, AfA, Betriebsausgaben, Lohn, Ertragsteuern,
     Kontenrahmen und Buchungsmustern – dieselbe Wissensbasis, die Obi im KI-Chat nutzt
     (Tool <code>search_knowledge</code>).{% if rechtsstand %} Rechtsstand {{ rechtsstand }}.{% endif %}
+    {% if company_summary and (company_summary.approved or company_summary.drafts) %}Die Suche umfasst
+    auch das <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id) }}">Firmenwissen</a> der gewählten Gesellschaft.{% endif %}
   </p>
 
   <section class="card">
@@ -16,9 +18,35 @@
       <input id="knowledge-q" name="q" value="{{ query }}" placeholder="z. B. GWG Grenze, Reverse Charge buchen, Aufbewahrungsfrist" size="48" autofocus />
       <label for="knowledge-limit">Treffer</label>
       <input id="knowledge-limit" name="limit" type="number" min="1" max="8" value="{{ limit }}" />
+      {% if selected_company_id %}<input type="hidden" name="company_id" value="{{ selected_company_id }}" />{% endif %}
       <button type="submit">Suchen</button>
     </form>
   </section>
+
+  {% if query and company_summary and (company_summary.approved or company_summary.drafts) %}
+    <section class="card">
+      <h2>Firmenwissen der Gesellschaft</h2>
+      {% if company_results %}
+        {% for hit in company_results %}
+          <div class="knowledge-hit company-hit">
+            <h3>
+              {% if hit.type == 'entry' %}<a href="{{ url_for('main.company_knowledge_entry_page', entry_id=hit.id) }}">{{ hit.title }}</a>{% else %}{{ hit.title }}{% endif %}
+              {% if hit.status == 'approved' %}<span class="badge badge-success">freigegeben</span>
+              {% elif hit.status == 'draft' %}<span class="badge badge-warning">Entwurf – nicht freigegeben</span>
+              {% else %}<span class="badge badge-info">{{ hit.status_label }}</span>{% endif %}
+            </h3>
+            <p class="muted small">
+              {% if hit.source_id %}<a href="{{ url_for('main.company_knowledge_source_page', source_id=hit.source_id) }}">{{ hit.source_title }}</a>{% else %}ohne Quelle{% endif %}{% if hit.locator %} · {{ hit.locator }}{% endif %}
+              {% if hit.review_reason %} · <span class="badge badge-danger">{{ hit.review_reason }}</span>{% endif %}
+            </p>
+            <div class="knowledge-text">{{ hit.text }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="muted">Keine Treffer im Firmenwissen für „{{ query }}“.</p>
+      {% endif %}
+    </section>
+  {% endif %}
 
   {% if query %}
     {% if results %}

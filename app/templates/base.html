@@ -55,6 +55,7 @@
           ]),
           ('Verwaltung', [
             ('main.admin_page', 'Verwaltung'),
+            ('main.company_knowledge_page', 'Firmenwissen'),
             ('main.mcp_servers_page', 'MCP-Server'),
             ('main.audit_log_page', 'Audit'),
           ]),
@@ -63,6 +64,8 @@
           'main.journal_entry_detail_page': 'main.journal_page',
           'main.amend_journal_entry_page': 'main.journal_page',
           'main.partner_detail_page': 'main.partners_page',
+          'main.company_knowledge_entry_page': 'main.company_knowledge_page',
+          'main.company_knowledge_source_page': 'main.company_knowledge_page',
         } %}
         {% set current_endpoint = detail_pages.get(request.endpoint, request.endpoint) %}
         <nav class="mainnav" aria-label="Hauptnavigation">

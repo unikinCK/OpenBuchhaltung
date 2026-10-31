@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source.title }} – Firmenwissen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <p><a href="{{ url_for('main.company_knowledge_page', company_id=source.company_id, view='sources') }}">← Quellen</a></p>
+  <h1 class="page-title">{{ source.title }}</h1>
+  <p>
+    {% if source.is_active %}<span class="badge badge-success">aktiv</span>{% else %}<span class="badge">inaktiv{% if source.inactive_reason %} – {{ source.inactive_reason }}{% endif %}</span>{% endif %}
+    <span class="badge badge-info">{{ authority_labels.get(source.authority, source.authority) }}</span>
+    <span class="muted small">Schlüssel <code>{{ source.source_key }}</code>{% if source.package_key %} · Paket <code>{{ source.package_key }}</code>{% if source.package_revision %} (Revision {{ source.package_revision }}){% endif %}{% endif %}</span>
+  </p>
+
+  <section class="card">
+    <table>
+      <tbody>
+        <tr><th>Art</th><td>{{ source.document_kind or '–' }}</td></tr>
+        <tr><th>Fassung / Stand</th><td>{{ source.source_version or '–' }}{% if source.source_date %} · {{ source.source_date | datum }}{% endif %}</td></tr>
+        <tr><th>Gültig</th><td>{% if source.valid_from %}ab {{ source.valid_from | datum }}{% endif %}{% if source.valid_to %} bis {{ source.valid_to | datum }}{% endif %}{% if not source.valid_from and not source.valid_to %}–{% endif %}</td></tr>
+        <tr><th>Herkunft</th><td>{{ source.origin or '–' }}</td></tr>
+        <tr><th>SHA-256 des Originals</th><td><code>{{ source.content_sha256 or '–' }}</code></td></tr>
+        {% if source.note %}<tr><th>Prüfhinweis</th><td>{{ source.note }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+    {% if can_write %}
+      <form method="post" action="{{ url_for('main.set_company_knowledge_source_active_from_form', source_id=source.id) }}" class="inline-form"
+            {% if source.is_active %}data-confirm="Quelle deaktivieren? Ihre Auszüge werden nicht mehr gefunden, freigegebene Einträge daraus erhalten einen Prüfgrund."{% endif %}>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="is_active" value="{{ 'false' if source.is_active else 'true' }}" />
+        <button type="submit" class="secondary">{{ 'Quelle deaktivieren' if source.is_active else 'Quelle aktivieren' }}</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Einträge aus dieser Quelle</h2>
+    {% if entries %}
+      <ul>
+        {% for entry in entries %}
+          <li>
+            <a href="{{ url_for('main.company_knowledge_entry_page', entry_id=entry.id) }}">{{ entry.title }}</a>
+            <span class="muted small">({{ status_labels.get(entry.status, entry.status) }}{% if entry.locator %}, {{ entry.locator }}{% endif %})</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Keine Einträge verweisen auf diese Quelle.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Auszüge ({{ excerpts|length }})</h2>
+    {% for excerpt in excerpts %}
+      <details {% if loop.first and excerpts|length < 4 %}open{% endif %}>
+        <summary>{{ excerpt.locator or excerpt.excerpt_key }}{% if not excerpt.is_active %} <span class="badge">entfallen</span>{% endif %}</summary>
+        <div class="knowledge-text">{{ excerpt.content }}</div>
+      </details>
+    {% else %}
+      <p class="muted">Keine Auszüge.</p>
+    {% endfor %}
+  </section>
+
+  {% if history %}
+    <section class="card">
+      <h2>Verlauf</h2>
+      <table>
+        <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Benutzer</th></tr></thead>
+        <tbody>
+          {% for event in history %}
+            <tr><td>{{ event.changed_at | datum_zeit(seconds=True) }}</td><td>{{ event.action }}</td><td>{{ event.changed_by }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+{% endblock %}

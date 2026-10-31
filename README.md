@@ -1715,13 +1715,58 @@ die betroffenen Dateien anpassen und den Rechtsstand hochsetzen. Instanzeigene E
 (Hinweise des Steuerberaters, Besonderheiten der Gesellschaft) kommen über
 `KNOWLEDGE_EXTRA_DIR` dazu, ohne das Repository zu ändern.
 
+### Firmenwissen je Gesellschaft
+
+Unternehmensspezifisches Wissen (Richtlinien, Arbeitsanweisungen, Kontierungsregeln) liegt
+nicht in Dateien, sondern je Gesellschaft in der Datenbank (ADR-004): **Quellen** mit
+Verbindlichkeit, Stand und Gültigkeit, **Quellenauszüge** mit Fundstelle und
+**Wissenseinträge** mit Status `draft` → `approved` → `retired`, Wiedervorlage und Prüfgrund.
+Importierte und von Obi vorgeschlagene Einträge sind immer Entwürfe; freigeben kann nur ein
+Admin oder Buchhalter (im KI-Chat gesperrt). Jede Änderung geht in die Audit-Hashkette.
+
+- UI: **Verwaltung → Firmenwissen** (Einträge mit Filter „zu prüfen“, Quellen mit Auszügen,
+  Import mit Vorschau, neuer Eintrag); **Wissen** zeigt die Firmentreffer der gewählten
+  Gesellschaft mit.
+- API: `GET/POST /api/v1/companies/<id>/knowledge/entries`,
+  `GET/PATCH /api/v1/knowledge-entries/<id>`, `POST /api/v1/knowledge-entries/<id>/status`,
+  `GET /api/v1/companies/<id>/knowledge/sources`, `GET /api/v1/knowledge-sources/<id>`,
+  `POST /api/v1/knowledge-sources/<id>/active`, `POST /api/v1/companies/<id>/knowledge/import`
+  (`dry_run` für die Vorschau), `GET /api/v1/knowledge?q=…&company_id=…` (Firmentreffer in
+  `company_results`).
+- MCP: `list_/get_/create_/update_company_knowledge_entry`,
+  `set_company_knowledge_entry_status`, `list_company_knowledge_sources`,
+  `get_company_knowledge_source`, `set_company_knowledge_source_active`,
+  `import_company_knowledge`, `search_knowledge` mit `company_id`.
+
+Wissenspakete sind JSON-Dateien mit stabilen Schlüsseln; ein späterer Import desselben
+Pakets gleicht ab (neu, geändert, entfallen), setzt geänderte freigegebene Einträge auf
+Entwurf zurück und markiert Einträge geänderter Quellen zur Prüfung:
+
+```json
+{
+  "format": "openbuchhaltung-firmenwissen",
+  "version": 1,
+  "package": {"key": "handbuch", "revision": "3", "title": "Verwaltungshandbuch"},
+  "sources": [{"key": "HB", "title": "Verwaltungshandbuch", "kind": "Richtlinie",
+               "version": "3.0", "date": "2026-01-15", "valid_from": "2026-02-01",
+               "authority": "binding", "sha256": "<SHA-256 des Originals>"}],
+  "excerpts": [{"key": "HB-S3", "source": "HB", "locator": "Seite 3", "content": "…"}],
+  "entries": [{"key": "HB-R1", "kind": "knowledge", "topic": "Beschaffung",
+               "title": "…", "content": "…", "source": "HB", "locator": "Seite 3",
+               "review_due": "2027-01-31", "review_note": "…"}]
+}
+```
+
+`authority`: `binding`, `reference`, `historical` oder `unverified` (Standard); `kind` eines
+Eintrags: `knowledge` oder `open_question`. Unbekannte Felder werden ignoriert.
+
 ## Obi und externe MCP-Server
 
 Über MCP-Server greift Obi im KI-Chat auf andere Systeme des Unternehmens zu – etwa die
 Belegablage eines anderen Herstellers, ein CRM oder eine Wissensdatenbank. OpenBuchhaltung
 ist dabei MCP-**Client** (Streamable HTTP, Protokoll 2025-06-18, nur stdlib); die
 Entscheidung und das Sicherheitsmodell stehen in
-[ADR-004](docs/adr/ADR-004-obi-als-mcp-client.md).
+[ADR-005](docs/adr/ADR-005-obi-als-mcp-client.md).
 
 **Einrichten (Administrator):** **Verwaltung → MCP-Server** (`/verwaltung/mcp-server`):
 Name, URL des Endpunkts (z. B. `https://dms.example.com/mcp`), Präfix der Werkzeuge,

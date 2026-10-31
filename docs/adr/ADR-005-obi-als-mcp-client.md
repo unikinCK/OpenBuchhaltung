@@ -1,4 +1,4 @@
-# ADR-004: Obi als MCP-Client für Systeme des Unternehmens
+# ADR-005: Obi als MCP-Client für Systeme des Unternehmens
 
 - **Status:** Angenommen
 - **Datum:** 2026-10-31
