@@ -288,6 +288,27 @@ def _document_content_properties() -> dict[str, Any]:
     }
 
 
+def _knowledge_source_properties() -> dict[str, Any]:
+    """Angaben zu einer Quelle des Firmenwissens (Hochladen und Ändern)."""
+    return {
+        "title": {"type": "string", "description": "Titel der Quelle (Standard: Dateiname)."},
+        "authority": {
+            "type": "string",
+            "enum": ["binding", "reference", "historical", "unverified"],
+            "description": (
+                "Verbindlichkeit: binding maßgeblich, reference Orientierung, historical "
+                "historisch, unverified ungeprüft (Standard)."
+            ),
+        },
+        "document_kind": {"type": "string", "description": "Art, z. B. Richtlinie."},
+        "source_version": {"type": "string", "description": "Fassung, z. B. 2.0."},
+        "source_date": {"type": "string", "description": "Stand JJJJ-MM-TT."},
+        "valid_from": {"type": "string", "description": "Gültig ab JJJJ-MM-TT."},
+        "valid_to": {"type": "string", "description": "Gültig bis JJJJ-MM-TT."},
+        "note": {"type": "string", "description": "Hinweis zur Quelle."},
+    }
+
+
 def _period_report_schema() -> dict[str, Any]:
     """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
     return {
@@ -5261,6 +5282,104 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/knowledge-sources/{source_id}/active",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_company_knowledge_source",
+        description=(
+            "Ändert die Angaben einer hochgeladenen Quelle des Firmenwissens, z. B. die "
+            "Verbindlichkeit nach der Prüfung. Quellen aus Wissenspaketen pflegt das Paket. "
+            "Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "integer", "description": "ID der Quelle."},
+                **_knowledge_source_properties(),
+            },
+            "required": ["source_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/knowledge-sources/{source_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="upload_company_knowledge_document",
+        description=(
+            "Lädt eine Unterlage (PDF, Word .docx, TXT, Markdown, JPG, PNG) ins Firmenwissen. "
+            "Der Server liest im Hintergrund den Text aus, legt eine Quelle mit Auszügen an "
+            "und lässt ein KI-Modell eine Zusammenfassung schreiben, die als Entwurf gespeichert "
+            "wird. Kehrt sofort zurück (status running); Stand und Ergebnis liefert "
+            "get_company_knowledge_upload. Danach prüfen (get_company_knowledge_source für den "
+            "Text, update_company_knowledge_entry zum Korrigieren) und freigeben "
+            "(set_company_knowledge_entry_status). Eine schon hochgeladene Datei wird nicht "
+            "erneut verarbeitet (duplicate true). " + _SOURCE_URL_HINT + " Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                **_document_content_properties(),
+                **_knowledge_source_properties(),
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/knowledge/uploads",
+        arg_location="json",
+        timeout=DOCUMENT_UPLOAD_TOOL_TIMEOUT,
+    ),
+    ToolSpec(
+        name="list_company_knowledge_uploads",
+        description="Listet die jüngsten Uploads des Firmenwissens einer Gesellschaft mit Stand.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "limit": {"type": "integer", "description": "Höchstens (Standard 50, max 200)."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/companies/{company_id}/knowledge/uploads",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_company_knowledge_upload",
+        description=(
+            "Stand eines Uploads fürs Firmenwissen: status running (progress nennt den "
+            "Schritt), done (entry enthält den Entwurf der Zusammenfassung, source_id die "
+            "Quelle) oder failed (error nennt den Grund; retry_company_knowledge_upload "
+            "wiederholt). Dazu ein zeitlich begrenzter Link auf das Original. "
+            + _DOWNLOAD_URL_HINT
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"upload_id": {"type": "integer", "description": "ID des Uploads."}},
+            "required": ["upload_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/knowledge-uploads/{upload_id}",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="retry_company_knowledge_upload",
+        description=(
+            "Verarbeitet eine fehlgeschlagene Unterlage erneut, ohne sie neu hochzuladen. "
+            "Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"upload_id": {"type": "integer", "description": "ID des Uploads."}},
+            "required": ["upload_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/knowledge-uploads/{upload_id}/retry",
         arg_location="json",
     ),
     ToolSpec(

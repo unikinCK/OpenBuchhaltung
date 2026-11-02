@@ -33,6 +33,27 @@
     {% if entry.review_note %}<p><strong>Prüfhinweis:</strong> {{ entry.review_note }}</p>{% endif %}
   </section>
 
+  {% if upload %}
+    <section class="card">
+      <h2>Prüfen gegen das Original</h2>
+      <p class="muted small">
+        Diese Zusammenfassung hat ein KI-Modell aus der hochgeladenen Unterlage erstellt und kann
+        Fehler oder Lücken enthalten. Bitte mit dem Dokument vergleichen, bei Bedarf unten
+        korrigieren und dann freigeben.
+      </p>
+      <p><a href="{{ url_for('main.download_company_knowledge_upload', upload_id=upload.id) }}">Original herunterladen ({{ upload.file_name }})</a></p>
+      {% if source %}
+        <details>
+          <summary>Ausgelesener Text ({{ source.excerpts|length }} Auszüge)</summary>
+          {% for excerpt in source.excerpts %}
+            <h3 class="small">{{ excerpt.locator }}</h3>
+            <div class="knowledge-text">{{ excerpt.content }}</div>
+          {% endfor %}
+        </details>
+      {% endif %}
+    </section>
+  {% endif %}
+
   {% if can_write %}
     <section class="card">
       <h2>Status</h2>

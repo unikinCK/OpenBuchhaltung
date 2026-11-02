@@ -379,9 +379,10 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `CHAT_LLM_MAX_TOOL_CALLS` | `15` | Tool-Aufrufe je Chat-Nachricht. |
 | `CHAT_LLM_MAX_REASONING_TOKENS` | `16000` | Reasoning-Schranke je Modellaufruf: Denkt das Modell länger (getypte Reasoning-Ereignisse oder `<think>`-Text im Stream), bricht der Chat ab („Obi hat zu lange nachgedacht …“). Die gesamte Ausgabe je Aufruf ist auf diesen Wert + 8000 Token begrenzt, clientseitig und als `max_output_tokens` für Anbieter mit verdecktem Reasoning. `0` schaltet beides ab. |
 | `CHAT_LLM_IDLE_TIMEOUT_SECONDS` | `600` | Leerlauf-Timeout je Modellaufruf: Abbruch, wenn das Chat-LLM so lange keine Daten liefert. Großzügig, weil Prompt-Verarbeitung und Warteschlange lokaler Server minutenlang still sein können. Eine Höchstdauer je Chat-Nachricht gibt es nicht mehr. |
+| `KNOWLEDGE_LLM_ENDPOINT_URL`, `KNOWLEDGE_LLM_MODEL` | `CHAT_LLM_*`, dann `DOCUMENT_LLM_*` | Zusammenfassung hochgeladener Unterlagen fürs Firmenwissen. |
 | `KNOWLEDGE_EXTRA_DIR` | – | Zusätzliches Verzeichnis mit eigenen Wissensdateien (`*.md`, Aufbau wie `data/wissen/`) für Obi: `kompakt*.md` darin gehen in den Systemprompt, alle anderen in die Suche von `search_knowledge`. |
 | `CHAT_LLM_TIMEOUT_SECONDS` | – | **Entfernt** – wird ignoriert (Warnung beim Start); ersetzt durch `CHAT_LLM_MAX_REASONING_TOKENS` und `CHAT_LLM_IDLE_TIMEOUT_SECONDS`. |
-| `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich und Dokument-Update; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). |
+| `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`, Firmenwissen-Zusammenfassung `300`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich, Dokument-Update und Firmenwissen-Zusammenfassung; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). |
 
 **Fachliche Schnittstellen**
 
@@ -1721,21 +1722,37 @@ Unternehmensspezifisches Wissen (Richtlinien, Arbeitsanweisungen, Kontierungsreg
 nicht in Dateien, sondern je Gesellschaft in der Datenbank (ADR-004): **Quellen** mit
 Verbindlichkeit, Stand und Gültigkeit, **Quellenauszüge** mit Fundstelle und
 **Wissenseinträge** mit Status `draft` → `approved` → `retired`, Wiedervorlage und Prüfgrund.
-Importierte und von Obi vorgeschlagene Einträge sind immer Entwürfe; freigeben kann nur ein
-Admin oder Buchhalter (im KI-Chat gesperrt). Jede Änderung geht in die Audit-Hashkette.
+Hochgeladene, importierte und von Obi vorgeschlagene Einträge sind immer Entwürfe; freigeben
+kann nur ein Admin oder Buchhalter (im KI-Chat gesperrt). Jede Änderung geht in die
+Audit-Hashkette.
+
+**Unterlage hochladen:** Eine Datei (PDF, Word `.docx`, TXT, Markdown, JPG, PNG; Scans per
+Texterkennung) wird im Hintergrund ausgelesen. Daraus entstehen eine Quelle mit Auszügen je
+Seite bzw. Überschrift und eine KI-Zusammenfassung als Entwurf. Lange Dokumente fasst das
+Modell erst abschnittsweise und dann insgesamt zusammen. Das Original bleibt neben den Belegen
+im Upload-Verzeichnis der Instanz. Danach gilt der übliche Weg: gegen das Original prüfen, bei
+Bedarf korrigieren, freigeben. Das Modell kommt aus dem KI-Zugang des Benutzers, sonst aus
+`KNOWLEDGE_LLM_*` (Fallback `CHAT_LLM_*`). Dieselbe Datei wird nicht doppelt verarbeitet; ein
+Fehlschlag lässt sich ohne neues Hochladen wiederholen.
 
 - UI: **Verwaltung → Firmenwissen** (Einträge mit Filter „zu prüfen“, Quellen mit Auszügen,
-  Import mit Vorschau, neuer Eintrag); **Wissen** zeigt die Firmentreffer der gewählten
-  Gesellschaft mit.
+  Hochladen, Import mit Vorschau, neuer Eintrag); **Wissen** zeigt die Firmentreffer der
+  gewählten Gesellschaft mit.
 - API: `GET/POST /api/v1/companies/<id>/knowledge/entries`,
   `GET/PATCH /api/v1/knowledge-entries/<id>`, `POST /api/v1/knowledge-entries/<id>/status`,
   `GET /api/v1/companies/<id>/knowledge/sources`, `GET /api/v1/knowledge-sources/<id>`,
-  `POST /api/v1/knowledge-sources/<id>/active`, `POST /api/v1/companies/<id>/knowledge/import`
-  (`dry_run` für die Vorschau), `GET /api/v1/knowledge?q=…&company_id=…` (Firmentreffer in
-  `company_results`).
+  `PATCH /api/v1/knowledge-sources/<id>`, `POST /api/v1/knowledge-sources/<id>/active`,
+  `GET/POST /api/v1/companies/<id>/knowledge/uploads` (Datei als `multipart/form-data` oder
+  JSON mit `content_base64`/`source_url`; 202, Verarbeitung im Hintergrund),
+  `GET /api/v1/knowledge-uploads/<id>` (Stand, Entwurf, Link aufs Original),
+  `GET /api/v1/knowledge-uploads/<id>/file`, `POST /api/v1/knowledge-uploads/<id>/retry`,
+  `POST /api/v1/companies/<id>/knowledge/import` (`dry_run` für die Vorschau),
+  `GET /api/v1/knowledge?q=…&company_id=…` (Firmentreffer in `company_results`).
 - MCP: `list_/get_/create_/update_company_knowledge_entry`,
   `set_company_knowledge_entry_status`, `list_company_knowledge_sources`,
-  `get_company_knowledge_source`, `set_company_knowledge_source_active`,
+  `get_/update_company_knowledge_source`, `set_company_knowledge_source_active`,
+  `upload_company_knowledge_document`, `list_company_knowledge_uploads`,
+  `get_company_knowledge_upload`, `retry_company_knowledge_upload`,
   `import_company_knowledge`, `search_knowledge` mit `company_id`.
 - **Über MCP sperrbar:** Ein Administrator kann das Firmenwissen einer Gesellschaft für
   MCP-Clients (ChatGPT-/Claude-Connectoren, alles über den MCP-Server von OpenBuchhaltung)

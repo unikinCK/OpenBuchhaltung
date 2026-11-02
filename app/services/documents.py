@@ -20,6 +20,8 @@ DOCUMENT_CONTENT_SIGNATURES: dict[str, tuple[bytes, ...]] = {
     "application/pdf": (b"%PDF-",),
     "image/jpeg": (b"\xff\xd8\xff",),
     "image/png": (b"\x89PNG\r\n\x1a\n",),
+    # Nur für Unterlagen des Firmenwissens; Belege lassen Word-Dateien nicht zu.
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (b"PK\x03\x04",),
 }
 DOCUMENT_SIGNATURE_PROBE_BYTES = 8
 

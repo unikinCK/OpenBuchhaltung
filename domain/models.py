@@ -2138,3 +2138,58 @@ class CompanyKnowledgeEntry(Base):
     )
 
     source: Mapped[CompanyKnowledgeSource | None] = relationship()
+
+
+class CompanyKnowledgeUpload(Base):
+    """Hochgeladene Unterlage fürs Firmenwissen samt Verarbeitungsauftrag (ADR-004).
+
+    Textgewinnung und KI-Zusammenfassung dauern mit lokalen Modellen Minuten; sie laufen
+    deshalb wie der Belegabgleich in einem Thread des Workers, der Stand liegt hier.
+    ``status``: ``running``, dann ``done`` (mit Quelle, Auszügen und Eintrag als Entwurf)
+    oder ``failed`` (mit ``error``; die Datei bleibt, der Auftrag lässt sich wiederholen).
+    ``source_fields`` sind die beim Hochladen genannten Angaben zur Quelle, ``updated_at``
+    ist das Lebenszeichen des Auftrags.
+    """
+
+    __tablename__ = "company_knowledge_upload"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'done', 'failed')",
+            name="ck_company_knowledge_upload_status",
+        ),
+        Index("ix_company_knowledge_upload_file", "company_id", "file_sha256"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_fields: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    progress: Mapped[str | None] = mapped_column(String(120))
+    error: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_knowledge_source.id", ondelete="SET NULL")
+    )
+    entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_knowledge_entry.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    source: Mapped[CompanyKnowledgeSource | None] = relationship()
+    entry: Mapped[CompanyKnowledgeEntry | None] = relationship()

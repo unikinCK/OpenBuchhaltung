@@ -475,8 +475,9 @@
     });
   }
 
-  // Belegabgleich im Hintergrund: laufende Aufträge auf jeder Seite verfolgen und
-  // bei Abschluss Bescheid geben (Browser-Benachrichtigung, sonst Hinweis oben).
+  // Hintergrundaufträge (Belegabgleich, Firmenwissen-Upload): laufende Aufträge auf jeder
+  // Seite verfolgen und bei Abschluss Bescheid geben (Browser-Benachrichtigung, sonst
+  // Hinweis oben). Die Status-URL kann notice_title, notice_detail und page_label liefern.
   // <form data-match-start>: fragt vor dem Absenden nach der Erlaubnis für
   // Benachrichtigungen (geht nur bei einer Nutzeraktion).
   // <span data-match-job="<Status-URL>" data-match-job-file="…">: laufender Auftrag;
@@ -547,13 +548,29 @@
           return response.json();
         })
         .then(function (job) {
-          if (job && job.status !== "running") finishMatchJob(url, job);
+          if (!job) return;
+          if (job.status === "running") showMatchJobProgress(url, job);
+          else finishMatchJob(url, job);
         })
         .catch(function () {
           // Netzfehler: beim nächsten Durchlauf erneut versuchen.
         });
     });
     Promise.all(requests).then(scheduleMatchJobPoll);
+  }
+
+  function findMatchJobBadge(url) {
+    var badge = null;
+    document.querySelectorAll("[data-match-job]").forEach(function (element) {
+      if (element.dataset.matchJob === url) badge = element;
+    });
+    return badge;
+  }
+
+  function showMatchJobProgress(url, job) {
+    var badge = findMatchJobBadge(url);
+    var note = badge && badge.nextElementSibling;
+    if (note && job.progress) note.textContent = job.progress;
   }
 
   function finishMatchJob(url, job) {
@@ -565,9 +582,11 @@
     if (!known || job.status === "gone") return;
 
     var done = job.status === "done";
-    var title = done ? "Belegabgleich fertig" : "Belegabgleich fehlgeschlagen";
+    var title = job.notice_title || (done ? "Belegabgleich fertig" : "Belegabgleich fehlgeschlagen");
     var detail = done
-      ? job.suggestion_type === "match"
+      ? job.notice_detail
+        ? job.notice_detail
+        : job.suggestion_type === "match"
         ? "Passende Buchung gefunden – bitte prüfen und freigeben."
         : "Vorschlag für eine neue Buchung liegt zur Freigabe bereit."
       : job.error || "Unbekannter Fehler.";
@@ -576,7 +595,7 @@
 
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     try {
-      var notification = new Notification(title, { body: body, tag: "obh-match-" + job.id });
+      var notification = new Notification(title, { body: body, tag: "obh-job-" + url });
       notification.onclick = function () {
         window.focus();
         window.location.href = job.page_url;
@@ -591,14 +610,11 @@
   function showMatchJobResult(url, job, title, body) {
     var link = document.createElement("a");
     link.href = job.page_url;
-    var badge = null;
-    document.querySelectorAll("[data-match-job]").forEach(function (element) {
-      if (element.dataset.matchJob === url) badge = element;
-    });
+    var badge = findMatchJobBadge(url);
     if (badge) {
       badge.className = job.status === "done" ? "badge badge-success" : "badge badge-danger";
       badge.textContent = job.status === "done" ? "Fertig" : "Fehlgeschlagen";
-      link.textContent = "Seite neu laden";
+      link.textContent = job.page_label || "Seite neu laden";
       var note = badge.nextElementSibling;
       if (note) note.replaceChildren(link);
       return;
@@ -612,7 +628,7 @@
     var item = document.createElement("li");
     item.className = job.status === "done" ? "success" : "error";
     item.textContent = title + " – " + body + " ";
-    link.textContent = "Zum Belegabgleich";
+    link.textContent = job.page_label || "Zum Belegabgleich";
     item.appendChild(link);
     list.appendChild(item);
   }

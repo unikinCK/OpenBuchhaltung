@@ -1,15 +1,18 @@
-"""UI für das Firmenwissen je Gesellschaft (ADR-004): Einträge, Quellen, Paketimport."""
+"""UI für das Firmenwissen je Gesellschaft (ADR-004): Einträge, Quellen, Upload, Paketimport."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, jsonify, redirect, render_template, request, send_file, url_for
+from werkzeug.utils import secure_filename
 
 from app.auth import ROLE_ADMIN, WRITE_ROLES, current_user
 from app.services.company_knowledge import (
     AUTHORITY_LABELS,
     KIND_LABELS,
+    SOURCE_FIELDS,
     STATUS_LABELS,
     CompanyKnowledgeError,
     company_knowledge_summary,
@@ -25,7 +28,19 @@ from app.services.company_knowledge import (
     set_knowledge_mcp,
     set_source_active,
     update_entry,
+    update_source,
 )
+from app.services.company_knowledge_upload import (
+    UPLOAD_DONE,
+    UPLOAD_TYPES,
+    get_upload,
+    list_uploads,
+    retry_upload,
+    start_upload,
+    upload_dict,
+    upload_for,
+)
+from app.services.llm_settings import PURPOSE_KNOWLEDGE, receipt_analysis_options
 from app.web.blueprint import main_bp
 from app.web.helpers import (
     changed_by,
@@ -59,6 +74,15 @@ def _form_value(name: str) -> str | None:
     return value if value is not None and value.strip() else None
 
 
+def _source_form_fields() -> dict:
+    """Angaben zur Quelle aus dem Formular (leer = keine Angabe)."""
+    return {
+        name: request.form.get(name)
+        for name in SOURCE_FIELDS
+        if request.form.get(name) is not None
+    }
+
+
 def _common_context() -> dict:
     return {
         "status_labels": STATUS_LABELS,
@@ -80,11 +104,14 @@ def company_knowledge_page():
         entries = []
         total = 0
         sources = []
+        uploads = []
         knowledge_mcp_enabled = False
         if selected_company_id:
             summary = company_knowledge_summary(session=session, company_id=selected_company_id)
             knowledge_mcp_enabled = session.get(Company, selected_company_id).knowledge_mcp_enabled
             sources = list_sources(session=session, company_id=selected_company_id)
+            if view == "upload":
+                uploads = list_uploads(session, selected_company_id)
             if view != "sources":
                 try:
                     entries, total = list_entries(
@@ -117,6 +144,8 @@ def company_knowledge_page():
             entries=entries,
             total=total,
             sources=sources,
+            uploads=uploads,
+            upload_extensions=", ".join(sorted(UPLOAD_TYPES)),
             report=None,
             knowledge_mcp_enabled=knowledge_mcp_enabled,
             is_admin=_is_admin(),
@@ -181,6 +210,7 @@ def company_knowledge_entry_page(entry_id: int):
             entry=entry,
             source=entry.source,
             sources=sources,
+            upload=upload_for(session, entry_id=entry.id),
             history=history,
             **_common_context(),
         )
@@ -263,6 +293,7 @@ def company_knowledge_source_page(source_id: int):
             source=source,
             excerpts=list(source.excerpts),
             entries=entries,
+            upload=upload_for(session, source_id=source.id),
             history=history,
             **_common_context(),
         )
@@ -282,6 +313,139 @@ def set_company_knowledge_source_active_from_form(source_id: int):
         session.commit()
     flash("Quelle wurde aktiviert." if is_active else "Quelle wurde deaktiviert.", "success")
     return redirect(url_for("main.company_knowledge_source_page", source_id=source_id))
+
+
+@main_bp.post("/firmenwissen/quellen/<int:source_id>/aendern")
+def update_company_knowledge_source_from_form(source_id: int):
+    with get_session_factory()() as session:
+        source = get_source(session=session, source_id=source_id)
+        if source is None:
+            abort(404)
+        require_company_access(session, source.company_id)
+        try:
+            changed = update_source(
+                session=session,
+                source=source,
+                changed_by=changed_by(),
+                fields=_source_form_fields(),
+            )
+            session.commit()
+        except CompanyKnowledgeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.company_knowledge_source_page", source_id=source_id))
+    flash("Quelle wurde geändert." if changed else "Keine Änderung erkannt.", "success")
+    return redirect(url_for("main.company_knowledge_source_page", source_id=source_id))
+
+
+@main_bp.post("/firmenwissen/hochladen")
+def upload_company_knowledge_from_form():
+    """Unterlage hochladen; Text und KI-Zusammenfassung entstehen im Hintergrund."""
+    company_id = request.form.get("company_id", type=int)
+    if not company_id:
+        abort(404)
+    back = url_for("main.company_knowledge_page", company_id=company_id, view="upload")
+    file = request.files.get("document_file")
+    if file is None or not file.filename:
+        flash("Bitte eine Datei auswählen.", "error")
+        return redirect(back)
+    with get_session_factory()() as session:
+        company = require_company_access(session, company_id)
+        try:
+            upload, duplicate = start_upload(
+                session=session,
+                company=company,
+                file_name=secure_filename(file.filename),
+                content=file.read(),
+                changed_by=changed_by(),
+                analysis_options=receipt_analysis_options(
+                    llm_purpose=PURPOSE_KNOWLEDGE, session=session
+                ),
+                fields=_source_form_fields(),
+            )
+        except CompanyKnowledgeError as exc:
+            flash(str(exc), "error")
+            return redirect(back)
+        if duplicate and upload.entry_id:
+            flash("Diese Datei wurde bereits hochgeladen.", "success")
+            return redirect(url_for("main.company_knowledge_entry_page", entry_id=upload.entry_id))
+    if duplicate:
+        flash("Diese Datei wird bereits verarbeitet.", "success")
+    else:
+        flash(
+            "Die Datei wird im Hintergrund ausgelesen und zusammengefasst. Die Zusammenfassung "
+            "erscheint hier als Entwurf zur Prüfung.",
+            "success",
+        )
+    return redirect(back)
+
+
+def _load_upload(session, upload_id: int):
+    upload = get_upload(session, upload_id)
+    if upload is None:
+        abort(404)
+    require_company_access(session, upload.company_id)
+    return upload
+
+
+@main_bp.get("/firmenwissen/hochladen/<int:upload_id>/status")
+def company_knowledge_upload_status(upload_id: int):
+    """Stand eines Uploads (JSON für die Benachrichtigung in app.js)."""
+    with get_session_factory()() as session:
+        upload = _load_upload(session, upload_id)
+        data = upload_dict(upload)
+        if upload.status == UPLOAD_DONE and upload.entry_id:
+            data["page_url"] = url_for(
+                "main.company_knowledge_entry_page", entry_id=upload.entry_id
+            )
+            data["page_label"] = "Entwurf prüfen"
+        else:
+            data["page_url"] = url_for(
+                "main.company_knowledge_page", company_id=upload.company_id, view="upload"
+            )
+            data["page_label"] = "Zum Firmenwissen"
+        data["notice_title"] = (
+            "Zusammenfassung fertig"
+            if upload.status == UPLOAD_DONE
+            else "Zusammenfassung fehlgeschlagen"
+        )
+        data["notice_detail"] = "Der Entwurf liegt zur Prüfung und Freigabe bereit."
+        return jsonify(data)
+
+
+@main_bp.get("/firmenwissen/hochladen/<int:upload_id>/datei")
+def download_company_knowledge_upload(upload_id: int):
+    with get_session_factory()() as session:
+        upload = _load_upload(session, upload_id)
+        path = Path(upload.storage_key)
+        if not path.exists():
+            abort(404)
+        return send_file(
+            path,
+            mimetype=upload.mime_type,
+            as_attachment=True,
+            download_name=upload.file_name,
+        )
+
+
+@main_bp.post("/firmenwissen/hochladen/<int:upload_id>/wiederholen")
+def retry_company_knowledge_upload_from_form(upload_id: int):
+    with get_session_factory()() as session:
+        upload = _load_upload(session, upload_id)
+        company_id = upload.company_id
+        try:
+            retry_upload(
+                session=session,
+                upload=upload,
+                changed_by=changed_by(),
+                analysis_options=receipt_analysis_options(
+                    llm_purpose=PURPOSE_KNOWLEDGE, session=session
+                ),
+            )
+        except CompanyKnowledgeError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Die Datei wird erneut verarbeitet.", "success")
+    return redirect(url_for("main.company_knowledge_page", company_id=company_id, view="upload"))
 
 
 @main_bp.post("/firmenwissen/import")

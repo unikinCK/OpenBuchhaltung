@@ -57,7 +57,7 @@ Drei getrennte Schichten:
 
 1. Importierte und von Obi vorgeschlagene Einträge sind immer Entwürfe. Die Freigabe
    (`approved`) setzt ein Mensch mit Schreibrolle über UI, REST-API oder MCP; im KI-Chat
-   sind Freigabe, Statuswechsel, Quellen-Deaktivierung und Import gesperrt.
+   sind Freigabe, Statuswechsel, Quellenpflege, Import und Hochladen gesperrt.
 2. Ändert jemand Titel, Inhalt oder Fundstelle eines freigegebenen Eintrags, fällt er
    auf Entwurf zurück. Wiedervorlage und Themenfeld lassen sich ohne neue Freigabe ändern.
 3. Nichts wird gelöscht: Einträge werden `retired`, Quellen und Auszüge inaktiv. Jede
@@ -88,6 +88,24 @@ das Paketformat überführt; dafür gibt es bewusst keinen fremdformatspezifisch
 Repository. Das Original einer Quelle bleibt maßgeblich; das Paket enthält Auszüge,
 nicht die Dateien.
 
+**Unterlage hochladen (Ergänzung vom 2026-11-02):** Wer kein Paket hat, lädt eine Datei hoch
+(PDF, Word `.docx`, TXT, Markdown, JPG, PNG). Daraus entstehen eine Quelle (ohne Paket,
+Verbindlichkeit wie angegeben, sonst `unverified`), ihre Auszüge mit Fundstelle (Seite bzw.
+Überschrift) und ein Wissenseintrag mit der KI-Zusammenfassung, immer als Entwurf (Regel 1).
+
+- Textgewinnung und Zusammenfassung laufen im Hintergrund (`company_knowledge_upload`, Thread
+  wie beim Belegabgleich, Stand in der Datenbank), weil lokale Modelle länger brauchen, als ein
+  Proxy wartet. Quelle, Auszüge und Entwurf entstehen in einer Transaktion: Scheitert ein
+  Schritt, bleibt nur der Auftrag mit Fehler; er lässt sich ohne neues Hochladen wiederholen.
+- Lange Dokumente fasst das Modell erst abschnittsweise und dann insgesamt zusammen, statt sie
+  stillschweigend abzuschneiden. Was nicht abgedeckt ist, steht im Prüfhinweis.
+- Das Original bleibt anders als beim Paket erhalten (Upload-Verzeichnis der Instanz, aber nicht
+  in der Belegablage), weil der Prüfer es zum Vergleich braucht.
+- Der Dokumenttext ist nicht vertrauenswürdig: Er geht als Daten an das Modell, das Ergebnis
+  ist nur ein Entwurf, und die Auszüge sind in der Suche als ungeprüft gekennzeichnet.
+  Hochladen ist wie der Paketimport im KI-Chat gesperrt.
+- Angaben einer hochgeladenen Quelle lassen sich ändern; Quellen aus Paketen pflegt das Paket.
+
 **Wirkung im Chat:**
 
 - `search_knowledge` erhält `company_id` und liefert neben den Abschnitten der
@@ -107,12 +125,14 @@ nicht die Dateien.
 die Gesellschaft, Schreiben Admin und Buchhalter; Prüfer und Support nur lesend.
 
 **Parität:** UI (Verwaltung → Firmenwissen: Liste mit Filtern, Eintrag anlegen/ändern,
-freigeben/ausmustern, Quellen mit Auszügen, Import mit Vorschau; Seite „Wissen“ mit
+freigeben/ausmustern, Quellen mit Auszügen, Hochladen, Import mit Vorschau; Seite „Wissen“ mit
 Firmentreffern), REST-API unter `/api/v1/companies/<id>/knowledge/…`,
-`/api/v1/knowledge-entries/<id>` und `/api/v1/knowledge-sources/<id>`, MCP-Tools
+`/api/v1/knowledge-entries/<id>`, `/api/v1/knowledge-sources/<id>` und
+`/api/v1/knowledge-uploads/<id>`, MCP-Tools
 `list_/get_/create_/update_company_knowledge_entry`,
-`set_company_knowledge_entry_status`, `list_/get_company_knowledge_source(s)`,
-`set_company_knowledge_source_active`, `import_company_knowledge`.
+`set_company_knowledge_entry_status`, `list_/get_/update_company_knowledge_source(s)`,
+`set_company_knowledge_source_active`, `upload_company_knowledge_document`,
+`list_/get_/retry_company_knowledge_upload(s)`, `import_company_knowledge`.
 
 ### Stufe 2: Richtlinien (geplant)
 

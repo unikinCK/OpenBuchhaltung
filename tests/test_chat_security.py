@@ -99,10 +99,13 @@ EXPECTED_BLOCKED_TOOLS = {
     "create_sepa_payment_run",
     "set_company_bank_details",
     "set_partner_bank_details",
-    # Firmenwissen: Freigabe, Quellen schalten, Paketimport nur durch Menschen
+    # Firmenwissen: Freigabe, Quellen pflegen, Paketimport und Upload nur durch Menschen
     "set_company_knowledge_entry_status",
     "set_company_knowledge_source_active",
+    "update_company_knowledge_source",
     "import_company_knowledge",
+    "upload_company_knowledge_document",
+    "retry_company_knowledge_upload",
     # Externe MCP-Server (Obi erweitert seine Werkzeuge nicht selbst)
     "list_mcp_servers",
     "create_mcp_server",

@@ -423,7 +423,9 @@ def _png_from_pixels(width: int, height: int, channels: int, pixels: bytes) -> b
     )
 
 
-def _pdf_page_images(pdf_bytes: bytes) -> list[tuple[str, bytes]]:
+def _pdf_page_images(
+    pdf_bytes: bytes, *, max_pages: int = _MAX_OCR_PAGES
+) -> list[tuple[str, bytes]]:
     """Seiten als Graustufen-PNG für OCR-Endpoints ohne PDF-Unterstützung.
 
     Die Seiten werden mit pdfium gerendert, statt eingebettete Bilder herauszulösen:
@@ -440,7 +442,7 @@ def _pdf_page_images(pdf_bytes: bytes) -> list[tuple[str, bytes]]:
     try:
         pdf = pdfium.PdfDocument(pdf_bytes)
         try:
-            for index in range(min(len(pdf), _MAX_OCR_PAGES)):
+            for index in range(min(len(pdf), max_pages)):
                 page = pdf[index]
                 scale = min(_OCR_MAX_SCALE, _OCR_PAGE_PIXELS / max(page.get_size()))
                 bitmap = page.render(scale=scale, force_bitmap_format=pdfium_c.FPDFBitmap_Gray)
@@ -1069,7 +1071,12 @@ def _parse_llm_json(text: str) -> dict:
 
 
 def post_llm_payload(
-    endpoint_url: str, payload: dict, api_key: str | None, *, label: str
+    endpoint_url: str,
+    payload: dict,
+    api_key: str | None,
+    *,
+    label: str,
+    default_timeout: float = 30,
 ) -> dict:
     """Schickt einen ``/responses``-Request und liefert die JSON-Antwort.
 
@@ -1090,7 +1097,7 @@ def post_llm_payload(
             method="POST",
         )
         try:
-            with urlopen(request, timeout=llm_timeout(30)) as response:
+            with urlopen(request, timeout=llm_timeout(default_timeout)) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]

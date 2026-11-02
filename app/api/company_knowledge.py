@@ -1,4 +1,4 @@
-"""Firmenwissen je Gesellschaft (ADR-004) über die API: Einträge, Quellen, Paketimport.
+"""Firmenwissen je Gesellschaft (ADR-004) über die API: Einträge, Quellen, Upload, Paketimport.
 
 Über den MCP-Server (externe KI-Clients) ist das Firmenwissen nur lesbar und änderbar,
 wenn die Gesellschaft es dafür freigegeben hat (``knowledge_mcp_enabled``); Obi im
@@ -11,11 +11,15 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from pathlib import Path
 from typing import Any
 
-from flask import jsonify, request
+from flask import jsonify, request, send_file
+from werkzeug.utils import secure_filename
 
 from app.api.blueprint import api_bp
+from app.api.documents import json_upload_content
+from app.api.downloads import download_link_payload, linkable_download
 from app.api.helpers import (
     api_can_write,
     api_scoped_company,
@@ -27,6 +31,7 @@ from app.api.helpers import (
 )
 from app.auth import ROLE_ADMIN, current_api_user
 from app.services.company_knowledge import (
+    SOURCE_FIELDS,
     CompanyKnowledgeError,
     create_entry,
     entry_dict,
@@ -41,7 +46,17 @@ from app.services.company_knowledge import (
     set_source_active,
     source_dict,
     update_entry,
+    update_source,
 )
+from app.services.company_knowledge_upload import (
+    UPLOAD_DONE,
+    get_upload,
+    list_uploads,
+    retry_upload,
+    start_upload,
+    upload_dict,
+)
+from app.services.llm_settings import PURPOSE_KNOWLEDGE, receipt_analysis_options
 
 _ENTRY_FIELDS = {
     "title",
@@ -278,6 +293,153 @@ def set_company_knowledge_source_active_via_api(source_id: int):
         )
         session.commit()
         return jsonify(source_dict(source))
+
+
+@api_bp.patch("/knowledge-sources/<int:source_id>")
+def update_company_knowledge_source_via_api(source_id: int):
+    """Angaben einer hochgeladenen Quelle ändern (Quellen aus Paketen pflegt das Paket)."""
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    if not payload:
+        return jsonify({"error": "At least one editable field is required."}), 400
+    with get_session_factory()() as session:
+        source, error = _scoped_source(session, source_id)
+        if error is not None:
+            return error
+        try:
+            changed = update_source(
+                session=session, source=source, changed_by=_api_changed_by(), fields=payload
+            )
+        except CompanyKnowledgeError as exc:
+            return jsonify({"error": str(exc)}), 422
+        session.commit()
+        return jsonify({**source_dict(source), "changed": changed})
+
+
+def _scoped_upload(session, upload_id: int):
+    upload = get_upload(session, upload_id)
+    _company, error = _knowledge_company(
+        session, upload.company_id if upload else None, not_found="Knowledge upload not found."
+    )
+    return (None, error) if error is not None else (upload, None)
+
+
+def _upload_response(upload) -> dict[str, Any]:
+    """Stand eines Uploads; fertig mit Entwurf zum Prüfen."""
+    data = upload_dict(upload)
+    if upload.status == UPLOAD_DONE and upload.entry is not None:
+        data["entry"] = entry_dict(upload.entry)
+    return data
+
+
+@api_bp.post("/companies/<int:company_id>/knowledge/uploads")
+def upload_company_knowledge_via_api(company_id: int):
+    """Unterlage hochladen (202), Verarbeitung im Hintergrund; Stand über GET …/<id>."""
+    if not api_can_write():
+        return forbidden()
+    if request.files:
+        file = request.files.get("document_file")
+        if file is None or not file.filename:
+            return jsonify({"error": "document_file is required."}), 400
+        file_name, content = secure_filename(file.filename), file.read()
+        fields = {name: request.form[name] for name in SOURCE_FIELDS if name in request.form}
+    else:
+        payload = request.get_json(silent=True) or {}
+        upload_content, error_response, status_code = json_upload_content(payload)
+        if error_response is not None:
+            return error_response, status_code
+        file_name, content = upload_content["file_name"], upload_content["content"]
+        if not file_name:
+            return jsonify({"error": "file_name is required."}), 400
+        fields = {name: payload[name] for name in SOURCE_FIELDS if name in payload}
+    with get_session_factory()() as session:
+        company, error = _knowledge_company(session, company_id)
+        if error is not None:
+            return error
+        try:
+            upload, duplicate = start_upload(
+                session=session,
+                company=company,
+                file_name=file_name,
+                content=content,
+                changed_by=_api_changed_by(),
+                analysis_options=receipt_analysis_options(
+                    llm_purpose=PURPOSE_KNOWLEDGE, session=session
+                ),
+                fields=fields,
+            )
+        except CompanyKnowledgeError as exc:
+            return jsonify({"error": str(exc)}), 422
+        if duplicate:
+            return jsonify({**_upload_response(upload), "duplicate": True}), 200
+        return jsonify(_upload_response(upload)), 202
+
+
+@api_bp.get("/companies/<int:company_id>/knowledge/uploads")
+def list_company_knowledge_uploads_via_api(company_id: int):
+    with get_session_factory()() as session:
+        _company, error = _knowledge_company(session, company_id)
+        if error is not None:
+            return error
+        uploads = list_uploads(
+            session, company_id, limit=request.args.get("limit", type=int) or 50
+        )
+        return jsonify({"company_id": company_id, "uploads": [upload_dict(u) for u in uploads]})
+
+
+@api_bp.get("/knowledge-uploads/<int:upload_id>")
+def get_company_knowledge_upload_via_api(upload_id: int):
+    with get_session_factory()() as session:
+        upload, error = _scoped_upload(session, upload_id)
+        if error is not None:
+            return error
+        return jsonify(
+            {
+                **_upload_response(upload),
+                **download_link_payload(f"/knowledge-uploads/{upload.id}/file"),
+            }
+        )
+
+
+@api_bp.get("/knowledge-uploads/<int:upload_id>/file")
+@linkable_download
+def download_company_knowledge_upload_via_api(upload_id: int):
+    with get_session_factory()() as session:
+        upload, error = _scoped_upload(session, upload_id)
+        if error is not None:
+            return error
+        path = Path(upload.storage_key)
+        if not path.exists():
+            return jsonify({"error": "Knowledge upload file not found."}), 404
+        return send_file(
+            path,
+            mimetype=upload.mime_type,
+            as_attachment=True,
+            download_name=upload.file_name,
+        )
+
+
+@api_bp.post("/knowledge-uploads/<int:upload_id>/retry")
+def retry_company_knowledge_upload_via_api(upload_id: int):
+    if not api_can_write():
+        return forbidden()
+    with get_session_factory()() as session:
+        upload, error = _scoped_upload(session, upload_id)
+        if error is not None:
+            return error
+        try:
+            retry_upload(
+                session=session,
+                upload=upload,
+                changed_by=_api_changed_by(),
+                analysis_options=receipt_analysis_options(
+                    llm_purpose=PURPOSE_KNOWLEDGE, session=session
+                ),
+            )
+        except CompanyKnowledgeError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_upload_response(upload)), 202
 
 
 def _package_from_payload(payload: dict[str, Any]) -> Any:

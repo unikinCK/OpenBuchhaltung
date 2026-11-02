@@ -70,6 +70,17 @@ MAX_LIST_LIMIT = 500
 DEFAULT_LIST_LIMIT = 100
 MAX_REPORTED_CHANGES = 500
 
+# Angaben zu einer Quelle, die Menschen pflegen (Hochladen, Bearbeiten).
+SOURCE_DATE_FIELDS = ("source_date", "valid_from", "valid_to")
+SOURCE_FIELDS = (
+    "title",
+    "document_kind",
+    "source_version",
+    *SOURCE_DATE_FIELDS,
+    "authority",
+    "note",
+)
+
 # Prüfgründe, die der Import setzt (``review_reason``).
 REASON_CONTENT_CHANGED = "Inhalt durch Import geändert"
 REASON_SOURCE_CHANGED = "Quelle geändert"
@@ -709,6 +720,133 @@ def set_source_active(
         payload={"source_key": source.source_key, "flagged_entries": flagged},
     )
     return source
+
+
+def clean_source_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    """Prüft Angaben zu einer Quelle (UI, API); nur die genannten Felder, Daten als ``date``."""
+    unknown = set(raw) - set(SOURCE_FIELDS)
+    if unknown:
+        raise CompanyKnowledgeError(f"Unbekannte Angaben: {', '.join(sorted(unknown))}.")
+    cleaned: dict[str, Any] = {}
+    for name, value in raw.items():
+        if name in SOURCE_DATE_FIELDS:
+            cleaned[name] = _date(value, name)
+        elif name == "authority":
+            cleaned[name] = _choice(value, name, AUTHORITIES, "unverified")
+        elif name == "note":
+            cleaned[name] = _text(value, name, max_len=MAX_NOTE_CHARS)
+        else:
+            max_len = 255 if name == "title" else 80
+            cleaned[name] = _text(value, name, max_len=max_len)
+    return cleaned
+
+
+def create_source_with_excerpts(
+    *,
+    session: Session,
+    company: Company,
+    source_key: str,
+    title: str,
+    fields: dict[str, Any],
+    origin: str | None,
+    content_sha256: str | None,
+    excerpts: list[tuple[str, str]],
+    changed_by: str,
+) -> CompanyKnowledgeSource:
+    """Legt eine Quelle mit Auszügen ``(Fundstelle, Text)`` an, die nicht aus einem Paket kommt."""
+    now = _now()
+    cleaned = clean_source_fields(fields)
+    cleaned.pop("title", None)
+    source = CompanyKnowledgeSource(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        source_key=_key(source_key, "source_key", max_len=120),
+        title=_text(title, "title", max_len=255, required=True),
+        origin=_text(origin, "origin", max_len=500),
+        content_sha256=content_sha256,
+        is_active=True,
+        created_by=changed_by,
+        created_at=now,
+        updated_at=now,
+        **{"authority": "unverified", **cleaned},
+    )
+    session.add(source)
+    session.flush()
+    for index, (locator, content) in enumerate(excerpts, start=1):
+        session.add(
+            CompanyKnowledgeExcerpt(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                source_id=source.id,
+                excerpt_key=f"{source.source_key}-{index}",
+                locator=locator[:255],
+                content=content,
+                content_sha256=_sha256(content),
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    session.flush()
+    log_audit_event(
+        session=session,
+        tenant_id=source.tenant_id,
+        company_id=source.company_id,
+        entity_type="company_knowledge_source",
+        entity_id=str(source.id),
+        action="created",
+        changed_by=changed_by,
+        payload={
+            "source_key": source.source_key,
+            "title": source.title,
+            "content_sha256": source.content_sha256,
+            "excerpts": len(excerpts),
+        },
+    )
+    return source
+
+
+def _source_snapshot(source: CompanyKnowledgeSource) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {}
+    for name in SOURCE_FIELDS:
+        value = getattr(source, name)
+        snapshot[name] = value.isoformat() if isinstance(value, date) else value
+    return snapshot
+
+
+def update_source(
+    *, session: Session, source: CompanyKnowledgeSource, changed_by: str, fields: dict[str, Any]
+) -> bool:
+    """Ändert die Angaben einer hochgeladenen Quelle; gibt zurück, ob sich etwas geändert hat.
+
+    Quellen aus einem Wissenspaket pflegt das Paket: Der nächste Import überschriebe die
+    Änderung sonst stillschweigend. Einträge aus der Quelle bleiben unberührt.
+    """
+    if source.package_key:
+        raise CompanyKnowledgeError(
+            "Diese Quelle stammt aus einem Wissenspaket und wird dort gepflegt."
+        )
+    cleaned = clean_source_fields(fields)
+    if "title" in cleaned and not cleaned["title"]:
+        raise CompanyKnowledgeError("title: Angabe fehlt.")
+    before = _source_snapshot(source)
+    for name, value in cleaned.items():
+        setattr(source, name, value)
+    after = _source_snapshot(source)
+    if after == before:
+        return False
+    source.updated_at = _now()
+    log_audit_event(
+        session=session,
+        tenant_id=source.tenant_id,
+        company_id=source.company_id,
+        entity_type="company_knowledge_source",
+        entity_id=str(source.id),
+        action="updated",
+        changed_by=changed_by,
+        payload={"source_key": source.source_key, "before": before, "after": after},
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------

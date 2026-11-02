@@ -8,6 +8,21 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Firmenwissen: Unterlagen hochladen mit KI-Zusammenfassung
+- Unterlagen (PDF, Word `.docx`, TXT, Markdown, JPG, PNG) lassen sich über **Verwaltung →
+  Firmenwissen → Hochladen**, die REST-API (`POST /api/v1/companies/<id>/knowledge/uploads`)
+  und MCP (`upload_company_knowledge_document`) ins Firmenwissen laden. Im Hintergrund entstehen
+  eine Quelle mit Auszügen je Seite bzw. Überschrift und eine KI-Zusammenfassung als Entwurf,
+  der wie jeder Eintrag geprüft und freigegeben wird. Neue Tabelle `company_knowledge_upload`
+  (Migration `20261102_0056`); das Original liegt im Upload-Verzeichnis der Instanz.
+- Scans werden seitenweise per Texterkennung gelesen, lange Dokumente abschnittsweise
+  zusammengefasst. Was die Zusammenfassung nicht abdeckt (leere Seiten, Grenzen bei sehr langen
+  Dokumenten und Scans), steht im Prüfhinweis des Entwurfs.
+- Neue Endpunkte und Tools für Stand, Wiederholung und Original (`list_/get_/retry_…`).
+  Angaben hochgeladener Quellen lassen sich ändern (UI, `PATCH /api/v1/knowledge-sources/<id>`,
+  `update_company_knowledge_source`). Hochladen und Quellen ändern sind im KI-Chat gesperrt.
+- Neue Variablen `KNOWLEDGE_LLM_ENDPOINT_URL` und `KNOWLEDGE_LLM_MODEL` (Fallback `CHAT_LLM_*`).
+
 ### OpenBuchhaltung als MCP-Proxy, Firmenwissen über MCP sperrbar
 - Je MCP-Server wählbar, ob der MCP-Server von OpenBuchhaltung dessen Werkzeuge an seine
   Clients weiterreicht (`proxy_mode`: aus, nur lesende, alle freigegebenen): ChatGPT-,
