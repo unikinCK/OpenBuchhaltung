@@ -739,6 +739,10 @@ dann selbst betriebener Modellserver).
 - [x] **Firmenwissen je Gesellschaft** (ADR-004): Quellen, Fundstellen, Wissenseinträge mit
       Freigabe und Wiedervorlage, Import von Wissenspaketen mit Abgleich, Suche je Gesellschaft
       in `search_knowledge`, UI/API/MCP *(2026-10-31)*.
+- [x] **Firmenwissen: Unterlagen hochladen** (ADR-004): Datei hochladen, Text mit Fundstellen,
+      KI-Zusammenfassung als Entwurf, prüfen, freigeben; im Hintergrund, UI/API/MCP *(2026-11-02)*.
+- [ ] Neue Fassung einer hochgeladenen Unterlage als Aktualisierung derselben Quelle
+      (bisher: als neue Quelle hochladen, die alte deaktivieren).
 - [ ] Unternehmensrichtlinien als durchsetzbare Regeln (ADR-004 Stufe 2: `company_policy` mit
       Versionen, `evaluate_tool_call` am Bestätigungs-Hook).
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,

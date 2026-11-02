@@ -652,6 +652,41 @@ class _RecordingHttp:
             ),
         ),
         (
+            "upload_company_knowledge_document",
+            {
+                "company_id": 3,
+                "content_base64": "QUJD",
+                "file_name": "a.md",
+                "authority": "binding",
+            },
+            (
+                "POST",
+                "/companies/3/knowledge/uploads",
+                None,
+                {"content_base64": "QUJD", "file_name": "a.md", "authority": "binding"},
+            ),
+        ),
+        (
+            "list_company_knowledge_uploads",
+            {"company_id": 3, "limit": 5},
+            ("GET", "/companies/3/knowledge/uploads", {"limit": 5}, None),
+        ),
+        (
+            "get_company_knowledge_upload",
+            {"upload_id": 4},
+            ("GET", "/knowledge-uploads/4", None, None),
+        ),
+        (
+            "retry_company_knowledge_upload",
+            {"upload_id": 4},
+            ("POST", "/knowledge-uploads/4/retry", None, None),
+        ),
+        (
+            "update_company_knowledge_source",
+            {"source_id": 2, "authority": "binding"},
+            ("PATCH", "/knowledge-sources/2", None, {"authority": "binding"}),
+        ),
+        (
             "search_knowledge",
             {"query": "Beschaffung", "company_id": 3},
             ("GET", "/knowledge", {"query": "Beschaffung", "company_id": 3}, None),
@@ -681,7 +716,10 @@ def test_chat_blocks_approval_and_import_but_offers_reading_and_proposing():
     for name in (
         "set_company_knowledge_entry_status",
         "set_company_knowledge_source_active",
+        "update_company_knowledge_source",
         "import_company_knowledge",
+        "upload_company_knowledge_document",
+        "retry_company_knowledge_upload",
     ):
         assert chat_tool_blocked(name)
     for name in (

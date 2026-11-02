@@ -147,6 +147,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         CHAT_LLM_MODEL=os.environ.get(
             "CHAT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
         ),
+        # Zusammenfassung hochgeladener Unterlagen fürs Firmenwissen; Fallback auf das
+        # Chat-LLM, das das Firmenwissen ohnehin sieht, dann auf den Beleg-LLM-Endpoint.
+        KNOWLEDGE_LLM_ENDPOINT_URL=os.environ.get("KNOWLEDGE_LLM_ENDPOINT_URL")
+        or os.environ.get("CHAT_LLM_ENDPOINT_URL")
+        or os.environ.get("DOCUMENT_LLM_ENDPOINT_URL"),
+        KNOWLEDGE_LLM_MODEL=os.environ.get(
+            "KNOWLEDGE_LLM_MODEL",
+            os.environ.get(
+                "CHAT_LLM_MODEL", os.environ.get("DOCUMENT_LLM_MODEL", "gpt-4.1-mini")
+            ),
+        ),
         # Timeout je Beleg-/Dokument-LLM-Aufruf (Standard 30 s, Dokument-Update 20 s).
         LLM_TIMEOUT_SECONDS=os.environ.get("LLM_TIMEOUT_SECONDS"),
         CHAT_LLM_MAX_TOOL_CALLS=int(os.environ.get("CHAT_LLM_MAX_TOOL_CALLS", "15")),

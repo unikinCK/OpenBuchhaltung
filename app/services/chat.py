@@ -112,15 +112,18 @@ CHAT_BLOCKED_TOOL_KEYWORDS = (
 )
 # Bankdaten (Zahlungsempfänger) nie per Chat ändern: eine präparierte Rechnung
 # könnte sonst eine Lieferanten-IBAN umbiegen.
-# Firmenwissen freigeben, ausmustern, Quellen schalten und Pakete einspielen bleibt
-# Menschen vorbehalten: Die Freigabe ist die Grenze zwischen Entwurf und Unternehmens-
+# Firmenwissen freigeben, ausmustern, Quellen pflegen und Pakete oder Unterlagen einspielen
+# bleibt Menschen vorbehalten: Die Freigabe ist die Grenze zwischen Entwurf und Unternehmens-
 # regel, und ein Paket oder Anhang im Chat ist nicht vertrauenswürdig (ADR-004).
 CHAT_BLOCKED_TOOL_NAMES = {
     "set_company_bank_details",
     "set_partner_bank_details",
     "set_company_knowledge_entry_status",
     "set_company_knowledge_source_active",
+    "update_company_knowledge_source",
     "import_company_knowledge",
+    "upload_company_knowledge_document",
+    "retry_company_knowledge_upload",
 }
 
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.

@@ -13,9 +13,9 @@
   <p class="muted">
     Richtlinien, Arbeitsanweisungen und Regeln dieser Gesellschaft, die Obi im KI-Chat mit
     Quelle und Fundstelle zitiert (Tool <code>search_knowledge</code> mit
-    <code>company_id</code>). Importierte und vorgeschlagene Einträge sind Entwürfe, bis ein
-    Admin oder Buchhalter sie freigibt. Firmenwissen ist vertraulich und nur für Benutzer
-    dieser Gesellschaft sichtbar.
+    <code>company_id</code>). Hochgeladene, importierte und vorgeschlagene Einträge sind
+    Entwürfe, bis ein Admin oder Buchhalter sie freigibt. Firmenwissen ist vertraulich und nur
+    für Benutzer dieser Gesellschaft sichtbar.
   </p>
 
   {% if not selected_company_id %}
@@ -46,6 +46,7 @@
         <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id) }}" {% if view == 'entries' %}class="active"{% endif %}>Einträge</a>
         <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='sources') }}" {% if view == 'sources' %}class="active"{% endif %}>Quellen</a>
         {% if can_write %}
+          <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='upload') }}" {% if view == 'upload' %}class="active"{% endif %}>Hochladen</a>
           <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='import') }}" {% if view == 'import' %}class="active"{% endif %}>Import</a>
           <a href="{{ url_for('main.company_knowledge_page', company_id=selected_company_id, view='new') }}" {% if view == 'new' %}class="active"{% endif %}>Neuer Eintrag</a>
         {% endif %}
@@ -115,7 +116,72 @@
             </tbody>
           </table>
         {% else %}
-          <p class="muted">Noch keine Quellen. Quellen kommen über ein Wissenspaket (Import).</p>
+          <p class="muted">Noch keine Quellen. Quellen entstehen beim Hochladen einer Unterlage oder über ein Wissenspaket (Import).</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if view == 'upload' and can_write %}
+      <section class="card">
+        <h2>Unterlage hochladen</h2>
+        <p class="muted small">
+          Datei hochladen, ein KI-Modell fasst sie zusammen, dann prüfen und freigeben. Der Text
+          wird je Seite bzw. Überschrift als Auszug mit Fundstelle gespeichert, die
+          Zusammenfassung als Entwurf. Obi findet die Auszüge sofort als ungeprüften
+          Quellentext, die Zusammenfassung gilt erst nach der Freigabe als Unternehmensregel.
+          Erlaubt: {{ upload_extensions }}.
+        </p>
+        <form method="post" action="{{ url_for('main.upload_company_knowledge_from_form') }}" enctype="multipart/form-data" class="stacked" data-match-start>
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <label for="kw-file">Datei</label>
+          <input id="kw-file" type="file" name="document_file" accept="{{ upload_extensions }}" required />
+          <details>
+            <summary>Angaben zur Quelle (optional)</summary>
+            {% with source = none %}{% include "firmenwissen_quelle_felder.html" %}{% endwith %}
+          </details>
+          <p><button type="submit">Hochladen und zusammenfassen</button></p>
+        </form>
+      </section>
+      <section class="card">
+        <h2>Letzte Uploads</h2>
+        {% if uploads %}
+          <table>
+            <thead><tr><th>Datei</th><th>Hochgeladen</th><th>Stand</th><th>Zusammenfassung</th></tr></thead>
+            <tbody>
+              {% for upload in uploads %}
+                <tr>
+                  <td><a href="{{ url_for('main.download_company_knowledge_upload', upload_id=upload.id) }}">{{ upload.file_name }}</a></td>
+                  <td>{{ upload.created_at | datum_zeit }} · {{ upload.created_by }}</td>
+                  <td>
+                    {% if upload.status == 'running' %}
+                      <span class="badge badge-info"
+                            data-match-job="{{ url_for('main.company_knowledge_upload_status', upload_id=upload.id) }}"
+                            data-match-job-file="{{ upload.file_name }}">In Bearbeitung …</span>
+                      <span class="muted small">{{ upload.progress or '' }}</span>
+                    {% elif upload.status == 'failed' %}
+                      <span class="badge badge-danger">Fehlgeschlagen</span>
+                      <p class="muted small">{{ upload.error }}</p>
+                      <form method="post" action="{{ url_for('main.retry_company_knowledge_upload_from_form', upload_id=upload.id) }}" class="inline-form" data-match-start>
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <button type="submit" class="secondary">Wiederholen</button>
+                      </form>
+                    {% else %}
+                      <span class="badge badge-success">Fertig</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if upload.entry %}
+                      <a href="{{ url_for('main.company_knowledge_entry_page', entry_id=upload.entry.id) }}">{{ upload.entry.title }}</a>
+                      {{ status_badge(upload.entry.status) }}
+                    {% else %}–{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">Noch keine Uploads.</p>
         {% endif %}
       </section>
     {% endif %}

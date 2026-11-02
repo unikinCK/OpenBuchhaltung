@@ -1,0 +1,28 @@
+{# Formularfelder einer Quelle; ``source`` ist beim Hochladen nicht gesetzt. #}
+<label for="ks-title">Titel</label>
+<input id="ks-title" name="title" value="{{ source.title if source else '' }}" maxlength="255" size="70" {% if source %}required{% else %}placeholder="Standard: Dateiname"{% endif %} />
+
+<label for="ks-authority">Verbindlichkeit</label>
+<select id="ks-authority" name="authority">
+  {% for value, label in authority_labels.items() %}
+    <option value="{{ value }}" {% if (source.authority if source else 'unverified') == value %}selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+</select>
+
+<label for="ks-kind">Art</label>
+<input id="ks-kind" name="document_kind" value="{{ source.document_kind or '' if source else '' }}" maxlength="80" placeholder="z. B. Richtlinie" />
+
+<label for="ks-version">Fassung</label>
+<input id="ks-version" name="source_version" value="{{ source.source_version or '' if source else '' }}" maxlength="80" placeholder="z. B. 2.0" />
+
+<label for="ks-date">Stand</label>
+<input id="ks-date" type="date" name="source_date" value="{{ source.source_date.isoformat() if source and source.source_date else '' }}" />
+
+<label for="ks-valid-from">Gültig ab</label>
+<input id="ks-valid-from" type="date" name="valid_from" value="{{ source.valid_from.isoformat() if source and source.valid_from else '' }}" />
+
+<label for="ks-valid-to">Gültig bis</label>
+<input id="ks-valid-to" type="date" name="valid_to" value="{{ source.valid_to.isoformat() if source and source.valid_to else '' }}" />
+
+<label for="ks-note">Hinweis</label>
+<textarea id="ks-note" name="note" rows="2" cols="90">{{ source.note or '' if source else '' }}</textarea>
