@@ -18,6 +18,11 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Scans werden seitenweise per Texterkennung gelesen, lange Dokumente abschnittsweise
   zusammengefasst. Was die Zusammenfassung nicht abdeckt (leere Seiten, Grenzen bei sehr langen
   Dokumenten und Scans), steht im Prüfhinweis des Entwurfs.
+- Jeder KI-Aufruf eines Uploads bekommt im Hintergrund mindestens 300 s, auch wenn
+  `LLM_TIMEOUT_SECONDS` kleiner ist: Mit einem Modell, das nur einen Aufruf gleichzeitig abarbeitet,
+  brach ein paralleler Upload sonst wegen der Wartezeit ab.
+- Das Modell übernimmt Fundstellen nur noch wörtlich, statt Seiten weiterzuzählen. Nennt es trotzdem
+  eine Seite, die in den Auszügen nicht vorkommt, steht das im Prüfhinweis des Entwurfs.
 - Neue Endpunkte und Tools für Stand, Wiederholung und Original (`list_/get_/retry_…`).
   Angaben hochgeladener Quellen lassen sich ändern (UI, `PATCH /api/v1/knowledge-sources/<id>`,
   `update_company_knowledge_source`). Hochladen und Quellen ändern sind im KI-Chat gesperrt.

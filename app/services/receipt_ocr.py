@@ -1076,7 +1076,6 @@ def post_llm_payload(
     api_key: str | None,
     *,
     label: str,
-    default_timeout: float = 30,
 ) -> dict:
     """Schickt einen ``/responses``-Request und liefert die JSON-Antwort.
 
@@ -1097,7 +1096,7 @@ def post_llm_payload(
             method="POST",
         )
         try:
-            with urlopen(request, timeout=llm_timeout(default_timeout)) as response:
+            with urlopen(request, timeout=llm_timeout(30)) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
