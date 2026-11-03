@@ -1516,8 +1516,32 @@ class User(Base):
     llm_model: Mapped[str | None] = mapped_column(String(120))
     llm_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
     llm_api_key_last4: Mapped[str | None] = mapped_column(String(4))
+    # Zwei-Faktor-Anmeldung (TOTP): Das Secret liegt nur verschlüsselt vor (siehe
+    # app.services.two_factor). Secret ohne ``totp_enabled_at`` heißt: Einrichtung
+    # begonnen, aber noch nicht mit einem gültigen Code bestätigt.
+    totp_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Zuletzt verbrauchter Zeitschritt: Derselbe Code gilt nur einmal.
+    totp_last_step: Mapped[int | None] = mapped_column(Integer)
 
     tenant: Mapped[Tenant | None] = relationship()
+
+
+class TwoFactorRecoveryCode(Base):
+    """Wiederherstellungscode der Zwei-Faktor-Anmeldung: nur gehasht, einmal verwendbar."""
+
+    __tablename__ = "two_factor_recovery_code"
+    __table_args__ = (
+        UniqueConstraint("user_id", "code_hash", name="uq_two_factor_recovery_code_user_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LoginAttempt(Base):

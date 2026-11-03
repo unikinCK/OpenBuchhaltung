@@ -575,7 +575,7 @@ def test_migration_backfills_settlements_and_round_trips(tmp_path: Path) -> None
     engine = create_engine(url)
     config = _alembic_config(engine)
 
-    command.downgrade(config, "20261103_0057")
+    command.downgrade(config, "20261103_0060")
     assert "open_item_settlement" not in inspect(engine).get_table_names()
     assert "vat_cash_basis_from" not in {
         column["name"] for column in inspect(engine).get_columns("company")

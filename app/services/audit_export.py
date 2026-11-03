@@ -220,7 +220,14 @@ USER_DERIVED_FIELDS = {
 
 EXCLUDED_EXPORT_FIELDS = {
     "documents": {"storage_key"},
-    "users": {"password_hash", "api_token_hash", "api_token_last4"},
+    "users": {
+        "password_hash",
+        "api_token_hash",
+        "api_token_last4",
+        "totp_secret_encrypted",
+        "totp_enabled_at",
+        "totp_last_step",
+    },
 }
 
 EXPORT_README = (

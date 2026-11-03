@@ -68,7 +68,8 @@ Audit-Hashes in `business_partner_history.json`.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,
-Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert. Beim
+Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert, ebenso wenig
+die Daten der Zwei-Faktor-Anmeldung (Secret, Zeitstempel, Wiederherstellungscodes). Beim
 Belegindex wird der interne Speicherpfad ebenfalls nicht ausgegeben.
 
 ## 4. Prüfsummen und Reproduzierbarkeit

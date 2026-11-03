@@ -198,6 +198,8 @@ EXPECTED_TOOL_NAMES = {
     "confirm_chat_action",
     "reject_chat_action",
     "unlock_user_login",
+    "get_user_two_factor_status",
+    "reset_user_two_factor",
     "set_user_password",
     "set_user_llm_settings",
     "clear_user_llm_settings",
