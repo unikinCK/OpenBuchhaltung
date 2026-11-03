@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -9,9 +9,21 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
 from app.services.sepa_export import SepaExportError, normalize_bic, normalize_iban
-from domain.models import Account, BankTransaction, Company, JournalEntry, OpenItem
+from domain.models import (
+    SUBLEDGER_CREDITOR,
+    SUBLEDGER_DEBTOR,
+    Account,
+    BankTransaction,
+    BusinessPartner,
+    Company,
+    JournalEntry,
+    JournalEntryLine,
+    OpenItem,
+)
 
 OPEN_ITEM_TYPES = {"receivable", "payable"}
+# Sammelkontoseite und Rollenfeld des Partners je OPOS-Typ.
+ITEM_TYPE_SUBLEDGER = {"receivable": SUBLEDGER_DEBTOR, "payable": SUBLEDGER_CREDITOR}
 
 
 class OpenItemError(ValueError):
@@ -32,26 +44,83 @@ class OpenItemInput:
     due_date: date | None = None
     counterparty_iban: str | None = None
     counterparty_bic: str | None = None
+    partner_id: int | None = None
 
 
 def list_open_items(
-    *, session: Session, company_id: int, include_settled: bool = False
+    *,
+    session: Session,
+    company_id: int,
+    include_settled: bool = False,
+    partner_id: int | None = None,
 ) -> list[OpenItem]:
     stmt = (
         select(OpenItem)
-        .options(selectinload(OpenItem.account), selectinload(OpenItem.journal_entry))
+        .options(
+            selectinload(OpenItem.account),
+            selectinload(OpenItem.journal_entry),
+            selectinload(OpenItem.partner),
+        )
         .where(OpenItem.company_id == company_id)
         .order_by(OpenItem.status, OpenItem.due_date, OpenItem.entry_date, OpenItem.id)
     )
     if not include_settled:
         stmt = stmt.where(OpenItem.status == "open")
+    if partner_id is not None:
+        stmt = stmt.where(OpenItem.partner_id == partner_id)
     return session.execute(stmt).scalars().all()
+
+
+def open_item_partner_number(item: OpenItem) -> str | None:
+    """Personenkontonummer des Partners passend zur Seite des Postens."""
+    partner = item.partner
+    if partner is None:
+        return None
+    return partner.debtor_number if item.item_type == "receivable" else partner.creditor_number
+
+
+def open_item_matches_query(item: OpenItem, query: str) -> bool:
+    """Suche in Referenz, Gegenseite sowie Name und Nummern des Partners."""
+    needle = query.lower()
+    partner = item.partner
+    haystacks = [item.reference, item.counterparty]
+    if partner is not None:
+        haystacks += [partner.name, partner.debtor_number, partner.creditor_number]
+    return any(needle in (value or "").lower() for value in haystacks)
 
 
 def is_overdue(item: OpenItem, today: date | None = None) -> bool:
     """Offen und die Fälligkeit liegt vor heute (Dashboard-Kachel, Filter „überfällig“)."""
     today = today or date.today()
     return item.status == "open" and item.due_date is not None and item.due_date < today
+
+
+def _load_item_partner(
+    *,
+    session: Session,
+    company_id: int,
+    partner_id: int,
+    item_type: str,
+    account: Account,
+) -> BusinessPartner:
+    """Partner eines Postens: gleiche Gesellschaft, aktiv, Rolle und Sammelkonto passen."""
+    partner = session.get(BusinessPartner, partner_id)
+    if partner is None or partner.company_id != company_id:
+        raise OpenItemError("Geschäftspartner nicht gefunden.")
+    if not partner.is_active:
+        raise OpenItemError(f"{partner.name} ist inaktiv und darf nicht neu zugeordnet werden.")
+    subledger = ITEM_TYPE_SUBLEDGER[item_type]
+    if subledger == SUBLEDGER_DEBTOR and partner.debtor_number is None:
+        raise OpenItemError(f"{partner.name} ist kein Kunde; der Posten ist debitorisch.")
+    if subledger == SUBLEDGER_CREDITOR and partner.creditor_number is None:
+        raise OpenItemError(f"{partner.name} ist kein Lieferant; der Posten ist kreditorisch.")
+    if account.subledger != subledger:
+        side = "Debitoren" if subledger == SUBLEDGER_DEBTOR else "Kreditoren"
+        raise OpenItemError(
+            f"Konto {account.code} ist kein {side}-Sammelkonto. Das Kennzeichen wird in der "
+            "Kontenpflege gesetzt."
+        )
+    return partner
 
 
 def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
@@ -85,18 +154,38 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
     except SepaExportError as exc:
         raise OpenItemError(str(exc)) from exc
 
+    counterparty = (payload.counterparty or "").strip() or None
+    due_date = payload.due_date
+    partner = None
+    if payload.partner_id is not None:
+        partner = _load_item_partner(
+            session=session,
+            company_id=company.id,
+            partner_id=payload.partner_id,
+            item_type=item_type,
+            account=account,
+        )
+        # Vorbelegung als Snapshot: was erfasst wurde, geht vor.
+        counterparty = counterparty or partner.name
+        if counterparty_iban is None:
+            counterparty_iban = partner.iban
+            counterparty_bic = counterparty_bic or partner.bic
+        if due_date is None and partner.payment_term_days is not None:
+            due_date = payload.entry_date + timedelta(days=partner.payment_term_days)
+
     item = OpenItem(
         tenant_id=company.tenant_id,
         company_id=company.id,
         account_id=account.id,
         journal_entry_id=linked_entry.id if linked_entry else None,
+        partner_id=partner.id if partner else None,
         item_type=item_type,
         reference=reference,
-        counterparty=(payload.counterparty or "").strip() or None,
+        counterparty=counterparty,
         counterparty_iban=counterparty_iban,
         counterparty_bic=counterparty_bic,
         entry_date=payload.entry_date,
-        due_date=payload.due_date,
+        due_date=due_date,
         original_amount=amount,
         open_amount=amount,
         currency_code=company.currency_code,
@@ -118,8 +207,51 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
             "item_type": item.item_type,
             "account_id": item.account_id,
             "journal_entry_id": item.journal_entry_id,
+            "partner_id": item.partner_id,
             "original_amount": str(item.original_amount),
         },
+    )
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+def set_open_item_partner(
+    *, session: Session, open_item_id: int, partner_id: int | None, changed_by: str
+) -> OpenItem:
+    """Ordnet einem Posten einen Partner zu oder entfernt ihn (auch nach dem Ausgleich).
+
+    Name, Bankdaten und Fälligkeit bleiben unverändert; fehlende Angaben werden aus dem
+    Partner ergänzt. Der Freitext bleibt erhalten, er ist der Stand zum Zeitpunkt der Erfassung.
+    """
+    item = session.get(OpenItem, open_item_id)
+    if item is None:
+        raise OpenItemError("Offener Posten nicht gefunden.")
+    before = item.partner_id
+    if partner_id is not None and partner_id != before:
+        partner = _load_item_partner(
+            session=session,
+            company_id=item.company_id,
+            partner_id=partner_id,
+            item_type=item.item_type,
+            account=item.account,
+        )
+        item.counterparty = item.counterparty or partner.name
+        if item.counterparty_iban is None:
+            item.counterparty_iban = partner.iban
+            item.counterparty_bic = item.counterparty_bic or partner.bic
+    if partner_id == before:
+        return item
+    item.partner_id = partner_id
+    log_audit_event(
+        session=session,
+        tenant_id=item.tenant_id,
+        company_id=item.company_id,
+        entity_type="open_item",
+        entity_id=str(item.id),
+        action="partner_assigned",
+        changed_by=changed_by,
+        payload={"reference": item.reference, "before": before, "after": partner_id},
     )
     session.commit()
     session.refresh(item)
@@ -146,6 +278,10 @@ def settle_open_item(
     )
     linked_entry = _load_journal_entry(
         session=session, item=item, journal_entry_id=journal_entry_id
+    )
+
+    _check_settlement_partner(
+        session=session, item=item, bank_transaction=bank_transaction, linked_entry=linked_entry
     )
 
     settlement_amount = _settlement_amount(
@@ -225,6 +361,40 @@ def _load_journal_entry(
     if entry is None or entry.company_id != item.company_id:
         raise OpenItemError("Ausgleichsbuchung nicht gefunden.")
     return entry
+
+
+def _check_settlement_partner(
+    *,
+    session: Session,
+    item: OpenItem,
+    bank_transaction: BankTransaction | None,
+    linked_entry: JournalEntry | None,
+) -> None:
+    """Weist einen Ausgleich ab, dessen Buchung einen anderen Partner bebucht.
+
+    Geprüft werden nur Zeilen auf dem Sammelkonto des Postens; Zeilen ohne Partner oder ein
+    Posten ohne Partner bleiben zulässig (Altbestand, Sammelzahlungen).
+    """
+    if item.partner_id is None:
+        return
+    entry_id = linked_entry.id if linked_entry is not None else None
+    if entry_id is None and bank_transaction is not None:
+        entry_id = bank_transaction.journal_entry_id
+    if entry_id is None:
+        return
+    partner_ids = set(
+        session.execute(
+            select(JournalEntryLine.partner_id).where(
+                JournalEntryLine.journal_entry_id == entry_id,
+                JournalEntryLine.account_id == item.account_id,
+                JournalEntryLine.partner_id.is_not(None),
+            )
+        ).scalars()
+    )
+    if partner_ids and item.partner_id not in partner_ids:
+        raise OpenItemError(
+            "Die Zahlung ist auf einen anderen Geschäftspartner gebucht als der Posten."
+        )
 
 
 def _settlement_amount(

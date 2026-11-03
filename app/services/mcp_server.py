@@ -1485,6 +1485,88 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="get_partner_statement",
+        description=(
+            "Partnerkonto: Zeilen des Geschäftspartners auf Sammelkonten mit Anfangssaldo und "
+            "laufendem Saldo (Soll minus Haben), je Rolle Debitor/Kreditor, dazu seine offenen "
+            "Posten. Saldovorträge erscheinen nicht als Zeilen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "partner_id": {"type": "integer"},
+                "side": {
+                    "type": "string",
+                    "enum": ["debtor", "creditor"],
+                    "description": "Nur eine Rolle; ohne Angabe alle Rollen des Partners.",
+                },
+                "date_from": {"type": "string", "description": "Von (JJJJ-MM-TT)."},
+                "date_to": {"type": "string", "description": "Bis (JJJJ-MM-TT)."},
+                "limit": {"type": "integer", "description": "Zeilen je Seite (max. 1000)."},
+                "offset": {"type": "integer"},
+            },
+            "required": ["partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/partners/{partner_id}/statement",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_partner_balances",
+        description=(
+            "Saldenliste Debitoren oder Kreditoren zum Stichtag: Saldo je Partner, Abstimmung "
+            "je Sammelkonto (Partnersalden + Zeilen ohne Partner = Sachkontosaldo) und "
+            "Abweichung zu den offenen Posten."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "side": {
+                    "type": "string",
+                    "enum": ["debtor", "creditor"],
+                    "description": "Debitoren (Standard) oder Kreditoren.",
+                },
+                "as_of": {
+                    "type": "string",
+                    "description": "Stichtag (JJJJ-MM-TT), Standard heute.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/reports/partner-balances",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="export_partner_balances_csv",
+        description="Exportiert die Saldenliste Debitoren oder Kreditoren als CSV.",
+        input_schema=_with_download_link(
+            {
+                "type": "object",
+                "properties": {
+                    "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                    "side": {
+                        "type": "string",
+                        "enum": ["debtor", "creditor"],
+                        "description": "Debitoren (Standard) oder Kreditoren.",
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "Stichtag (JJJJ-MM-TT), Standard heute.",
+                    },
+                },
+                "required": ["company_id"],
+                "additionalProperties": False,
+            }
+        ),
+        http_method="GET",
+        path="/exports/partner-balances.csv",
+        arg_location="query",
+    ),
+    ToolSpec(
         name="get_partner_history",
         description=(
             "Liefert die verkettete Vorher-/Nachher-Historie eines Geschäftspartners."
@@ -3557,7 +3639,13 @@ TOOLS: list[ToolSpec] = [
                 },
                 "q": {
                     "type": "string",
-                    "description": "Volltextsuche in Referenz und Gegenpartei.",
+                    "description": (
+                        "Volltextsuche in Referenz, Gegenpartei, Partnername und -nummer."
+                    ),
+                },
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Nur Posten dieses Geschäftspartners.",
                 },
             },
             "required": ["company_id"],
@@ -3590,8 +3678,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="list_payment_run_proposals",
         description=(
-            "Offene Kreditoren-Posten mit hinterlegter Empfänger-IBAN, die in einen "
-            "SEPA-Zahllauf aufgenommen werden können (fällige zuerst)."
+            "Offene Kreditoren-Posten mit Empfänger-IBAN (am Posten oder am Geschäftspartner), "
+            "die in einen SEPA-Zahllauf aufgenommen werden können (fällige zuerst). "
+            "iban_mismatch/warning melden eine IBAN, die vom Partnerstamm abweicht."
         ),
         input_schema={
             "type": "object",
@@ -3682,7 +3771,11 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="create_open_item",
-        description="Legt einen offenen Posten (Debitor/Kreditor) an.",
+        description=(
+            "Legt einen offenen Posten (Debitor/Kreditor) an. Mit partner_id bzw. "
+            "partner_number kommen fehlender Name, IBAN und Fälligkeit (Belegdatum plus "
+            "Zahlungsziel) aus dem Geschäftspartner; das Konto muss dann ein Sammelkonto sein."
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -3698,6 +3791,14 @@ TOOLS: list[ToolSpec] = [
                     "description": "Debitorisch oder kreditorisch.",
                 },
                 "reference": {"type": "string", "description": "Referenz/Rechnungsnummer."},
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Optional: Geschäftspartner (siehe list_partners).",
+                },
+                "partner_number": {
+                    "type": "string",
+                    "description": "Alternativ zu partner_id: Debitoren-/Kreditorennummer.",
+                },
                 "counterparty": {"type": "string", "description": "Kunde/Lieferant."},
                 "counterparty_iban": {
                     "type": "string",
@@ -3716,6 +3817,30 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/open-items",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="set_open_item_partner",
+        description=(
+            "Ordnet einem offenen Posten einen Geschäftspartner zu (auch nachträglich für "
+            "Altbestand); ohne partner_id/partner_number wird die Zuordnung entfernt. Der "
+            "Freitext bleibt, fehlende Angaben kommen aus dem Partner."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "open_item_id": {"type": "integer", "description": "ID des offenen Postens."},
+                "partner_id": {"type": "integer", "description": "ID des Geschäftspartners."},
+                "partner_number": {
+                    "type": "string",
+                    "description": "Alternativ zu partner_id: Debitoren-/Kreditorennummer.",
+                },
+            },
+            "required": ["open_item_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-items/{open_item_id}/partner",
         arg_location="json",
     ),
     ToolSpec(

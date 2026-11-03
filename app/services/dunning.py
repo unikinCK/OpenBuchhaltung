@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
 from domain.models import OpenItem
@@ -56,6 +56,7 @@ def dunning_proposals(
     items = (
         session.execute(
             select(OpenItem)
+            .options(selectinload(OpenItem.partner))
             .where(
                 OpenItem.company_id == company_id,
                 OpenItem.item_type == "receivable",
@@ -141,12 +142,33 @@ def record_dunning(
     return item
 
 
+def dunning_recipient_lines(item: OpenItem) -> list[str]:
+    """Empfängeranschrift des Mahnschreibens: aus dem Partner, sonst nur der Freitextname."""
+    partner = item.partner
+    if partner is None:
+        return [item.counterparty] if item.counterparty else []
+    lines = [partner.name]
+    if partner.contact_person:
+        lines.append(partner.contact_person)
+    if partner.street:
+        lines.append(partner.street)
+    city = " ".join(value for value in (partner.postal_code, partner.city) if value)
+    if city:
+        lines.append(city)
+    if partner.country_code != "DE":
+        lines.append(partner.country_code)
+    return lines
+
+
 def serialize_proposal(proposal: DunningProposal) -> dict[str, object]:
     item = proposal.item
     return {
         "open_item_id": item.id,
         "reference": item.reference,
         "counterparty": item.counterparty,
+        "partner_id": item.partner_id,
+        "partner_number": item.partner.debtor_number if item.partner else None,
+        "partner_name": item.partner.name if item.partner else None,
         "due_date": item.due_date.isoformat() if item.due_date else None,
         "days_overdue": proposal.days_overdue,
         "open_amount": str(item.open_amount),

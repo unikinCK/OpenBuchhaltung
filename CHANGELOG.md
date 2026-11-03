@@ -8,6 +8,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Geschäftspartner in offenen Posten, Zahllauf und Mahnwesen; Partnerkonto und Saldenliste
+- Offene Posten tragen einen Geschäftspartner (`open_item.partner_id`, Migration `20261103_0057`).
+  Fehlender Name, IBAN/BIC und die Fälligkeit (Belegdatum plus Zahlungsziel) kommen als Snapshot
+  aus dem Partner; Rolle und Sammelkonto werden geprüft. Bestehende Posten lassen sich nachträglich
+  zuordnen (UI, `POST /api/v1/open-items/<id>/partner`, MCP `set_open_item_partner`). Filter
+  `partner_id`, die Suche findet auch Partnername und -nummer.
+- Der Ausgleich eines Postens wird abgewiesen, wenn die verknüpfte Zahlung auf dem Sammelkonto
+  einen anderen Partner bebucht.
+- Zahllauf: IBAN am Posten, ersatzweise am Partner; Empfängername aus dem Partner. Weicht die IBAN
+  vom Partnerstamm ab, ist der Posten nicht vorausgewählt und die Abweichung wird gemeldet
+  (`iban_mismatch`, `warnings`, Audit-Log).
+- Mahnschreiben: Die Empfängeranschrift kommt aus dem Partner, die Mahnvorschläge nennen ihn.
+- Partnerkonto auf der Partnerseite: Sammelkontozeilen mit Anfangssaldo und laufendem Saldo je Rolle
+  und offene Posten (`GET /api/v1/partners/<id>/statement`, MCP `get_partner_statement`).
+- Saldenliste Debitoren/Kreditoren zum Stichtag mit Abstimmung je Sammelkonto und Abweichung zu den
+  offenen Posten (`/partner/saldenliste`, `GET /api/v1/reports/partner-balances`,
+  `GET /api/v1/exports/partner-balances.csv`, MCP `get_partner_balances`,
+  `export_partner_balances_csv`).
+
 ### Firmenwissen: Unterlagen hochladen mit KI-Zusammenfassung
 - Unterlagen (PDF, Word `.docx`, TXT, Markdown, JPG, PNG) lassen sich über **Verwaltung →
   Firmenwissen → Hochladen**, die REST-API (`POST /api/v1/companies/<id>/knowledge/uploads`)

@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from typing import Any
 
-from flask import jsonify, request
+from flask import Response, jsonify, request
 
 from app.api.blueprint import api_bp
-from app.api.helpers import api_can_write, api_scoped_company, forbidden, get_session_factory
+from app.api.downloads import linkable_download
+from app.api.helpers import (
+    DateArgError,
+    api_can_write,
+    api_scoped_company,
+    date_arg,
+    forbidden,
+    get_session_factory,
+)
 from app.auth import current_api_user
+from app.services.partner_ledger import (
+    DEFAULT_STATEMENT_LIMIT,
+    PartnerLedgerError,
+    partner_balances,
+    partner_statement,
+    serialize_partner_balances,
+    serialize_statement_side,
+)
 from app.services.partners import (
     UPDATABLE_FIELDS,
     PartnerError,
@@ -20,7 +38,7 @@ from app.services.partners import (
     set_partner_bank_details,
     update_partner,
 )
-from domain.models import SUBLEDGER_TYPES, BusinessPartner
+from domain.models import SUBLEDGER_DEBTOR, SUBLEDGER_TYPES, BusinessPartner
 
 CREATE_FIELDS = {"company_id", *UPDATABLE_FIELDS}
 BANK_FIELDS = {"iban", "bic"}
@@ -248,3 +266,131 @@ def get_partner_history_via_api(partner_id: int):
                 "limit": max(1, min(limit, 500)),
             }
         )
+
+
+@api_bp.get("/partners/<int:partner_id>/statement")
+def get_partner_statement_via_api(partner_id: int):
+    limit = request.args.get("limit", default=DEFAULT_STATEMENT_LIMIT, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    if limit is None or offset is None:
+        return jsonify({"error": "limit and offset must be integers."}), 400
+    try:
+        date_from = date_arg("date_from")
+        date_to = date_arg("date_to")
+    except DateArgError as exc:
+        return jsonify({"error": str(exc)}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        partner = _scoped_partner(session, partner_id)
+        if partner is None:
+            return jsonify({"error": "Partner not found."}), 404
+        try:
+            statement = partner_statement(
+                session=session,
+                partner=partner,
+                side=(request.args.get("side") or "").strip() or None,
+                date_from=date_from,
+                date_to=date_to,
+                limit=limit,
+                offset=offset,
+            )
+        except PartnerLedgerError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(
+            {
+                "partner": serialize_partner(partner),
+                "date_from": date_from.isoformat() if date_from else None,
+                "date_to": date_to.isoformat() if date_to else None,
+                "limit": statement["limit"],
+                "offset": statement["offset"],
+                "sides": [serialize_statement_side(side) for side in statement["sides"]],
+                "open_items": [
+                    {
+                        "id": item.id,
+                        "item_type": item.item_type,
+                        "reference": item.reference,
+                        "entry_date": item.entry_date.isoformat(),
+                        "due_date": item.due_date.isoformat() if item.due_date else None,
+                        "original_amount": str(item.original_amount),
+                        "open_amount": str(item.open_amount),
+                        "currency_code": item.currency_code,
+                        "dunning_level": item.dunning_level,
+                    }
+                    for item in statement["open_items"]
+                ],
+            }
+        )
+
+
+def _partner_balances_report(session, company_id: int):
+    return partner_balances(
+        session=session,
+        company_id=company_id,
+        side=(request.args.get("side") or SUBLEDGER_DEBTOR).strip(),
+        as_of=date_arg("as_of"),
+    )
+
+
+@api_bp.get("/reports/partner-balances")
+def get_partner_balances_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            report = _partner_balances_report(session, company_id)
+        except (DateArgError, PartnerLedgerError) as exc:
+            return jsonify({"error": str(exc)}), 400
+    return jsonify(serialize_partner_balances(report))
+
+
+@api_bp.get("/exports/partner-balances.csv")
+@linkable_download
+def export_partner_balances_csv():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            report = _partner_balances_report(session, company_id)
+        except (DateArgError, PartnerLedgerError) as exc:
+            return jsonify({"error": str(exc)}), 400
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "number",
+            "name",
+            "debit_total",
+            "credit_total",
+            "balance",
+            "open_items_total",
+            "opos_difference",
+        ]
+    )
+    for row in report["partners"]:
+        writer.writerow(
+            [
+                row["number"],
+                row["name"],
+                row["debit_total"],
+                row["credit_total"],
+                row["balance"],
+                row["open_items_total"],
+                row["opos_difference"],
+            ]
+        )
+    file_name = (
+        f"saldenliste-{report['side']}-{company_id}-{report['as_of'].isoformat()}.csv"
+    )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )

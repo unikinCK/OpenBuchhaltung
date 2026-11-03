@@ -14,12 +14,33 @@ from app.services.sepa_export import (
     SepaExportError,
     create_payment_run,
     payable_items_for_run,
+    payment_recipient,
     set_company_bank_details,
 )
+from domain.models import OpenItem
 
 
 def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
+
+
+def _proposal_dict(item: OpenItem) -> dict[str, object]:
+    recipient = payment_recipient(item)
+    return {
+        "open_item_id": item.id,
+        "reference": item.reference,
+        "partner_id": item.partner_id,
+        "partner_number": item.partner.creditor_number if item.partner else None,
+        "counterparty": recipient.name,
+        "counterparty_iban": recipient.iban,
+        "counterparty_bic": recipient.bic,
+        "iban_mismatch": recipient.iban_mismatch,
+        "partner_iban": recipient.partner_iban,
+        "warning": recipient.warning,
+        "due_date": item.due_date.isoformat() if item.due_date else None,
+        "open_amount": str(item.open_amount),
+        "currency_code": item.currency_code,
+    }
 
 
 @api_bp.post("/companies/<int:company_id>/bank-details")
@@ -64,19 +85,7 @@ def list_payment_run_proposals_via_api():
             jsonify(
                 {
                     "company_id": company_id,
-                    "items": [
-                        {
-                            "open_item_id": item.id,
-                            "reference": item.reference,
-                            "counterparty": item.counterparty,
-                            "counterparty_iban": item.counterparty_iban,
-                            "counterparty_bic": item.counterparty_bic,
-                            "due_date": item.due_date.isoformat() if item.due_date else None,
-                            "open_amount": str(item.open_amount),
-                            "currency_code": item.currency_code,
-                        }
-                        for item in items
-                    ],
+                    "items": [_proposal_dict(item) for item in items],
                 }
             ),
             200,
@@ -125,6 +134,7 @@ def create_payment_run_via_api():
                     "transaction_count": result.transaction_count,
                     "control_sum": str(result.control_sum),
                     "open_item_ids": result.open_item_ids,
+                    "warnings": result.warnings,
                     "xml_base64": base64.b64encode(result.xml_bytes).decode("ascii"),
                 }
             ),

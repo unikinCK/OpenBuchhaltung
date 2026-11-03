@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from flask import abort, flash, redirect, render_template, request, url_for
 from sqlalchemy import case, func, select
 
+from app.services.partner_ledger import (
+    SIDE_LABELS,
+    SUBLEDGER_SIDES,
+    partner_balances,
+    partner_statement,
+)
 from app.services.partners import (
     PartnerError,
     create_partner,
@@ -23,10 +30,17 @@ from app.web.helpers import (
     get_session_factory,
     pagination_args,
     require_company_access,
+    search_args,
     sort_args,
 )
 from app.web.journal import entry_overview
-from domain.models import SUBLEDGER_TYPES, BusinessPartner, JournalEntry, JournalEntryLine
+from domain.models import (
+    SUBLEDGER_DEBTOR,
+    SUBLEDGER_TYPES,
+    BusinessPartner,
+    JournalEntry,
+    JournalEntryLine,
+)
 
 # Buchungen eines Partners auf der Detailseite (vollständige Liste im Journal).
 PARTNER_ENTRY_LIMIT = 25
@@ -271,16 +285,56 @@ def partner_detail_page(partner_id: int):
             .all()
         )
         overview = entry_overview(session, partner.company_id, [entry.id for entry in entries])
+        _, date_from, date_to = search_args()
+        if date_from and date_to and date_from > date_to:
+            flash("Das Von-Datum darf nicht nach dem Bis-Datum liegen.", "error")
+            date_from = date_to = None
+        statement = partner_statement(
+            session=session, partner=partner, date_from=date_from, date_to=date_to
+        )
         return render_template(
             "partner_detail.html",
             companies=companies,
             selected_company_id=partner.company_id,
             partner=partner,
             history=history,
+            statement=statement,
+            date_from=date_from,
+            date_to=date_to,
             entries=entries,
             entries_total=entries_total,
             overview=overview,
         )
+
+
+@main_bp.get("/partner/saldenliste")
+def partner_balances_page():
+    side = request.args.get("side", SUBLEDGER_DEBTOR)
+    if side not in SUBLEDGER_SIDES:
+        side = SUBLEDGER_DEBTOR
+    raw_as_of = (request.args.get("as_of") or "").strip()
+    try:
+        as_of = date.fromisoformat(raw_as_of) if raw_as_of else date.today()
+    except ValueError:
+        flash("Ungültiger Stichtag.", "error")
+        as_of = date.today()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = company_context(session)
+        report = None
+        if selected_company_id:
+            report = partner_balances(
+                session=session, company_id=selected_company_id, side=side, as_of=as_of
+            )
+    return render_template(
+        "partner_salden.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        report=report,
+        side=side,
+        side_labels=SIDE_LABELS,
+        as_of=as_of,
+    )
 
 
 @main_bp.post("/partner/<int:partner_id>/update")

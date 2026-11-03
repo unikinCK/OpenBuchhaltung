@@ -64,6 +64,16 @@
             <input id="reference" name="reference" placeholder="RE-2026-001" required />
           </div>
           <div class="field">
+            <label for="partner_id">Geschäftspartner</label>
+            <select id="partner_id" name="partner_id">
+              <option value="">ohne Partner</option>
+              {% for partner in partners %}
+                <option value="{{ partner.id }}">{{ partner.name }}{% if partner.debtor_number %} · D {{ partner.debtor_number }}{% endif %}{% if partner.creditor_number %} · K {{ partner.creditor_number }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <span class="hint">leere Felder kommen aus dem Partner, das Konto muss ein Sammelkonto sein</span>
+          </div>
+          <div class="field">
             <label for="counterparty">Debitor/Kreditor</label>
             <input id="counterparty" name="counterparty" placeholder="Kunde oder Lieferant" />
           </div>
@@ -117,8 +127,12 @@
     </div>
     {% if selected_company_id %}
       {{ filter_form('main.open_items_page', selected_company_id, q, date_from, date_to,
-                     extra=dict(dict({'include_settled': 1} if include_settled else {}, **({'overdue': 1} if overdue_only else {})), **sort.url_args),
-                     placeholder="Referenz oder Gegenpartei") }}
+                     extra=dict(dict(dict({'include_settled': 1} if include_settled else {}, **({'overdue': 1} if overdue_only else {})), **({'partner_id': filter_partner.id} if filter_partner else {})), **sort.url_args),
+                     placeholder="Referenz, Gegenpartei oder Partnernummer") }}
+      {% if filter_partner %}
+        <p class="small">Nur Posten von <a href="{{ url_for('main.partner_detail_page', partner_id=filter_partner.id) }}">{{ filter_partner.name }}</a>
+          · <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">Filter aufheben</a></p>
+      {% endif %}
     {% endif %}
 
     {% if open_items %}
@@ -148,7 +162,14 @@
                   {% endif %}
                 </td>
                 <td>{% if item.item_type == "receivable" %}<span class="badge badge-info">Debitor</span>{% else %}<span class="badge badge-warning">Kreditor</span>{% endif %}</td>
-                <td>{{ item.counterparty or "–" }}</td>
+                <td>
+                  {% if item.partner %}
+                    <a href="{{ url_for('main.partner_detail_page', partner_id=item.partner.id) }}">{{ item.partner.name }}</a>
+                    <br /><span class="muted small">{{ item.partner.debtor_number if item.item_type == "receivable" else item.partner.creditor_number }}</span>
+                  {% else %}
+                    {{ item.counterparty or "–" }}
+                  {% endif %}
+                </td>
                 <td class="nowrap" title="{{ item.account.name }}">{{ account_link(item.account.id, item.account.code) }}</td>
                 <td class="date">
                   {% if item.due_date %}
@@ -166,6 +187,33 @@
                   {% endif %}
                 </td>
                 <td class="actions">
+                  <button type="button" class="button-secondary btn-sm" popovertarget="partner-panel-{{ item.id }}">Partner …</button>
+                  <div popover id="partner-panel-{{ item.id }}" class="panel">
+                    <div class="panel-header">
+                      <div>
+                        <h3>Partner für {{ item.reference }}</h3>
+                        <p class="muted small" style="margin:0.2rem 0 0;">Freitext: {{ item.counterparty or "–" }}. Name und IBAN des Postens bleiben, fehlende Angaben kommen aus dem Partner.</p>
+                      </div>
+                      <button type="button" class="panel-close" popovertarget="partner-panel-{{ item.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
+                    </div>
+                    <form method="post" action="{{ url_for('main.set_open_item_partner_action', open_item_id=item.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <div class="field">
+                        <label for="item-partner-{{ item.id }}">Geschäftspartner</label>
+                        <select id="item-partner-{{ item.id }}" name="partner_id">
+                          <option value="">ohne Partner</option>
+                          {% for partner in partners %}
+                            {% if (item.item_type == "receivable" and partner.debtor_number) or (item.item_type == "payable" and partner.creditor_number) %}
+                              <option value="{{ partner.id }}" {% if partner.id == item.partner_id %}selected{% endif %}>{{ partner.name }} · {{ partner.debtor_number if item.item_type == "receivable" else partner.creditor_number }}</option>
+                            {% endif %}
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="form-actions">
+                        <button type="submit">Speichern</button>
+                      </div>
+                    </form>
+                  </div>
                   {% if item.status == "open" %}
                     <button type="button" class="primary btn-sm" popovertarget="item-panel-{{ item.id }}">Ausgleichen …</button>
                     <div popover id="item-panel-{{ item.id }}" class="panel">

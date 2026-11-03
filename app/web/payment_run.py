@@ -10,6 +10,7 @@ from app.services.sepa_export import (
     SepaExportError,
     create_payment_run,
     payable_items_for_run,
+    payment_recipient,
     set_company_bank_details,
 )
 from app.web.blueprint import main_bp
@@ -27,22 +28,25 @@ def payment_run_page():
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
         items = []
+        recipients = {}
         company_iban = None
         company_bic = None
         if selected_company_id:
             company = require_company_access(session, selected_company_id)
             company_iban, company_bic = company.iban, company.bic
             items = payable_items_for_run(session=session, company_id=selected_company_id)
+            recipients = {item.id: payment_recipient(item) for item in items}
 
-    return render_template(
-        "zahllauf.html",
-        companies=companies,
-        selected_company_id=selected_company_id,
-        items=items,
-        company_iban=company_iban,
-        company_bic=company_bic,
-        today=date.today().isoformat(),
-    )
+        return render_template(
+            "zahllauf.html",
+            companies=companies,
+            selected_company_id=selected_company_id,
+            items=items,
+            recipients=recipients,
+            company_iban=company_iban,
+            company_bic=company_bic,
+            today=date.today().isoformat(),
+        )
 
 
 @main_bp.post("/zahllauf/bankverbindung")

@@ -13,6 +13,8 @@ from app.services.open_items import (
     create_open_item,
     is_overdue,
     list_open_items,
+    open_item_matches_query,
+    set_open_item_partner,
     settle_open_item,
 )
 from app.services.scoping import scoped_select
@@ -28,7 +30,7 @@ from app.web.helpers import (
     search_args,
     sort_args,
 )
-from domain.models import Account, BankTransaction, JournalEntry, OpenItem
+from domain.models import Account, BankTransaction, BusinessPartner, JournalEntry, OpenItem
 
 # Obergrenze für Verknüpfungs-Dropdowns (jüngste Einträge).
 LINK_SELECT_LIMIT = 200
@@ -91,6 +93,9 @@ def open_items_page():
         journal_entries = []
         bank_transactions = []
         open_items = []
+        partners = []
+        filter_partner = None
+        partner_id = request.args.get("partner_id", type=int)
         include_settled = request.args.get("include_settled") == "1"
         overdue_only = request.args.get("overdue") == "1"
         totals = {"receivable": parse_decimal("0.00"), "payable": parse_decimal("0.00")}
@@ -124,23 +129,32 @@ def open_items_page():
                 .scalars()
                 .all()
             )
+            partners = (
+                session.execute(
+                    scoped_select(BusinessPartner, company_id=selected_company_id)
+                    .where(BusinessPartner.is_active.is_(True))
+                    .order_by(BusinessPartner.name)
+                )
+                .scalars()
+                .all()
+            )
+            if partner_id:
+                filter_partner = session.get(BusinessPartner, partner_id)
+                if filter_partner is None or filter_partner.company_id != selected_company_id:
+                    filter_partner = None
+                    partner_id = None
             open_items = list_open_items(
                 session=session,
                 company_id=selected_company_id,
                 include_settled=include_settled,
+                partner_id=partner_id,
             )
             for item in open_items:
                 if item.status == "open":
                     totals[item.item_type] += item.open_amount
 
     if query:
-        needle = query.lower()
-        open_items = [
-            item
-            for item in open_items
-            if needle in (item.reference or "").lower()
-            or needle in (item.counterparty or "").lower()
-        ]
+        open_items = [item for item in open_items if open_item_matches_query(item, query)]
     if overdue_only:
         open_items = [item for item in open_items if is_overdue(item)]
     if date_from:
@@ -158,6 +172,8 @@ def open_items_page():
         companies=companies,
         selected_company_id=selected_company_id,
         accounts=accounts,
+        partners=partners,
+        filter_partner=filter_partner,
         journal_entries=journal_entries,
         bank_transactions=bank_transactions,
         open_items=open_items,
@@ -173,6 +189,7 @@ def open_items_page():
             date_to,
             include_settled=1 if include_settled else None,
             overdue=1 if overdue_only else None,
+            partner_id=partner_id,
         ),
         include_settled=include_settled,
         overdue_only=overdue_only,
@@ -187,6 +204,7 @@ def create_open_item_action():
     company_id = request.form.get("company_id", type=int)
     account_id = request.form.get("account_id", type=int)
     journal_entry_id = request.form.get("journal_entry_id", type=int)
+    partner_id = request.form.get("partner_id", type=int)
     item_type = request.form.get("item_type", "").strip()
     reference = request.form.get("reference", "").strip()
     counterparty = request.form.get("counterparty", "").strip() or None
@@ -218,6 +236,7 @@ def create_open_item_action():
                     company_id=company_id,
                     account_id=account_id,
                     journal_entry_id=journal_entry_id,
+                    partner_id=partner_id,
                     item_type=item_type,
                     reference=reference,
                     counterparty=counterparty,
@@ -234,6 +253,35 @@ def create_open_item_action():
             return redirect(url_for("main.open_items_page", company_id=company_id))
 
     flash(f"Offener Posten {item.reference} wurde angelegt.", "success")
+    return redirect(url_for("main.open_items_page", company_id=company_id))
+
+
+@main_bp.post("/offene-posten/<int:open_item_id>/partner")
+def set_open_item_partner_action(open_item_id: int):
+    partner_id = request.form.get("partner_id", type=int)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        item = session.get(OpenItem, open_item_id)
+        if item is None:
+            abort(404)
+        require_company_access(session, item.company_id)
+        company_id = item.company_id
+        try:
+            item = set_open_item_partner(
+                session=session,
+                open_item_id=open_item_id,
+                partner_id=partner_id,
+                changed_by=changed_by(),
+            )
+        except OpenItemError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.open_items_page", company_id=company_id))
+        message = (
+            f"Posten {item.reference} ist {item.partner.name} zugeordnet."
+            if item.partner
+            else f"Partner von Posten {item.reference} wurde entfernt."
+        )
+    flash(message, "success")
     return redirect(url_for("main.open_items_page", company_id=company_id))
 
 

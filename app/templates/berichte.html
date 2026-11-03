@@ -75,6 +75,8 @@
         <a href="{{ url_for('api.export_trial_balance_csv', company_id=selected_company_id, **report_args) }}">SuSa-Export (CSV, API-Format)</a>
         ·
         <a href="{{ url_for('api.export_audit_package', company_id=selected_company_id) }}">Prüferexport (ZIP)</a>
+        ·
+        <a href="{{ url_for('main.partner_balances_page', company_id=selected_company_id) }}">Saldenliste Debitoren/Kreditoren</a>
       </p>
       {% if datev_fiscal_years %}
         <form method="get" action="{{ url_for('main.download_datev_csv') }}" class="inline-form" id="datev-export">

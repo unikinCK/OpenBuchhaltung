@@ -61,6 +61,104 @@
     </dl>
   </section>
 
+  <section class="card" id="partnerkonto">
+    <div class="card-header">
+      <h2>Partnerkonto</h2>
+    </div>
+    <form method="get" action="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}" class="filter-bar">
+      <input type="date" name="date_from" value="{{ date_from.isoformat() if date_from else '' }}" aria-label="Von-Datum" title="Von" />
+      <input type="date" name="date_to" value="{{ date_to.isoformat() if date_to else '' }}" aria-label="Bis-Datum" title="Bis" />
+      <button type="submit" class="secondary">Filtern</button>
+      {% if date_from or date_to %}<a href="{{ url_for('main.partner_detail_page', partner_id=partner.id) }}">Zurücksetzen</a>{% endif %}
+    </form>
+    {% for side in statement.sides %}
+      <h3 class="form-section-title">{{ "Debitor" if side.side == "debtor" else "Kreditor" }} {{ side.number }}</h3>
+      {% if side.lines or side.opening_balance %}
+        <div class="table-scroll">
+          <table class="data" data-no-sort>
+            <thead>
+              <tr>
+                <th>Datum</th>
+                <th>Beleg-Nr.</th>
+                <th>Buchungstext</th>
+                <th>Konto</th>
+                <th class="num">Soll</th>
+                <th class="num">Haben</th>
+                <th class="num">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if date_from %}
+                <tr class="row-muted">
+                  <td colspan="6">Anfangssaldo</td>
+                  <td class="num">{{ side.opening_balance | betrag }}</td>
+                </tr>
+              {% endif %}
+              {% for line in side.lines %}
+                <tr>
+                  <td class="date">{{ line.entry_date | datum }}</td>
+                  <td class="nowrap"><a class="posting-number" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=line.journal_entry_id) }}">{{ line.posting_number }}</a></td>
+                  <td>{{ line.description }}</td>
+                  <td class="nowrap"><a href="{{ url_for('main.account_detail_page', account_id=line.account_id) }}">{{ line.account_code }}</a></td>
+                  <td class="num">{{ line.debit_amount | betrag if line.debit_amount else "" }}</td>
+                  <td class="num">{{ line.credit_amount | betrag if line.credit_amount else "" }}</td>
+                  <td class="num{% if line.balance < 0 %} negative{% endif %}">{{ line.balance | betrag }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th colspan="4">Summe / Endsaldo{% if side.line_count > side.lines | length %} ({{ side.lines | length }} von {{ side.line_count }} Zeilen){% endif %}</th>
+                <th class="num">{{ side.debit_total | betrag }}</th>
+                <th class="num">{{ side.credit_total | betrag }}</th>
+                <th class="num">{{ side.closing_balance | betrag }}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Keine Buchungen auf einem {{ "Debitoren" if side.side == "debtor" else "Kreditoren" }}-Sammelkonto{% if date_from or date_to %} im Zeitraum{% endif %}.</p>
+      {% endif %}
+    {% endfor %}
+    <p class="muted small">Es zählen Zeilen auf Sammelkonten; Saldo = Soll minus Haben.
+      <a href="{{ url_for('main.partner_balances_page', company_id=partner.company_id) }}">Saldenliste</a></p>
+
+    <h3 class="form-section-title">Offene Posten <span class="count">{{ statement.open_items | length }}</span></h3>
+    {% if statement.open_items %}
+      <div class="table-scroll">
+        <table class="data" data-no-sort>
+          <thead>
+            <tr>
+              <th>Referenz</th>
+              <th>Typ</th>
+              <th>Belegdatum</th>
+              <th>Fällig</th>
+              <th class="num">Original</th>
+              <th class="num">Offen</th>
+              <th>Mahnstufe</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in statement.open_items %}
+              <tr>
+                <td>{{ item.reference }}</td>
+                <td>{{ "Debitor" if item.item_type == "receivable" else "Kreditor" }}</td>
+                <td class="date">{{ item.entry_date | datum }}</td>
+                <td class="date">{{ item.due_date | datum if item.due_date else "–" }}</td>
+                <td class="num">{{ item.original_amount | betrag }}</td>
+                <td class="num"><strong>{{ item.open_amount | betrag }}</strong></td>
+                <td>{{ item.dunning_level or "–" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="small"><a href="{{ url_for('main.open_items_page', company_id=partner.company_id, partner_id=partner.id, include_settled=1) }}">Alle Posten dieses Partners →</a></p>
+    {% else %}
+      <p class="muted">Keine offenen Posten.</p>
+    {% endif %}
+  </section>
+
   <section class="card">
     <div class="card-header">
       <h2>Buchungen <span class="count">{{ entries_total }}</span></h2>
