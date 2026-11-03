@@ -45,6 +45,8 @@ können, was gebucht, exportiert und protokolliert wird.
   FinTS/HBCI-Direktabruf mit TAN-Flow, mehrere Bankkonten je Gesellschaft,
   Deduplizierung über Bankreferenzen, Matching, Saldenabgleich je Bankkonto,
   offene Posten und Zahlungsausgleich.
+- **Kassenbuch:** fortlaufende, verkettete und unveränderbare Einträge mit Tagessaldo,
+  Kassensturz, Kassenbericht und automatischer Buchung; manuell geführt, ersetzt keine TSE.
 - **Arbeitskomfort:** Dashboard mit offenen Aufgaben (unverbuchte Umsätze,
   unverknüpfte Belege, überfällige OPOS, offene Abgleich-Vorschläge) sowie
   Suche und Datumsfilter auf Bank-, Buchungs-, Beleg- und OPOS-Seite. Die
@@ -799,6 +801,48 @@ Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so
 sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
 `get_bank_reconciliation`).
 
+## Kassenbuch
+
+Unter **Bank & OPOS → Kassenbuch** führt jede Gesellschaft eine oder mehrere Kassen, jede an
+genau einem Aktivkonto (Entscheidungen in [ADR-007](docs/adr/ADR-007-kassenbuch.md)).
+
+> **Grenzen:** Das ist ein manuell geführtes Kassenbuch. Es ersetzt keine TSE und keinen
+> DSFinV-K-Export für elektronische Kassensysteme und ist nicht zertifiziert. Ob eine offene
+> Ladenkasse im Einzelfall zulässig ist, klärt der Betrieb mit seiner Steuerberatung.
+
+- **Anlage:** Der Anfangsbestand wird der erste Eintrag. Mit Gegenkonto (z. B. Saldenvorträge)
+  wird er gebucht; das Konto darf dann noch keinen Saldo haben. Ohne Gegenkonto entsteht keine
+  Buchung, der Betrag muss dem Kontensaldo am Stichtag entsprechen (ohne Betrag gilt dieser).
+- **Einträge:** Einnahme oder Ausgabe mit Datum, Bruttobetrag, Beschreibung, Gegenkonto und optional
+  Steuercode, Geschäftspartner und Beleg. Jeder Eintrag erzeugt in derselben Transaktion genau eine
+  Buchung, die Steuer entsteht wie bei der Bankbuchung aus dem Bruttobetrag. Gesperrte Perioden
+  schlagen durch und rollen alles zurück.
+- **Regeln:** Datum nicht in der Zukunft, nicht vor dem letzten Eintrag und nicht in einem
+  abgeschlossenen Tag. Der Bestand darf nie negativ werden. Inaktive Kassen nehmen keine Einträge
+  an; inaktiv setzen lässt sich eine Kasse nur mit Bestand 0.
+- **Unveränderbar:** Einträge und Abschlüsse sind per Datenbank-Trigger gegen Ändern und Löschen
+  geschützt. Die Nummern sind je Kasse lückenlos, die Einträge per SHA-256 verkettet. Korrektur nur
+  per Storno: Der Storno-Eintrag spiegelt den Eintrag am aktuellen Datum und storniert die Buchung,
+  je Eintrag höchstens einmal. Die Buchung eines Eintrags lässt sich nicht über das Journal
+  stornieren; Kostenstelle, Partner und Leistungsdatum lassen sich an der offenen Buchung ergänzen.
+- **Kassensturz:** hält Soll-Bestand, gezählten Bestand und Differenz fest und sperrt alle Tage bis
+  zu diesem Datum. Eine Differenz wird als eigener Eintrag gegen ein gewähltes Konto gebucht.
+- **Kassenbericht:** Zeitraum mit Anfangsbestand, Einnahmen, Ausgaben, Endbestand, Tagessalden und
+  Einzelzeilen als druckbare Seite und CSV. Der Anfangsbestand einer neuen Kasse zählt nicht als
+  Einnahme; Storno- und Differenz-Einträge zählen nach ihrer Richtung.
+- **Prüfung:** Hashkette, lückenlose Nummern, Bestandsfortschreibung, Buchungen und Kassenstürze.
+  Weicht der Saldo des Kassenkontos ab (Buchungen am Kassenbuch vorbei), meldet die Prüfung das und
+  nennt die Buchungen, blockiert aber nicht.
+
+API: `GET/POST /api/v1/cash-books`, `GET/PATCH /api/v1/cash-books/<id>`,
+`GET/POST /api/v1/cash-books/<id>/entries`, `POST /api/v1/cash-books/<id>/entries/<entry_id>/reverse`,
+`GET/POST /api/v1/cash-books/<id>/closings`, `GET /api/v1/cash-books/<id>/report`,
+`GET /api/v1/cash-books/<id>/report.csv` und `GET /api/v1/cash-books/<id>/integrity`. MCP:
+`list_cash_books`, `create_cash_book`, `update_cash_book`, `list_cash_entries`, `create_cash_entry`,
+`reverse_cash_entry`, `list_cash_closings`, `create_cash_closing`, `get_cash_report`,
+`export_cash_report_csv`, `verify_cash_book`; im KI-Chat laufen die schreibenden Tools erst nach
+Bestätigung. Prüferexport: `cash_books`, `cash_entries`, `cash_closings`.
+
 ## Geschäftspartner (Debitoren/Kreditoren)
 
 Unter **Partner** (Nav-Gruppe Buchen) werden Kunden und Lieferanten gepflegt.
@@ -1072,7 +1116,8 @@ derselben Transaktion mit: ein aus der Buchung verbuchter Bankumsatz wird wieder
 „open“, ein AfA-/Abgangssatz wird zurückgenommen (Buchwert und Anlagenstatus
 folgen dem Hauptbuch), ein gebuchter Lohnlauf wird wieder Entwurf und ein mit
 der Buchung ausgeglichener offener Posten lebt um den Ausgleichsbetrag wieder
-auf. Das Stornodatum darf nicht vor dem Buchungsdatum des Originals liegen.
+auf. Das Stornodatum darf nicht vor dem Buchungsdatum des Originals liegen. Die Buchung eines
+Kassenbuch-Eintrags wird nur im [Kassenbuch](#kassenbuch) storniert.
 
 ## E-Rechnung importieren (XRechnung / ZUGFeRD)
 
@@ -1415,6 +1460,8 @@ Basis-Endpunkte:
   oder eigene CSV per `content_base64`); MCP-Tool `import_account_chart`
 - `GET /api/v1/account-chart/check` — Kontenrahmen-Prüfung (`company_id`, siehe
   [Kontenrahmenimport](#kontenrahmenimport-skr03skr04)); MCP-Tool `check_account_chart`
+- `GET/POST /api/v1/cash-books`, `GET/PATCH /api/v1/cash-books/<id>`, Einträge, Storno,
+  Kassenstürze, Bericht und Prüfung darunter — Kassenbuch (siehe [Kassenbuch](#kassenbuch)).
 - `GET/POST /api/v1/partners`, `GET/PATCH /api/v1/partners/<id>`,
   `POST /api/v1/partners/<id>/bank-details`, `GET /api/v1/partners/<id>/history` —
   Geschäftspartner (Debitoren/Kreditoren)
@@ -1875,7 +1922,7 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 `reject_chat_action`).
 
 **Werkzeuge auf Anforderung.** Jede Tool-Definition belegt bei jeder Anfrage Platz im Kontext des
-Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Konsolidierung, Einrichtung) blendet
+Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Kasse, Konsolidierung, Einrichtung) blendet
 Obi deshalb erst ein, wenn es sie braucht: über das Chat-Werkzeug `load_tools`, das keine Bestätigung
 braucht und in der Unterhaltung erhalten bleibt. Was im Chat gesperrt ist, bleibt auch danach gesperrt, und
 schreibende Werkzeuge bleiben bestätigungspflichtig. Für MCP-Clients ändert sich nichts.

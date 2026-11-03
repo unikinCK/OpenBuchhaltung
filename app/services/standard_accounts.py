@@ -90,6 +90,13 @@ BANK = StandardAccount(
     codes=("1800", "1200"),
     name_keyword="bank",
 )
+# SKR04 1600 (Kasse) und SKR03 1000 (Kasse) tragen nur im jeweiligen Kontenrahmen diese
+# Bedeutung, deshalb zählt allein die Bezeichnung.
+KASSE = StandardAccount(
+    label="Kasse",
+    codes=("1600", "1000"),
+    name_keyword="kasse",
+)
 # SKR04 1600 (Kasse) ist ein Aktivkonto, SKR03 3300 (Wareneingang) ein Aufwandskonto.
 VERBINDLICHKEITEN_LUL = StandardAccount(
     label="Verbindlichkeiten aus Lieferungen und Leistungen",

@@ -309,6 +309,33 @@ def _knowledge_source_properties() -> dict[str, Any]:
     }
 
 
+def _cash_report_schema() -> dict[str, Any]:
+    """Schema für den Kassenbericht einer Kasse."""
+    return {
+        "type": "object",
+        "properties": {
+            "cash_book_id": {"type": "integer"},
+            "date_from": {"type": "string"},
+            "date_to": {"type": "string"},
+        },
+        "required": ["cash_book_id"],
+        "additionalProperties": False,
+    }
+
+
+def _cash_list_schema() -> dict[str, Any]:
+    """Schema für die Listen einer Kasse (Einträge, Kassenstürze)."""
+    schema = _cash_report_schema()
+    return {
+        **schema,
+        "properties": {
+            **schema["properties"],
+            "limit": {"type": "integer"},
+            "offset": {"type": "integer"},
+        },
+    }
+
+
 def _period_report_schema() -> dict[str, Any]:
     """Schema für Zeitraum-Reports (GuV, Summen-/Saldenliste)."""
     return {
@@ -3531,6 +3558,184 @@ TOOLS: list[ToolSpec] = [
         http_method="POST",
         path="/bank-transactions/{transaction_id}/book",
         arg_location="json",
+    ),
+    ToolSpec(
+        name="list_cash_books",
+        description="Listet die Kassen einer Gesellschaft mit Konto und Bestand.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "include_inactive": {"type": "boolean"},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/cash-books",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_cash_book",
+        description=(
+            "Legt eine Kasse auf einem Aktivkonto an. Anfangsbestand: mit "
+            "opening_contra_account_id gebucht (Konto ohne Saldo), sonst gleich dem Kontensaldo "
+            "(ohne Betrag automatisch)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "account_id": {"type": "integer"},
+                "name": {"type": "string"},
+                "opening_amount": {"type": "string"},
+                "opening_date": {"type": "string"},
+                "opening_contra_account_id": {"type": "integer"},
+            },
+            "required": ["company_id", "account_id", "name"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/cash-books",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_cash_book",
+        description="Ändert Name oder Status einer Kasse (inaktiv nur mit Bestand 0).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "cash_book_id": {"type": "integer"},
+                "name": {"type": "string"},
+                "is_active": {"type": "boolean"},
+            },
+            "required": ["cash_book_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/cash-books/{cash_book_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_cash_entries",
+        description="Listet die Einträge einer Kasse, neueste zuerst.",
+        input_schema=_cash_list_schema(),
+        http_method="GET",
+        path="/cash-books/{cash_book_id}/entries",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_cash_entry",
+        description=(
+            "Erfasst Einnahme (receipt) oder Ausgabe (payment) brutto im Kassenbuch und bucht "
+            "sie samt Steuer. Unveränderbar; Datum chronologisch, nicht in der Zukunft oder in "
+            "abgeschlossenen Tagen; Bestand nie negativ."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "cash_book_id": {"type": "integer"},
+                "entry_type": {"type": "string", "enum": ["receipt", "payment"]},
+                "entry_date": {"type": "string"},
+                "amount": {"type": "string"},
+                "description": {"type": "string"},
+                "contra_account_id": {"type": "integer"},
+                "tax_code_id": {"type": "integer"},
+                "partner_id": {"type": "integer"},
+                "partner_number": {"type": "string"},
+                "document_id": {"type": "integer"},
+            },
+            "required": [
+                "cash_book_id",
+                "entry_type",
+                "entry_date",
+                "amount",
+                "description",
+                "contra_account_id",
+            ],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/cash-books/{cash_book_id}/entries",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="reverse_cash_entry",
+        description=(
+            "Storniert einen Kassenbuch-Eintrag am aktuellen Datum samt Buchung (einzige "
+            "Korrektur, einmalig)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"cash_book_id": {"type": "integer"}, "entry_id": {"type": "integer"}},
+            "required": ["cash_book_id", "entry_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/cash-books/{cash_book_id}/entries/{entry_id}/reverse",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="list_cash_closings",
+        description="Listet die Kassenstürze einer Kasse, neueste zuerst.",
+        input_schema=_cash_list_schema(),
+        http_method="GET",
+        path="/cash-books/{cash_book_id}/closings",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_cash_closing",
+        description=(
+            "Kassensturz: gezählten Bestand festhalten, Tage bis zum Datum sperren; eine "
+            "Differenz geht auf difference_account_id."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "cash_book_id": {"type": "integer"},
+                "closing_date": {"type": "string"},
+                "counted_balance": {"type": "string"},
+                "difference_account_id": {"type": "integer"},
+                "description": {"type": "string"},
+            },
+            "required": ["cash_book_id", "closing_date", "counted_balance"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/cash-books/{cash_book_id}/closings",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_cash_report",
+        description=(
+            "Kassenbericht eines Zeitraums: Bestände, Einnahmen, Ausgaben, Tagessalden, "
+            "Einzelzeilen."
+        ),
+        input_schema=_cash_report_schema(),
+        http_method="GET",
+        path="/cash-books/{cash_book_id}/report",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="export_cash_report_csv",
+        description="Exportiert den Kassenbericht als CSV.",
+        input_schema=_with_download_link(_cash_report_schema()),
+        http_method="GET",
+        path="/cash-books/{cash_book_id}/report.csv",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="verify_cash_book",
+        description="Prüft Hashkette, Nummern, Bestand, Kassenstürze und Kontensaldo einer Kasse.",
+        input_schema={
+            "type": "object",
+            "properties": {"cash_book_id": {"type": "integer"}},
+            "required": ["cash_book_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/cash-books/{cash_book_id}/integrity",
+        arg_location="none",
     ),
     ToolSpec(
         name="list_fints_connections",

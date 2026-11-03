@@ -23,6 +23,9 @@ from domain.models import (
     AuditLog,
     BankTransaction,
     BusinessPartner,
+    CashBook,
+    CashClosing,
+    CashEntry,
     Company,
     ConsolidationAdjustment,
     ConsolidationAdjustmentLine,
@@ -101,6 +104,9 @@ EXPORT_TABLE_MODELS = {
     "journal_entries": JournalEntry,
     "journal_entry_lines": JournalEntryLine,
     "bank_transactions": BankTransaction,
+    "cash_books": CashBook,
+    "cash_entries": CashEntry,
+    "cash_closings": CashClosing,
     "open_items": OpenItem,
     "open_item_settlements": OpenItemSettlement,
     "fixed_assets": FixedAsset,
@@ -141,6 +147,15 @@ TABLE_DESCRIPTIONS = {
     "journal_entries": "Buchungsköpfe einschließlich Festschreibung und Inhaltshash.",
     "journal_entry_lines": "Soll- und Haben-Zeilen der exportierten Buchungen.",
     "bank_transactions": "Importierte Bankumsätze und Buchungszuordnungen.",
+    "cash_books": "Kassen der Gesellschaft mit Kassenkonto, Status und Nummernkreis.",
+    "cash_entries": (
+        "Unveränderbare Kassenbuch-Einträge mit fortlaufender Nummer, Bestand, Buchung "
+        "und Hashkette (SHA-256 über die kanonischen Felder einschließlich Vorgänger-Hash)."
+    ),
+    "cash_closings": (
+        "Unveränderbare Tagesabschlüsse (Kassensturz) mit Soll-Bestand, gezähltem Bestand "
+        "und Differenz."
+    ),
     "open_items": "Offene und ausgeglichene Forderungen und Verbindlichkeiten.",
     "open_item_settlements": "Ausgleiche offener Posten mit Zahlungsdatum und Storno.",
     "fixed_assets": "Anlagenstamm und Bewertungsparameter.",
@@ -234,6 +249,27 @@ FIELD_DESCRIPTIONS = {
     "sequence_number": "Fortlaufende Sequenznummer innerhalb der Mandanten-Auditkette.",
     "previous_hash": "SHA-256-Hash des vorherigen Audit-Eintrags.",
     "entry_hash": "SHA-256-Inhaltshash dieses Audit-Eintrags.",
+}
+
+# Tabellenbezogene Beschreibung, wenn derselbe Feldname anderswo etwas anderes bedeutet.
+TABLE_FIELD_DESCRIPTIONS = {
+    ("cash_books", "last_entry_number"): "Nummernkreis: zuletzt vergebene Eintragsnummer.",
+    ("cash_entries", "entry_number"): "Lückenlose laufende Nummer je Kasse.",
+    ("cash_entries", "entry_type"): "Art: receipt, payment, opening, difference, reversal.",
+    ("cash_entries", "direction"): "in = Bestand steigt, out = Bestand sinkt.",
+    ("cash_entries", "amount"): "Bruttobetrag des Eintrags, immer positiv.",
+    ("cash_entries", "balance_after"): "Kassenbestand nach dem Eintrag.",
+    ("cash_entries", "hash_version"): "Version des Verfahrens für content_hash.",
+    ("cash_entries", "previous_hash"): (
+        "SHA-256-Hash des vorherigen Eintrags derselben Kasse (erster Eintrag: 64 Nullen)."
+    ),
+    ("cash_entries", "content_hash"): (
+        "SHA-256 über die kanonischen Felder des Eintrags einschließlich previous_hash."
+    ),
+    ("cash_closings", "expected_balance"): "Soll-Bestand laut Kassenbuch vor einer Differenz.",
+    ("cash_closings", "counted_balance"): "Beim Kassensturz gezählter Bestand.",
+    ("cash_closings", "difference"): "Gezählter Bestand minus Soll-Bestand.",
+    ("cash_closings", "difference_entry_id"): "Eintrag, der die Differenz gebucht hat.",
 }
 
 DOCUMENT_DERIVED_FIELDS = {
@@ -397,6 +433,35 @@ def build_audit_export_package(
                 BankTransaction.company_id == company.id,
                 _date_range(BankTransaction.booking_date, date_from, date_to),
                 order_by=(BankTransaction.booking_date, BankTransaction.id),
+            )
+        ],
+        "cash_books": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                CashBook,
+                CashBook.company_id == company.id,
+                order_by=(CashBook.name, CashBook.id),
+            )
+        ],
+        "cash_entries": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                CashEntry,
+                CashEntry.company_id == company.id,
+                _date_range(CashEntry.entry_date, date_from, date_to),
+                order_by=(CashEntry.cash_book_id, CashEntry.entry_number),
+            )
+        ],
+        "cash_closings": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                CashClosing,
+                CashClosing.company_id == company.id,
+                _date_range(CashClosing.closing_date, date_from, date_to),
+                order_by=(CashClosing.cash_book_id, CashClosing.closing_date),
             )
         ],
         "open_items": [
@@ -854,6 +919,8 @@ def _column_json_type(column) -> str:
 
 
 def _field_description(export_name: str, name: str, foreign_keys: list[str]) -> str:
+    if (export_name, name) in TABLE_FIELD_DESCRIPTIONS:
+        return TABLE_FIELD_DESCRIPTIONS[(export_name, name)]
     if name in FIELD_DESCRIPTIONS:
         return FIELD_DESCRIPTIONS[name]
     if foreign_keys:

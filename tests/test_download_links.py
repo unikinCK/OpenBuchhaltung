@@ -160,7 +160,9 @@ def test_forged_or_foreign_tokens_are_rejected(tmp_path):
     client = app.test_client()
     link = _document_link(client, document_id).get_json()["download_path"]
 
-    tampered = link[:-1] + ("A" if link[-1] != "A" else "B")
+    # Vorletztes Zeichen: Beim letzten Base64-Zeichen zählen nicht alle Bits, eine Änderung
+    # dort kann dieselbe Signatur ergeben.
+    tampered = link[:-2] + ("A" if link[-2] != "A" else "B") + link[-1]
     assert client.get(tampered).status_code == 404
     foreign = issue_download_token(
         "anderer-schluessel", DownloadGrant(path=f"/documents/{document_id}/download")

@@ -196,6 +196,22 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "export_audit_package",
         ),
     ),
+    "kasse": (
+        "Kassenbuch",
+        (
+            "list_cash_books",
+            "create_cash_book",
+            "update_cash_book",
+            "list_cash_entries",
+            "create_cash_entry",
+            "reverse_cash_entry",
+            "list_cash_closings",
+            "create_cash_closing",
+            "get_cash_report",
+            "export_cash_report_csv",
+            "verify_cash_book",
+        ),
+    ),
     "konsolidierung": (
         "Konsolidierte Auswertung mehrerer Gesellschaften",
         (

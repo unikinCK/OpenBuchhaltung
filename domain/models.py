@@ -2287,6 +2287,182 @@ class CompanyKnowledgeUpload(Base):
     entry: Mapped[CompanyKnowledgeEntry | None] = relationship()
 
 
+CASH_ENTRY_RECEIPT = "receipt"
+CASH_ENTRY_PAYMENT = "payment"
+CASH_ENTRY_OPENING = "opening"
+CASH_ENTRY_DIFFERENCE = "difference"
+CASH_ENTRY_REVERSAL = "reversal"
+CASH_ENTRY_TYPES = (
+    CASH_ENTRY_RECEIPT,
+    CASH_ENTRY_PAYMENT,
+    CASH_ENTRY_OPENING,
+    CASH_ENTRY_DIFFERENCE,
+    CASH_ENTRY_REVERSAL,
+)
+CASH_DIRECTION_IN = "in"
+CASH_DIRECTION_OUT = "out"
+
+
+class CashBook(Base):
+    """Eine Kasse der Gesellschaft, gebunden an genau ein Aktivkonto (ADR-007).
+
+    ``last_entry_number`` ist der Nummernkreis der Kasse: Die Zeile wird beim Erfassen
+    mit ``FOR UPDATE`` gesperrt, dadurch sind Nummer, Vorgänger-Hash und Bestand je Kasse
+    serialisiert und die Nummern lückenlos (ein Rollback nimmt auch den Zähler zurück).
+    """
+
+    __tablename__ = "cash_book"
+    __table_args__ = (
+        UniqueConstraint("company_id", "account_id", name="uq_cash_book_company_account"),
+        UniqueConstraint("company_id", "name", name="uq_cash_book_company_name"),
+        CheckConstraint("last_entry_number >= 0", name="ck_cash_book_entry_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_entry_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    account: Mapped[Account] = relationship()
+
+
+class CashEntry(Base):
+    """Eintrag im Kassenbuch: fortlaufend, verkettet und unveränderbar (DB-Trigger).
+
+    ``amount`` ist immer positiv, ``direction`` sagt, ob der Bestand steigt (``in``) oder
+    sinkt (``out``); ein Differenz- oder Storno-Eintrag kann beides sein. Nur ein
+    Anfangsbestand, den das Konto schon trägt, hat keine Buchung und kein Gegenkonto.
+    """
+
+    __tablename__ = "cash_entry"
+    __table_args__ = (
+        UniqueConstraint("cash_book_id", "entry_number", name="uq_cash_entry_book_number"),
+        # Ein Eintrag lässt sich höchstens einmal stornieren.
+        UniqueConstraint("reversal_of_id", name="uq_cash_entry_reversal_of"),
+        CheckConstraint("entry_number > 0", name="ck_cash_entry_number_positive"),
+        CheckConstraint("amount > 0", name="ck_cash_entry_amount_positive"),
+        CheckConstraint("balance_after >= 0", name="ck_cash_entry_balance_non_negative"),
+        CheckConstraint(
+            "entry_type IN ('receipt', 'payment', 'opening', 'difference', 'reversal')",
+            name="ck_cash_entry_type",
+        ),
+        CheckConstraint("direction IN ('in', 'out')", name="ck_cash_entry_direction"),
+        CheckConstraint(
+            "(entry_type = 'reversal' AND reversal_of_id IS NOT NULL) OR "
+            "(entry_type <> 'reversal' AND reversal_of_id IS NULL)",
+            name="ck_cash_entry_reversal_link",
+        ),
+        CheckConstraint(
+            "entry_type = 'opening' OR journal_entry_id IS NOT NULL",
+            name="ck_cash_entry_journal_entry",
+        ),
+        Index("ix_cash_entry_book_date", "cash_book_id", "entry_date"),
+        Index("ix_cash_entry_journal_entry", "journal_entry_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    cash_book_id: Mapped[int] = mapped_column(
+        ForeignKey("cash_book.id", ondelete="RESTRICT"), nullable=False
+    )
+    entry_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    direction: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    contra_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT")
+    )
+    tax_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tax_code.id", ondelete="RESTRICT")
+    )
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT")
+    )
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document.id", ondelete="RESTRICT")
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="RESTRICT")
+    )
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    reversal_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cash_entry.id", ondelete="RESTRICT")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    hash_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    cash_book: Mapped[CashBook] = relationship()
+    contra_account: Mapped[Account | None] = relationship()
+    tax_code: Mapped[TaxCode | None] = relationship()
+    partner: Mapped[BusinessPartner | None] = relationship()
+    document: Mapped[Document | None] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+    reversal_of: Mapped[CashEntry | None] = relationship(remote_side="CashEntry.id")
+
+
+class CashClosing(Base):
+    """Tagesabschluss (Kassensturz): unveränderbar, sperrt alle Tage bis ``closing_date``.
+
+    ``difference`` ist gezählt minus Soll; ist sie nicht null, verweist
+    ``difference_entry_id`` auf den Eintrag, der sie gebucht hat.
+    """
+
+    __tablename__ = "cash_closing"
+    __table_args__ = (
+        UniqueConstraint("cash_book_id", "closing_date", name="uq_cash_closing_book_date"),
+        CheckConstraint("expected_balance >= 0", name="ck_cash_closing_expected"),
+        CheckConstraint("counted_balance >= 0", name="ck_cash_closing_counted"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    cash_book_id: Mapped[int] = mapped_column(
+        ForeignKey("cash_book.id", ondelete="RESTRICT"), nullable=False
+    )
+    closing_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    counted_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    difference: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    difference_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cash_entry.id", ondelete="RESTRICT")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    cash_book: Mapped[CashBook] = relationship()
+    difference_entry: Mapped[CashEntry | None] = relationship()
+
+
 # Art einer manuellen Konsolidierungsbuchung (ADR-008).
 CONSOLIDATION_KIND_CAPITAL = "capital"
 CONSOLIDATION_KIND_OTHER = "other"

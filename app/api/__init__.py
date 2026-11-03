@@ -10,6 +10,7 @@ from app.api import (  # noqa: F401
     accounts,
     audit_log,
     bank,
+    cash_book,
     chat,
     company_knowledge,
     consolidation,
