@@ -4,7 +4,7 @@
 - **Datum:** 2026-11-03
 - **Entscheider:** OpenBuchhaltung Kernteam
 - **Umsetzung:** `app/services/sales_invoices.py`, `sales_invoice_pdf.py`,
-  `company_master_data.py`, `einvoice_export.py`; Migration `20261103_0058`
+  `company_master_data.py`, `einvoice_export.py`; Migration `20261103_0063`
 
 ## Kontext
 Bisher ließ sich eine Ausgangsrechnung nur als XML aus einem Formular erzeugen: nicht gespeichert,

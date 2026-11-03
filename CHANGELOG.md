@@ -18,7 +18,7 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   `list_`, `get_`, `create_`, `update_`, `delete_`, `issue_`, `cancel_`, `download_sales_invoice`):
   Entwurf ohne Nummer, atomares Ausstellen mit lückenlosem Nummernkreis, Buchung, offenem Posten,
   XRechnung und PDF als Belegen. Ausgestellte Rechnungen sind unveränderlich (Service und
-  DB-Trigger, Migration `20261103_0058`, ADR-006).
+  DB-Trigger, Migration `20261103_0063`, ADR-006).
 - Steuerbehandlung am Rechnungskopf: Regelsteuer, § 13b, innergemeinschaftliche Lieferung, Ausfuhr,
   steuerfrei, Kleinunternehmer, jeweils mit Steuerkategorie und Pflichthinweis.
 - Storno per Stornorechnung mit eigener Nummer (E-Rechnung Typ 381), nur solange der Posten unbezahlt

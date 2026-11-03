@@ -670,7 +670,7 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
       Kassenbuch (#9), Fremdwährung (#14).
   - [x] Firmenstammdaten (#3) und Ausgangsrechnungen (#2), Storno per Stornorechnung (#7)
-        *(2026-11-03, ADR-006, Migration `20261103_0058`)*: Rechnung mit lückenlosem Nummernkreis,
+        *(2026-11-03, ADR-006, Migration `20261103_0063`)*: Rechnung mit lückenlosem Nummernkreis,
         atomarem Ausstellen (Buchung, OPOS, XRechnung, PDF als Belege), Steuerbehandlung und
         Unveränderlichkeit per Trigger; UI/API/MCP, Prüferexport. Offen: E-Mail-Versand (#6),
         Fremdwährung (#14), Abschlagsrechnungen, wiederkehrende Rechnungen, Prüfung gegen den

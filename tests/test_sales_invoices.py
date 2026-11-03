@@ -2316,7 +2316,7 @@ def test_migration_roundtrip(tmp_path: Path) -> None:
     assert "sales_invoice" in inspect(engine).get_table_names()
 
     # Downgrade entfernt Trigger, Tabellen und Spalten.
-    command.downgrade(config, "20261103_0057")
+    command.downgrade(config, "20261103_0061")
     tables = inspect(engine).get_table_names()
     assert "sales_invoice" not in tables
     assert "sales_invoice_line" not in tables
