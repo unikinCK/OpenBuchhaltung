@@ -19,6 +19,8 @@ from app import create_app
 from app.auth import hash_api_token, hash_password
 from app.services import company_knowledge as ck
 from app.services import company_knowledge_upload as cku
+from app.services import receipt_ocr
+from app.services.llm_settings import llm_timeout, llm_timeout_floor
 from app.services.receipt_ocr import ReceiptLLMError
 from domain.models import (
     AuditLog,
@@ -60,7 +62,7 @@ class FakeModel:
             "vier Wochen (Abrechnung).",
         }
 
-    def __call__(self, endpoint, payload, api_key, *, label, default_timeout=30):
+    def __call__(self, endpoint, payload, api_key, *, label):
         self.calls.append(payload)
         if self.error is not None:
             raise self.error
@@ -838,6 +840,7 @@ def test_long_document_is_summarized_in_sections(model):
     assert "[Seite 1]" in model.calls[0]["input"][1]["content"][0]["text"]
     final_prompt = model.calls[-1]["input"][1]["content"][0]["text"]
     assert "lang.pdf" in final_prompt and "Zusammenfassungen der Teile" in final_prompt
+    assert "Fundstellen stehen darin schon in runden Klammern" in final_prompt
     assert summary.summary.startswith("Reisen genehmigt")
     assert summary.notes == []
     assert steps[0] == f"Zusammenfassung: Abschnitt 1 von {len(chunks)}"
@@ -858,16 +861,109 @@ def test_very_long_document_is_flagged_instead_of_cut_silently(app, model, monke
     assert any("Absatz 39" in content for content in texts)
 
 
-def test_uses_longer_default_timeout_for_summaries(app, monkeypatch):
-    seen = {}
+class _ModelResponse:
+    def __enter__(self):
+        return self
 
-    def fake(endpoint, payload, api_key, *, label, default_timeout=30):
-        seen["timeout"] = default_timeout
-        return {"output_text": json.dumps({"title": "T", "topic": "", "summary": "Inhalt"})}
+    def __exit__(self, *_exc):
+        return False
 
-    monkeypatch.setattr(cku, "post_llm_payload", fake)
-    _post_upload(app)
-    assert seen["timeout"] == cku.SUMMARY_TIMEOUT_SECONDS
+    def read(self):
+        answer = json.dumps({"title": "T", "topic": "", "summary": "Inhalt aus dem Modell"})
+        return json.dumps({"output_text": answer}).encode()
+
+
+def _record_timeouts(monkeypatch) -> list[float]:
+    seen: list[float] = []
+
+    def fake_urlopen(_request, timeout):
+        seen.append(timeout)
+        return _ModelResponse()
+
+    monkeypatch.setattr(receipt_ocr, "urlopen", fake_urlopen)
+    monkeypatch.setattr(cku, "_start_thread", lambda target: target())
+    return seen
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [(None, cku.MIN_LLM_TIMEOUT_SECONDS), ("90", cku.MIN_LLM_TIMEOUT_SECONDS), ("600", 600)],
+)
+def test_summary_gets_at_least_the_minimum_timeout(tmp_path, monkeypatch, configured, expected):
+    seen = _record_timeouts(monkeypatch)
+    app = _create_app(tmp_path, LLM_TIMEOUT_SECONDS=configured)
+    assert _post_upload(app).get_json()["status"] == "done"
+    assert seen == [expected]
+
+
+def test_text_recognition_gets_the_minimum_timeout_too(tmp_path, monkeypatch):
+    seen = _record_timeouts(monkeypatch)
+    monkeypatch.setattr(cku, "_pdf_page_images", lambda _data, *, max_pages: [("image/png", b"a")])
+    app = _create_app(tmp_path, LLM_TIMEOUT_SECONDS="90")
+    body = _post_upload(app, name="scan.pdf", content=_pdf(["", ""])).get_json()
+    assert body["status"] == "done"
+    assert seen == [cku.MIN_LLM_TIMEOUT_SECONDS, cku.MIN_LLM_TIMEOUT_SECONDS]
+
+
+def test_minimum_timeout_only_applies_inside_the_job(app):
+    app.config["LLM_TIMEOUT_SECONDS"] = "90"
+    with app.app_context():
+        assert llm_timeout(30) == 90
+        with llm_timeout_floor(300):
+            assert llm_timeout(30) == 300
+        assert llm_timeout(30) == 90
+
+
+# ---------------------------------------------------------------------------
+# Fundstellen in der Zusammenfassung
+# ---------------------------------------------------------------------------
+
+
+def _summarize(model, summary: str, excerpts: list[tuple[str, str]]) -> cku.DocumentSummary:
+    model.reply = {**model.reply, "summary": summary}
+    return cku.summarize_excerpts(
+        excerpts,
+        file_name="richtlinie.pdf",
+        options={"llm_endpoint": "http://llm.test", "llm_model": "m"},
+        progress=_no_progress,
+    )
+
+
+def test_prompt_forbids_counting_pages_on(model):
+    _summarize(model, "Inhalt.", [("Seite 1", "Erste Seite.")])
+    instruction = model.calls[0]["input"][0]["content"][0]["text"]
+    assert "gilt für den gesamten Text bis zur nächsten eckigen Klammer" in instruction
+    assert "Zähle nicht selbst weiter" in instruction
+
+
+def test_pages_missing_from_the_excerpts_are_flagged(model):
+    result = _summarize(
+        model,
+        "Regel A (Seite 2). Regel B (Seite 9). Regel C (Seite 5, Teil 2). Noch einmal (Seite 9).",
+        [("Seite 1", "Erste Seite."), ("Seite 2", "Zweite Seite.")],
+    )
+    assert len(result.notes) == 1
+    assert "(Seite 5, 9)" in result.notes[0]
+    # Der Text des Modells bleibt, wie er ist: Der Mensch entscheidet beim Prüfen.
+    assert result.summary.startswith("Regel A (Seite 2).")
+
+
+def test_known_pages_and_other_locators_are_not_flagged(model):
+    result = _summarize(
+        model,
+        "Regel A (Seite 2, Teil 3). Regel B (Seite 12). Regel C (Abrechnung). Siehe Seite 99.",
+        [("Seite 2, Teil 3", "Zweite Seite."), ("Seite 12", "Zwölfte Seite."), ("Abrechnung", "x")],
+    )
+    assert result.notes == []
+
+
+def test_flag_for_unknown_pages_reaches_the_draft(app, model):
+    model.reply = {**model.reply, "summary": "Reisen genehmigt die Leitung (Seite 7)."}
+    content = _pdf(["Reisen genehmigt die Abteilungsleitung immer vorab."])
+    body = _post_upload(app, name="richtlinie.pdf", content=content).get_json()
+    with _session(app) as session:
+        note = session.get(CompanyKnowledgeEntry, body["entry_id"]).review_note
+    assert "Seite 7" in note and "gegen das Original" in note
 
 
 # ---------------------------------------------------------------------------

@@ -382,7 +382,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `KNOWLEDGE_LLM_ENDPOINT_URL`, `KNOWLEDGE_LLM_MODEL` | `CHAT_LLM_*`, dann `DOCUMENT_LLM_*` | Zusammenfassung hochgeladener Unterlagen fürs Firmenwissen. |
 | `KNOWLEDGE_EXTRA_DIR` | – | Zusätzliches Verzeichnis mit eigenen Wissensdateien (`*.md`, Aufbau wie `data/wissen/`) für Obi: `kompakt*.md` darin gehen in den Systemprompt, alle anderen in die Suche von `search_knowledge`. |
 | `CHAT_LLM_TIMEOUT_SECONDS` | – | **Entfernt** – wird ignoriert (Warnung beim Start); ersetzt durch `CHAT_LLM_MAX_REASONING_TOKENS` und `CHAT_LLM_IDLE_TIMEOUT_SECONDS`. |
-| `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`, Firmenwissen-Zusammenfassung `300`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich, Dokument-Update und Firmenwissen-Zusammenfassung; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). |
+| `LLM_TIMEOUT_SECONDS` | `30` (Dokument-Update `20`) | Timeout je Aufruf von Beleg-OCR, Feldextraktion, Belegabgleich und Dokument-Update; für lokale Modelle erhöhen (nginx `proxy_read_timeout` 190 s beachten, gilt für Antworten ohne Stream). Firmenwissen-Uploads laufen im Hintergrund und bekommen je Aufruf mindestens 300 s, auch bei kleinerem Wert. |
 
 **Fachliche Schnittstellen**
 

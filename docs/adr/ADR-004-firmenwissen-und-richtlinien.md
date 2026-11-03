@@ -97,6 +97,10 @@ Verbindlichkeit wie angegeben, sonst `unverified`), ihre Auszüge mit Fundstelle
   wie beim Belegabgleich, Stand in der Datenbank), weil lokale Modelle länger brauchen, als ein
   Proxy wartet. Quelle, Auszüge und Entwurf entstehen in einer Transaktion: Scheitert ein
   Schritt, bleibt nur der Auftrag mit Fehler; er lässt sich ohne neues Hochladen wiederholen.
+  Weil dort niemand auf die Antwort wartet, gilt je KI-Aufruf ein Mindest-Timeout von 300 s, auch
+  bei kleinerem `LLM_TIMEOUT_SECONDS`; die Wartezeit auf andere Aufrufe desselben Modells zählt mit.
+- Fundstellen übernimmt das Modell wörtlich aus den Auszügen. Nennt es eine Seite, die dort nicht
+  vorkommt, steht das im Prüfhinweis. Ob eine vorhandene Seite stimmt, prüft der Mensch beim Freigeben.
 - Lange Dokumente fasst das Modell erst abschnittsweise und dann insgesamt zusammen, statt sie
   stillschweigend abzuschneiden. Was nicht abgedeckt ist, steht im Prüfhinweis.
 - Das Original bleibt anders als beim Paket erhalten (Upload-Verzeichnis der Instanz, aber nicht

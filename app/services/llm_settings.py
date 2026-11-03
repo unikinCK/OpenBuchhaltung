@@ -26,6 +26,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -79,6 +82,8 @@ SOURCE_INSTANCE = "instance"
 
 _HKDF_INFO = b"openbuchhaltung:user-llm-api-key:v1"
 
+_timeout_floor: ContextVar[float] = ContextVar("llm_timeout_floor", default=0)
+
 
 class LlmSettingsError(ValueError):
     """Ungültige Eingabe für den KI-Zugang eines Benutzers."""
@@ -94,16 +99,32 @@ class LlmEndpoint:
     source: str = SOURCE_INSTANCE
 
 
+@contextmanager
+def llm_timeout_floor(seconds: float) -> Iterator[None]:
+    """Mindest-Timeout für Hintergrundaufträge, auch bei kleinerem ``LLM_TIMEOUT_SECONDS``.
+
+    Der globale Wert ist auf Anfragen ausgelegt, auf die ein Proxy wartet. Im Hintergrund
+    wartet niemand, und lokale Server arbeiten oft nur einen Aufruf gleichzeitig ab: Die
+    Wartezeit auf andere Aufrufe zählt mit.
+    """
+    token = _timeout_floor.set(seconds)
+    try:
+        yield
+    finally:
+        _timeout_floor.reset(token)
+
+
 def llm_timeout(default: float) -> float:
     """Timeout je Beleg-/Dokument-LLM-Aufruf: ``LLM_TIMEOUT_SECONDS`` oder ``default``.
 
     Lokale (Reasoning-)Modelle brauchen oft deutlich länger als Cloud-APIs.
     """
+    timeout = default
     if has_app_context():
         value = current_app.config.get("LLM_TIMEOUT_SECONDS")
         if value:
-            return float(value)
-    return default
+            timeout = float(value)
+    return max(timeout, _timeout_floor.get())
 
 
 def llm_headers(api_key: str | None) -> dict[str, str]:
