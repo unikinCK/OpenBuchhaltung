@@ -940,6 +940,11 @@ class OpenItem(Base):
     bank_transaction_id: Mapped[int | None] = mapped_column(
         ForeignKey("bank_transaction.id", ondelete="SET NULL")
     )
+    # Geschäftspartner des Postens; ``counterparty`` und die Bankdaten bleiben als Snapshot
+    # (Altbestand, Einmalpartner) daneben stehen.
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT"), index=True
+    )
     # Letzte Ausgleichsbuchung samt Betrag: wird diese Buchung storniert, lebt
     # der Posten mit dem Betrag wieder auf (Storno-Hook).
     settlement_journal_entry_id: Mapped[int | None] = mapped_column(
@@ -968,6 +973,7 @@ class OpenItem(Base):
     settled_by: Mapped[str | None] = mapped_column(String(120))
 
     account: Mapped[Account] = relationship()
+    partner: Mapped[BusinessPartner | None] = relationship()
     journal_entry: Mapped[JournalEntry | None] = relationship(foreign_keys=[journal_entry_id])
     settlement_journal_entry: Mapped[JournalEntry | None] = relationship(
         foreign_keys=[settlement_journal_entry_id]

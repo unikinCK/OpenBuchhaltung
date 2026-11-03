@@ -72,6 +72,10 @@ TOOL_TITLES: dict[str, str] = {
     "create_partner": "Geschäftspartner anlegen",
     "update_partner": "Geschäftspartner ändern",
     "get_partner_history": "Partner-Historie abrufen",
+    "get_partner_statement": "Partnerkonto abrufen",
+    "get_partner_balances": "Saldenliste Debitoren/Kreditoren abrufen",
+    "export_partner_balances_csv": "Saldenliste Debitoren/Kreditoren exportieren",
+    "set_open_item_partner": "Partner am offenen Posten zuordnen",
     "set_partner_bank_details": "Partner-Bankverbindung setzen",
     # Buchungen
     "create_journal_entry": "Buchung erfassen",

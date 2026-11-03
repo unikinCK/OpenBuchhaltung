@@ -43,12 +43,25 @@
             </thead>
             <tbody>
               {% for item in items %}
+                {% set recipient = recipients[item.id] %}
                 <tr>
-                  <td><input type="checkbox" name="open_item_ids" value="{{ item.id }}" checked
+                  {# Eine vom Partnerstamm abweichende IBAN wird nicht vorausgewählt. #}
+                  <td><input type="checkbox" name="open_item_ids" value="{{ item.id }}" {% if not recipient.iban_mismatch %}checked{% endif %}
                              aria-label="Posten {{ item.reference }} auswählen" /></td>
                   <td>{{ item.reference }}</td>
-                  <td>{{ item.counterparty or "–" }}</td>
-                  <td>{{ item.counterparty_iban }}</td>
+                  <td>
+                    {% if item.partner %}
+                      <a href="{{ url_for('main.partner_detail_page', partner_id=item.partner.id) }}">{{ recipient.name }}</a>
+                    {% else %}
+                      {{ recipient.name }}
+                    {% endif %}
+                  </td>
+                  <td>
+                    {{ recipient.iban }}
+                    {% if recipient.iban_mismatch %}
+                      <br /><span class="badge badge-danger" title="{{ recipient.warning }}">weicht vom Partnerstamm ab: {{ recipient.partner_iban }}</span>
+                    {% endif %}
+                  </td>
                   <td>{{ item.due_date | datum if item.due_date else "–" }}</td>
                   <td class="num">{{ item.open_amount | betrag }} {{ item.currency_code }}</td>
                 </tr>
@@ -63,10 +76,11 @@
         </form>
         <p class="muted">Die Datei wird im Online-Banking hochgeladen und dort freigegeben —
           die Posten bleiben offen und werden wie gewohnt über den Kontoauszug ausgeglichen.
-          Der Zahllauf wird im Audit-Log protokolliert.</p>
+          Der Zahllauf wird im Audit-Log protokolliert. Weicht die IBAN eines Postens vom
+          Partnerstamm ab, ist er nicht vorausgewählt: bitte vor der Zahlung klären.</p>
       {% else %}
-        <p class="muted">Keine offenen Kreditoren-Posten mit hinterlegter IBAN.
-          Die Empfänger-IBAN wird beim Anlegen unter
+        <p class="muted">Keine offenen Kreditoren-Posten mit IBAN.
+          Die Empfänger-IBAN steht am Geschäftspartner oder wird beim Anlegen unter
           <a href="{{ url_for('main.open_items_page', company_id=selected_company_id) }}">OPOS</a> erfasst.</p>
       {% endif %}
     </section>

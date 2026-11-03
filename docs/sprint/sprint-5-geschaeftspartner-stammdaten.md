@@ -1,7 +1,7 @@
 # Sprint 5a – Geschäftspartner-Stammdaten (Debitoren/Kreditoren) – Detailplan
 
-- **Stand:** 2026-10-08; Entscheidungen aus Abschnitt 9 angenommen (ADR-002),
-  PR 1 (Schritte 0–2) umgesetzt
+- **Stand:** 2026-11-03; Entscheidungen aus Abschnitt 9 angenommen (ADR-002),
+  PR 1 (Schritte 0–2) und PR 2 (Schritte 3–4) umgesetzt
 - **Bezug:** Projektreview 2026-09-19, Feature #1 „Kunden-/Lieferantenstamm“
   (Phase 5, Sprint 5 – Produkt-Basis). Berührt #5 (Eingangsrechnung → OPOS),
   F3 (DATEV-Export) und F8 (OPOS/Zahllauf).
@@ -326,34 +326,34 @@ Sprint 5) abgehakt.
   damit die bisherigen Spaltenpositionen bleiben.
 
 ### Schritt 3 – OPOS, Bank, Zahllauf, Mahnwesen (M)
-- [ ] Migration `open_item.partner_id`.
-- [ ] OPOS:
+- [x] Migration `open_item.partner_id`.
+- [x] OPOS:
   - Anlage mit Partnerauswahl und Vorbelegung (siehe 5.5).
   - Filter `partner_id`.
   - Die Suche `q` durchsucht auch Partnername und -nummer.
-- [ ] Bankumsatz verbuchen:
+- [x] Bankumsatz verbuchen:
   - Ist das Gegenkonto ein Sammelkonto, gibt es eine Partnerauswahl.
   - Beim OPOS-Ausgleich wird geprüft, ob der Partner der Zahlung zum Partner
     des Postens passt (sofern beide gesetzt sind).
-- [ ] Zahllauf:
+- [x] Zahllauf:
   - IBAN aus dem OPOS-Snapshot, ersatzweise vom Partner.
   - Warnung, wenn die OPOS-IBAN von der aktuellen Partner-IBAN abweicht.
   - Empfängername aus dem Partner.
-- [ ] Mahnschreiben: Die Empfängeranschrift kommt aus dem Partner statt aus
+- [x] Mahnschreiben: Die Empfängeranschrift kommt aus dem Partner statt aus
   Leerzeilen. Die Absenderanschrift bleibt bis #3 bei `SELLER_*`.
 
 ### Schritt 4 – Partnerkonto und Saldenliste (S–M)
 Nur Zeilen auf Sammelkonten zählen (ADR-002, Nachtrag 2026-10-12); Partnerbezüge auf
 anderen Konten erscheinen höchstens als Buchungsliste des Partners.
-- [ ] Partnerkonto:
+- [x] Partnerkonto:
   - die Sammelkontozeilen des Partners mit Anfangssaldo und laufendem Saldo
   - getrennt nach Debitor- und Kreditorseite
   - dazu die offenen Posten
-- [ ] Saldenliste Debitoren/Kreditoren zum Stichtag, mit einer Abstimmungszeile
+- [x] Saldenliste Debitoren/Kreditoren zum Stichtag, mit einer Abstimmungszeile
   je Sammelkonto: Summe der Partnersalden + Zeilen ohne Partner = Saldo des
   Sachkontos. Abweichungen zwischen OPOS und Hauptbuch (F8) werden so sichtbar.
-- [ ] CSV-Download. Die Dashboard-Kachel „Überfällige Posten“ verlinkt auf den
-  Partner.
+- [x] CSV-Download. Die Liste der überfälligen Posten (Absprung aus der
+  Dashboard-Kachel) verlinkt auf den Partner.
 
 ### Schritt 5 – Partnererkennung in automatischen Quellen (M–L)
 - [ ] E-Rechnung-Import:
@@ -452,5 +452,6 @@ anderen Konten erscheinen höchstens als Buchungsliste des Partners.
 - **DATEV-Formatdetails** (Kategorie 16) sind ohne offizielle Prüfung nur
   „kompatibel“, nicht zertifiziert.
 - **Umgeleitete Zahlungen:** `create_open_item` kann im Chat (nach Bestätigung)
-  schon heute eine IBAN setzen. Mit dem Partner-Fallback im Zahllauf ist zu
-  prüfen, ob dieses Feld im Chat ebenfalls gesperrt werden sollte.
+  eine IBAN setzen. Seit Schritt 3 meldet der Zahllauf eine IBAN, die vom
+  Partnerstamm abweicht, und wählt den Posten nicht vor. Für Posten ohne Partner
+  bleibt nur die Sichtprüfung vor dem Upload ins Online-Banking.

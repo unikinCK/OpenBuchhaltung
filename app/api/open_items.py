@@ -22,13 +22,40 @@ from app.services.open_items import (
     create_open_item,
     is_overdue,
     list_open_items,
+    open_item_matches_query,
+    open_item_partner_number,
+    set_open_item_partner,
     settle_open_item,
 )
+from app.services.partners import find_partner_by_number
 from domain.models import OpenItem
 
 
 def _api_changed_by() -> str:
     return (current_api_user() or {}).get("username", "api")
+
+
+class _PartnerArgumentError(ValueError):
+    """``partner_id``/``partner_number`` lassen sich nicht auflösen."""
+
+
+def _resolve_partner_id(session, company_id: int, payload: dict) -> int | None:
+    """Partner aus ``partner_id`` oder ``partner_number`` (Debitoren-/Kreditorennummer)."""
+    raw_number = payload.get("partner_number")
+    if raw_number not in (None, ""):
+        partner = find_partner_by_number(
+            session=session, company_id=company_id, number=str(raw_number)
+        )
+        if partner is None:
+            raise _PartnerArgumentError(f"Partnernummer {raw_number} nicht gefunden.")
+        return partner.id
+    raw_id = payload.get("partner_id")
+    if raw_id in (None, ""):
+        return None
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError) as exc:
+        raise _PartnerArgumentError("partner_id must be an integer.") from exc
 
 
 def _open_item_dict(item: OpenItem) -> dict[str, object]:
@@ -47,6 +74,9 @@ def _open_item_dict(item: OpenItem) -> dict[str, object]:
         "bank_transaction_id": item.bank_transaction_id,
         "item_type": item.item_type,
         "reference": item.reference,
+        "partner_id": item.partner_id,
+        "partner_number": open_item_partner_number(item),
+        "partner_name": item.partner.name if item.partner else None,
         "counterparty": item.counterparty,
         "counterparty_iban": item.counterparty_iban,
         "counterparty_bic": item.counterparty_bic,
@@ -75,24 +105,22 @@ def list_open_items_via_api():
     # Überfällig: offen und Fälligkeit vor heute (wie die Dashboard-Kachel).
     overdue = request.args.get("overdue", "").lower() in {"1", "true"}
     query = (request.args.get("q") or "").strip() or None
+    partner_id = request.args.get("partner_id", type=int)
 
     session_factory = get_session_factory()
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
         items = list_open_items(
-            session=session, company_id=company_id, include_settled=include_settled
+            session=session,
+            company_id=company_id,
+            include_settled=include_settled,
+            partner_id=partner_id,
         )
         if overdue:
             items = [item for item in items if is_overdue(item)]
         if query:
-            needle = query.lower()
-            items = [
-                item
-                for item in items
-                if needle in (item.reference or "").lower()
-                or needle in (item.counterparty or "").lower()
-            ]
+            items = [item for item in items if open_item_matches_query(item, query)]
         return (
             jsonify(
                 {
@@ -136,12 +164,17 @@ def create_open_item_via_api():
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
         try:
+            partner_id = _resolve_partner_id(session, company_id, payload)
+        except _PartnerArgumentError as exc:
+            return jsonify({"error": str(exc)}), 422
+        try:
             item = create_open_item(
                 session=session,
                 payload=OpenItemInput(
                     company_id=company_id,
                     account_id=account_id,
                     journal_entry_id=journal_entry_id,
+                    partner_id=partner_id,
                     item_type=(payload.get("item_type") or "").strip(),
                     reference=(payload.get("reference") or "").strip(),
                     counterparty=(payload.get("counterparty") or "").strip() or None,
@@ -157,6 +190,30 @@ def create_open_item_via_api():
         except OpenItemError as exc:
             return jsonify({"error": str(exc)}), 422
         return jsonify(_open_item_dict(item)), 201
+
+
+@api_bp.post("/open-items/<int:open_item_id>/partner")
+def set_open_item_partner_via_api(open_item_id: int):
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        item = session.get(OpenItem, open_item_id)
+        if item is None or api_scoped_company(session, item.company_id) is None:
+            return jsonify({"error": "Open item not found."}), 404
+        try:
+            partner_id = _resolve_partner_id(session, item.company_id, payload)
+            item = set_open_item_partner(
+                session=session,
+                open_item_id=open_item_id,
+                partner_id=partner_id,
+                changed_by=_api_changed_by(),
+            )
+        except (_PartnerArgumentError, OpenItemError) as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(_open_item_dict(item)), 200
 
 
 @api_bp.post("/open-items/<int:open_item_id>/settle")

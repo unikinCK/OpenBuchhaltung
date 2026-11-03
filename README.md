@@ -779,6 +779,21 @@ ebenso (Partner der Buchung, auch bei `PATCH /api/v1/journal-entries/<id>` und
 `get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
 `get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
 
+### Partnerkonto und Saldenliste
+
+Die Partnerseite zeigt das **Partnerkonto**: die Zeilen des Partners auf Sammelkonten mit
+Anfangssaldo und laufendem Saldo (Soll minus Haben), getrennt nach Debitor und Kreditor, dazu seine
+offenen Posten. Partnerbezüge auf anderen Konten stehen nur in der Buchungsliste. API:
+`GET /api/v1/partners/<id>/statement` (`side`, `date_from`, `date_to`, `limit`, `offset`); MCP:
+`get_partner_statement`.
+
+Die **Saldenliste Debitoren/Kreditoren** (Partner → Saldenliste) zeigt zum Stichtag den Saldo je
+Partner und stimmt je Sammelkonto ab: Partnersalden + Zeilen ohne Partner = Saldo des Sachkontos.
+Die Spalte „Abweichung“ vergleicht den Saldo mit den offenen Posten und macht Posten ohne Buchung
+oder Buchungen ohne Posten sichtbar. API: `GET /api/v1/reports/partner-balances` (`side`, `as_of`),
+CSV unter `GET /api/v1/exports/partner-balances.csv`; MCP: `get_partner_balances`,
+`export_partner_balances_csv`.
+
 ## Kostenstellen und Profitcenter: zugehörige Buchungen
 
 Das Journal filtert nach Konto, Kostenstelle und Profitcenter. Eine Buchung trifft,
@@ -804,6 +819,15 @@ Ausgleichsbuchung storniert, lebt der Posten um den Ausgleichsbetrag wieder auf.
 „Überfällige“ zeigt nur offene Posten mit Fälligkeit vor heute (Absprung aus der
 Dashboard-Kachel; API `GET /api/v1/open-items?overdue=1`, MCP `list_open_items` mit
 `overdue`).
+
+Ein Posten kann einem **Geschäftspartner** gehören (`partner_id` bzw. `partner_number`). Die
+Rolle muss zum Posten passen, und das Konto muss ein Sammelkonto der passenden Seite sein.
+Was nicht erfasst wurde, kommt als Snapshot aus dem Partner: Name, IBAN/BIC und die Fälligkeit
+(Belegdatum plus Zahlungsziel). Der Freitext bleibt für Altbestand und Einmalpartner erhalten.
+Bestehende Posten lassen sich nachträglich zuordnen (UI „Partner …“,
+`POST /api/v1/open-items/<id>/partner`, MCP `set_open_item_partner`). Die Liste filtert nach
+`partner_id`, die Suche findet auch Partnername und -nummer. Ein Ausgleich wird abgewiesen, wenn
+die verknüpfte Zahlung auf dem Sammelkonto einen anderen Partner bebucht.
 
 ## Buchungsvorlagen (wiederkehrende Buchungen)
 
@@ -837,20 +861,23 @@ Mahnstufe (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = letzte Mahnung) und das
 letzte Mahndatum geführt; nach einer Mahnung pausiert der Posten 7 Tage.
 „Mahnstufe setzen“ protokolliert die Mahnung im Audit-Log, das
 **Mahnschreiben** öffnet sich als druckbare Seite (über den Browser als PDF
-speichern). API: `GET /api/v1/dunning-proposals`,
+speichern); die Empfängeranschrift kommt aus dem Geschäftspartner des Postens. API:
+`GET /api/v1/dunning-proposals`,
 `POST /api/v1/open-items/<id>/dunning` (optional `level`, `dunning_date`);
 MCP: `list_dunning_proposals`, `record_dunning`.
 
 ## SEPA-Zahllauf (pain.001)
 
-Unter **Zahllauf** wird aus offenen Kreditoren-Posten mit hinterlegter
-Empfänger-IBAN (erfasst beim OPOS-Anlegen) eine SEPA-Überweisungsdatei
+Unter **Zahllauf** wird aus offenen Kreditoren-Posten mit Empfänger-IBAN (am Posten oder
+am Geschäftspartner) eine SEPA-Überweisungsdatei
 **pain.001.001.03** erzeugt — zum Upload ins Online-Banking; die Freigabe und
 Ausführung bleiben bei der Bank. Voraussetzung ist die
 Auftraggeber-Bankverbindung der Gesellschaft (IBAN, optional BIC), die direkt
 auf der Zahllauf-Seite gepflegt wird; IBANs werden mit Mod-97-Prüfsumme
 validiert. Die Posten bleiben offen und werden wie gewohnt über den
-Kontoauszug ausgeglichen; jeder Zahllauf wird im Audit-Log protokolliert.
+Kontoauszug ausgeglichen; jeder Zahllauf wird im Audit-Log protokolliert. Der Empfängername
+kommt aus dem Partner. Weicht die IBAN eines Postens vom Partnerstamm ab, ist er in der Oberfläche
+nicht vorausgewählt, API und Datei melden es unter `iban_mismatch`/`warnings`.
 API: `POST /api/v1/companies/<id>/bank-details`,
 `GET /api/v1/payment-runs/proposals`, `POST /api/v1/payment-runs`
 (liefert `xml_base64`); MCP: `set_company_bank_details`,

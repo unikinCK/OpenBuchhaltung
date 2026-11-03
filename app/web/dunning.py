@@ -10,6 +10,7 @@ from app.services.dunning import (
     DUNNING_LEVEL_LABELS,
     DunningError,
     dunning_proposals,
+    dunning_recipient_lines,
     record_dunning,
 )
 from app.web.blueprint import main_bp
@@ -34,13 +35,13 @@ def dunning_page():
         if selected_company_id:
             proposals = dunning_proposals(session=session, company_id=selected_company_id)
 
-    return render_template(
-        "mahnwesen.html",
-        companies=companies,
-        selected_company_id=selected_company_id,
-        proposals=proposals,
-        level_labels=DUNNING_LEVEL_LABELS,
-    )
+        return render_template(
+            "mahnwesen.html",
+            companies=companies,
+            selected_company_id=selected_company_id,
+            proposals=proposals,
+            level_labels=DUNNING_LEVEL_LABELS,
+        )
 
 
 @main_bp.post("/mahnwesen/<int:open_item_id>/mahnen")
@@ -83,12 +84,14 @@ def dunning_letter_page(open_item_id: int):
         # verbindlich wird sie erst über "Mahnstufe setzen".
         company_name = company.name
 
-    return render_template(
-        "mahnschreiben.html",
-        item=item,
-        company_name=company_name,
-        level=level,
-        level_label=DUNNING_LEVEL_LABELS[level],
-        today=date.today(),
-        payment_deadline=date.today() + timedelta(days=PAYMENT_DEADLINE_DAYS),
-    )
+        return render_template(
+            "mahnschreiben.html",
+            item=item,
+            recipient_lines=dunning_recipient_lines(item),
+            has_partner=item.partner is not None,
+            company_name=company_name,
+            level=level,
+            level_label=DUNNING_LEVEL_LABELS[level],
+            today=date.today(),
+            payment_deadline=date.today() + timedelta(days=PAYMENT_DEADLINE_DAYS),
+        )

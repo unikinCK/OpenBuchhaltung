@@ -27,7 +27,14 @@
             {% set item = proposal.item %}
             <tr>
               <td>{{ item.reference }}</td>
-              <td>{{ item.counterparty or "–" }}</td>
+              <td>
+                {% if item.partner %}
+                  <a href="{{ url_for('main.partner_detail_page', partner_id=item.partner.id) }}">{{ item.partner.name }}</a>
+                  <br /><span class="muted small">{{ item.partner.debtor_number }}</span>
+                {% else %}
+                  {{ item.counterparty or "–" }}
+                {% endif %}
+              </td>
               <td>{{ item.due_date | datum }} ({{ proposal.days_overdue }} Tage)</td>
               <td class="num">{{ item.open_amount | betrag }} {{ item.currency_code }}</td>
               <td>

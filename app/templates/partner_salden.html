@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Saldenliste {{ side_labels[side] }} – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.partners_page', company_id=selected_company_id) }}">‹ Alle Geschäftspartner</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Saldenliste {{ side_labels[side] }}</h1>
+      <p class="page-subtitle">Partnersalden zum Stichtag, abgestimmt mit den Sammelkonten und offenen Posten</p>
+    </div>
+    {% if report %}
+      <div class="page-actions">
+        <a class="button-secondary btn-sm" href="{{ url_for('api.export_partner_balances_csv', company_id=selected_company_id, side=side, as_of=as_of.isoformat()) }}">CSV</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not report %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <form method="get" action="{{ url_for('main.partner_balances_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <select name="side" aria-label="Seite">
+          {% for value, label in side_labels.items() %}
+            <option value="{{ value }}" {% if value == side %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <input type="date" name="as_of" value="{{ as_of.isoformat() }}" aria-label="Stichtag" title="Stichtag" />
+        <button type="submit" class="secondary">Anzeigen</button>
+      </form>
+
+      {% if report.partners %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Nummer</th>
+                <th>Partner</th>
+                <th class="num">Soll</th>
+                <th class="num">Haben</th>
+                <th class="num">Saldo</th>
+                <th class="num">Offene Posten</th>
+                <th class="num">Abweichung</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in report.partners %}
+                <tr>
+                  <td class="nowrap">{{ row.number }}</td>
+                  <td>
+                    <a href="{{ url_for('main.partner_detail_page', partner_id=row.partner_id) }}">{{ row.name }}</a>
+                    {% if not row.is_active %}<span class="badge">inaktiv</span>{% endif %}
+                  </td>
+                  <td class="num">{{ row.debit_total | betrag }}</td>
+                  <td class="num">{{ row.credit_total | betrag }}</td>
+                  <td class="num{% if row.balance < 0 %} negative{% endif %}">{{ row.balance | betrag }}</td>
+                  <td class="num">{{ row.open_items_total | betrag }}</td>
+                  <td class="num">{% if row.opos_difference %}<strong class="negative">{{ row.opos_difference | betrag }}</strong>{% else %}–{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th colspan="2">Summe</th>
+                <th class="num">{{ report.totals.debit_total | betrag }}</th>
+                <th class="num">{{ report.totals.credit_total | betrag }}</th>
+                <th class="num">{{ report.totals.partner_balance | betrag }}</th>
+                <th class="num">{{ report.totals.open_items_total | betrag }}</th>
+                <th class="num">{{ report.totals.opos_difference | betrag }}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="muted small">Saldo = Soll minus Haben. „Abweichung“ vergleicht den Saldo mit den heute
+          offenen Beträgen der Posten bis zum Stichtag. Sie deutet auf Posten ohne Buchung oder Buchungen
+          ohne Posten hin und ist für Stichtage in der Vergangenheit nur ein Anhaltspunkt.</p>
+      {% else %}
+        <p class="empty-state">Keine Partnersalden zum Stichtag.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Abstimmung mit dem Hauptbuch</h2>
+      {% if report.accounts %}
+        <div class="table-scroll">
+          <table class="data" data-no-sort>
+            <thead>
+              <tr>
+                <th>Sammelkonto</th>
+                <th class="num">Partnersalden</th>
+                <th class="num">Zeilen ohne Partner</th>
+                <th class="num">Saldo Sachkonto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in report.accounts %}
+                <tr>
+                  <td><a href="{{ url_for('main.account_detail_page', account_id=row.account_id) }}">{{ row.code }}</a> {{ row.name }}</td>
+                  <td class="num">{{ row.partner_total | betrag }}</td>
+                  <td class="num">{% if row.unassigned %}<strong class="negative">{{ row.unassigned | betrag }}</strong>{% else %}–{% endif %}</td>
+                  <td class="num">{{ row.ledger_balance | betrag }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small">Partnersalden + Zeilen ohne Partner = Saldo des Sachkontos. Zeilen ohne Partner lassen sich in offenen Buchungen über „Partner zuordnen“ ergänzen.</p>
+      {% else %}
+        <p class="muted">Kein Konto ist als {{ side_labels[side] }}-Sammelkonto gekennzeichnet. Das Kennzeichen wird unter
+          <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> gesetzt.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

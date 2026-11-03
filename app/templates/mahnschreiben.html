@@ -30,13 +30,14 @@
   </head>
   <body>
     <p class="print-hint">Über die Druckfunktion des Browsers als PDF speichern oder drucken.
-      Anschrift der Gegenpartei bitte vor dem Druck ergänzen.</p>
+      {% if not has_partner %}Anschrift der Gegenpartei bitte vor dem Druck ergänzen; mit einem
+      Geschäftspartner am Posten steht sie hier automatisch.{% endif %}</p>
 
     <header>
       <div class="sender">{{ company_name }}</div>
-      <div class="recipient">{{ item.counterparty or "(Empfänger eintragen)" }}
+      <div class="recipient">{% if recipient_lines %}{{ recipient_lines | join("\n") }}{% else %}(Empfänger eintragen){% endif %}{% if not has_partner %}
 &nbsp;
-&nbsp;</div>
+&nbsp;{% endif %}</div>
       <div class="meta">{{ today.strftime("%d.%m.%Y") }}</div>
     </header>
 

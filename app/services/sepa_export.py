@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
-from domain.models import Company, OpenItem
+from domain.models import BusinessPartner, Company, OpenItem
 
 PAIN_NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03"
 
@@ -34,6 +34,47 @@ class PaymentRunResult:
     transaction_count: int
     control_sum: Decimal
     open_item_ids: list[int]
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PaymentRecipient:
+    """Zahlungsempfänger eines Postens: Name und IBAN aus OPOS-Snapshot und Partner."""
+
+    name: str
+    iban: str | None
+    bic: str | None
+    # Die IBAN des Postens weicht von der aktuellen IBAN des Partners ab.
+    iban_mismatch: bool
+    partner_iban: str | None
+
+    @property
+    def warning(self) -> str | None:
+        if not self.iban_mismatch:
+            return None
+        return (
+            f"IBAN des Postens ({self.iban}) weicht von der IBAN im Partnerstamm "
+            f"({self.partner_iban}) ab."
+        )
+
+
+def payment_recipient(item: OpenItem) -> PaymentRecipient:
+    """Empfänger: IBAN aus dem Posten, ersatzweise vom Partner; Name aus dem Partner."""
+    partner = item.partner
+    partner_iban = partner.iban if partner else None
+    iban = item.counterparty_iban or partner_iban
+    bic = item.counterparty_bic
+    if not item.counterparty_iban and partner is not None:
+        bic = partner.bic
+    return PaymentRecipient(
+        name=(partner.name if partner else None) or item.counterparty or item.reference,
+        iban=iban,
+        bic=bic,
+        iban_mismatch=bool(
+            item.counterparty_iban and partner_iban and item.counterparty_iban != partner_iban
+        ),
+        partner_iban=partner_iban,
+    )
 
 
 def normalize_iban(raw: str | None) -> str | None:
@@ -86,15 +127,17 @@ def set_company_bank_details(
 
 
 def payable_items_for_run(*, session: Session, company_id: int) -> list[OpenItem]:
-    """Offene Kreditoren-Posten mit hinterlegter IBAN, fällige zuerst."""
+    """Offene Kreditoren-Posten mit IBAN (am Posten oder am Partner), fällige zuerst."""
     return list(
         session.execute(
             select(OpenItem)
+            .options(selectinload(OpenItem.partner))
+            .outerjoin(BusinessPartner, BusinessPartner.id == OpenItem.partner_id)
             .where(
                 OpenItem.company_id == company_id,
                 OpenItem.item_type == "payable",
                 OpenItem.status == "open",
-                OpenItem.counterparty_iban.is_not(None),
+                or_(OpenItem.counterparty_iban.is_not(None), BusinessPartner.iban.is_not(None)),
             )
             .order_by(OpenItem.due_date.is_(None), OpenItem.due_date, OpenItem.id)
         )
@@ -138,7 +181,9 @@ def create_payment_run(
         raise SepaExportError("Kein offener Posten ausgewählt.")
 
     items = (
-        session.execute(select(OpenItem).where(OpenItem.id.in_(ids)))
+        session.execute(
+            select(OpenItem).options(selectinload(OpenItem.partner)).where(OpenItem.id.in_(ids))
+        )
         .scalars()
         .all()
     )
@@ -150,7 +195,7 @@ def create_payment_run(
             raise SepaExportError(f"Posten {item.reference} gehört zu einer anderen Gesellschaft.")
         if item.item_type != "payable" or item.status != "open":
             raise SepaExportError(f"Posten {item.reference} ist kein offener Kreditoren-Posten.")
-        if not item.counterparty_iban:
+        if not payment_recipient(item).iban:
             raise SepaExportError(f"Posten {item.reference} hat keine Empfänger-IBAN.")
         if item.currency_code != "EUR":
             raise SepaExportError(
@@ -202,22 +247,26 @@ def create_payment_run(
         _text_element(other, "Id", "NOTPROVIDED")
     _text_element(payment_info, "ChrgBr", "SLEV")
 
+    warnings = []
     for item in items:
+        recipient = payment_recipient(item)
+        if recipient.warning:
+            warnings.append(f"{item.reference}: {recipient.warning}")
         transfer = ET.SubElement(payment_info, "CdtTrfTxInf")
         payment_id = ET.SubElement(transfer, "PmtId")
         _text_element(payment_id, "EndToEndId", _sanitize(item.reference, 35))
         amount = ET.SubElement(transfer, "Amt")
         instructed = ET.SubElement(amount, "InstdAmt", Ccy="EUR")
         instructed.text = str(item.open_amount)
-        if item.counterparty_bic:
+        if recipient.bic:
             creditor_agent = ET.SubElement(transfer, "CdtrAgt")
             creditor_fin = ET.SubElement(creditor_agent, "FinInstnId")
-            _text_element(creditor_fin, "BIC", item.counterparty_bic)
+            _text_element(creditor_fin, "BIC", recipient.bic)
         creditor = ET.SubElement(transfer, "Cdtr")
-        _text_element(creditor, "Nm", _sanitize(item.counterparty or item.reference, 70))
+        _text_element(creditor, "Nm", _sanitize(recipient.name, 70))
         creditor_account = ET.SubElement(transfer, "CdtrAcct")
         creditor_account_id = ET.SubElement(creditor_account, "Id")
-        _text_element(creditor_account_id, "IBAN", item.counterparty_iban)
+        _text_element(creditor_account_id, "IBAN", recipient.iban)
         remittance = ET.SubElement(transfer, "RmtInf")
         _text_element(remittance, "Ustrd", _sanitize(item.reference, 140))
 
@@ -236,6 +285,7 @@ def create_payment_run(
             "transaction_count": len(items),
             "control_sum": str(control_sum),
             "execution_date": execution_date.isoformat(),
+            "warnings": warnings,
         },
     )
     session.commit()
@@ -246,4 +296,5 @@ def create_payment_run(
         transaction_count=len(items),
         control_sum=control_sum,
         open_item_ids=[item.id for item in items],
+        warnings=warnings,
     )
