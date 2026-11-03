@@ -45,7 +45,7 @@ def _period(
     }
 
 
-def _balance_rows(
+def account_balance_rows(
     session: Session,
     company_id: int,
     *,
@@ -105,6 +105,41 @@ def fiscal_year_for_date(session: Session, company_id: int, dt: date) -> FiscalY
     )
 
 
+def trial_balance_conditions(*, date_from: date | None, include_closing_entries: bool) -> list:
+    """Buchungsmenge der Summen- und Saldenliste (siehe ``trial_balance_for_company``)."""
+    conditions = []
+    if not include_closing_entries:
+        conditions.append(Period.is_closing.is_(False))
+    if date_from is None:
+        conditions.append(JournalEntry.source != SOURCE_CARRYFORWARD)
+    return conditions
+
+
+def income_statement_conditions(*, include_closing_entries: bool) -> list:
+    """Buchungsmenge der Erfolgsrechnung (ohne Vortragsbuchungen)."""
+    conditions = [JournalEntry.source.notin_(CARRYFORWARD_SOURCES)]
+    if not include_closing_entries:
+        conditions.append(Period.is_closing.is_(False))
+    return conditions
+
+
+def balance_sheet_conditions(
+    *, session: Session, company_id: int, as_of: date, include_closing_entries: bool
+) -> tuple[list, FiscalYear | None]:
+    """Buchungsmenge der Bilanz zum Stichtag und das Geschäftsjahr des Stichtags.
+
+    Regeln siehe ``balance_sheet_for_company``.
+    """
+    fiscal_year = fiscal_year_for_date(session, company_id, as_of)
+    conditions = [JournalEntry.source != SOURCE_CARRYFORWARD]
+    if fiscal_year is not None:
+        in_scope = JournalEntry.fiscal_year_id == fiscal_year.id
+        conditions.append(~and_(in_scope, JournalEntry.source == SOURCE_YEAR_END_CLOSE))
+        if not include_closing_entries:
+            conditions.append(~and_(in_scope, Period.is_closing.is_(True)))
+    return conditions, fiscal_year
+
+
 def trial_balance_for_company(
     *,
     session: Session,
@@ -119,13 +154,14 @@ def trial_balance_for_company(
     Startdatum mit — ohne ``date_from`` enthalten die kumulierten Summen die
     Vorjahre bereits, ein zusätzlicher Vortrag würde sie doppeln.
     """
-    conditions = []
-    if not include_closing_entries:
-        conditions.append(Period.is_closing.is_(False))
-    if date_from is None:
-        conditions.append(JournalEntry.source != SOURCE_CARRYFORWARD)
-    rows = _balance_rows(
-        session, company_id, date_from=date_from, date_to=date_to, conditions=conditions
+    rows = account_balance_rows(
+        session,
+        company_id,
+        date_from=date_from,
+        date_to=date_to,
+        conditions=trial_balance_conditions(
+            date_from=date_from, include_closing_entries=include_closing_entries
+        ),
     )
     return [
         {
@@ -149,11 +185,12 @@ def account_balances_by_type(
     include_closing_entries: bool = False,
 ) -> list[dict[str, Decimal | str]]:
     """Kontensalden je Kontoart für Erfolgsrechnungen (ohne Vortragsbuchungen)."""
-    conditions = [JournalEntry.source.notin_(CARRYFORWARD_SOURCES)]
-    if not include_closing_entries:
-        conditions.append(Period.is_closing.is_(False))
-    return _balance_rows(
-        session, company_id, date_from=date_from, date_to=date_to, conditions=conditions
+    return account_balance_rows(
+        session,
+        company_id,
+        date_from=date_from,
+        date_to=date_to,
+        conditions=income_statement_conditions(include_closing_entries=include_closing_entries),
     )
 
 
@@ -237,14 +274,13 @@ def balance_sheet_for_company(
     Buchungsmenge — die Bilanz geht daher immer auf.
     """
     as_of = date_to or date.today()
-    fiscal_year = fiscal_year_for_date(session, company_id, as_of)
-    conditions = [JournalEntry.source != SOURCE_CARRYFORWARD]
-    if fiscal_year is not None:
-        in_scope = JournalEntry.fiscal_year_id == fiscal_year.id
-        conditions.append(~and_(in_scope, JournalEntry.source == SOURCE_YEAR_END_CLOSE))
-        if not include_closing_entries:
-            conditions.append(~and_(in_scope, Period.is_closing.is_(True)))
-    balances = _balance_rows(
+    conditions, fiscal_year = balance_sheet_conditions(
+        session=session,
+        company_id=company_id,
+        as_of=as_of,
+        include_closing_entries=include_closing_entries,
+    )
+    balances = account_balance_rows(
         session, company_id, date_from=None, date_to=date_to, conditions=conditions
     )
 

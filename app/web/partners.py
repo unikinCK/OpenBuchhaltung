@@ -43,6 +43,7 @@ from domain.models import (
     SUBLEDGER_DEBTOR,
     SUBLEDGER_TYPES,
     BusinessPartner,
+    Company,
     JournalEntry,
     JournalEntryLine,
 )
@@ -82,7 +83,19 @@ _TEXT_FIELDS = (
     "notes",
     "debtor_number",
     "creditor_number",
+    "intercompany_company_id",
 )
+
+
+def _intercompany_choices(session, company_id: int) -> list[dict[str, Any]]:
+    """Andere Gesellschaften des Mandanten als Auswahl „Verbundene Gesellschaft“."""
+    company = session.get(Company, company_id)
+    rows = session.execute(
+        select(Company.id, Company.name)
+        .where(Company.tenant_id == company.tenant_id, Company.id != company_id)
+        .order_by(Company.name)
+    ).all()
+    return [{"id": row.id, "name": row.name} for row in rows]
 
 
 def _form_fields() -> dict[str, Any]:
@@ -170,7 +183,9 @@ def partners_page():
         partners: list[BusinessPartner] = []
         total = 0
         entry_counts: dict[int, int] = {}
+        intercompany_choices: list[dict[str, Any]] = []
         if selected_company_id:
+            intercompany_choices = _intercompany_choices(session, selected_company_id)
             partners, total = list_partners(
                 session=session,
                 company_id=selected_company_id,
@@ -208,6 +223,7 @@ def partners_page():
         include_inactive=include_inactive,
         filter_args=filter_args,
         sort=sort,
+        intercompany_choices=intercompany_choices,
     )
 
 
@@ -309,6 +325,7 @@ def partner_detail_page(partner_id: int):
             entries=entries,
             entries_total=entries_total,
             overview=overview,
+            intercompany_choices=_intercompany_choices(session, partner.company_id),
         )
 
 

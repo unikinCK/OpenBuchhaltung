@@ -13,6 +13,7 @@ from app.api import (  # noqa: F401
     cash_book,
     chat,
     company_knowledge,
+    consolidation,
     controlling,
     dashboard,
     documents,
@@ -42,6 +43,7 @@ from app.api import (  # noqa: F401
     system,
     tax_codes,
     tenants,
+    two_factor,
     users,
     vat_returns,
 )

@@ -34,6 +34,7 @@ from domain.models import (
     JournalEntry,
     JournalEntryLine,
     OpenItem,
+    OpenItemSettlement,
     PayrollRun,
     Period,
     PeriodLock,
@@ -1522,24 +1523,36 @@ def _release_subledgers(
         )
         released.setdefault("payroll_runs", []).append(run.id)
 
-    # OPOS: mit dieser Buchung ausgeglichene Posten leben wieder auf.
-    open_items = (
+    # OPOS: mit dieser Buchung ausgeglichene Posten leben wieder auf. Die Zeile der Zahlung bleibt
+    # mit Stornodatum stehen: Bei Istversteuerung korrigiert das den Zeitraum des Stornos.
+    settlements = (
         session.execute(
-            select(OpenItem).where(OpenItem.settlement_journal_entry_id == original.id)
+            select(OpenItemSettlement).where(
+                OpenItemSettlement.journal_entry_id == original.id,
+                OpenItemSettlement.reversed_on.is_(None),
+            )
         )
         .scalars()
         .all()
     )
-    for item in open_items:
-        restored = item.settlement_amount or (item.original_amount - item.open_amount)
+    restored_by_item: dict[int, Decimal] = {}
+    for settlement in settlements:
+        settlement.reversed_on = reversal.entry_date
+        settlement.reversal_journal_entry_id = reversal.id
+        restored_by_item[settlement.open_item_id] = (
+            restored_by_item.get(settlement.open_item_id, Decimal("0.00")) + settlement.amount
+        )
+    for item_id, restored in restored_by_item.items():
+        item = session.get(OpenItem, item_id)
         item.open_amount = min(
             item.original_amount, (item.open_amount + restored).quantize(Decimal("0.01"))
         )
         item.status = "open"
         item.settled_at = None
         item.settled_by = None
-        item.settlement_journal_entry_id = None
-        item.settlement_amount = None
+        if item.settlement_journal_entry_id == original.id:
+            item.settlement_journal_entry_id = None
+            item.settlement_amount = None
         log_audit_event(
             **audit_common,
             entity_type="open_item",

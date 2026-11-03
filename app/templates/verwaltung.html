@@ -100,6 +100,7 @@
               <th>Mandant</th>
               <th>API</th>
               <th>KI-Zugang</th>
+              <th>2FA</th>
               <th>Status</th>
               <th>Aktionen</th>
             </tr>
@@ -113,6 +114,15 @@
                 <td>{{ "..." ~ user.api_token_last4 if user.api_token_last4 else "kein Token" }}</td>
                 {% set llm = llm_summaries[user.id] %}
                 <td>{{ llm.provider_label if llm.configured else "Instanz-Standard" }}</td>
+                {% set two_factor = two_factor_summaries[user.id] %}
+                <td>
+                  {% if two_factor.enabled %}aktiv
+                  {% elif two_factor.setup_pending %}begonnen
+                  {% else %}aus{% endif %}
+                  {% if two_factor.required and not two_factor.enabled %}
+                    <span class="badge">Pflicht offen</span>
+                  {% endif %}
+                </td>
                 <td>{{ "aktiv" if user.is_active else "inaktiv" }}</td>
                 <td>
                   <form method="post" action="{{ url_for('main.rotate_user_api_token_action', user_id=user.id) }}" style="display:inline">
@@ -129,6 +139,13 @@
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                     <button type="submit">Entsperren</button>
                   </form>
+                  {% if (two_factor.enabled or two_factor.setup_pending) and user.id != session['user']['id'] %}
+                    <form method="post" action="{{ url_for('main.reset_user_two_factor_action', user_id=user.id) }}" style="display:inline"
+                          data-confirm="Zwei-Faktor-Anmeldung von {{ user.username }} wirklich zurücksetzen? Der Benutzer meldet sich danach nur mit dem Passwort an.">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit">2FA zurücksetzen</button>
+                    </form>
+                  {% endif %}
                   <form method="post" action="{{ url_for('main.set_user_password_action', user_id=user.id) }}" style="display:inline">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                     <input type="password" name="new_password" placeholder="Neues Passwort"

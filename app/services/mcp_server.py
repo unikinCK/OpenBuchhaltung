@@ -374,6 +374,41 @@ def _asof_report_schema() -> dict[str, Any]:
     }
 
 
+def _consolidation_member_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "description": "Mitglieder (ersetzt die Liste); Daten als JJJJ-MM-TT, Quote Standard 100.",
+        "items": {
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "ownership_percent": {"type": "string"},
+                "included_from": {"type": ["string", "null"]},
+                "included_to": {"type": ["string", "null"]},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _consolidation_report_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "group_id": {"type": "integer"},
+            "date_from": {"type": "string", "description": "JJJJ-MM-TT"},
+            "date_to": {"type": "string", "description": "Auch Bilanzstichtag (JJJJ-MM-TT)."},
+            "include_closing_entries": {
+                "type": "boolean",
+                "description": "Abschlussbuchungen (Periode 13) einbeziehen.",
+            },
+        },
+        "required": ["group_id"],
+        "additionalProperties": False,
+    }
+
+
 def _chat_action_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -521,6 +556,10 @@ _PARTNER_FIELD_SCHEMA: dict[str, Any] = {
         "description": "Zahlungsziel in Tagen.",
     },
     "notes": {"type": ["string", "null"]},
+    "intercompany_company_id": {
+        "type": ["integer", "null"],
+        "description": "Verbundene Gesellschaft desselben Mandanten (Konsolidierung).",
+    },
     "is_active": {"type": "boolean"},
 }
 
@@ -991,6 +1030,43 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/users/{user_id}/unlock",
+        arg_location="json",
+    ),
+    # Einrichten und Abschalten der Zwei-Faktor-Anmeldung gibt es bewusst nicht als Tool:
+    # Das Secret soll durch keinen KI-Kontext laufen (Ausnahme von der Parität, siehe README).
+    ToolSpec(
+        name="get_user_two_factor_status",
+        description=(
+            "Zeigt den Status der Zwei-Faktor-Anmeldung: den eigenen oder mit user_id den eines "
+            "Benutzers (Administrator). Enthält nie Secret oder Codes."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers (optional)."},
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/users/me/two-factor",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="reset_user_two_factor",
+        description=(
+            "Setzt die Zwei-Faktor-Anmeldung eines anderen Benutzers zurück (Administrator), "
+            "z. B. nach Verlust des Geräts. Danach reicht für diesen Benutzer wieder das Passwort."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/two-factor/reset",
         arg_location="json",
     ),
     ToolSpec(
@@ -2187,6 +2263,134 @@ TOOLS: list[ToolSpec] = [
         input_schema=_with_download_link(_period_report_schema()),
         http_method="GET",
         path="/exports/trial-balance.csv",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="list_consolidation_groups",
+        description="Listet die Konsolidierungsgruppen des Mandanten mit ihren Mitgliedern.",
+        input_schema={
+            "type": "object",
+            "properties": {"include_inactive": {"type": "boolean"}},
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/consolidation-groups",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_consolidation_group",
+        description=(
+            "Legt eine Konsolidierungsgruppe an (gleicher Mandant, gleiche Währung); die "
+            "Muttergesellschaft wird automatisch Mitglied."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "parent_company_id": {"type": "integer"},
+                "members": _consolidation_member_schema(),
+                "is_active": {"type": "boolean"},
+            },
+            "required": ["name", "parent_company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/consolidation-groups",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_consolidation_group",
+        description=(
+            "Ändert Name, Muttergesellschaft, Status oder Mitgliederliste einer "
+            "Konsolidierungsgruppe."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "integer"},
+                "name": {"type": "string"},
+                "parent_company_id": {"type": "integer"},
+                "members": _consolidation_member_schema(),
+                "is_active": {"type": "boolean"},
+            },
+            "required": ["group_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/consolidation-groups/{group_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_consolidation_report",
+        description=(
+            "Konsolidierte SuSa, GuV und Bilanz einer Gruppe mit Spalten je Gesellschaft, "
+            "Eliminierungen und Aufrechnungsdifferenzen. Kein Konzernabschluss nach HGB; "
+            "Warnungen und Grenzen mit nennen."
+        ),
+        input_schema=_consolidation_report_schema(),
+        http_method="GET",
+        path="/consolidation-groups/{group_id}/report",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_consolidation_adjustment",
+        description=(
+            "Erfasst eine ausgeglichene manuelle Konsolidierungsbuchung (capital = "
+            "Kapitalkonsolidierung) auf Kontonummern der Mitglieder; zählt nur in der Auswertung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "integer"},
+                "adjustment_date": {"type": "string", "description": "JJJJ-MM-TT"},
+                "kind": {"type": "string", "enum": ["capital", "other"]},
+                "description": {"type": "string"},
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "account_code": {"type": "string"},
+                            "debit_amount": {"type": "string"},
+                            "credit_amount": {"type": "string"},
+                        },
+                        "required": ["account_code"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["group_id", "adjustment_date", "kind", "description", "lines"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/consolidation-groups/{group_id}/adjustments",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="delete_consolidation_adjustment",
+        description=(
+            "Löscht eine manuelle Konsolidierungsbuchung; ihr Inhalt bleibt im Audit-Log."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group_id": {"type": "integer"},
+                "adjustment_id": {"type": "integer"},
+                "reason": {"type": "string"},
+            },
+            "required": ["group_id", "adjustment_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/consolidation-groups/{group_id}/adjustments/{adjustment_id}/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="export_consolidation_report_csv",
+        description="Exportiert den konsolidierten Bericht einer Gruppe als CSV.",
+        input_schema=_with_download_link(_consolidation_report_schema()),
+        http_method="GET",
+        path="/exports/consolidation-report.csv",
         arg_location="query",
     ),
     ToolSpec(
@@ -4301,6 +4505,48 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_company_vat_method",
+        description=(
+            "Versteuerungsart der Gesellschaft: soll (Sollversteuerung, Standard) oder ist "
+            "(Istversteuerung nach § 20 UStG) mit dem Zeitraum der Istversteuerung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/companies/{company_id}/vat-method",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="set_company_vat_method",
+        description=(
+            "Wechselt die Versteuerungsart zum Monatsersten. Bei Istversteuerung zählen "
+            "Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten anteilig mit der "
+            "Zahlung. Der Wechsel braucht die Gestattung durch das Finanzamt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "method": {"type": "string", "enum": ["soll", "ist"]},
+                "valid_from": {
+                    "type": "string",
+                    "description": "Gültig ab, Erster eines Monats (JJJJ-MM-TT).",
+                },
+            },
+            "required": ["company_id", "method", "valid_from"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/vat-method",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_vat_return",
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "
@@ -4310,7 +4556,9 @@ TOOLS: list[ToolSpec] = [
             "(nicht steuerbar: EU-Leistungen § 18b, übrige), Kz 60, Kz 89/93 (ig. Erwerb), "
             "Kz 46/47 und 84/85 (§ 13b), Kz 66/61/67 (Vorsteuer), Kz 83 (Zahllast/Überschuss). "
             "Erträge ohne Umsatzsteuer ordnet die DATEV-Kontenfunktion zu (z. B. 8125 → 41, "
-            "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist."
+            "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist. "
+            "Bei Istversteuerung (get_company_vat_method) zählen Rechnungen auf offene Posten "
+            "anteilig mit der Zahlung."
         ),
         input_schema={
             "type": "object",

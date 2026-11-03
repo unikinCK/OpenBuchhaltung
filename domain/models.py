@@ -79,6 +79,9 @@ class Company(Base):
     # Auftraggeber-Bankverbindung für SEPA-Zahlläufe (pain.001).
     iban: Mapped[str | None] = mapped_column(String(34))
     bic: Mapped[str | None] = mapped_column(String(11))
+    # Istversteuerung (§ 20 UStG) in diesem Zeitraum; ohne ``from`` gilt Sollversteuerung.
+    vat_cash_basis_from: Mapped[date | None] = mapped_column(Date)
+    vat_cash_basis_until: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -105,7 +108,9 @@ class Company(Base):
         back_populates="company", cascade="all, delete-orphan"
     )
     business_partners: Mapped[list[BusinessPartner]] = relationship(
-        back_populates="company", cascade="all, delete-orphan"
+        back_populates="company",
+        cascade="all, delete-orphan",
+        foreign_keys="BusinessPartner.company_id",
     )
 
 
@@ -402,11 +407,20 @@ class BusinessPartner(Base):
     payment_term_days: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Der Partner ist diese verbundene Gesellschaft (Konsolidierung, ADR-008).
+    intercompany_company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    company: Mapped[Company] = relationship(back_populates="business_partners")
+    company: Mapped[Company] = relationship(
+        back_populates="business_partners", foreign_keys=[company_id]
+    )
+    intercompany_company: Mapped[Company | None] = relationship(
+        foreign_keys=[intercompany_company_id]
+    )
     journal_lines: Mapped[list[JournalEntryLine]] = relationship(back_populates="partner")
 
 
@@ -979,6 +993,54 @@ class OpenItem(Base):
         foreign_keys=[settlement_journal_entry_id]
     )
     bank_transaction: Mapped[BankTransaction | None] = relationship()
+    settlements: Mapped[list[OpenItemSettlement]] = relationship(
+        back_populates="open_item", cascade="all, delete-orphan"
+    )
+
+
+class OpenItemSettlement(Base):
+    """Ein Ausgleich eines offenen Postens mit Datum und Betrag.
+
+    Grundlage der Istversteuerung: Die Umsatzsteuer entsteht anteilig mit der Zahlung. Wird die
+    Ausgleichsbuchung storniert, bleibt die Zeile stehen und trägt das Stornodatum, damit bereits
+    gemeldete Zeiträume unverändert bleiben und die Korrektur im Zeitraum des Stornos erscheint.
+    """
+
+    __tablename__ = "open_item_settlement"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_open_item_settlement_amount_positive"),
+        Index("ix_open_item_settlement_item", "open_item_id", "settlement_date"),
+        Index("ix_open_item_settlement_entry", "journal_entry_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    open_item_id: Mapped[int] = mapped_column(
+        ForeignKey("open_item.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    settlement_date: Mapped[date] = mapped_column(Date, nullable=False)
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    bank_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_transaction.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    reversed_on: Mapped[date | None] = mapped_column(Date)
+    reversal_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+
+    open_item: Mapped[OpenItem] = relationship(back_populates="settlements")
 
 
 class FixedAsset(Base):
@@ -1465,8 +1527,32 @@ class User(Base):
     llm_model: Mapped[str | None] = mapped_column(String(120))
     llm_api_key_encrypted: Mapped[str | None] = mapped_column(Text)
     llm_api_key_last4: Mapped[str | None] = mapped_column(String(4))
+    # Zwei-Faktor-Anmeldung (TOTP): Das Secret liegt nur verschlüsselt vor (siehe
+    # app.services.two_factor). Secret ohne ``totp_enabled_at`` heißt: Einrichtung
+    # begonnen, aber noch nicht mit einem gültigen Code bestätigt.
+    totp_secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Zuletzt verbrauchter Zeitschritt: Derselbe Code gilt nur einmal.
+    totp_last_step: Mapped[int | None] = mapped_column(Integer)
 
     tenant: Mapped[Tenant | None] = relationship()
+
+
+class TwoFactorRecoveryCode(Base):
+    """Wiederherstellungscode der Zwei-Faktor-Anmeldung: nur gehasht, einmal verwendbar."""
+
+    __tablename__ = "two_factor_recovery_code"
+    __table_args__ = (
+        UniqueConstraint("user_id", "code_hash", name="uq_two_factor_recovery_code_user_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LoginAttempt(Base):
@@ -2375,3 +2461,153 @@ class CashClosing(Base):
 
     cash_book: Mapped[CashBook] = relationship()
     difference_entry: Mapped[CashEntry | None] = relationship()
+
+
+# Art einer manuellen Konsolidierungsbuchung (ADR-008).
+CONSOLIDATION_KIND_CAPITAL = "capital"
+CONSOLIDATION_KIND_OTHER = "other"
+CONSOLIDATION_ADJUSTMENT_KINDS = (CONSOLIDATION_KIND_CAPITAL, CONSOLIDATION_KIND_OTHER)
+
+
+class ConsolidationGroup(Base):
+    """Gruppe von Gesellschaften eines Mandanten für die konsolidierte Auswertung.
+
+    Die Auswertung rechnet aus den Büchern der Mitglieder; Konsolidierungsbuchungen
+    stehen nie in den Büchern der einzelnen Gesellschaften (ADR-008).
+    """
+
+    __tablename__ = "consolidation_group"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_consolidation_group_tenant_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    parent_company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    parent_company: Mapped[Company] = relationship(foreign_keys=[parent_company_id])
+    members: Mapped[list[ConsolidationMember]] = relationship(
+        back_populates="group", cascade="all, delete-orphan", order_by="ConsolidationMember.id"
+    )
+    adjustments: Mapped[list[ConsolidationAdjustment]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        order_by="(ConsolidationAdjustment.adjustment_date, ConsolidationAdjustment.id)",
+    )
+
+
+class ConsolidationMember(Base):
+    """Gesellschaft in einer Gruppe: Beteiligungsquote und Einbeziehungszeitraum."""
+
+    __tablename__ = "consolidation_member"
+    __table_args__ = (
+        UniqueConstraint("group_id", "company_id", name="uq_consolidation_member_group_company"),
+        CheckConstraint(
+            "ownership_percent > 0 AND ownership_percent <= 100",
+            name="ck_consolidation_member_ownership",
+        ),
+        CheckConstraint(
+            "included_from IS NULL OR included_to IS NULL OR included_from <= included_to",
+            name="ck_consolidation_member_included_range",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("consolidation_group.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    ownership_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("100.00")
+    )
+    included_from: Mapped[date | None] = mapped_column(Date)
+    included_to: Mapped[date | None] = mapped_column(Date)
+
+    group: Mapped[ConsolidationGroup] = relationship(back_populates="members")
+    company: Mapped[Company] = relationship(foreign_keys=[company_id])
+
+
+class ConsolidationAdjustment(Base):
+    """Manuelle Konsolidierungsbuchung; zählt nur in der Auswertung der Gruppe."""
+
+    __tablename__ = "consolidation_adjustment"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('capital', 'other')", name="ck_consolidation_adjustment_kind"
+        ),
+        Index("ix_consolidation_adjustment_group_date", "group_id", "adjustment_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("consolidation_group.id", ondelete="CASCADE"), nullable=False
+    )
+    adjustment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    group: Mapped[ConsolidationGroup] = relationship(back_populates="adjustments")
+    lines: Mapped[list[ConsolidationAdjustmentLine]] = relationship(
+        back_populates="adjustment",
+        cascade="all, delete-orphan",
+        order_by="ConsolidationAdjustmentLine.line_number",
+    )
+
+
+class ConsolidationAdjustmentLine(Base):
+    """Zeile einer Konsolidierungsbuchung; bezieht sich auf die Kontonummer.
+
+    Bezeichnung und Kontoart werden bei der Erfassung festgehalten, damit die Zeile
+    auch einzuordnen bleibt, wenn die Gesellschaft mit dem Konto die Gruppe verlässt.
+    """
+
+    __tablename__ = "consolidation_adjustment_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "adjustment_id", "line_number", name="uq_consolidation_adjustment_line_number"
+        ),
+        CheckConstraint(
+            "debit_amount >= 0 AND credit_amount >= 0",
+            name="ck_consolidation_adjustment_line_non_negative",
+        ),
+        CheckConstraint(
+            "(debit_amount > 0 AND credit_amount = 0) OR (credit_amount > 0 AND debit_amount = 0)",
+            name="ck_consolidation_adjustment_line_one_sided",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    adjustment_id: Mapped[int] = mapped_column(
+        ForeignKey("consolidation_adjustment.id", ondelete="CASCADE"), nullable=False
+    )
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    account_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    debit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    credit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    adjustment: Mapped[ConsolidationAdjustment] = relationship(back_populates="lines")

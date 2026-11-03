@@ -96,6 +96,7 @@ _DEMO_BLOCKED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^/api/v1/(users|tenants)(/|$)", "Benutzer- und Mandantenverwaltung"),
         (r"^/(users|tenants)(/|$)", "Benutzer- und Mandantenverwaltung"),
         (r"^/auth/password$", "Passwortänderung"),
+        (r"^/auth/zwei-faktor(/|$)", "Zwei-Faktor-Anmeldung"),
         (r"^/api/v1/(fints-|open-banking)", "Bankverbindungen"),
         (r"^/bank/(fints|open-banking)(/|$)", "Bankverbindungen"),
         (r"^/verwaltung/fints-bankenliste$", "Bankverbindungen"),

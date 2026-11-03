@@ -2,7 +2,7 @@
 Tagesabschlüsse (``cash_closing``) samt Triggern gegen UPDATE/DELETE (ADR-007).
 
 Revision ID: 20261103_0059
-Revises: 20261103_0057
+Revises: 20261103_0061
 Create Date: 2026-11-03 10:00:00
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20261103_0059"
-down_revision = "20261103_0057"
+down_revision = "20261103_0061"
 branch_labels = None
 depends_on = None
 

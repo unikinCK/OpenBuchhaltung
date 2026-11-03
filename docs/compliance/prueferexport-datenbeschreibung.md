@@ -23,6 +23,12 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/cash_books.json` | Kassen der Gesellschaft mit Kassenkonto, Status und Nummernkreis |
 | `data/cash_entries.json` | Unveränderbare Kassenbuch-Einträge mit fortlaufender Nummer, Bestand, Buchung und Hashkette |
 | `data/cash_closings.json` | Unveränderbare Tagesabschlüsse (Kassensturz) mit Soll-Bestand, gezähltem Bestand und Differenz |
+| `data/consolidation_groups.json` | Konsolidierungsgruppen, deren Muttergesellschaft die exportierte Gesellschaft ist |
+| `data/consolidation_members.json` | Mitglieder dieser Gruppen mit Beteiligungsquote und Einbeziehungszeitraum |
+| `data/consolidation_adjustments.json` | Manuelle Konsolidierungsbuchungen dieser Gruppen |
+| `data/consolidation_adjustment_lines.json` | Zeilen der manuellen Konsolidierungsbuchungen |
+| `data/consolidation_history.json` | Verkettete Vorher-/Nachher-Historie der Gruppen und Buchungen einschließlich gelöschter Buchungen |
+| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung und Storno |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -78,10 +84,17 @@ per Datenbank-Trigger unveränderbar. `date_from`/`date_to` filtern Einträge na
 `entry_date` und Abschlüsse nach `closing_date`; die Kette lässt sich deshalb nur
 in einem ungefilterten Export von Anfang an nachrechnen. Das Kassenbuch ist manuell
 geführt und ersetzt keine TSE und keinen DSFinV-K-Export.
+Konsolidierungsgruppen (ADR-008) gehören zum Paket ihrer Muttergesellschaft; der
+Export einer Tochtergesellschaft enthält sie nicht. Manuelle Konsolidierungsbuchungen
+sind keine Buchungen einer Gesellschaft und stehen nicht im Journal; sie werden nach
+`date_from`/`date_to` gefiltert. Gelöschte Buchungen sind mit vollständigem Inhalt in
+`consolidation_history.json` nachvollziehbar. `business_partners.json` enthält mit
+`intercompany_company_id` die verbundene Gesellschaft, für die ein Partner steht.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,
-Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert. Beim
+Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert, ebenso wenig
+die Daten der Zwei-Faktor-Anmeldung (Secret, Zeitstempel, Wiederherstellungscodes). Beim
 Belegindex wird der interne Speicherpfad ebenfalls nicht ausgegeben.
 
 ## 4. Prüfsummen und Reproduzierbarkeit

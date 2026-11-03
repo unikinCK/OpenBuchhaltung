@@ -25,6 +25,55 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Manuell geführt: ersetzt keine TSE und keinen DSFinV-K-Export für elektronische Kassensysteme
   und ist nicht zertifiziert.
 
+### Konsolidierte Auswertung mehrerer Gesellschaften
+- Unter **Steuern & Berichte → Konsolidierung** fasst eine Gruppe Gesellschaften desselben Mandanten
+  und derselben Währung zusammen: SuSa, GuV und Bilanz mit Spalten je Gesellschaft, Summe, Eliminierung,
+  manueller Buchung und konsolidiertem Wert, dazu Eliminierungsliste und CSV. Kein Konzernabschluss nach
+  §§ 290 ff. HGB; die Grenzen stehen im Bericht, in der README und in ADR-008.
+- Am Geschäftspartner lässt sich eine verbundene Gesellschaft hinterlegen
+  (`intercompany_company_id`, UI/REST/MCP, mit Historie). Salden auf Sammelkonten und Erfolgszeilen
+  solcher Buchungen werden berechnet eliminiert; Differenzen zwischen den Gesellschaften stehen je Paar und
+  auf einer eigenen Zeile „Aufrechnungsdifferenz“.
+- Manuelle Konsolidierungsbuchungen (Kapitalkonsolidierung, Sonstige) gehören der Gruppe und stehen nie in den
+  Büchern einer Gesellschaft; Korrektur durch Löschen und neu Erfassen mit Audit-Eintrag.
+- Neue Tabellen `consolidation_group`, `consolidation_member`, `consolidation_adjustment`,
+  `consolidation_adjustment_line` (Migration `20261103_0061`), im Prüferexport bei der Muttergesellschaft.
+  Neue Endpunkte unter `/api/v1/consolidation-groups` und `/api/v1/exports/consolidation-report.csv`, neue
+  MCP-Tools `*_consolidation_*`.
+
+### KI-Chat: Werkzeuge seltener Fachgebiete auf Anforderung
+- Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss und Einrichtung sind im Chat nicht mehr von Anfang an
+  sichtbar. Obi lädt sie bei Bedarf mit dem Chat-Werkzeug `load_tools`; das spart rund ein Viertel der
+  Tool-Definitionen je Anfrage und schafft Platz für neue Fachfunktionen. Sperren und Bestätigungspflicht
+  gelten unverändert, MCP-Clients sehen weiter alle Tools.
+
+### Istversteuerung (§ 20 UStG)
+- Versteuerungsart je Gesellschaft mit Wechsel zum Monatsersten (`company.vat_cash_basis_from`/`_until`,
+  Migration `20261103_0062`, UI auf der Seite Umsatzsteuer, `GET`/`POST /api/v1/companies/<id>/vat-method`,
+  MCP `get_company_vat_method`, `set_company_vat_method`; im KI-Chat gesperrt).
+- UStVA und Jahreserklärung: Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten zählen im
+  Ist-Zeitraum anteilig mit der Zahlung. Warnungen nennen noch nicht fällige Umsatzsteuer und Rechnungen ohne
+  verknüpften Posten.
+- Neue Tabelle `open_item_settlement`: jeder Ausgleich mit Datum und Betrag, auch im Prüferexport.
+  Bestehende Ausgleiche werden übernommen. `settle_open_item` nimmt das Zahlungsdatum aus Buchung
+  oder Bankumsatz.
+- Behoben: Der Storno einer Ausgleichsbuchung stellte nur den zuletzt verbuchten Ausgleich wieder her. Jetzt
+  leben alle Ausgleiche dieser Buchung wieder auf, auch wenn dieselbe Buchung mehrere Posten ausgleicht.
+
+### Zwei-Faktor-Anmeldung (TOTP)
+- Der Browser-Login lässt sich mit einer Authenticator-App absichern (RFC 6238): Einrichtung im
+  Benutzermenü mit QR-Code, zehn einmal verwendbare Wiederherstellungscodes, Abschalten und neue
+  Codes nur mit Passwort plus Code. Neue Felder am Benutzer und Tabelle
+  `two_factor_recovery_code` (Migration `20261103_0060`), neue Abhängigkeit `segno`.
+- Nach dem richtigen Passwort gibt es nur einen 5 Minuten gültigen Zwischenstand; angemeldet ist
+  erst, wer den zweiten Schritt besteht. Das gilt auch für OAuth-Zugriffe und die iOS-App.
+  Fehlversuche zählen im Login-Rate-Limit, zusätzlich je Benutzername über alle Adressen.
+- `TWO_FACTOR_REQUIRED_ROLES` schreibt die Einrichtung je Rolle vor. Administratoren setzen zurück
+  über Verwaltung, `POST /api/v1/users/<id>/two-factor/reset`, MCP `reset_user_two_factor` und
+  `flask reset-2fa`. REST: `/api/v1/users/me/two-factor` mit `setup`, `confirm`, `disable` und
+  `recovery-codes`; MCP zusätzlich `get_user_two_factor_status`.
+- API-Tokens bleiben ein eigener Zugang ohne zweiten Faktor. Einrichten und Abschalten gibt es
+  bewusst nicht per MCP, damit das Secret durch keinen KI-Kontext läuft.
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf

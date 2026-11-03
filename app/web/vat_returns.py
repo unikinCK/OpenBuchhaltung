@@ -29,10 +29,12 @@ from app.services.elster import (
 )
 from app.services.vat_returns import (
     VatReturnError,
+    company_vat_method,
     compute_vat_return_details,
     list_vat_returns,
     period_bounds,
     save_vat_return,
+    set_company_vat_method,
     vat_return_display_name,
     vat_return_kind_from_label,
 )
@@ -87,8 +89,15 @@ def vat_returns_page():
         elster_filter_error = None
         elster_filters = _selected_elster_filters()
         elster_summary = None
+        vat_method = None
         date_from = date_to = None
         if selected_company_id:
+            company = require_company_access(session, selected_company_id)
+            vat_method = {
+                **company_vat_method(company),
+                "from_date": company.vat_cash_basis_from,
+                "until_date": company.vat_cash_basis_until,
+            }
             try:
                 date_from, date_to, period_label = period_bounds(period_label)
                 details = compute_vat_return_details(
@@ -156,6 +165,7 @@ def vat_returns_page():
         "ustva.html",
         companies=companies,
         selected_company_id=selected_company_id,
+        vat_method=vat_method,
         period_label=period_label,
         include_closing_entries=include_closing_entries,
         declaration_display_name=vat_return_display_name(period_label),
@@ -324,3 +334,27 @@ def download_elster_payload_action(submission_id: int):
             f'attachment; filename="{elster_payload_filename(submission)}"'
         )
         return response
+
+
+@main_bp.post("/ustva/versteuerungsart")
+def set_company_vat_method_action():
+    company_id = request.form.get("company_id", type=int)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            hints = set_company_vat_method(
+                session=session,
+                company=company,
+                method=request.form.get("method", ""),
+                valid_from=date.fromisoformat(request.form.get("valid_from", "")),
+                changed_by=changed_by(),
+            )
+        except ValueError as exc:
+            # VatReturnError ist ein ValueError, ebenso ein ungültiges Datum.
+            flash(str(exc), "error")
+            return redirect(url_for("main.vat_returns_page", company_id=company_id))
+    flash("Die Versteuerungsart wurde gespeichert.", "success")
+    for hint in hints:
+        flash(hint, "warning")
+    return redirect(url_for("main.vat_returns_page", company_id=company_id))

@@ -31,6 +31,7 @@ import base64
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,6 +121,8 @@ CHAT_BLOCKED_TOOL_NAMES = {
     "set_partner_bank_details",
     # Übernimmt eine IBAN aus dem Freitext eines Postens in den Partnerstamm.
     "apply_partner_takeover",
+    # Die Versteuerungsart braucht die Gestattung des Finanzamts und ändert alle Meldungen.
+    "set_company_vat_method",
     "set_company_knowledge_entry_status",
     "set_company_knowledge_source_active",
     "update_company_knowledge_source",
@@ -130,6 +133,112 @@ CHAT_BLOCKED_TOOL_NAMES = {
 
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.
 CHAT_READ_ONLY_POST_TOOLS = {"preview_income_tax_return"}
+
+# Seltene Fachgebiete blendet der Chat erst auf Anforderung ein (``load_tools``): Jede Definition
+# belegt bei jeder Anfrage Platz im Kontext des Modells, und das Budget aus Prompt und Tools ist
+# begrenzt (``tests/test_knowledge.py``). Gesperrt oder freigegeben ist ein Tool davon unabhängig.
+LOAD_TOOLS_NAME = "load_tools"
+CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "lohn": (
+        "Lohnabrechnung",
+        (
+            "get_payroll_readiness",
+            "create_payroll_employee",
+            "list_payroll_employees",
+            "create_payroll_run",
+            "list_payroll_runs",
+            "post_payroll_run",
+        ),
+    ),
+    "anlagen": (
+        "Anlagenbuchhaltung und AfA",
+        (
+            "create_fixed_asset",
+            "list_fixed_assets",
+            "update_fixed_asset",
+            "get_depreciation_schedule",
+            "post_depreciation",
+            "record_fixed_asset_impairment",
+            "dispose_fixed_asset",
+            "cancel_fixed_asset",
+        ),
+    ),
+    "ertragsteuern": (
+        "Körperschaft- und Gewerbesteuer",
+        (
+            "preview_income_tax_return",
+            "create_income_tax_return",
+            "list_income_tax_returns",
+        ),
+    ),
+    "controlling": (
+        "Kostenstellen und Profitcenter",
+        (
+            "create_controlling_unit",
+            "update_controlling_unit",
+            "list_controlling_units",
+            "get_controlling_unit_history",
+            "get_controlling_report",
+            "export_controlling_csv",
+        ),
+    ),
+    "abschluss": (
+        "Geschäftsjahre, Periodensperren, Jahresabschluss, Audit-Log und Prüferexport",
+        (
+            "create_fiscal_year",
+            "set_fiscal_year_start",
+            "lock_period",
+            "unlock_period",
+            "close_fiscal_year",
+            "list_audit_log",
+            "verify_audit_log_integrity",
+            "verify_compliance_integrity",
+            "export_audit_package",
+        ),
+    ),
+    "kasse": (
+        "Kassenbuch",
+        (
+            "list_cash_books",
+            "create_cash_book",
+            "update_cash_book",
+            "list_cash_entries",
+            "create_cash_entry",
+            "reverse_cash_entry",
+            "list_cash_closings",
+            "create_cash_closing",
+            "get_cash_report",
+            "export_cash_report_csv",
+            "verify_cash_book",
+        ),
+    ),
+    "konsolidierung": (
+        "Konsolidierte Auswertung mehrerer Gesellschaften",
+        (
+            "list_consolidation_groups",
+            "create_consolidation_group",
+            "update_consolidation_group",
+            "get_consolidation_report",
+            "create_consolidation_adjustment",
+            "delete_consolidation_adjustment",
+            "export_consolidation_report_csv",
+        ),
+    ),
+    "einrichtung": (
+        "Mandanten, Kontenrahmen, Steuercodes, Bankkonten und Belegkategorien einrichten",
+        (
+            "create_tenant_with_company",
+            "import_account_chart",
+            "check_account_chart",
+            "get_account_history",
+            "create_tax_code",
+            "ensure_default_tax_codes",
+            "create_bank_account",
+            "create_document_category",
+            "set_document_category_active",
+        ),
+    ),
+}
 
 # Für Chat-Anhänge erlaubte Dateitypen (Erweiterung -> MIME-Typ).
 CHAT_ATTACHMENT_TYPES = {
@@ -219,25 +328,87 @@ def chat_available_tools() -> list[ToolSpec]:
     return [tool for tool in TOOLS if not chat_tool_blocked(tool.name)]
 
 
-def chat_tool_definitions() -> list[dict[str, Any]]:
-    """MCP-Tools als Funktionsdefinitionen der OpenAI-``/responses``-API."""
-    definitions = []
-    for tool in chat_available_tools():
-        description = tool.description
-        if chat_tool_requires_confirmation(tool.name):
-            description = (
-                f"{description} (Schreibend: wird erst nach ausdrücklicher Bestätigung "
-                "des Benutzers in der Oberfläche ausgeführt.)"
-            )
-        definitions.append(
-            {
-                "type": "function",
-                "name": tool.name,
-                "description": description,
-                "parameters": tool.input_schema,
-            }
+def _tool_definition(tool: ToolSpec) -> dict[str, Any]:
+    description = tool.description
+    if chat_tool_requires_confirmation(tool.name):
+        description = (
+            f"{description} (Schreibend: wird erst nach ausdrücklicher Bestätigung "
+            "des Benutzers in der Oberfläche ausgeführt.)"
         )
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": description,
+        "parameters": tool.input_schema,
+    }
+
+
+def _load_tools_definition() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": LOAD_TOOLS_NAME,
+        "description": (
+            "Blendet die Werkzeuge eines selteneren Fachgebiets für diese Unterhaltung ein: "
+            + "; ".join(f"{key} ({title})" for key, (title, _) in CHAT_TOOL_GROUPS.items())
+            + "."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"group": {"type": "string", "enum": list(CHAT_TOOL_GROUPS)}},
+            "required": ["group"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def chat_tool_definitions(loaded_groups: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """MCP-Tools als Funktionsdefinitionen der OpenAI-``/responses``-API.
+
+    Werkzeuge aus ``CHAT_TOOL_GROUPS`` erscheinen erst, wenn ihre Gruppe geladen ist.
+    """
+    loaded = set(loaded_groups)
+    hidden = {
+        name
+        for key, (_, names) in CHAT_TOOL_GROUPS.items()
+        if key not in loaded
+        for name in names
+    }
+    definitions = [
+        _tool_definition(tool) for tool in chat_available_tools() if tool.name not in hidden
+    ]
+    definitions.append(_load_tools_definition())
     return definitions
+
+
+def loaded_tool_groups(messages: Iterable[Any]) -> list[str]:
+    """Gruppen, die frühere Züge dieser Unterhaltung geladen haben."""
+    loaded: list[str] = []
+    for message in messages:
+        for call in message.tool_calls or []:
+            if call.get("name") != LOAD_TOOLS_NAME:
+                continue
+            group = (call.get("arguments") or {}).get("group")
+            if group in CHAT_TOOL_GROUPS and group not in loaded:
+                loaded.append(group)
+    return loaded
+
+
+def _load_tool_group(arguments: dict[str, Any], tools: list[dict[str, Any]] | None) -> str:
+    """Hängt die Werkzeuge einer Gruppe an die laufende Definitionsliste an."""
+    group = arguments.get("group")
+    if group not in CHAT_TOOL_GROUPS:
+        raise ChatError(f"Unbekannte Werkzeuggruppe. Verfügbar: {', '.join(CHAT_TOOL_GROUPS)}.")
+    title, names = CHAT_TOOL_GROUPS[group]
+    available = {tool.name: tool for tool in chat_available_tools()}
+    present = {definition.get("name") for definition in tools or []}
+    if tools is not None:
+        tools.extend(
+            _tool_definition(available[name])
+            for name in names
+            if name in available and name not in present
+        )
+    loaded_names = ", ".join(name for name in names if name in available)
+    return f"{title}: {loaded_names} sind jetzt verfügbar."
 
 
 def mark_untrusted(label: str, text: str) -> str:
@@ -280,11 +451,13 @@ def build_tool_executor(
     api_user: dict | None,
     global_access: bool,
     external: ExternalTools = NO_EXTERNAL_TOOLS,
+    tool_definitions: list[dict[str, Any]] | None = None,
 ):
     """Erzeugt den ``execute_tool``-Callback für :func:`run_chat_turn`.
 
     ``external`` führt die Werkzeuge externer MCP-Server aus; ihre Ergebnisse werden
     wie die der eigenen Tools gekürzt und als Fremddaten gekennzeichnet.
+    ``tool_definitions`` ist die Liste der Tool-Schleife, die ``load_tools`` ergänzt.
     """
     server = MCPServer(
         http=InProcessApiClient(
@@ -297,6 +470,11 @@ def build_tool_executor(
     )
 
     def execute_tool(name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        if name == LOAD_TOOLS_NAME:
+            try:
+                return _load_tool_group(arguments, tool_definitions), False
+            except ChatError as exc:
+                return str(exc), True
         if external.handles(name):
             text, is_error = external.execute(name, arguments)
             text = truncate_tool_result(
@@ -562,6 +740,9 @@ def build_system_prompt(
         "account_code=…, company_id=…). Lange Tool-Ergebnisse werden gekürzt; "
         "ein gekürztes Ergebnis ist unvollständig und kein Beleg dafür, dass "
         "etwas nicht existiert.\n"
+        "Seltene Fachgebiete blendest du bei Bedarf mit load_tools(group=…) ein ("
+        + ", ".join(CHAT_TOOL_GROUPS)
+        + "); fehlt dir ein Werkzeug, lade zuerst seine Gruppe.\n"
         "Lesende Tools werden sofort ausgeführt. Schreibende Tools (Buchungen, "
         "Anlagen, Stammdaten) werden nicht sofort ausgeführt, sondern dem Benutzer "
         "zur Bestätigung vorgelegt; fordere sie nur an, wenn der Benutzer die "
@@ -767,16 +948,23 @@ def _run_turn(
     global_access: bool,
     external: ExternalTools = NO_EXTERNAL_TOOLS,
     progress: ProgressCallback = _no_progress,
+    loaded_groups: Iterable[str] = (),
 ) -> ChatTurnResult:
     config = current_app.config
     max_reasoning_tokens = config.get("CHAT_LLM_MAX_REASONING_TOKENS")
+    # Dieselbe Liste geht an die Tool-Schleife und den Executor: ``load_tools`` ergänzt sie,
+    # die nächste Anfrage des Zuges sieht die neuen Werkzeuge.
+    tools = chat_tool_definitions(loaded_groups) + external.definitions()
     return run_chat_turn(
         endpoint_url=endpoint.url,
         model=endpoint.model,
         input_items=input_items,
-        tools=chat_tool_definitions() + external.definitions(),
+        tools=tools,
         execute_tool=build_tool_executor(
-            api_user=api_user, global_access=global_access, external=external
+            api_user=api_user,
+            global_access=global_access,
+            external=external,
+            tool_definitions=tools,
         ),
         api_key=endpoint.api_key,
         max_tool_calls=int(config.get("CHAT_LLM_MAX_TOOL_CALLS") or 15),
@@ -935,6 +1123,7 @@ def run_chat_message(
             created_conversation = True
 
         history = list(conversation.messages)
+        loaded_groups = loaded_tool_groups(history)
         chart = detect_company_chart(session=session, company_id=company.id)
         knowledge_summary = company_knowledge_summary(session=session, company_id=company.id)
         user_message = ChatMessage(
@@ -994,6 +1183,7 @@ def run_chat_message(
             global_access=global_access,
             external=external,
             progress=progress,
+            loaded_groups=loaded_groups,
         )
     except ChatLLMReasoningLimit as exc:
         _store_reasoning_abort(session_factory, conversation_id, exc)
@@ -1060,6 +1250,7 @@ def resolve_chat_action(
         chart = detect_company_chart(session=session, company_id=company.id)
         knowledge_summary = company_knowledge_summary(session=session, company_id=company.id)
         history_items = _history_items(conversation.messages[:-1])
+        loaded_groups = loaded_tool_groups(conversation.messages)
         conversation_id = conversation.id
 
     external = _load_external_tools(session_factory, company, api_user)
@@ -1073,6 +1264,7 @@ def resolve_chat_action(
             chart=chart,
             knowledge_summary=knowledge_summary,
             history_items=history_items,
+            loaded_groups=loaded_groups,
             conversation_id=conversation_id,
             endpoint=endpoint,
             api_user=api_user,
@@ -1094,6 +1286,7 @@ def _continue_after_action(
     chart: str | None,
     knowledge_summary: dict[str, int] | None,
     history_items: list[dict[str, Any]],
+    loaded_groups: list[str],
     conversation_id: int,
     endpoint: LlmEndpoint,
     api_user: dict | None,
@@ -1162,6 +1355,7 @@ def _continue_after_action(
             global_access=global_access,
             external=external,
             progress=progress,
+            loaded_groups=loaded_groups,
         )
     except ChatLLMReasoningLimit as exc:
         _store_reasoning_abort(session_factory, conversation_id, exc)

@@ -55,7 +55,12 @@ GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HG
 ### V2
 - [x] E-Rechnung (XRechnung/ZUGFeRD Import/Export)
 - [x] Automatisierte Belegerkennung (OCR + Buchungsvorschläge, LLM-Belegabgleich)
-- [ ] Konsolidierung/mehrere Gesellschaften
+- [x] Konsolidierung/mehrere Gesellschaften *(konsolidierte Auswertung innerhalb eines Mandanten:
+      SuSa, GuV und Bilanz je Gruppe, berechnete Schulden- und Aufwands-/Ertragskonsolidierung mit
+      sichtbarer Aufrechnungsdifferenz, manuelle Konsolidierungsbuchungen, UI/API/MCP, ADR-008. Grenzen:
+      kein Konzernabschluss nach §§ 290 ff. HGB, keine Zwischenergebniseliminierung, keine latenten
+      Steuern, keine Equity-Methode, keine automatischen Minderheitenanteile, keine
+      Fremdwährungsumrechnung, kein Konzernanhang, nicht geprüft)*
 - [x] API für Steuerberater-Tools (REST + MCP-Server, UI/API/MCP-Parität)
 
 ## 4. Zielarchitektur
@@ -654,13 +659,20 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
         und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
         Listen-Endpunkte in REST/MCP.
-- [x] **Kassenbuch (#9)** *(2026-11-03, ADR-007)*: Kassen je Aktivkonto, fortlaufende und
+  - [x] Ist-Versteuerung (#15, ADR-009) *(2026-11-03)*: Versteuerungsart je Gesellschaft, Zahlungen je
+        offenem Posten (`open_item_settlement`, Migration `20261103_0062`), UStVA und Jahreserklärung
+        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“, Hinweis
+        auf der Rechnung ab 2028 (§ 14 Abs. 4 Nr. 6a UStG).
+  - [x] Zwei-Faktor-Anmeldung (TOTP) *(2026-11-03, Review #13)*: Einrichtung mit QR-Code und
+        Wiederherstellungscodes, zweiter Login-Schritt, Rollenpflicht
+        `TWO_FACTOR_REQUIRED_ROLES`, Admin-Reset über UI, REST, MCP und CLI. API-Tokens bleiben
+        bewusst ohne zweiten Faktor.
+  - [x] **Kassenbuch (#9)** *(2026-11-03, ADR-007)*: Kassen je Aktivkonto, fortlaufende und
       verkettete Einträge mit DB-Triggern gegen Ändern und Löschen, Buchung in derselben
       Transaktion, Storno-Einträge, Kassensturz mit Tagessperre, Kassenbericht (druckbar, CSV),
       Prüfung inklusive Kontensaldo; UI `/kassenbuch`, REST `/api/v1/cash-books…`, MCP und
       Prüferexport. Manuell geführt, ersetzt keine TSE und keinen DSFinV-K-Export.
-- [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
-      2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+- [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10), Fremdwährung (#14).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 
@@ -757,8 +769,8 @@ dann selbst betriebener Modellserver).
       Versionen, `evaluate_tool_call` am Bestätigungs-Hook).
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
       Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
-- [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf
-      Anforderung einblenden oder Schemas kürzen, um Platz für Fachwissen zu gewinnen.
+- [x] Tool-Definitionen für den Chat verschlanken *(2026-11-03)*: seltene Fachgebiete erst auf
+      Anforderung (`load_tools`, Gruppen in `CHAT_TOOL_GROUPS`).
 - [ ] Konto- und Steuercode-Beschreibungen aus der Datenbank in Tool-Antworten mitliefern
       (`list_accounts`, `list_tax_codes`), damit instanzspezifisches Wissen ohne Pflege der
       Wissensbasis beim Modell ankommt.

@@ -13,6 +13,28 @@
     </div>
   </div>
 
+  {% if vat_method %}
+    <details class="card" id="versteuerungsart">
+      <summary>Versteuerungsart:
+        {% if vat_method.method == "ist" %}<span class="badge badge-warning">Istversteuerung</span>{% else %}<span class="badge">Sollversteuerung</span>{% endif %}
+        {% if vat_method.from_date %}<span class="summary-hint">Ist ab {{ vat_method.from_date | datum }}{% if vat_method.until_date %} bis {{ vat_method.until_date | datum }}{% endif %}</span>{% endif %}
+      </summary>
+      <p class="muted">Bei Istversteuerung (§ 20 UStG) zählen Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten anteilig mit der Zahlung; Vorsteuer und steuerfreie Umsätze bleiben unverändert. Sie braucht die Gestattung durch das Finanzamt. Festgehaltene Voranmeldungen ändern sich nicht.</p>
+      <form method="post" action="{{ url_for('main.set_company_vat_method_action') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="vat_method">Wechsel zu</label>
+        <select id="vat_method" name="method" style="width:auto;">
+          <option value="ist">Istversteuerung</option>
+          <option value="soll">Sollversteuerung</option>
+        </select>
+        <label for="vat_method_from">ab (Monatserster)</label>
+        <input id="vat_method_from" name="valid_from" type="date" required style="width:auto;" />
+        <button type="submit" class="secondary" data-confirm="Versteuerungsart wechseln? Das ändert alle künftigen Berechnungen dieser Gesellschaft.">Speichern</button>
+      </form>
+    </details>
+  {% endif %}
+
   <section class="card">
     <h2>Zeitraum wählen</h2>
     {% if not selected_company_id %}

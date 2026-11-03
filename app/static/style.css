@@ -1483,6 +1483,39 @@ fieldset {
   width: 100%;
 }
 
+/* Zwei-Faktor-Anmeldung */
+.two-factor-qr {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  margin: 0.5rem 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  line-height: 0;
+}
+
+.two-factor-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.two-factor-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.two-factor-codes {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.35rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .report-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1647,3 +1680,5 @@ details.line-details > summary {
 .company-hit + .company-hit { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 .company-hit h3 { margin: 0 0 0.25rem; }
 .filter-bar a.active { font-weight: 600; text-decoration: none; }
+/* Konsolidierung: Aufrechnungsdifferenz bleibt sichtbar */
+tr.consolidation-difference td { background: var(--warning-bg); }
