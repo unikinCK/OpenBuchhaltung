@@ -281,6 +281,8 @@ def close_open_item_by_cancellation(
     Kein Ausgleich: Es floss kein Geld, deshalb entsteht keine Zeile in ``OpenItemSettlement``.
     Bei Istversteuerung gälte sie sonst als Zahlung und löste Umsatzsteuer aus.
     """
+    item.settlement_journal_entry_id = reversal_entry.id
+    item.settlement_amount = item.open_amount
     item.open_amount = Decimal("0.00")
     item.status = "settled"
     item.settled_at = datetime.now(timezone.utc)
