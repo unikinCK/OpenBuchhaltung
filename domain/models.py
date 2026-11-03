@@ -810,6 +810,8 @@ class SalesInvoice(Base):
     service_period_to: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Einheiten der Rechnungswährung je 1 Einheit Firmenwährung; leer bei Firmenwährung.
+    exchange_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
     # Empfänger zum Zeitpunkt des Ausstellens; der Entwurf zeigt den Partnerstamm.
     recipient_name: Mapped[str | None] = mapped_column(String(255))
     recipient_street: Mapped[str | None] = mapped_column(String(255))

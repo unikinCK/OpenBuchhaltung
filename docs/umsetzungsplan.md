@@ -661,8 +661,7 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Listen-Endpunkte in REST/MCP.
   - [x] Ist-Versteuerung (#15, ADR-009) *(2026-11-03)*: Versteuerungsart je Gesellschaft, Zahlungen je
         offenem Posten (`open_item_settlement`, Migration `20261103_0062`), UStVA und Jahreserklärung
-        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“, Hinweis
-        auf der Rechnung ab 2028 (§ 14 Abs. 4 Nr. 6a UStG).
+        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“.
   - [x] Zwei-Faktor-Anmeldung (TOTP) *(2026-11-03, Review #13)*: Einrichtung mit QR-Code und
         Wiederherstellungscodes, zweiter Login-Schritt, Rollenpflicht
         `TWO_FACTOR_REQUIRED_ROLES`, Admin-Reset über UI, REST, MCP und CLI. API-Tokens bleiben

@@ -31,6 +31,10 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Prüferexport: `sales_invoices`, `sales_invoice_lines`. Dezimalwerte mit mehr als zwei Nachkommastellen
   werden dort nicht mehr gerundet.
 - Neue Abhängigkeiten: `reportlab`, `pillow`, `chardet`.
+- Der Storno einer Rechnung schließt ihren Posten, ohne eine Zahlung zu erzeugen; bei Istversteuerung löst er
+  keine Umsatzsteuer aus. Ab 2028 trägt die Rechnung eines Istversteuerers den Hinweis „Versteuerung nach
+  vereinnahmten Entgelten“.
+
 ### Kassenbuch
 - Neues Kassenbuch unter **Bank & OPOS → Kassenbuch**, per REST (`/api/v1/cash-books…`) und MCP
   (`list_cash_books`, `create_cash_book`, `update_cash_book`, `list_cash_entries`,

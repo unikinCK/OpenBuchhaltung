@@ -26,8 +26,8 @@ damit bestehende Installationen ohne Pflege weiterlaufen.
 - **Entwurf:** frei änderbar und löschbar, keine Nummer, keine Buchung.
 - **Ausstellen ist atomar:** Pflichtangaben prüfen, Nummer ziehen, buchen, offenen Posten anlegen, XML
   und PDF erzeugen und als Belege ablegen. Scheitert ein Schritt, fällt alles zurück, auch geschriebene
-  Dateien. Dafür haben `create_open_item`, `settle_open_item` und `reverse_journal_entry` den Parameter
-  `commit=False` bekommen.
+  Dateien. Dafür haben `create_open_item` und `reverse_journal_entry` den Parameter `commit=False`
+  bekommen.
 - **Unveränderlich:** Service und Datenbank-Trigger lassen an einer ausgestellten Rechnung nur noch den
   Wechsel `issued` → `cancelled` zu. Die PDF- und XML-Belege lassen sich weder ersetzen noch umhängen.
   Die Buchung lässt sich nicht direkt stornieren und Leistungsdatum und Partner nicht nachträglich
@@ -87,7 +87,7 @@ auch für CII mit Typ 381, das bisher unbemerkt als Rechnung gebucht wurde.
 E-Mail-Versand (es gibt noch keinen Mailer), Fremdwährung (nur Firmenwährung), Abschlagsrechnungen,
 Skonto-Automatik, wiederkehrende Rechnungen, Gutschriften auf eine Teilmenge, Hinweis auf die
 Aufbewahrungspflicht bei Grundstücksleistungen an Privatpersonen (§ 14 Abs. 4 Nr. 9 UStG, derzeit über den
-Fußtext), Istversteuerungshinweis ab 2028.
+Fußtext).
 
 ## Konsequenzen
 - Positiv: Rechnung, Buchung, offener Posten und Beleg entstehen aus einem Vorgang und stimmen überein.
@@ -106,3 +106,9 @@ Fußtext), Istversteuerungshinweis ab 2028.
   negative Einzelpreise, deshalb sind auch Nachlässe negative Mengen.
 - **Zertifiziertes PDF/A-3:** braucht Farbprofil, eingebettete Schriften und XMP-Metadaten. Für die
   E-Rechnungspflicht reicht das XML, deshalb später.
+
+## Nachtrag: Storno und Istversteuerung
+Der Storno einer Rechnung schließt ihren Posten über `close_open_item_by_cancellation`, nicht über einen
+Ausgleich. Es floss kein Geld, also entsteht keine Zeile in `open_item_settlement`; bei Istversteuerung
+(ADR-009) gälte sie sonst als Zahlung und löste die volle Umsatzsteuer aus. Ab 2028 trägt die Rechnung eines
+Istversteuerers den Hinweis „Versteuerung nach vereinnahmten Entgelten“ (§ 14 Abs. 4 Nr. 6a UStG).
