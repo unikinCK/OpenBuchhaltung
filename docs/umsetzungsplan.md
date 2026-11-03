@@ -55,7 +55,12 @@ GnuCash ist stark in der doppelten Buchführung, aber für den geplanten Web-/HG
 ### V2
 - [x] E-Rechnung (XRechnung/ZUGFeRD Import/Export)
 - [x] Automatisierte Belegerkennung (OCR + Buchungsvorschläge, LLM-Belegabgleich)
-- [ ] Konsolidierung/mehrere Gesellschaften
+- [x] Konsolidierung/mehrere Gesellschaften *(konsolidierte Auswertung innerhalb eines Mandanten:
+      SuSa, GuV und Bilanz je Gruppe, berechnete Schulden- und Aufwands-/Ertragskonsolidierung mit
+      sichtbarer Aufrechnungsdifferenz, manuelle Konsolidierungsbuchungen, UI/API/MCP, ADR-008. Grenzen:
+      kein Konzernabschluss nach §§ 290 ff. HGB, keine Zwischenergebniseliminierung, keine latenten
+      Steuern, keine Equity-Methode, keine automatischen Minderheitenanteile, keine
+      Fremdwährungsumrechnung, kein Konzernanhang, nicht geprüft)*
 - [x] API für Steuerberater-Tools (REST + MCP-Server, UI/API/MCP-Parität)
 
 ## 4. Zielarchitektur

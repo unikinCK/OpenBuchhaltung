@@ -10,6 +10,7 @@
   "payment_term_days": "Zahlungsziel", "notes": "Notizen", "is_active": "aktiv",
   "debtor_number": "Debitorennummer", "creditor_number": "Kreditorennummer",
   "is_customer": "Kunde", "is_supplier": "Lieferant",
+  "intercompany_company_id": "Verbundene Gesellschaft",
 } %}
 
 {% block content %}
@@ -20,6 +21,7 @@
       <p class="page-subtitle">
         {% if partner.debtor_number %}<span class="badge badge-info">Kunde · Debitor {{ partner.debtor_number }}</span>{% endif %}
         {% if partner.creditor_number %}<span class="badge badge-warning">Lieferant · Kreditor {{ partner.creditor_number }}</span>{% endif %}
+        {% if partner.intercompany_company %}<span class="badge">Verbundene Gesellschaft</span>{% endif %}
         {% if not partner.is_active %}<span class="badge">inaktiv</span>{% endif %}
       </p>
     </div>
@@ -55,6 +57,9 @@
       </div>
       <div><dt>Zahlungsziel</dt><dd>{{ partner.payment_term_days ~ " Tage" if partner.payment_term_days is not none else "–" }}</dd></div>
       <div><dt>Bankverbindung</dt><dd>{{ partner.iban or "–" }}{% if partner.bic %}<br /><span class="muted small">BIC {{ partner.bic }}</span>{% endif %}</dd></div>
+      {% if partner.intercompany_company %}
+        <div><dt>Verbundene Gesellschaft</dt><dd>{{ partner.intercompany_company.name }} <span class="muted small">(Konsolidierung)</span></dd></div>
+      {% endif %}
       {% if partner.notes %}
         <div style="grid-column: 1 / -1;"><dt>Notizen</dt><dd>{{ partner.notes }}</dd></div>
       {% endif %}
@@ -283,6 +288,18 @@
           <label for="payment_term_days">Zahlungsziel (Tage)</label>
           <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" value="{{ partner.payment_term_days if partner.payment_term_days is not none else '' }}" />
         </div>
+        {% if intercompany_choices %}
+          <div class="field">
+            <label for="intercompany_company_id">Verbundene Gesellschaft</label>
+            <select id="intercompany_company_id" name="intercompany_company_id">
+              <option value="">keine</option>
+              {% for choice in intercompany_choices %}
+                <option value="{{ choice.id }}" {% if partner.intercompany_company_id == choice.id %}selected{% endif %}>{{ choice.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="hint">Salden und Erfolgszeilen mit diesem Partner werden in der <a href="{{ url_for('main.consolidation_page', company_id=partner.company_id) }}">Konsolidierung</a> eliminiert.</p>
+          </div>
+        {% endif %}
         <div class="field field-full">
           <label for="notes">Notizen</label>
           <textarea id="notes" name="notes" rows="3">{{ partner.notes or '' }}</textarea>

@@ -60,6 +60,9 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Auswertungen & Exporte:** Summen-/Saldenliste, GuV, Bilanz,
   Journalexporte, DATEV-kompatibler Buchungsstapel und Prüferexport-Paket
   mit Manifest und Hashes.
+- **Konsolidierte Auswertung:** SuSa, GuV und Bilanz mehrerer Gesellschaften eines
+  Mandanten mit Spalten je Gesellschaft, berechneten Eliminierungen und sichtbaren
+  Aufrechnungsdifferenzen; kein Konzernabschluss nach §§ 290 ff. HGB.
 - **Schnittstellen:** REST API mit Token-Auth, MCP-Server für agentische
   Workflows und ein ELSTER-Bridge-Konzept über lokalen ERiC-Runner.
 - **Nachvollziehbarkeit:** Rollen, Tenant-Scoping, append-only Audit-Log,
@@ -806,6 +809,51 @@ oder Buchungen ohne Posten sichtbar. API: `GET /api/v1/reports/partner-balances`
 CSV unter `GET /api/v1/exports/partner-balances.csv`; MCP: `get_partner_balances`,
 `export_partner_balances_csv`.
 
+## Konsolidierte Auswertung mehrerer Gesellschaften
+
+Unter **Steuern & Berichte → Konsolidierung** fasst eine Gruppe mehrere Gesellschaften
+desselben Mandanten mit derselben Währung zusammen (Entscheidungen in
+`docs/adr/ADR-008-konsolidierte-auswertung.md`). Der Bericht zeigt SuSa, GuV und Bilanz mit
+einer Spalte je Gesellschaft, Summe, Eliminierung, manueller Buchung und konsolidiertem Wert. Für
+Saldovorträge und Abschlussbuchungen gelten dieselben Regeln wie in den Einzelberichten. Die Bücher der
+Gesellschaften bleiben unberührt.
+
+**Das ist kein Konzernabschluss nach §§ 290 ff. HGB und nicht geprüft.** Nicht enthalten sind
+Zwischenergebniseliminierung, latente Steuern, Equity-Methode, Fremdwährungsumrechnung von Töchtern,
+automatische Minderheitenanteile und ein Konzernanhang.
+
+- **Gruppe:** Muttergesellschaft und Mitglieder mit Beteiligungsquote und „einbezogen ab/bis“. SuSa und
+  GuV zählen nur Buchungen im Einbeziehungszeitraum; die Bilanz zeigt den vollen Bestand der Gesellschaften,
+  die zum Stichtag einbezogen sind, einschließlich des Ergebnisses vor der Einbeziehung.
+- **Zusammenfassung über die Kontonummer:** Unterschiedliche Kontenrahmen und gleiche Nummern mit anderer
+  Kontoart erscheinen als Warnung im Bericht. Bezeichnung und Kontoart kommen von der
+  Muttergesellschaft, sonst von der ersten Gesellschaft mit diesem Konto.
+- **Verbundene Partner:** Am Geschäftspartner wird „Verbundene Gesellschaft“ gesetzt
+  (`intercompany_company_id`, mit Änderungshistorie). Erst dann erkennt die Eliminierung die Buchungen.
+- **Eliminierungen werden berechnet, nicht gebucht:** Salden auf Sammelkonten mit einem verbundenen Partner
+  werden je Paar aufgerechnet; Erfolgszeilen von Buchungen mit einem solchen Partner fallen heraus. Der
+  eigene Partner der Zeile entscheidet, sonst der eindeutige Partner der Buchung. Eine Erfolgszeile ohne
+  Partner in einer Buchung mit mehreren Partnern bleibt stehen, der Bericht warnt.
+- **Aufrechnungsdifferenz:** Sieht die eine Gesellschaft 100 und die andere 90, steht die Differenz je Paar in
+  der Eliminierungsliste und auf einer eigenen Zeile. Die Bilanz geht auf, die Differenz bleibt sichtbar
+  und ist in den Büchern zu klären.
+- **Manuelle Konsolidierungsbuchungen:** Art `capital` (Kapitalkonsolidierung) oder `other`, Zeilen auf
+  Kontonummern aus den Mitgliedern, müssen ausgeglichen sein. Korrigieren heißt löschen und neu erfassen; der
+  Inhalt bleibt im Audit-Log. Ältere Buchungen wirken wie ein Saldovortrag weiter.
+- **Beteiligungsquote unter 100 %:** Der Bericht zeigt die Quote und den rechnerischen Fremdanteil als
+  Information. Minderheitenanteile werden nicht berechnet, die Buchung erfolgt manuell.
+- **Rechte:** Benutzer sehen die Gruppen ihres Mandanten, der globale Admin alle. Prüfer und Support lesen nur.
+  Im Prüferexport gehört eine Gruppe zum Paket ihrer Muttergesellschaft.
+
+API: `GET/POST /api/v1/consolidation-groups`, `GET/PATCH /api/v1/consolidation-groups/<id>`,
+`GET /api/v1/consolidation-groups/<id>/report` (`date_from`, `date_to`, `include_closing_entries`),
+`GET/POST /api/v1/consolidation-groups/<id>/adjustments`,
+`POST /api/v1/consolidation-groups/<id>/adjustments/<adjustment_id>/delete`,
+`GET /api/v1/exports/consolidation-report.csv?group_id=…`; `PATCH /api/v1/partners/<id>` nimmt
+`intercompany_company_id` an. MCP: `list_consolidation_groups`, `create_consolidation_group`,
+`update_consolidation_group`, `get_consolidation_report`, `create_consolidation_adjustment`,
+`delete_consolidation_adjustment`, `export_consolidation_report_csv`.
+
 ## Kostenstellen und Profitcenter: zugehörige Buchungen
 
 Das Journal filtert nach Konto, Kostenstelle und Profitcenter. Eine Buchung trifft,
@@ -1481,6 +1529,7 @@ Base64-Weg bleibt daneben bestehen — für Modelle, die den Inhalt selbst auswe
 | Datei-Exporte mit `?download_link=1` | Parameter `download_link` der Export-Tools | `file_name`, `mime_type`, `file_size_bytes` und Link statt der Datei |
 
 Datei-Exporte sind `exports/journal.csv`, `exports/trial-balance.csv`,
+`exports/consolidation-report.csv`,
 `exports/controlling.csv`, `exports/datev.csv`, `exports/audit-package.zip`,
 `elster/submissions/<id>/payload.xml` und `documents/<id>/download`. Der Link steht in
 `download_url` (absolut), `download_path` (relativ), `expires_at` und

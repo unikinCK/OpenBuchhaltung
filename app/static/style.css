@@ -1647,3 +1647,5 @@ details.line-details > summary {
 .company-hit + .company-hit { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 .company-hit h3 { margin: 0 0 0.25rem; }
 .filter-bar a.active { font-weight: 600; text-decoration: none; }
+/* Konsolidierung: Aufrechnungsdifferenz bleibt sichtbar */
+tr.consolidation-difference td { background: var(--warning-bg); }

@@ -20,6 +20,11 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
 | `data/business_partners.json` | Geschäftspartner (Debitoren/Kreditoren) mit Personenkontonummern |
 | `data/business_partner_history.json` | Verkettete Vorher-/Nachher-Historie der Geschäftspartner inklusive Bankdatenänderungen |
+| `data/consolidation_groups.json` | Konsolidierungsgruppen, deren Muttergesellschaft die exportierte Gesellschaft ist |
+| `data/consolidation_members.json` | Mitglieder dieser Gruppen mit Beteiligungsquote und Einbeziehungszeitraum |
+| `data/consolidation_adjustments.json` | Manuelle Konsolidierungsbuchungen dieser Gruppen |
+| `data/consolidation_adjustment_lines.json` | Zeilen der manuellen Konsolidierungsbuchungen |
+| `data/consolidation_history.json` | Verkettete Vorher-/Nachher-Historie der Gruppen und Buchungen einschließlich gelöschter Buchungen |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -64,6 +69,13 @@ Nachträge vor der Festschreibung (Leistungsdatum, Partner) stehen als Aktion
 `amended` mit altem und neuem Wert im Audit-Log. Anlage,
 Änderungen und Bankdatenänderungen (`bank_details_changed`) stehen mit
 Audit-Hashes in `business_partner_history.json`.
+
+Konsolidierungsgruppen (ADR-008) gehören zum Paket ihrer Muttergesellschaft; der
+Export einer Tochtergesellschaft enthält sie nicht. Manuelle Konsolidierungsbuchungen
+sind keine Buchungen einer Gesellschaft und stehen nicht im Journal; sie werden nach
+`date_from`/`date_to` gefiltert. Gelöschte Buchungen sind mit vollständigem Inhalt in
+`consolidation_history.json` nachvollziehbar. `business_partners.json` enthält mit
+`intercompany_company_id` die verbundene Gesellschaft, für die ein Partner steht.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,

@@ -108,6 +108,17 @@
               <label for="payment_term_days">Zahlungsziel (Tage)</label>
               <input id="payment_term_days" name="payment_term_days" type="number" min="0" max="365" />
             </div>
+            {% if intercompany_choices %}
+              <div class="field">
+                <label for="intercompany_company_id">Verbundene Gesellschaft</label>
+                <select id="intercompany_company_id" name="intercompany_company_id">
+                  <option value="">keine</option>
+                  {% for choice in intercompany_choices %}
+                    <option value="{{ choice.id }}">{{ choice.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% endif %}
             <div class="field">
               <label for="iban">IBAN</label>
               <input id="iban" name="iban" />
