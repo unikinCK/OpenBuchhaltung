@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Kassenbuch prüfen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Prüfung {{ book.name }}</h1>
+      <p class="page-subtitle">Hashkette, lückenlose Nummern, Bestandsfortschreibung, Kassenstürze und Kontensaldo</p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary" href="{{ url_for('main.cash_book_page', company_id=book.company_id, cash_book_id=book.id) }}">Zurück zum Kassenbuch</a>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Ergebnis</div>
+      <div class="stat-value">{% if result.valid %}<span class="badge badge-success">Intakt</span>{% else %}<span class="badge badge-danger">Fehler gefunden</span>{% endif %}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Geprüft</div>
+      <div class="stat-value">{{ result.checked_entries }} Einträge, {{ result.checked_closings }} Kassenstürze</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Kassenbestand</div>
+      <div class="stat-value">{{ result.book_balance | betrag }} €</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Saldo Konto {{ book.account.code }}</div>
+      <div class="stat-value">{{ result.account_balance | betrag }} €
+        {% if result.account_matches %}<span class="badge badge-success">passt</span>{% else %}<span class="badge badge-warning">weicht ab</span>{% endif %}</div>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>Befunde</h2>
+    {% if result.issues %}
+      <ul>
+        {% for issue in result.issues %}
+          <li><span class="badge {{ 'badge-danger' if issue.severity == 'error' else 'badge-warning' }}">{{ "Fehler" if issue.severity == "error" else "Hinweis" }}</span> {{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Keine Befunde.</p>
+    {% endif %}
+    {% if result.head_hash %}
+      <p class="hint">Hash des letzten Eintrags: <code>{{ result.head_hash }}</code></p>
+    {% endif %}
+  </section>
+
+  {% if result.unlinked_postings %}
+    <section class="card">
+      <h2>Buchungen am Kassenbuch vorbei</h2>
+      <p class="hint" style="margin-top:0;">Diese Buchungen bewegen das Kassenkonto, haben aber keinen Eintrag im Kassenbuch. Das Kassenbuch bleibt benutzbar; die Buchungen sollten geklärt werden.</p>
+      <div class="table-scroll">
+        <table class="data">
+          <thead>
+            <tr><th>Datum</th><th>Buchung</th><th>Text</th></tr>
+          </thead>
+          <tbody>
+            {% for posting in result.unlinked_postings %}
+              <tr>
+                <td class="nowrap">{{ posting.entry_date | datum }}</td>
+                <td class="nowrap"><a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=posting.journal_entry_id) }}">{{ posting.posting_number }}</a></td>
+                <td>{{ posting.description }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+  <p class="hint">Die Prüfung belegt die innere Stimmigkeit der Daten. Sie ersetzt keine TSE, keinen DSFinV-K-Export und keine Zertifizierung.</p>
+{% endblock %}

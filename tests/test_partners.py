@@ -1133,11 +1133,16 @@ def test_partner_api_is_tenant_scoped_and_read_only_for_pruefer(tmp_path: Path) 
 
 
 def _trigger_names(engine) -> set[str]:
+    # Nur die Trigger, die es schon vor dem Nebenbuch gab: Spätere Migrationen wie das
+    # Kassenbuch bringen eigene Trigger samt Tabellen mit, die der Rücklauf mit abbaut.
     with engine.connect() as connection:
         return {
             row[0]
             for row in connection.execute(
-                text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='trigger' "
+                    "AND tbl_name NOT LIKE 'cash\\_%' ESCAPE '\\'"
+                )
             )
         }
 

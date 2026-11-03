@@ -31,6 +31,16 @@ Schlagworte: Bankumsätze, import_bank_transactions, CSV, MT940, camt, FinTS, Op
 - Falsches Konto: reassign_bank_transaction(transaction_id, bank_account_id) hängt einen Umsatz um und bucht standardmäßig eine Umgliederung; move_bank_transactions für mehrere. Saldenabgleich: get_bank_reconciliation(company_id) vergleicht Buchsaldo und Summe der Kontoauszugszeilen je Bankkonto; Abweichungen deuten auf fehlende Importe, Doppelbuchungen oder direkte Buchungen auf dem Bankkonto ohne Umsatz hin.
 - Dashboard (get_dashboard) zeigt unverbuchte Umsätze, unverknüpfte Belege, überfällige OPOS, offene Abgleich-Vorschläge und fällige Vorlagen – guter Einstieg für „Was ist zu tun?“.
 
+## Kassenbuch: Einträge, Storno, Kassensturz, Bericht
+Schlagworte: Kassenbuch, Kasse, Bareinnahme, Barausgabe, Kassensturz, Tagesabschluss, Kassendifferenz, Kassenbericht, list_cash_books, create_cash_book, create_cash_entry, reverse_cash_entry, create_cash_closing, get_cash_report, export_cash_report_csv, verify_cash_book, Kassenfehlbetrag, Anfangsbestand
+
+- Kasse anlegen: create_cash_book(company_id, account_id, name, opening_amount?, opening_date?, opening_contra_account_id?). Trägt das Kassenkonto den Bestand schon (Eröffnungsbilanz), ohne Gegenkonto anlegen; sonst Gegenkonto Saldenvorträge. Je Aktivkonto eine Kasse.
+- Erfassen: create_cash_entry(cash_book_id, entry_type receipt|payment, entry_date, amount brutto, description, contra_account_id, tax_code_id?, partner_id?, document_id?) bucht sofort, die Steuer aus dem Brutto wie bei book_bank_transaction. Bargeld auf die Bank: Ausgabe gegen Geldtransit. Nicht zusätzlich create_journal_entry auf das Kassenkonto: Das liefe am Kassenbuch vorbei.
+- Regeln: Datum nicht in der Zukunft, nicht vor dem letzten Eintrag, nicht in einem abgeschlossenen Tag; der Bestand darf nie negativ werden. Fehlt Geld, nicht das Datum verbiegen, sondern fehlende Einnahmen oder Einlagen klären (Kassenfehlbetrag ist ein Warnsignal der Betriebsprüfung).
+- Korrigieren: Einträge sind unveränderbar. reverse_cash_entry(cash_book_id, entry_id) spiegelt den Eintrag am aktuellen Datum samt Stornobuchung, danach neu erfassen. reverse_journal_entry lehnt Buchungen des Kassenbuchs ab; amend_journal_entry darf Kostenstelle, Partner und Leistungsdatum an der offenen Buchung ergänzen.
+- Tagesabschluss: create_cash_closing(cash_book_id, closing_date, counted_balance, difference_account_id?) sperrt alle Tage bis zum Datum und bucht eine Differenz als eigenen Eintrag.
+- Auswertung: get_cash_report und export_cash_report_csv (Zeitraum), verify_cash_book (Hashkette, Nummern, Bestand, Kontensaldo; Abweichung zum Konto ist nur eine Warnung). Das Kassenbuch ersetzt keine TSE und keinen DSFinV-K-Export und ist nicht zertifiziert.
+
 ## Belege, OCR, Belegabgleich, E-Rechnung
 Schlagworte: Beleg hochladen, upload_document, list_documents, Belegkategorie, document_category, Beleg verknüpfen, link_document, Beleg-OCR, create_receipt_ocr_suggestion, book_receipt_ocr_suggestion, Buchungsvorschlag, Belegabgleich, create_receipt_match_suggestion, start_receipt_match_job, approve_receipt_match_suggestion, reject_receipt_match_suggestion, E-Rechnung importieren, import_einvoice, export_einvoice, XRechnung, ZUGFeRD, download_document, Belegpflicht
 

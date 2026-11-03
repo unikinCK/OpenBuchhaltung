@@ -8,6 +8,23 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Kassenbuch
+- Neues Kassenbuch unter **Bank & OPOS → Kassenbuch**, per REST (`/api/v1/cash-books…`) und MCP
+  (`list_cash_books`, `create_cash_book`, `update_cash_book`, `list_cash_entries`,
+  `create_cash_entry`, `reverse_cash_entry`, `list_cash_closings`, `create_cash_closing`,
+  `get_cash_report`, `export_cash_report_csv`, `verify_cash_book`). Neue Tabellen `cash_book`,
+  `cash_entry` und `cash_closing` (Migration `20261103_0059`, ADR-007), auch im Prüferexport.
+- Einträge sind fortlaufend nummeriert, je Kasse per SHA-256 verkettet und per DB-Trigger
+  unveränderbar; jeder Eintrag erzeugt in derselben Transaktion genau eine Buchung, die Steuer
+  entsteht wie bei der Bankbuchung aus dem Bruttobetrag. Der Bestand darf nie negativ werden,
+  Korrekturen laufen nur über Storno-Einträge. Die Buchung eines Eintrags lässt sich nicht mehr
+  über das Journal stornieren.
+- Tagesabschluss (Kassensturz) mit Soll-Bestand, gezähltem Bestand und gebuchter Differenz, der die
+  Tage bis zum Datum sperrt; Kassenbericht als druckbare Seite und CSV; Prüfung von Hashkette,
+  Nummern, Bestand und Kontensaldo.
+- Manuell geführt: ersetzt keine TSE und keinen DSFinV-K-Export für elektronische Kassensysteme
+  und ist nicht zertifiziert.
+
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf

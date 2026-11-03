@@ -654,8 +654,13 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
         und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
         Listen-Endpunkte in REST/MCP.
+- [x] **Kassenbuch (#9)** *(2026-11-03, ADR-007)*: Kassen je Aktivkonto, fortlaufende und
+      verkettete Einträge mit DB-Triggern gegen Ändern und Löschen, Buchung in derselben
+      Transaktion, Storno-Einträge, Kassensturz mit Tagessperre, Kassenbericht (druckbar, CSV),
+      Prüfung inklusive Kontensaldo; UI `/kassenbuch`, REST `/api/v1/cash-books…`, MCP und
+      Prüferexport. Manuell geführt, ersetzt keine TSE und keinen DSFinV-K-Export.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
-      Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+      2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 

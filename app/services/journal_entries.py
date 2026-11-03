@@ -25,6 +25,7 @@ from domain.models import (
     Account,
     BankTransaction,
     BusinessPartner,
+    CashEntry,
     Company,
     ControllingUnit,
     DepreciationEntry,
@@ -108,6 +109,8 @@ SOURCE_STORNO = "storno"
 SOURCE_YEAR_END_CLOSE = "year_end_close"
 # Saldovortrag der Bestandskonten ins Folgejahr (EB-Werte, Periode 1).
 SOURCE_CARRYFORWARD = "carryforward"
+# Buchung aus einem Kassenbuch-Eintrag (``app.services.cash_book``).
+SOURCE_CASH_BOOK = "cash_book"
 # Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
@@ -1291,6 +1294,8 @@ def reverse_journal_entry(
     journal_entry_id: int,
     reversal_date: date,
     changed_by: str,
+    commit: bool = True,
+    from_cash_book: bool = False,
 ) -> JournalEntry:
     """Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip).
 
@@ -1303,10 +1308,23 @@ def reverse_journal_entry(
     zurückgenommen (Buchwert und Anlagenstatus folgen dem Hauptbuch), ein
     gebuchter Lohnlauf wird wieder zum Entwurf und ein mit dieser Buchung
     ausgeglichener offener Posten lebt wieder auf. Alles in einer Transaktion.
+
+    Mit ``commit=False`` wird nur geflusht, der Aufrufer committet selbst. Die Buchung
+    eines Kassenbuch-Eintrags storniert nur das Kassenbuch (``from_cash_book=True``),
+    sonst liefen Kassenbestand und Konto auseinander.
     """
     original = session.get(JournalEntry, journal_entry_id)
     if original is None:
         raise JournalEntryCreationError("Buchung nicht gefunden.")
+    if not from_cash_book:
+        cash_entry_number = session.execute(
+            select(CashEntry.entry_number).where(CashEntry.journal_entry_id == original.id)
+        ).scalar()
+        if cash_entry_number is not None:
+            raise JournalEntryCreationError(
+                f"Buchung {original.posting_number} gehört zu Eintrag Nr. {cash_entry_number} "
+                "im Kassenbuch und kann nur dort storniert werden."
+            )
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1401,8 +1419,11 @@ def reverse_journal_entry(
             "subledgers": released,
         },
     )
-    session.commit()
-    session.refresh(reversal)
+    if commit:
+        session.commit()
+        session.refresh(reversal)
+    else:
+        session.flush()
     return reversal
 
 
