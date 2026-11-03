@@ -8,6 +8,22 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Konsolidierte Auswertung mehrerer Gesellschaften
+- Unter **Steuern & Berichte → Konsolidierung** fasst eine Gruppe Gesellschaften desselben Mandanten
+  und derselben Währung zusammen: SuSa, GuV und Bilanz mit Spalten je Gesellschaft, Summe, Eliminierung,
+  manueller Buchung und konsolidiertem Wert, dazu Eliminierungsliste und CSV. Kein Konzernabschluss nach
+  §§ 290 ff. HGB; die Grenzen stehen im Bericht, in der README und in ADR-008.
+- Am Geschäftspartner lässt sich eine verbundene Gesellschaft hinterlegen
+  (`intercompany_company_id`, UI/REST/MCP, mit Historie). Salden auf Sammelkonten und Erfolgszeilen
+  solcher Buchungen werden berechnet eliminiert; Differenzen zwischen den Gesellschaften stehen je Paar und
+  auf einer eigenen Zeile „Aufrechnungsdifferenz“.
+- Manuelle Konsolidierungsbuchungen (Kapitalkonsolidierung, Sonstige) gehören der Gruppe und stehen nie in den
+  Büchern einer Gesellschaft; Korrektur durch Löschen und neu Erfassen mit Audit-Eintrag.
+- Neue Tabellen `consolidation_group`, `consolidation_member`, `consolidation_adjustment`,
+  `consolidation_adjustment_line` (Migration `20261103_0061`), im Prüferexport bei der Muttergesellschaft.
+  Neue Endpunkte unter `/api/v1/consolidation-groups` und `/api/v1/exports/consolidation-report.csv`, neue
+  MCP-Tools `*_consolidation_*`.
+
 ### KI-Chat: Werkzeuge seltener Fachgebiete auf Anforderung
 - Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss und Einrichtung sind im Chat nicht mehr von Anfang an
   sichtbar. Obi lädt sie bei Bedarf mit dem Chat-Werkzeug `load_tools`; das spart rund ein Viertel der

@@ -21,6 +21,13 @@ from app.services.mcp_server import (
 
 EXPECTED_TOOL_NAMES = {
     "health",
+    "list_consolidation_groups",
+    "create_consolidation_group",
+    "update_consolidation_group",
+    "get_consolidation_report",
+    "create_consolidation_adjustment",
+    "delete_consolidation_adjustment",
+    "export_consolidation_report_csv",
     "search_knowledge",
     "list_company_knowledge_entries",
     "get_company_knowledge_entry",

@@ -64,6 +64,7 @@ UPDATABLE_FIELDS = (
     "is_supplier",
     "debtor_number",
     "creditor_number",
+    "intercompany_company_id",
 )
 
 NUMBER_ATTEMPTS = 5
@@ -103,6 +104,7 @@ def serialize_partner(partner: BusinessPartner) -> dict[str, Any]:
         "payment_term_days": partner.payment_term_days,
         "notes": partner.notes,
         "is_active": partner.is_active,
+        "intercompany_company_id": partner.intercompany_company_id,
         "created_at": partner.created_at.isoformat() if partner.created_at else None,
     }
 
@@ -213,6 +215,27 @@ def _bool(value: Any, field: str) -> bool:
     if not isinstance(value, bool):
         raise PartnerError(f"{field} muss true oder false sein.")
     return value
+
+
+def _intercompany_company_id(
+    session: Session, value: Any, *, tenant_id: int, company_id: int
+) -> int | None:
+    """Verbundene Gesellschaft (ADR-008): gleicher Mandant, nicht die eigene Gesellschaft."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise PartnerError("intercompany_company_id muss eine Gesellschafts-ID sein.")
+    try:
+        target_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise PartnerError("intercompany_company_id muss eine Gesellschafts-ID sein.") from exc
+    target = session.get(Company, target_id)
+    # Gleiche Meldung für fremd und unbekannt: Fremde Gesellschaften bleiben verborgen.
+    if target is None or target.tenant_id != tenant_id:
+        raise PartnerError("Die verbundene Gesellschaft gehört nicht zu diesem Mandanten.")
+    if target.id == company_id:
+        raise PartnerError("Ein Partner kann nicht auf die eigene Gesellschaft zeigen.")
+    return target.id
 
 
 def _partner_number(value: Any, role: str) -> str | None:
@@ -416,6 +439,7 @@ def create_partner(
     payment_term_days: Any = None,
     notes: Any = None,
     is_active: Any = True,
+    intercompany_company_id: Any = None,
 ) -> BusinessPartner:
     partner = BusinessPartner(
         tenant_id=company.tenant_id,
@@ -434,6 +458,9 @@ def create_partner(
         payment_term_days=_payment_term_days(payment_term_days),
         notes=_notes(notes),
         is_active=_bool(is_active, "is_active"),
+        intercompany_company_id=_intercompany_company_id(
+            session, intercompany_company_id, tenant_id=company.tenant_id, company_id=company.id
+        ),
     )
     pending = _apply_roles(
         session=session,
@@ -496,6 +523,13 @@ def update_partner(
         partner.notes = _notes(changes["notes"])
     if "is_active" in changes:
         partner.is_active = _bool(changes["is_active"], "is_active")
+    if "intercompany_company_id" in changes:
+        partner.intercompany_company_id = _intercompany_company_id(
+            session,
+            changes["intercompany_company_id"],
+            tenant_id=partner.tenant_id,
+            company_id=partner.company_id,
+        )
 
     pending: list[str] = []
     if {"is_customer", "is_supplier", "debtor_number", "creditor_number"} & set(changes):

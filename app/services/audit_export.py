@@ -24,6 +24,10 @@ from domain.models import (
     BankTransaction,
     BusinessPartner,
     Company,
+    ConsolidationAdjustment,
+    ConsolidationAdjustmentLine,
+    ConsolidationGroup,
+    ConsolidationMember,
     ControllingUnit,
     DepreciationEntry,
     Document,
@@ -111,6 +115,11 @@ EXPORT_TABLE_MODELS = {
     "account_history": AuditLog,
     "controlling_unit_history": AuditLog,
     "business_partner_history": AuditLog,
+    "consolidation_groups": ConsolidationGroup,
+    "consolidation_members": ConsolidationMember,
+    "consolidation_adjustments": ConsolidationAdjustment,
+    "consolidation_adjustment_lines": ConsolidationAdjustmentLine,
+    "consolidation_history": AuditLog,
     "document_categories": DocumentCategory,
     "documents": Document,
     "users": User,
@@ -153,6 +162,21 @@ TABLE_DESCRIPTIONS = {
         "Änderungshistorie der Geschäftspartner einschließlich Bankdatenänderungen "
         "mit Vorher-/Nachher-Werten."
     ),
+    "consolidation_groups": (
+        "Konsolidierungsgruppen, deren Muttergesellschaft diese Gesellschaft ist."
+    ),
+    "consolidation_members": (
+        "Mitglieder dieser Gruppen mit Beteiligungsquote und Einbeziehungszeitraum."
+    ),
+    "consolidation_adjustments": (
+        "Manuelle Konsolidierungsbuchungen dieser Gruppen; sie stehen nie in den Büchern "
+        "einer Gesellschaft."
+    ),
+    "consolidation_adjustment_lines": "Zeilen der manuellen Konsolidierungsbuchungen.",
+    "consolidation_history": (
+        "Änderungshistorie der Gruppen und manuellen Buchungen einschließlich gelöschter "
+        "Buchungen mit Vorher-/Nachher-Werten."
+    ),
     "document_categories": "Belegkategorien der Gesellschaft (Standard und eigene).",
     "documents": "Belegindex, Versionen und Prüfsummen der Originaldateien.",
     "users": "Mandantenbezogene Benutzer und Rollen ohne Authentisierungsgeheimnisse.",
@@ -181,6 +205,13 @@ FIELD_DESCRIPTIONS = {
         "Sammelkonto-Kennzeichen: debtor (Debitoren) bzw. creditor (Kreditoren); nur dort "
         "sind Geschäftspartner an Buchungszeilen zulässig."
     ),
+    "intercompany_company_id": (
+        "Verbundene Gesellschaft desselben Mandanten, für die dieser Partner steht "
+        "(Eliminierung in der konsolidierten Auswertung)."
+    ),
+    "ownership_percent": "Beteiligungsquote in Prozent; nur Information, keine Berechnung.",
+    "included_from": "Einbezogen in die konsolidierte Auswertung ab diesem Tag; leer = offen.",
+    "included_to": "Einbezogen in die konsolidierte Auswertung bis zu diesem Tag; leer = offen.",
     "debtor_number": "Debitorennummer (Personenkonto des Kunden, 10000–69999).",
     "creditor_number": "Kreditorennummer (Personenkonto des Lieferanten, 70000–99999).",
     "file_sha256": "Beim Eingang gespeicherter SHA-256-Hash der Originaldatei.",
@@ -296,6 +327,21 @@ def build_audit_export_package(
         order_by=(PayrollRun.payment_date, PayrollRun.id),
     )
     payroll_run_ids = [run.id for run in payroll_runs]
+    # Eine Gruppe gehört zum Export ihrer Muttergesellschaft (ADR-008).
+    consolidation_groups = _rows(
+        session,
+        ConsolidationGroup,
+        ConsolidationGroup.parent_company_id == company.id,
+        order_by=(ConsolidationGroup.name, ConsolidationGroup.id),
+    )
+    consolidation_group_ids = [group.id for group in consolidation_groups]
+    consolidation_adjustments = _rows(
+        session,
+        ConsolidationAdjustment,
+        ConsolidationAdjustment.group_id.in_(consolidation_group_ids or [-1]),
+        _date_range(ConsolidationAdjustment.adjustment_date, date_from, date_to),
+        order_by=(ConsolidationAdjustment.adjustment_date, ConsolidationAdjustment.id),
+    )
 
     tables: dict[str, list[dict[str, Any]] | dict[str, Any]] = {
         "tenant": _model_dict(tenant) if tenant is not None else {},
@@ -483,6 +529,41 @@ def build_audit_export_package(
                 order_by=(AuditLog.changed_at, AuditLog.id),
             )
         ],
+        "consolidation_groups": [_model_dict(row) for row in consolidation_groups],
+        "consolidation_members": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                ConsolidationMember,
+                ConsolidationMember.group_id.in_(consolidation_group_ids or [-1]),
+                order_by=(ConsolidationMember.group_id, ConsolidationMember.company_id),
+            )
+        ],
+        "consolidation_adjustments": [_model_dict(row) for row in consolidation_adjustments],
+        "consolidation_adjustment_lines": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                ConsolidationAdjustmentLine,
+                ConsolidationAdjustmentLine.adjustment_id.in_(
+                    [adjustment.id for adjustment in consolidation_adjustments] or [-1]
+                ),
+                order_by=(
+                    ConsolidationAdjustmentLine.adjustment_id,
+                    ConsolidationAdjustmentLine.line_number,
+                ),
+            )
+        ],
+        "consolidation_history": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                AuditLog,
+                AuditLog.company_id == company.id,
+                AuditLog.entity_type.in_(("consolidation_group", "consolidation_adjustment")),
+                order_by=(AuditLog.changed_at, AuditLog.id),
+            )
+        ],
         "document_categories": [
             _model_dict(row)
             for row in _rows(
@@ -607,6 +688,7 @@ def build_audit_export_package(
                 "dated_transaction_tables": "date_from/date_to",
                 "master_and_support_tables": "company-wide",
                 "audit_log": "company-filtered; integrity snapshot is tenant-wide",
+                "consolidation": "groups whose parent company is this company",
             },
             "integrity": integrity_result.as_dict(),
             "field_catalog_path": "schema/field_catalog.json",

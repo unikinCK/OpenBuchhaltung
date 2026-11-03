@@ -196,6 +196,18 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "export_audit_package",
         ),
     ),
+    "konsolidierung": (
+        "Konsolidierte Auswertung mehrerer Gesellschaften",
+        (
+            "list_consolidation_groups",
+            "create_consolidation_group",
+            "update_consolidation_group",
+            "get_consolidation_report",
+            "create_consolidation_adjustment",
+            "delete_consolidation_adjustment",
+            "export_consolidation_report_csv",
+        ),
+    ),
     "einrichtung": (
         "Mandanten, Kontenrahmen, Steuercodes, Bankkonten und Belegkategorien einrichten",
         (

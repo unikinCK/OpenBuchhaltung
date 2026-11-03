@@ -12,6 +12,7 @@ from app.web import (  # noqa: F401
     bank,
     chat,
     company_knowledge,
+    consolidation,
     controlling,
     dashboard,
     documents,
