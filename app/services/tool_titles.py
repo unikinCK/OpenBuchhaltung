@@ -8,6 +8,8 @@ Eintrag (``tests/test_tool_titles.py``).
 from __future__ import annotations
 
 TOOL_TITLES: dict[str, str] = {
+    "get_company_vat_method": "Versteuerungsart abrufen",
+    "set_company_vat_method": "Versteuerungsart wechseln",
     # System, Mandanten, Benutzer
     "health": "Erreichbarkeit prüfen",
     "list_companies": "Gesellschaften auflisten",
@@ -35,6 +37,8 @@ TOOL_TITLES: dict[str, str] = {
     "clear_mcp_server_credential": "MCP-Zugang entfernen",
     "start_mcp_server_oauth": "MCP-Anmeldung (OAuth) starten",
     "unlock_user_login": "Anmeldesperre aufheben",
+    "get_user_two_factor_status": "Zwei-Faktor-Status abrufen",
+    "reset_user_two_factor": "Zwei-Faktor-Anmeldung zurücksetzen",
     "set_user_password": "Passwort setzen",
     "change_own_password": "Eigenes Passwort ändern",
     # Kontenplan, Controlling

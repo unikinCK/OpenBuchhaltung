@@ -14,6 +14,33 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   Tool-Definitionen je Anfrage und schafft Platz für neue Fachfunktionen. Sperren und Bestätigungspflicht
   gelten unverändert, MCP-Clients sehen weiter alle Tools.
 
+### Istversteuerung (§ 20 UStG)
+- Versteuerungsart je Gesellschaft mit Wechsel zum Monatsersten (`company.vat_cash_basis_from`/`_until`,
+  Migration `20261103_0062`, UI auf der Seite Umsatzsteuer, `GET`/`POST /api/v1/companies/<id>/vat-method`,
+  MCP `get_company_vat_method`, `set_company_vat_method`; im KI-Chat gesperrt).
+- UStVA und Jahreserklärung: Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten zählen im
+  Ist-Zeitraum anteilig mit der Zahlung. Warnungen nennen noch nicht fällige Umsatzsteuer und Rechnungen ohne
+  verknüpften Posten.
+- Neue Tabelle `open_item_settlement`: jeder Ausgleich mit Datum und Betrag, auch im Prüferexport.
+  Bestehende Ausgleiche werden übernommen. `settle_open_item` nimmt das Zahlungsdatum aus Buchung
+  oder Bankumsatz.
+- Behoben: Der Storno einer Ausgleichsbuchung stellte nur den zuletzt verbuchten Ausgleich wieder her. Jetzt
+  leben alle Ausgleiche dieser Buchung wieder auf, auch wenn dieselbe Buchung mehrere Posten ausgleicht.
+
+### Zwei-Faktor-Anmeldung (TOTP)
+- Der Browser-Login lässt sich mit einer Authenticator-App absichern (RFC 6238): Einrichtung im
+  Benutzermenü mit QR-Code, zehn einmal verwendbare Wiederherstellungscodes, Abschalten und neue
+  Codes nur mit Passwort plus Code. Neue Felder am Benutzer und Tabelle
+  `two_factor_recovery_code` (Migration `20261103_0060`), neue Abhängigkeit `segno`.
+- Nach dem richtigen Passwort gibt es nur einen 5 Minuten gültigen Zwischenstand; angemeldet ist
+  erst, wer den zweiten Schritt besteht. Das gilt auch für OAuth-Zugriffe und die iOS-App.
+  Fehlversuche zählen im Login-Rate-Limit, zusätzlich je Benutzername über alle Adressen.
+- `TWO_FACTOR_REQUIRED_ROLES` schreibt die Einrichtung je Rolle vor. Administratoren setzen zurück
+  über Verwaltung, `POST /api/v1/users/<id>/two-factor/reset`, MCP `reset_user_two_factor` und
+  `flask reset-2fa`. REST: `/api/v1/users/me/two-factor` mit `setup`, `confirm`, `disable` und
+  `recovery-codes`; MCP zusätzlich `get_user_two_factor_status`.
+- API-Tokens bleiben ein eigener Zugang ohne zweiten Faktor. Einrichten und Abschalten gibt es
+  bewusst nicht per MCP, damit das Secret durch keinen KI-Kontext läuft.
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf

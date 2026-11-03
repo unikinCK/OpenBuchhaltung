@@ -70,6 +70,8 @@
           'main.company_knowledge_source_page': 'main.company_knowledge_page',
         } %}
         {% set current_endpoint = detail_pages.get(request.endpoint, request.endpoint) %}
+        {% set setup_forced = two_factor_setup_forced() %}
+        {% if not setup_forced %}
         <nav class="mainnav" aria-label="Hauptnavigation">
           <a href="{{ url_for('main.index', company_id=selected_company_id) }}"
              {% if current_endpoint == 'main.index' %}class="active"{% endif %}>Dashboard</a>
@@ -88,6 +90,7 @@
             </div>
           {% endfor %}
         </nav>
+        {% endif %}
         <div class="nav-group user-menu">
           <button type="button" class="nav-group-label" aria-haspopup="true" title="Benutzer {{ session['user']['username'] }} ({{ session['user']['role'] }})">
             <span class="user-avatar" aria-hidden="true">{{ session['user']['username'][:1] | upper }}</span>
@@ -95,9 +98,12 @@
           </button>
           <div class="nav-group-menu">
             <span class="menu-info">Angemeldet als <strong>{{ session['user']['username'] }}</strong> <span class="badge">{{ session['user']['role'] }}</span></span>
+            <a href="{{ url_for('auth.two_factor_page') }}" title="Anmeldung mit Authenticator-App absichern">Zwei-Faktor-Anmeldung</a>
+            {% if not setup_forced %}
             <a href="{{ url_for('auth.password_form') }}" title="Eigenes Passwort ändern">Passwort ändern</a>
             <a href="{{ url_for('auth.oauth_grants_page') }}" title="Per OAuth verbundene Apps (z. B. ChatGPT)">Verbundene Apps</a>
             <a href="{{ url_for('main.obi_connections_page') }}" title="Externe Systeme, auf die Obi zugreift (MCP-Server)">Obi-Verbindungen</a>
+            {% endif %}
             <form method="post" action="{{ url_for('auth.logout') }}">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="menu-button">Logout</button>

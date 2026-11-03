@@ -35,6 +35,7 @@ from domain.models import (
     JournalEntry,
     JournalEntryLine,
     OpenItem,
+    OpenItemSettlement,
     PayrollEmployee,
     PayrollRun,
     PayrollRunLine,
@@ -97,6 +98,7 @@ EXPORT_TABLE_MODELS = {
     "journal_entry_lines": JournalEntryLine,
     "bank_transactions": BankTransaction,
     "open_items": OpenItem,
+    "open_item_settlements": OpenItemSettlement,
     "fixed_assets": FixedAsset,
     "depreciation_entries": DepreciationEntry,
     "payroll_employees": PayrollEmployee,
@@ -131,6 +133,7 @@ TABLE_DESCRIPTIONS = {
     "journal_entry_lines": "Soll- und Haben-Zeilen der exportierten Buchungen.",
     "bank_transactions": "Importierte Bankumsätze und Buchungszuordnungen.",
     "open_items": "Offene und ausgeglichene Forderungen und Verbindlichkeiten.",
+    "open_item_settlements": "Ausgleiche offener Posten mit Zahlungsdatum und Storno.",
     "fixed_assets": "Anlagenstamm und Bewertungsparameter.",
     "depreciation_entries": "Gebuchte planmäßige und außerplanmäßige Abschreibungen.",
     "payroll_employees": "Prüfungsrelevante Beschäftigten- und Abrechnungsstammdaten.",
@@ -217,7 +220,14 @@ USER_DERIVED_FIELDS = {
 
 EXCLUDED_EXPORT_FIELDS = {
     "documents": {"storage_key"},
-    "users": {"password_hash", "api_token_hash", "api_token_last4"},
+    "users": {
+        "password_hash",
+        "api_token_hash",
+        "api_token_last4",
+        "totp_secret_encrypted",
+        "totp_enabled_at",
+        "totp_last_step",
+    },
 }
 
 EXPORT_README = (
@@ -351,6 +361,16 @@ def build_audit_export_package(
                 OpenItem.company_id == company.id,
                 _date_range(OpenItem.entry_date, date_from, date_to),
                 order_by=(OpenItem.entry_date, OpenItem.id),
+            )
+        ],
+        "open_item_settlements": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                OpenItemSettlement,
+                OpenItemSettlement.company_id == company.id,
+                _date_range(OpenItemSettlement.settlement_date, date_from, date_to),
+                order_by=(OpenItemSettlement.settlement_date, OpenItemSettlement.id),
             )
         ],
         "fixed_assets": [

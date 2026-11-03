@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from urllib.parse import urlsplit
@@ -24,6 +25,24 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.services.mcp_server import MCP_CHANNEL, MCP_CHANNEL_HEADER
 from app.services.security_events import record_security_event
+from app.services.two_factor import (
+    TwoFactorBlockedError,
+    TwoFactorCredentialsError,
+    TwoFactorError,
+    confirm_setup,
+    disable_two_factor,
+    group_secret,
+    pending_setup_secret,
+    provisioning_uri_for,
+    qr_code_svg,
+    record_verified_login,
+    regenerate_recovery_codes,
+    start_setup,
+    two_factor_enabled,
+    two_factor_required_for,
+    two_factor_status,
+    verify_code,
+)
 from domain.models import LoginAttempt, User
 
 logger = logging.getLogger(__name__)
@@ -34,6 +53,9 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 @auth_bp.before_request
 def _protect_auth_posts():
     validate_csrf()
+    if request.endpoint not in _OPEN_DURING_TWO_FACTOR_SETUP and two_factor_setup_required():
+        return redirect_to_two_factor_setup()
+    return None
 
 
 ROLE_ADMIN = "Admin"
@@ -43,6 +65,27 @@ ROLE_SUPPORT = "Support"
 WRITE_ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER}
 
 MIN_PASSWORD_LENGTH = 8
+
+# Zwischenstand zwischen Passwort und zweitem Faktor: nur diese Daten, kein ``session["user"]``.
+TWO_FACTOR_PENDING_KEY = "two_factor_pending"
+TWO_FACTOR_PENDING_SECONDS = 300
+TWO_FACTOR_SETUP_NEXT_KEY = "two_factor_setup_next"
+# Das Sprungziel liegt im Session-Cookie, das Browser nur bis rund 4 KB annehmen.
+MAX_STORED_NEXT_LENGTH = 2000
+# Fehlversuche beim zweiten Faktor zählen zusätzlich je Benutzername über alle Adressen:
+# Wer das Passwort kennt, soll Codes nicht von vielen Adressen aus durchprobieren können.
+TWO_FACTOR_ATTEMPT_ADDR = "two-factor"
+# Bleiben erreichbar, solange die Einrichtung für die Rolle vorgeschrieben, aber offen ist.
+_OPEN_DURING_TWO_FACTOR_SETUP = {
+    "auth.login_form",
+    "auth.login",
+    "auth.second_factor_form",
+    "auth.second_factor",
+    "auth.logout",
+    "auth.two_factor_page",
+    "auth.two_factor_setup",
+    "auth.two_factor_confirm",
+}
 
 # Bei unbekanntem Benutzernamen wird gegen diesen Hash geprüft, damit die
 # Antwortzeit keinen Rückschluss auf die Existenz des Kontos erlaubt.
@@ -106,11 +149,28 @@ def current_user() -> dict | None:
             g._current_user = None
             return None
         refreshed_user = _api_user_dict(user)
+        g._two_factor_setup_required = (
+            not two_factor_enabled(user) and two_factor_required_for(user.role)
+        )
 
     if session_user != refreshed_user:
         session["user"] = refreshed_user
     g._current_user = refreshed_user
     return refreshed_user
+
+
+def two_factor_setup_required() -> bool:
+    """Ob die Rolle des angemeldeten Benutzers 2FA verlangt, die noch nicht eingerichtet ist."""
+    return current_user() is not None and getattr(g, "_two_factor_setup_required", False)
+
+
+def redirect_to_two_factor_setup():
+    """Leitet zur Einrichtung um und merkt sich das ursprüngliche Ziel eines Seitenaufrufs."""
+    if request.method == "GET":
+        target = _storable_next_path(request.full_path.rstrip("?"))
+        if target:
+            session[TWO_FACTOR_SETUP_NEXT_KEY] = target
+    return redirect(url_for("auth.two_factor_page"))
 
 
 def current_api_user() -> dict | None:
@@ -174,6 +234,9 @@ def require_ui_login():
         flash("Bitte zuerst anmelden.", "error")
         return redirect(url_for("auth.login_form", next=request.path))
 
+    if two_factor_setup_required():
+        return redirect_to_two_factor_setup()
+
     if request.method not in {"GET", "HEAD", "OPTIONS"} and user["role"] not in WRITE_ROLES:
         flash("Ihre Rolle erlaubt nur Lesezugriff.", "error")
         return redirect(url_for("main.index"))
@@ -219,6 +282,8 @@ def require_api_token():
     if not auth_header.startswith("Bearer "):
         session_user = current_user()
         if session_user is not None and request.method in {"GET", "HEAD", "OPTIONS"}:
+            if two_factor_setup_required():
+                return {"error": "Zwei-Faktor-Anmeldung muss zuerst eingerichtet werden."}, 403
             g.api_user = dict(session_user)
             g.api_global_access = session_user.get("tenant_id") is None
             return None
@@ -367,6 +432,46 @@ def unlock_user_login(db_session, *, username: str) -> int:
     return int(result.rowcount or 0)
 
 
+def second_factor_blocked(db_session, *, username: str, remote_addr: str) -> bool:
+    return any(
+        login_blocked(db_session, username=username, remote_addr=addr)
+        for addr in (remote_addr, TWO_FACTOR_ATTEMPT_ADDR)
+    )
+
+
+def register_failed_second_factor(db_session, *, username: str, remote_addr: str) -> None:
+    for addr in (remote_addr, TWO_FACTOR_ATTEMPT_ADDR):
+        register_failed_login(db_session, username=username, remote_addr=addr)
+
+
+def reset_failed_second_factor(db_session, *, username: str, remote_addr: str) -> None:
+    for addr in (remote_addr, TWO_FACTOR_ATTEMPT_ADDR):
+        reset_failed_logins(db_session, username=username, remote_addr=addr)
+
+
+def run_guarded_two_factor_action(db_session, user: User, action):
+    """Führt eine Aktion mit Passwort und Code aus; Fehlversuche zählen im Rate-Limit.
+
+    Ohne Grenze ließen sich Passwort oder Code mit einer fremden Session oder einem
+    abgeflossenen API-Token durchprobieren.
+    """
+    limit_active = current_app.config.get("LOGIN_RATE_LIMIT", True)
+    remote_addr = request.remote_addr or "unknown"
+    if limit_active and second_factor_blocked(
+        db_session, username=user.username, remote_addr=remote_addr
+    ):
+        raise TwoFactorBlockedError("Zu viele Fehlversuche. Bitte später erneut versuchen.")
+    try:
+        return action()
+    except TwoFactorCredentialsError:
+        if limit_active:
+            register_failed_second_factor(
+                db_session, username=user.username, remote_addr=remote_addr
+            )
+            db_session.commit()
+        raise
+
+
 def safe_next_path(candidate: str | None) -> str | None:
     """Erlaubt als ``next``-Ziel nur relative Pfade dieser Anwendung.
 
@@ -384,6 +489,14 @@ def safe_next_path(candidate: str | None) -> str | None:
     if not parts.path.startswith("/") or parts.path.startswith("//"):
         return None
     return candidate
+
+
+def _storable_next_path(candidate: str | None) -> str | None:
+    """Geprüftes Sprungziel, das in die Session passt (zu lange Ziele entfallen)."""
+    next_path = safe_next_path(candidate)
+    if next_path and len(next_path) <= MAX_STORED_NEXT_LENGTH:
+        return next_path
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +557,27 @@ def login():
             flash("Ungültige Zugangsdaten", "error")
             return redirect(url_for("auth.login_form"))
 
+        if two_factor_enabled(user):
+            # Die Fehlversuche bleiben stehen: Würde das richtige Passwort sie löschen,
+            # ließen sich Codes durch erneutes Anmelden beliebig oft durchprobieren.
+            record_security_event(
+                db_session,
+                user=user,
+                action="two_factor_challenge",
+                actor=user.username,
+                payload=event_payload,
+                audit=False,
+            )
+            db_session.commit()
+            pending = {
+                "user_id": user.id,
+                "next": _storable_next_path(request.args.get("next", "")),
+                "expires_at": int(time.time()) + TWO_FACTOR_PENDING_SECONDS,
+            }
+            session.clear()
+            session[TWO_FACTOR_PENDING_KEY] = pending
+            return redirect(url_for("auth.second_factor_form"))
+
         if rate_limit_active:
             reset_failed_logins(db_session, username=username, remote_addr=remote_addr)
         record_security_event(
@@ -452,6 +586,10 @@ def login():
         db_session.commit()
         session_user = _api_user_dict(user)
 
+    return _complete_login(session_user, request.args.get("next", ""))
+
+
+def _complete_login(session_user: dict, next_path: str | None):
     # Neue Session je Login: verhindert Session-Fixation und rotiert den
     # CSRF-Token; ``permanent`` aktiviert die konfigurierte Session-Laufzeit
     # (PERMANENT_SESSION_LIFETIME wirkt als Idle-Timeout).
@@ -460,8 +598,104 @@ def login():
     session.permanent = True
 
     flash("Login erfolgreich", "success")
-    next_path = safe_next_path(request.args.get("next", ""))
-    return redirect(next_path or url_for("main.index"))
+    return redirect(safe_next_path(next_path) or url_for("main.index"))
+
+
+def _pending_second_factor() -> dict | None:
+    """Gültiger Zwischenstand der Anmeldung; ein abgelaufener zählt nicht."""
+    pending = session.get(TWO_FACTOR_PENDING_KEY)
+    if not isinstance(pending, dict):
+        return None
+    if int(pending.get("expires_at") or 0) <= time.time():
+        return None
+    return pending
+
+
+def _restart_login():
+    """Zurück zum Passwort, das ursprüngliche Ziel (z. B. OAuth-Zustimmung) bleibt erhalten."""
+    stale = session.pop(TWO_FACTOR_PENDING_KEY, None)
+    next_path = stale.get("next") if isinstance(stale, dict) else None
+    flash("Die Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.", "error")
+    return redirect(url_for("auth.login_form", next=safe_next_path(next_path)))
+
+
+@auth_bp.get("/login/zweiter-faktor")
+def second_factor_form():
+    if _pending_second_factor() is None:
+        return _restart_login()
+    return render_template("login_two_factor.html")
+
+
+@auth_bp.post("/login/zweiter-faktor")
+def second_factor():
+    pending = _pending_second_factor()
+    if pending is None:
+        return _restart_login()
+
+    remote_addr = request.remote_addr or "unknown"
+    rate_limit_active = current_app.config.get("LOGIN_RATE_LIMIT", True)
+    event_payload = {"remote_addr": remote_addr}
+    remaining_codes = None
+
+    with _get_session_factory()() as db_session:
+        user = db_session.get(User, pending.get("user_id"))
+        if user is None or not user.is_active or not two_factor_enabled(user):
+            return _restart_login()
+        username = user.username
+
+        if rate_limit_active and second_factor_blocked(
+            db_session, username=username, remote_addr=remote_addr
+        ):
+            record_security_event(
+                db_session,
+                user=user,
+                action="two_factor_blocked",
+                actor=username,
+                payload=event_payload,
+                audit=False,
+            )
+            flash(
+                "Zu viele fehlgeschlagene Anmeldeversuche. Bitte später erneut versuchen.",
+                "error",
+            )
+            return render_template("login_two_factor.html"), 429
+
+        method = verify_code(db_session, user, request.form.get("code", ""))
+        if method is None:
+            if rate_limit_active:
+                register_failed_second_factor(
+                    db_session, username=username, remote_addr=remote_addr
+                )
+            record_security_event(
+                db_session,
+                user=user,
+                action="two_factor_failed",
+                actor=username,
+                payload=event_payload,
+            )
+            db_session.commit()
+            flash("Der Code ist ungültig oder wurde bereits verwendet.", "error")
+            return redirect(url_for("auth.second_factor_form"))
+
+        if rate_limit_active:
+            reset_failed_second_factor(db_session, username=username, remote_addr=remote_addr)
+        remaining_codes = record_verified_login(
+            db_session, user, method=method, payload=event_payload
+        )
+        record_security_event(
+            db_session, user=user, action="login", actor=username, payload=event_payload
+        )
+        db_session.commit()
+        session_user = _api_user_dict(user)
+
+    response = _complete_login(session_user, pending.get("next"))
+    if remaining_codes is not None:
+        flash(
+            f"Wiederherstellungscode verwendet, noch {remaining_codes} übrig. "
+            "Bei Bedarf erzeugen Sie unter Zwei-Faktor-Anmeldung neue Codes.",
+            "warning",
+        )
+    return response
 
 
 @auth_bp.post("/logout")
@@ -514,6 +748,145 @@ def change_password():
 
     flash("Passwort wurde geändert.", "success")
     return redirect(url_for("main.index"))
+
+
+# ---------------------------------------------------------------------------
+# Zwei-Faktor-Anmeldung: Einrichten, Abschalten, neue Wiederherstellungscodes
+# ---------------------------------------------------------------------------
+
+
+def _no_store(body):
+    """Seiten mit Secret oder Codes dürfen nicht im Browser-Cache landen."""
+    response = current_app.make_response(body)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _render_recovery_codes(codes: list[str], *, continue_url: str):
+    return _no_store(
+        render_template(
+            "two_factor_recovery_codes.html",
+            recovery_codes=codes,
+            continue_url=continue_url,
+            companies=[],
+            selected_company_id=None,
+        )
+    )
+
+
+def _two_factor_error_redirect(exc: TwoFactorError):
+    flash(str(exc), "error")
+    return redirect(url_for("auth.two_factor_page"))
+
+
+@auth_bp.get("/zwei-faktor")
+@login_required
+def two_factor_page():
+    with _get_session_factory()() as db_session:
+        db_user = db_session.get(User, current_user()["id"])
+        secret = pending_setup_secret(db_user)
+        return _no_store(
+            render_template(
+                "two_factor.html",
+                status=two_factor_status(db_session, db_user),
+                secret_grouped=group_secret(secret) if secret else None,
+                qr_svg=qr_code_svg(provisioning_uri_for(db_user, secret)) if secret else None,
+                companies=[],
+                selected_company_id=None,
+            )
+        )
+
+
+@auth_bp.post("/zwei-faktor/einrichten")
+@login_required
+def two_factor_setup():
+    username = current_user()["username"]
+    with _get_session_factory()() as db_session:
+        db_user = db_session.get(User, current_user()["id"])
+        try:
+            run_guarded_two_factor_action(
+                db_session,
+                db_user,
+                lambda: start_setup(
+                    db_session,
+                    db_user,
+                    password=request.form.get("current_password", ""),
+                    actor=username,
+                ),
+            )
+        except TwoFactorError as exc:
+            return _two_factor_error_redirect(exc)
+        db_session.commit()
+    return redirect(url_for("auth.two_factor_page"))
+
+
+@auth_bp.post("/zwei-faktor/bestaetigen")
+@login_required
+def two_factor_confirm():
+    username = current_user()["username"]
+    with _get_session_factory()() as db_session:
+        db_user = db_session.get(User, current_user()["id"])
+        try:
+            codes = confirm_setup(
+                db_session, db_user, code=request.form.get("code", ""), actor=username
+            )
+        except TwoFactorError as exc:
+            return _two_factor_error_redirect(exc)
+        db_session.commit()
+    # Die Pflicht ist erfüllt: Die Seite mit den Codes zeigt wieder die volle Navigation.
+    g._two_factor_setup_required = False
+    # Die Codes stehen direkt in der Antwort, nicht per flash(): Das läge im Session-Cookie.
+    continue_url = safe_next_path(session.pop(TWO_FACTOR_SETUP_NEXT_KEY, None))
+    return _render_recovery_codes(codes, continue_url=continue_url or url_for("main.index"))
+
+
+@auth_bp.post("/zwei-faktor/abschalten")
+@login_required
+def two_factor_disable():
+    username = current_user()["username"]
+    with _get_session_factory()() as db_session:
+        db_user = db_session.get(User, current_user()["id"])
+        try:
+            run_guarded_two_factor_action(
+                db_session,
+                db_user,
+                lambda: disable_two_factor(
+                    db_session,
+                    db_user,
+                    password=request.form.get("current_password", ""),
+                    code=request.form.get("code", ""),
+                    actor=username,
+                ),
+            )
+        except TwoFactorError as exc:
+            return _two_factor_error_redirect(exc)
+        db_session.commit()
+    flash("Die Zwei-Faktor-Anmeldung wurde abgeschaltet.", "success")
+    return redirect(url_for("auth.two_factor_page"))
+
+
+@auth_bp.post("/zwei-faktor/codes")
+@login_required
+def two_factor_recovery_codes():
+    username = current_user()["username"]
+    with _get_session_factory()() as db_session:
+        db_user = db_session.get(User, current_user()["id"])
+        try:
+            codes = run_guarded_two_factor_action(
+                db_session,
+                db_user,
+                lambda: regenerate_recovery_codes(
+                    db_session,
+                    db_user,
+                    password=request.form.get("current_password", ""),
+                    code=request.form.get("code", ""),
+                    actor=username,
+                ),
+            )
+        except TwoFactorError as exc:
+            return _two_factor_error_redirect(exc)
+        db_session.commit()
+    return _render_recovery_codes(codes, continue_url=url_for("auth.two_factor_page"))
 
 
 # ---------------------------------------------------------------------------

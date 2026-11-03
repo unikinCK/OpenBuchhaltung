@@ -30,6 +30,7 @@ from app.services.demo import (
 )
 from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.security_events import record_security_event
+from app.services.two_factor import reset_two_factor
 from domain.models import (
     User,
 )
@@ -266,6 +267,24 @@ def register_cli_commands(app: Flask) -> None:
             record_security_event(session, user=user, action="password_reset", actor=CLI_ACTOR)
             session.commit()
         click.echo(f"Passwort für {username} wurde gesetzt.")
+
+    @app.cli.command("reset-2fa")
+    @click.option("--username", required=True)
+    def reset_2fa(username: str):
+        """Setzt die Zwei-Faktor-Anmeldung zurück (Gerät verloren, SECRET_KEY rotiert)."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            user = session.execute(
+                select(User).where(User.username == username)
+            ).scalar_one_or_none()
+            if user is None:
+                raise click.ClickException(f"Benutzer {username} wurde nicht gefunden.")
+            changed = reset_two_factor(session, user, actor=CLI_ACTOR)
+            session.commit()
+        if changed:
+            click.echo(f"Zwei-Faktor-Anmeldung für {username} wurde zurückgesetzt.")
+        else:
+            click.echo(f"Für {username} war keine Zwei-Faktor-Anmeldung eingerichtet.")
 
     @app.cli.command("set-api-token")
     @click.option("--username", required=True)

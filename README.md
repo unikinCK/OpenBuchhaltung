@@ -353,6 +353,7 @@ Compose-Dateien verwendete Variable hier und in `.env.example` dokumentiert ist.
 | `LOGIN_RATE_LIMIT` | `1` | Login-Rate-Limit an/aus. |
 | `LOGIN_RATE_LIMIT_ATTEMPTS` | `5` | Fehlversuche je Fenster. |
 | `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `900` | Fensterlänge in Sekunden. |
+| `TWO_FACTOR_REQUIRED_ROLES` | – (leer) | Rollen mit Pflicht zur Zwei-Faktor-Anmeldung, kommagetrennt (`Admin`, `Buchhalter`, `Pruefer`, `Support`); siehe [Zwei-Faktor-Anmeldung](#zwei-faktor-anmeldung-totp). |
 | `DOCUMENT_MAX_UPLOAD_BYTES` | `10485760` | Maximale Beleggröße (zugleich Request-Limit). |
 | `DOCUMENT_MIN_UPLOAD_BYTES` | `1024` | Mindestgröße hochgeladener Belege. |
 | `DOCUMENT_FETCH_ALLOWED_HOSTS` | – (aus) | Hosts (`host:port`, kommagetrennt), von denen Belege per `source_url` geladen werden dürfen; siehe [Belege per Link](#belege-per-link-source_url). |
@@ -497,6 +498,63 @@ flask --app run.py create-user --username maria --role Buchhalter --tenant-id 1
 
 Benutzer mit `--tenant-id` sehen nur Daten ihres Mandanten; ohne Angabe haben sie globalen Zugriff.
 
+### Zwei-Faktor-Anmeldung (TOTP)
+
+Jeder Benutzer kann den Browser-Login mit einer Authenticator-App absichern (TOTP nach
+RFC 6238: SHA-1, 6 Stellen, 30 Sekunden, ein Schritt Toleranz). Ein Code gilt nur einmal.
+
+- **Einrichten:** Benutzermenü → **Zwei-Faktor-Anmeldung** (`/auth/zwei-faktor`). Nach dem
+  aktuellen Passwort zeigt die Seite QR-Code und Schlüssel zum Abtippen. Aktiv wird die
+  Anmeldung erst mit einem gültigen Code; danach erscheinen einmalig zehn
+  Wiederherstellungscodes (gespeichert nur als Hash, jeder einmal verwendbar).
+- **Anmelden:** Nach dem richtigen Passwort fragt `/auth/login/zweiter-faktor` den Code oder
+  einen Wiederherstellungscode ab. Bis dahin gibt es nur einen 5 Minuten gültigen
+  Zwischenstand, keine Anmeldung. Fehlversuche zählen im Login-Rate-Limit, zusätzlich je
+  Benutzername über alle Adressen; das richtige Passwort setzt diesen Zähler nicht zurück. Eine
+  Sperre hebt ein Administrator wie gewohnt auf („Entsperren“). Der Login verrät vor der
+  Passwortprüfung nicht, ob 2FA aktiv ist.
+- **Abschalten und neue Codes** verlangen das Passwort plus einen aktuellen Code oder einen
+  Wiederherstellungscode.
+- **Pflicht je Rolle:** `TWO_FACTOR_REQUIRED_ROLES` (kommagetrennt, z. B. `Admin,Pruefer`,
+  Standard leer). Betroffene ohne 2FA landen nach dem Login auf der Einrichtungsseite; alle
+  übrigen Seiten, der OAuth-Abschluss und der lesende API-Zugriff über die Session sind bis
+  dahin gesperrt. Unbekannte Rollen in der Liste meldet das Log beim Start.
+- **Gerät verloren:** Mit einem Wiederherstellungscode anmelden und abschalten. Sonst setzt ein
+  Administrator zurück: Verwaltung → **2FA zurücksetzen**,
+  `POST /api/v1/users/<id>/two-factor/reset`, MCP `reset_user_two_factor` oder
+  `flask --app run.py reset-2fa --username <name>`. Mandanten-Administratoren erreichen nur
+  Benutzer ihres Mandanten. Das eigene Konto geht nur über Passwort plus Code oder die CLI.
+- **`SECRET_KEY` rotiert:** Das Secret liegt mit einem aus `SECRET_KEY` abgeleiteten Schlüssel
+  verschlüsselt am Benutzer und ist danach nicht mehr lesbar. App-Codes schlagen dann fehl,
+  Wiederherstellungscodes gelten weiter. Die Seite weist darauf hin; der Weg ist derselbe wie
+  bei einem verlorenen Gerät.
+- **REST:** `GET /api/v1/users/me/two-factor` (Status, Administratoren mit `?user_id=`),
+  `POST …/setup` (`current_password`, liefert `secret` und `otpauth_uri`), `…/confirm` (`code`,
+  liefert `recovery_codes`), `…/disable` und `…/recovery-codes` (je `current_password` und
+  `code`). Die Benutzerliste enthält den Status unter `two_factor`.
+
+**Was der zweite Faktor nicht abdeckt:**
+
+- **API-Tokens** (`API_AUTH_TOKEN`, Benutzer-Tokens) sind ein eigener Zugang und verlangen
+  keinen zweiten Faktor. Auch bereits erteilte OAuth-Zugriffe (Connectoren, iOS-App) bleiben
+  bis zum Widerruf gültig. Wer 2FA einschaltet, sollte Tokens und verbundene Apps
+  durchsehen.
+- **Neue OAuth-Zugriffe** laufen über den Browser-Login und damit über den zweiten Faktor; das
+  gilt auch für die Anmeldung der iOS-App (System-Browser, die App sieht weder Passwort noch
+  Code).
+- **Bestehende Browser-Sessions** bleiben nach dem Einschalten oder einem Reset bis zu ihrem
+  Ablauf gültig, wie bei einer Passwortänderung.
+- **MCP** bietet nur `get_user_two_factor_status` und `reset_user_two_factor`. Einrichten und
+  Abschalten gibt es dort bewusst nicht, damit das Secret durch keinen KI-Kontext läuft (eine
+  gewollte Ausnahme von der Parität). Im KI-Chat sind beide Tools gesperrt.
+- In der **Demo-Instanz** lässt sich 2FA nicht aktivieren, die Rollenpflicht gilt dort nicht.
+
+Secrets und Codes stehen weder im Log noch im Audit-Log noch im Prüferexport. Protokolliert
+werden Einschalten, Abschalten, Erfolg und Fehlschlag beim Login, eingesetzte
+Wiederherstellungscodes, neue Codes und das Zurücksetzen durch einen Administrator. Bei
+globalen Benutzern ohne Mandant steht das wie alle Sicherheitsereignisse nur im
+Anwendungslog.
+
 ### Öffentliche Demo-Instanz
 
 Für Interessierte, den Demo-Modus der iOS-App und den Testzugang der App-Review läuft
@@ -519,7 +577,8 @@ docker compose -p obh-demo up -d --build
   einzelne Löschungen verhindern; das Schema bleibt, laufende App-Prozesse arbeiten weiter. `flask demo-reset` ohne `--loop` setzt
   sofort zurück. Der Befehl verweigert den Dienst ohne `DEMO_MODE` in Produktion.
 - **Gesperrt** (Schreibzugriffe, UI und API): Benutzer- und Mandantenverwaltung,
-  Passwortänderung, KI-Zugang je Benutzer, FinTS/Open Banking, ELSTER-Übermittlung. Das
+  Passwortänderung, Zwei-Faktor-Anmeldung, KI-Zugang je Benutzer, FinTS/Open Banking,
+  ELSTER-Übermittlung. Das
   Banner bittet darum, keine echten Belege hochzuladen; Uploads sind auf 5 MB begrenzt.
 - **Demo-MCP:** Mit `COMPOSE_PROFILES=mcp` in der `.env` der Demo läuft auch ihr
   MCP-Server; über den Demo-Proxy ist er unter `https://<DEMO_DOMAIN>/mcp` erreichbar
@@ -574,7 +633,9 @@ rotiert) und vergleicht Passwörter auch bei unbekanntem Benutzernamen mit einem
 Dummy-Hash (kein Timing-Leck). Fehlgeschlagene Logins werden in der Tabelle
 `login_attempt` gezählt — das Rate-Limit gilt damit prozessübergreifend (mehrere
 gunicorn-Worker) und je Client-Adresse hinter dem Proxy. Der Befehl `seed-demo`
-verweigert in Produktion die Anlage der Demo-Benutzer mit bekannten Passwörtern.
+verweigert in Produktion die Anlage der Demo-Benutzer mit bekannten Passwörtern. Den
+Browser-Login sichert optional die
+[Zwei-Faktor-Anmeldung](#zwei-faktor-anmeldung-totp) zusätzlich ab, API-Tokens nicht.
 
 Beleguploads sind auf PDF/JPG/PNG begrenzt. Belege werden unverändert
 gespeichert (keine serverseitige Komprimierung). Damit zu stark komprimierte,
@@ -1205,8 +1266,28 @@ Erfassung: Feld **Leistungsdatum** in der Buchungsmaske (Journal zeigt „Leistu
 API `POST /api/v1/journal-entries` mit `service_date`, MCP `create_journal_entry`.
 Ein Storno übernimmt das Leistungsdatum und neutralisiert die Steuer im selben
 Zeitraum; in der ZM heben sich Buchung und Storno ohne Partner im selben Zeitraum auf
-und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
-Istversteuerung bildet OpenBuchhaltung nicht ab.
+und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum.
+
+**Istversteuerung (§ 20 UStG).** Auf der Seite **Umsatzsteuer** lässt sich die Versteuerungsart zum
+Monatsersten wechseln (API `GET`/`POST /api/v1/companies/<id>/vat-method`, MCP
+`get_company_vat_method`, `set_company_vat_method`; im KI-Chat gesperrt). Der Wechsel braucht die
+Gestattung durch das Finanzamt, das prüft die App nicht. Im Zeitraum der Istversteuerung gilt
+(ADR-009):
+
+- Rechnungen mit Umsatzsteuer und **verknüpftem offenen Posten** zählen nicht mit dem Buchungs- oder
+  Leistungsdatum, sondern anteilig im Zeitraum der Zahlung (`open_item_settlement`). Maßgeblich ist das
+  Datum der Ausgleichsbuchung, sonst des Bankumsatzes. Teilzahlungen summieren sich centgenau zur
+  Rechnung. Ein storniertes Ausgleichen mindert im Zeitraum des Stornos, bereits gemeldete Zeiträume
+  bleiben also richtig.
+- Direkt bezahlte Umsätze (Bank an Erlöse), Vorsteuer und steuerfreie Umsätze bleiben unverändert.
+- Eine Rechnung auf einem Forderungskonto **ohne** verknüpften Posten zählt mit dem Buchungsdatum; die
+  UStVA nennt sie als Warnung. Sie zeigt auch, wie viel Umsatzsteuer noch nicht fällig ist: Das
+  Steuerkonto enthält sie bereits, weil gebucht wird wie bei der Sollversteuerung. Eine Umgliederung auf
+  „Umsatzsteuer nicht fällig“ bucht die App nicht.
+
+Rechnungen von vor dem Wechsel zur Istversteuerung bleiben nach dem Buchungsdatum versteuert. Abgebildet
+wird ein zusammenhängender Zeitraum; ein erneuter Wechsel danach geht nicht. Im DATEV-Mandat ist die
+Istversteuerung gesondert einzustellen, der Export kennzeichnet sie nicht.
 
 **Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum,
 Geschäftspartner (auf Sammelkonten mit passender Rolle) sowie Kostenstelle und

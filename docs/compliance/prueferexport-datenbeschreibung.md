@@ -20,6 +20,7 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
 | `data/business_partners.json` | Geschäftspartner (Debitoren/Kreditoren) mit Personenkontonummern |
 | `data/business_partner_history.json` | Verkettete Vorher-/Nachher-Historie der Geschäftspartner inklusive Bankdatenänderungen |
+| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung und Storno |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -67,7 +68,8 @@ Audit-Hashes in `business_partner_history.json`.
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,
-Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert. Beim
+Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert, ebenso wenig
+die Daten der Zwei-Faktor-Anmeldung (Secret, Zeitstempel, Wiederherstellungscodes). Beim
 Belegindex wird der interne Speicherpfad ebenfalls nicht ausgegeben.
 
 ## 4. Prüfsummen und Reproduzierbarkeit

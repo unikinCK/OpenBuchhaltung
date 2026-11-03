@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Zweiter Faktor – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="login-wrapper">
+    <div class="login-card">
+      <h2>Zweiter Faktor</h2>
+      <p class="muted">Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App oder einen
+        Wiederherstellungscode ein.</p>
+      <form method="post" action="{{ url_for('auth.second_factor') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="code">Code</label>
+        <input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters"
+               spellcheck="false" required autofocus />
+        <button type="submit">Anmelden</button>
+      </form>
+      <p class="muted"><a href="{{ url_for('auth.login_form') }}">Zurück zur Anmeldung</a></p>
+    </div>
+  </div>
+{% endblock %}
