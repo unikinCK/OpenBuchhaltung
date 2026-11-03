@@ -20,6 +20,7 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
 | `data/business_partners.json` | Geschäftspartner (Debitoren/Kreditoren) mit Personenkontonummern |
 | `data/business_partner_history.json` | Verkettete Vorher-/Nachher-Historie der Geschäftspartner inklusive Bankdatenänderungen |
+| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung und Storno |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche

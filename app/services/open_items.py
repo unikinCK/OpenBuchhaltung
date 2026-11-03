@@ -19,6 +19,7 @@ from domain.models import (
     JournalEntry,
     JournalEntryLine,
     OpenItem,
+    OpenItemSettlement,
 )
 
 OPEN_ITEM_TYPES = {"receivable", "payable"}
@@ -276,7 +277,10 @@ def settle_open_item(
     amount: Decimal | None = None,
     bank_transaction_id: int | None = None,
     journal_entry_id: int | None = None,
+    settlement_date: date | None = None,
 ) -> OpenItem:
+    """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
+    Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum."""
     item = session.get(OpenItem, open_item_id)
     if item is None:
         raise OpenItemError("Offener Posten nicht gefunden.")
@@ -302,7 +306,27 @@ def settle_open_item(
     if settlement_amount > item.open_amount:
         raise OpenItemError("Ausgleichsbetrag darf den offenen Betrag nicht übersteigen.")
 
+    if settlement_date is None:
+        if linked_entry is not None:
+            settlement_date = linked_entry.entry_date
+        elif bank_transaction is not None:
+            settlement_date = bank_transaction.booking_date
+        else:
+            settlement_date = date.today()
+
     item.open_amount = (item.open_amount - settlement_amount).quantize(Decimal("0.01"))
+    session.add(
+        OpenItemSettlement(
+            tenant_id=item.tenant_id,
+            company_id=item.company_id,
+            open_item_id=item.id,
+            amount=settlement_amount,
+            settlement_date=settlement_date,
+            journal_entry_id=linked_entry.id if linked_entry else None,
+            bank_transaction_id=bank_transaction.id if bank_transaction else None,
+            created_by=changed_by,
+        )
+    )
     if linked_entry is not None:
         # Wird die Ausgleichsbuchung storniert, lebt der Posten um diesen
         # Betrag wieder auf (siehe reverse_journal_entry). Es wird nur der
@@ -332,6 +356,7 @@ def settle_open_item(
         changed_by=changed_by,
         payload={
             "settlement_amount": str(settlement_amount),
+            "settlement_date": settlement_date.isoformat(),
             "open_amount": str(item.open_amount),
             "bank_transaction_id": bank_transaction.id if bank_transaction else None,
             "journal_entry_id": linked_entry.id if linked_entry else None,

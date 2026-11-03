@@ -654,8 +654,12 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
         und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
         Listen-Endpunkte in REST/MCP.
+  - [x] Ist-Versteuerung (#15, ADR-009) *(2026-11-03)*: Versteuerungsart je Gesellschaft, Zahlungen je
+        offenem Posten (`open_item_settlement`, Migration `20261103_0062`), UStVA und Jahreserklärung
+        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“, Hinweis
+        auf der Rechnung ab 2028 (§ 14 Abs. 4 Nr. 6a UStG).
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
-      Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+      Kassenbuch (#9), 2FA (#13), Fremdwährung (#14).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 

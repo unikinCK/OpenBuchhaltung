@@ -1205,8 +1205,28 @@ Erfassung: Feld **Leistungsdatum** in der Buchungsmaske (Journal zeigt „Leistu
 API `POST /api/v1/journal-entries` mit `service_date`, MCP `create_journal_entry`.
 Ein Storno übernimmt das Leistungsdatum und neutralisiert die Steuer im selben
 Zeitraum; in der ZM heben sich Buchung und Storno ohne Partner im selben Zeitraum auf
-und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum. Die
-Istversteuerung bildet OpenBuchhaltung nicht ab.
+und erscheinen nicht als „fehlend“. Anzahlungen (Steuer bei Zahlung) erhalten kein Leistungsdatum.
+
+**Istversteuerung (§ 20 UStG).** Auf der Seite **Umsatzsteuer** lässt sich die Versteuerungsart zum
+Monatsersten wechseln (API `GET`/`POST /api/v1/companies/<id>/vat-method`, MCP
+`get_company_vat_method`, `set_company_vat_method`; im KI-Chat gesperrt). Der Wechsel braucht die
+Gestattung durch das Finanzamt, das prüft die App nicht. Im Zeitraum der Istversteuerung gilt
+(ADR-009):
+
+- Rechnungen mit Umsatzsteuer und **verknüpftem offenen Posten** zählen nicht mit dem Buchungs- oder
+  Leistungsdatum, sondern anteilig im Zeitraum der Zahlung (`open_item_settlement`). Maßgeblich ist das
+  Datum der Ausgleichsbuchung, sonst des Bankumsatzes. Teilzahlungen summieren sich centgenau zur
+  Rechnung. Ein storniertes Ausgleichen mindert im Zeitraum des Stornos, bereits gemeldete Zeiträume
+  bleiben also richtig.
+- Direkt bezahlte Umsätze (Bank an Erlöse), Vorsteuer und steuerfreie Umsätze bleiben unverändert.
+- Eine Rechnung auf einem Forderungskonto **ohne** verknüpften Posten zählt mit dem Buchungsdatum; die
+  UStVA nennt sie als Warnung. Sie zeigt auch, wie viel Umsatzsteuer noch nicht fällig ist: Das
+  Steuerkonto enthält sie bereits, weil gebucht wird wie bei der Sollversteuerung. Eine Umgliederung auf
+  „Umsatzsteuer nicht fällig“ bucht die App nicht.
+
+Rechnungen von vor dem Wechsel zur Istversteuerung bleiben nach dem Buchungsdatum versteuert. Abgebildet
+wird ein zusammenhängender Zeitraum; ein erneuter Wechsel danach geht nicht. Im DATEV-Mandat ist die
+Istversteuerung gesondert einzustellen, der Export kennzeichnet sie nicht.
 
 **Offene Buchungen ergänzen.** Vor der Festschreibung lassen sich Leistungsdatum,
 Geschäftspartner (auf Sammelkonten mit passender Rolle) sowie Kostenstelle und

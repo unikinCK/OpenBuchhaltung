@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Istversteuerung (§ 20 UStG)
+- Versteuerungsart je Gesellschaft mit Wechsel zum Monatsersten (`company.vat_cash_basis_from`/`_until`,
+  Migration `20261103_0062`, UI auf der Seite Umsatzsteuer, `GET`/`POST /api/v1/companies/<id>/vat-method`,
+  MCP `get_company_vat_method`, `set_company_vat_method`; im KI-Chat gesperrt).
+- UStVA und Jahreserklärung: Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten zählen im
+  Ist-Zeitraum anteilig mit der Zahlung. Warnungen nennen noch nicht fällige Umsatzsteuer und Rechnungen ohne
+  verknüpften Posten.
+- Neue Tabelle `open_item_settlement`: jeder Ausgleich mit Datum und Betrag, auch im Prüferexport.
+  Bestehende Ausgleiche werden übernommen. `settle_open_item` nimmt das Zahlungsdatum aus Buchung
+  oder Bankumsatz.
+- Behoben: Der Storno einer Ausgleichsbuchung stellte nur den zuletzt verbuchten Ausgleich wieder her. Jetzt
+  leben alle Ausgleiche dieser Buchung wieder auf, auch wenn dieselbe Buchung mehrere Posten ausgleicht.
+
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf
