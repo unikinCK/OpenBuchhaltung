@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
     true,
 )
@@ -82,6 +83,28 @@ class Company(Base):
     # Istversteuerung (§ 20 UStG) in diesem Zeitraum; ohne ``from`` gilt Sollversteuerung.
     vat_cash_basis_from: Mapped[date | None] = mapped_column(Date)
     vat_cash_basis_until: Mapped[date | None] = mapped_column(Date)
+    # Firmenstammdaten für Rechnungen und Schreiben (Pflege: app.services.company_master_data).
+    street: Mapped[str | None] = mapped_column(String(255))
+    postal_code: Mapped[str | None] = mapped_column(String(20))
+    city: Mapped[str | None] = mapped_column(String(120))
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    vat_id: Mapped[str | None] = mapped_column(String(20))
+    tax_number: Mapped[str | None] = mapped_column(String(30))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    email: Mapped[str | None] = mapped_column(String(255))
+    website: Mapped[str | None] = mapped_column(String(255))
+    register_court: Mapped[str | None] = mapped_column(String(120))
+    register_number: Mapped[str | None] = mapped_column(String(50))
+    managing_directors: Mapped[str | None] = mapped_column(String(255))
+    bank_name: Mapped[str | None] = mapped_column(String(120))
+    # Präfix des Rechnungsnummernkreises, z. B. RE-2026-0001.
+    invoice_prefix: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="RE", server_default="RE"
+    )
+    # Kleinunternehmer nach § 19 UStG: Rechnungen ohne Umsatzsteuerausweis.
+    is_small_business: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -678,6 +701,221 @@ class Document(Base):
     journal_entry: Mapped[JournalEntry | None] = relationship(back_populates="documents")
     category: Mapped[DocumentCategory | None] = relationship(back_populates="documents")
     replaces_document: Mapped[Document | None] = relationship(remote_side="Document.id")
+
+
+# Ausgangsrechnungen: Status, Art und Steuerbehandlung.
+SALES_INVOICE_DRAFT = "draft"
+SALES_INVOICE_ISSUED = "issued"
+SALES_INVOICE_CANCELLED = "cancelled"
+SALES_INVOICE_STATUSES = (SALES_INVOICE_DRAFT, SALES_INVOICE_ISSUED, SALES_INVOICE_CANCELLED)
+SALES_INVOICE_TYPE_INVOICE = "invoice"
+SALES_INVOICE_TYPE_CANCELLATION = "cancellation"
+SALES_INVOICE_TYPES = (SALES_INVOICE_TYPE_INVOICE, SALES_INVOICE_TYPE_CANCELLATION)
+TAX_TREATMENT_STANDARD = "standard"
+TAX_TREATMENT_REVERSE_CHARGE = "reverse_charge"
+TAX_TREATMENT_INTRA_COMMUNITY = "intra_community"
+TAX_TREATMENT_EXPORT = "export"
+TAX_TREATMENT_EXEMPT = "exempt"
+TAX_TREATMENT_SMALL_BUSINESS = "small_business"
+TAX_TREATMENTS = (
+    TAX_TREATMENT_STANDARD,
+    TAX_TREATMENT_REVERSE_CHARGE,
+    TAX_TREATMENT_INTRA_COMMUNITY,
+    TAX_TREATMENT_EXPORT,
+    TAX_TREATMENT_EXEMPT,
+    TAX_TREATMENT_SMALL_BUSINESS,
+)
+
+
+class SalesInvoiceSequence(Base):
+    """Lückenloser Rechnungsnummernkreis je Gesellschaft und Jahr des Rechnungsdatums.
+
+    Das Hochzählen sperrt die Zeile bis zum Commit; die Nummer wird in der Transaktion des
+    Ausstellens gezogen und fällt bei einem Fehler mit ihr zurück.
+    """
+
+    __tablename__ = "sales_invoice_sequence"
+    __table_args__ = (
+        UniqueConstraint("company_id", "year", name="uq_sales_invoice_sequence_company_year"),
+        CheckConstraint("last_number >= 0", name="ck_sales_invoice_sequence_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class SalesInvoice(Base):
+    """Ausgangsrechnung: Entwurf, ausgestellte Rechnung oder Stornorechnung.
+
+    Ausgestellte Rechnungen sind unveränderlich (Service und DB-Trigger); nur der Wechsel
+    ``issued`` → ``cancelled`` ist erlaubt. Stornorechnungen tragen negative Beträge und
+    verweisen über ``cancels_invoice_id`` auf das Original.
+    """
+
+    __tablename__ = "sales_invoice"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "invoice_number", name="uq_sales_invoice_company_number"
+        ),
+        # Eine Rechnung wird höchstens einmal storniert.
+        UniqueConstraint("cancels_invoice_id", name="uq_sales_invoice_cancels"),
+        CheckConstraint(
+            "status IN ('draft', 'issued', 'cancelled')", name="ck_sales_invoice_status"
+        ),
+        CheckConstraint(
+            "invoice_type IN ('invoice', 'cancellation')", name="ck_sales_invoice_type"
+        ),
+        CheckConstraint(
+            "tax_treatment IN ('standard', 'reverse_charge', 'intra_community', 'export', "
+            "'exempt', 'small_business')",
+            name="ck_sales_invoice_tax_treatment",
+        ),
+        CheckConstraint("einvoice_syntax IN ('ubl', 'cii')", name="ck_sales_invoice_syntax"),
+        CheckConstraint(
+            "status = 'draft' OR invoice_number IS NOT NULL", name="ck_sales_invoice_number_set"
+        ),
+        Index("ix_sales_invoice_company_status", "company_id", "status"),
+        Index("ix_sales_invoice_partner", "partner_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    partner_id: Mapped[int] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT"), nullable=False
+    )
+    invoice_number: Mapped[str | None] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=SALES_INVOICE_DRAFT)
+    invoice_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=SALES_INVOICE_TYPE_INVOICE
+    )
+    cancels_invoice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sales_invoice.id", ondelete="RESTRICT")
+    )
+    issue_date: Mapped[date | None] = mapped_column(Date)
+    # Leistungsdatum oder Leistungszeitraum (eines von beiden beim Ausstellen).
+    service_date: Mapped[date | None] = mapped_column(Date)
+    service_period_from: Mapped[date | None] = mapped_column(Date)
+    service_period_to: Mapped[date | None] = mapped_column(Date)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Empfänger zum Zeitpunkt des Ausstellens; der Entwurf zeigt den Partnerstamm.
+    recipient_name: Mapped[str | None] = mapped_column(String(255))
+    recipient_street: Mapped[str | None] = mapped_column(String(255))
+    recipient_postal_code: Mapped[str | None] = mapped_column(String(20))
+    recipient_city: Mapped[str | None] = mapped_column(String(120))
+    recipient_country_code: Mapped[str | None] = mapped_column(String(2))
+    recipient_vat_id: Mapped[str | None] = mapped_column(String(20))
+    # Leitweg-ID bzw. Käuferreferenz (BT-10).
+    buyer_reference: Mapped[str | None] = mapped_column(String(100))
+    tax_treatment: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TAX_TREATMENT_STANDARD
+    )
+    # XRechnung-Syntax des erzeugten XML (UBL ist der Standard).
+    einvoice_syntax: Mapped[str] = mapped_column(String(3), nullable=False, default="ubl")
+    header_text: Mapped[str | None] = mapped_column(Text)
+    footer_text: Mapped[str | None] = mapped_column(Text)
+    net_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    tax_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    gross_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00")
+    )
+    receivable_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT")
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="RESTRICT")
+    )
+    open_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("open_item.id", ondelete="RESTRICT")
+    )
+    pdf_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document.id", ondelete="RESTRICT")
+    )
+    xml_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document.id", ondelete="RESTRICT")
+    )
+    created_by: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    issued_by: Mapped[str | None] = mapped_column(String(120))
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    company: Mapped[Company] = relationship()
+    partner: Mapped[BusinessPartner] = relationship()
+    receivable_account: Mapped[Account | None] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()
+    open_item: Mapped[OpenItem | None] = relationship()
+    pdf_document: Mapped[Document | None] = relationship(foreign_keys=[pdf_document_id])
+    xml_document: Mapped[Document | None] = relationship(foreign_keys=[xml_document_id])
+    cancels_invoice: Mapped[SalesInvoice | None] = relationship(
+        remote_side="SalesInvoice.id", back_populates="cancellation"
+    )
+    cancellation: Mapped[SalesInvoice | None] = relationship(
+        back_populates="cancels_invoice", uselist=False
+    )
+    lines: Mapped[list[SalesInvoiceLine]] = relationship(
+        back_populates="sales_invoice",
+        cascade="all, delete-orphan",
+        order_by="SalesInvoiceLine.line_number",
+    )
+
+
+class SalesInvoiceLine(Base):
+    """Rechnungsposition; der Steuersatz ist ein Snapshot aus dem Steuercode."""
+
+    __tablename__ = "sales_invoice_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "sales_invoice_id", "line_number", name="uq_sales_invoice_line_number"
+        ),
+        CheckConstraint("tax_rate >= 0", name="ck_sales_invoice_line_tax_rate"),
+        CheckConstraint("unit_price >= 0", name="ck_sales_invoice_line_unit_price"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    sales_invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("sales_invoice.id", ondelete="CASCADE"), nullable=False
+    )
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Mengeneinheit nach UN/ECE Rec 20 (C62 = Stück/Einheit).
+    unit_code: Mapped[str] = mapped_column(String(3), nullable=False, default="C62")
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    tax_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tax_code.id", ondelete="RESTRICT")
+    )
+    revenue_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account.id", ondelete="RESTRICT")
+    )
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.00")
+    )
+    net_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    sales_invoice: Mapped[SalesInvoice] = relationship(back_populates="lines")
+    tax_code: Mapped[TaxCode | None] = relationship()
+    revenue_account: Mapped[Account | None] = relationship()
 
 
 class ReceiptMatchSuggestion(Base):

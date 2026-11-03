@@ -12,6 +12,7 @@ from app.web import (  # noqa: F401
     bank,
     chat,
     company_knowledge,
+    company_master_data,
     consolidation,
     controlling,
     dashboard,
@@ -34,6 +35,7 @@ from app.web import (  # noqa: F401
     receipt_matching,
     receipt_ocr,
     reports,
+    sales_invoices,
     vat_returns,
 )
 from app.web.blueprint import main_bp

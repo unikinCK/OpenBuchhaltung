@@ -8,6 +8,30 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Firmenstammdaten und Ausgangsrechnungen
+- Firmenstammdaten an der Gesellschaft (Anschrift, USt-IdNr, Steuernummer, Kontakt, Register,
+  Bank, Rechnungspräfix, Kleinunternehmer): Verwaltung → Firmendaten,
+  `GET`/`PATCH /api/v1/companies/<id>/master-data`, MCP `get_company_master_data`,
+  `update_company_master_data`, Audit mit Vorher/Nachher. `SELLER_*` bleibt Rückfallwert; der
+  E-Rechnungs-Export und das Mahnschreiben nutzen die Stammdaten.
+- Ausgangsrechnungen unter Belege → Rechnungen (`/rechnungen`, `/api/v1/sales-invoices`, MCP
+  `list_`, `get_`, `create_`, `update_`, `delete_`, `issue_`, `cancel_`, `download_sales_invoice`):
+  Entwurf ohne Nummer, atomares Ausstellen mit lückenlosem Nummernkreis, Buchung, offenem Posten,
+  XRechnung und PDF als Belegen. Ausgestellte Rechnungen sind unveränderlich (Service und
+  DB-Trigger, Migration `20261103_0058`, ADR-006).
+- Steuerbehandlung am Rechnungskopf: Regelsteuer, § 13b, innergemeinschaftliche Lieferung, Ausfuhr,
+  steuerfrei, Kleinunternehmer, jeweils mit Steuerkategorie und Pflichthinweis.
+- Storno per Stornorechnung mit eigener Nummer (E-Rechnung Typ 381), nur solange der Posten unbezahlt
+  ist. Die Buchung einer Rechnung lässt sich nicht mehr direkt stornieren.
+- `einvoice_export`: XRechnung-3.0-Kennung, Fälligkeit, Leistungsdatum und -zeitraum, Zahlungsart mit
+  IBAN, Kontakt, Steuernummer, Befreiungsgrund und Rechnungsbezug; CII enthält nun Positionen und
+  Anschriften, Gutschriften sind in UBL ein `CreditNote`. Nicht gegen den KoSIT-Validator geprüft.
+- `einvoice_import` liest auch UBL-`CreditNote` und den Rechnungstyp; `book_einvoice` weist Gutschriften
+  ab, statt sie als Rechnung zu buchen (auch CII mit Typ 381).
+- Prüferexport: `sales_invoices`, `sales_invoice_lines`. Dezimalwerte mit mehr als zwei Nachkommastellen
+  werden dort nicht mehr gerundet.
+- Neue Abhängigkeiten: `reportlab`, `pillow`, `chardet`.
+
 ### Konsolidierte Auswertung mehrerer Gesellschaften
 - Unter **Steuern & Berichte → Konsolidierung** fasst eine Gruppe Gesellschaften desselben Mandanten
   und derselben Währung zusammen: SuSa, GuV und Bilanz mit Spalten je Gesellschaft, Summe, Eliminierung,

@@ -32,6 +32,10 @@ from app.services.incoming_invoice import (
 from domain.formatting import format_amount
 from domain.models import Company, JournalEntry, TaxCode
 
+# Gutschriften und Stornorechnungen: Der Eingangsrechnungsweg würde sie als Rechnung mit
+# positivem Betrag buchen, deshalb lehnt ``book_einvoice`` sie ab.
+CREDIT_NOTE_TYPE_CODES = frozenset({"261", "381", "396", "532"})
+
 
 class EInvoiceParseError(ValueError):
     """Raised when an e-invoice XML cannot be parsed."""
@@ -55,6 +59,12 @@ class ParsedInvoice:
     grand_total: Decimal
     syntax: str  # "CII" oder "UBL"
     tax_lines: list[TaxBreakdown] = field(default_factory=list)
+    # BT-3, z. B. 380 Rechnung, 381 Gutschrift/Stornorechnung; leer = nicht angegeben.
+    type_code: str = ""
+
+    @property
+    def is_credit_note(self) -> bool:
+        return self.type_code in CREDIT_NOTE_TYPE_CODES
 
     @property
     def primary_tax_rate(self) -> Decimal | None:
@@ -119,7 +129,7 @@ def parse_einvoice(xml_bytes: bytes) -> ParsedInvoice:
     root_name = _local(root.tag)
     if root_name in {"CrossIndustryInvoice", "CrossIndustryDocument"}:
         return _parse_cii(root)
-    if root_name == "Invoice":
+    if root_name in {"Invoice", "CreditNote"}:
         return _parse_ubl(root)
     raise EInvoiceParseError(
         f"Unbekanntes Rechnungsformat (Wurzelelement {root_name!r}). "
@@ -130,6 +140,7 @@ def parse_einvoice(xml_bytes: bytes) -> ParsedInvoice:
 def _parse_cii(root: ET.Element) -> ParsedInvoice:
     doc = _find(root, "ExchangedDocument")
     invoice_number = _text(_find(doc, "ID")) if doc is not None else ""
+    type_code = _text(_find(doc, "TypeCode")) if doc is not None else ""
 
     issue_date = ""
     fmt_hint = None
@@ -191,6 +202,7 @@ def _parse_cii(root: ET.Element) -> ParsedInvoice:
         grand_total=grand_total,
         syntax="CII",
         tax_lines=tax_lines,
+        type_code=type_code,
     )
 
 
@@ -198,6 +210,7 @@ def _parse_ubl(root: ET.Element) -> ParsedInvoice:
     invoice_number = ""
     issue_date = ""
     currency = ""
+    type_code = ""
     # Direkte Kopf-Kinder (cbc:ID, cbc:IssueDate, cbc:DocumentCurrencyCode)
     for child in root:
         name = _local(child.tag)
@@ -207,6 +220,8 @@ def _parse_ubl(root: ET.Element) -> ParsedInvoice:
             issue_date = _text(child)
         elif name == "DocumentCurrencyCode" and not currency:
             currency = _text(child)
+        elif name in {"InvoiceTypeCode", "CreditNoteTypeCode"} and not type_code:
+            type_code = _text(child)
 
     seller = ""
     supplier = _find(root, "AccountingSupplierParty", "Party")
@@ -252,6 +267,7 @@ def _parse_ubl(root: ET.Element) -> ParsedInvoice:
         grand_total=grand_total,
         syntax="UBL",
         tax_lines=tax_lines,
+        type_code=type_code,
     )
 
 
@@ -359,8 +375,15 @@ def book_einvoice(
 
     Bei einem Steuersatz gilt ``tax_code_id`` (bzw. die Kontierung für diesen
     Satz aus ``assignments``). Liefert die Buchung und die verwendete
-    Aufteilung (``None`` bei einem Satz).
+    Aufteilung (``None`` bei einem Satz). Gutschriften werden abgelehnt.
     """
+    if invoice.is_credit_note:
+        raise IncomingInvoiceError(
+            f"{invoice.invoice_number} ist eine Gutschrift bzw. Stornorechnung "
+            f"(Typ {invoice.type_code}) und kann nicht als Eingangsrechnung gebucht werden. "
+            "Bitte manuell buchen.",
+            code="credit_note",
+        )
     tax_splits = einvoice_tax_splits(
         session, invoice, tax_code_id=tax_code_id, assignments=assignments
     )

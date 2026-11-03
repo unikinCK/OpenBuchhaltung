@@ -75,6 +75,7 @@ SOURCE_LABELS = {
     "year_end_close": "Jahresabschluss",
     "carryforward": "Saldovortrag",
     "payroll": "Lohn",
+    "sales_invoice": "Rechnung",
 }
 STATUS_FILTERS = {"offen": False, "festgeschrieben": True}
 

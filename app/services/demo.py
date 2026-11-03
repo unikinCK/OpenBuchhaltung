@@ -89,6 +89,25 @@ DEMO_PARTNERS = (
     ("Stadtwerke Musterstadt", False, True, "Musterstadt", 14),
 )
 
+# Erfundene Firmenstammdaten, damit Rechnungen in der Demo sofort ausstellbar sind.
+DEMO_COMPANY_DATA = {
+    "street": "Musterstraße 1",
+    "postal_code": "10115",
+    "city": "Berlin",
+    "country_code": "DE",
+    "vat_id": "DE000000000",
+    "tax_number": "00/000/00000",
+    "phone": "+49 30 000000",
+    "email": "rechnung@demo.example",
+    "website": "https://demo.example",
+    "register_court": "Amtsgericht Musterstadt",
+    "register_number": "HRB 00000",
+    "managing_directors": "Erika Muster",
+    "bank_name": "Musterbank",
+    "iban": "DE89370400440532013000",
+    "bic": "COBADEFFXXX",
+}
+
 # Schreibzugriffe, die die Demo-Instanz ablehnt (Pfad-Präfix, Grund).
 _DEMO_BLOCKED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pattern), reason)
@@ -144,7 +163,9 @@ def seed_demo_data(
         select(Company).where(Company.tenant_id == tenant.id, Company.name == DEMO_COMPANY_NAME)
     ).scalar_one_or_none()
     if company is None:
-        company = Company(name=DEMO_COMPANY_NAME, currency_code="EUR", tenant=tenant)
+        company = Company(
+            name=DEMO_COMPANY_NAME, currency_code="EUR", tenant=tenant, **DEMO_COMPANY_DATA
+        )
         session.add(company)
         session.flush()
         echo(f"Gesellschaft '{DEMO_COMPANY_NAME}' angelegt.")
@@ -176,7 +197,10 @@ def seed_demo_data(
                 name=name,
                 is_customer=is_customer,
                 is_supplier=is_supplier,
+                street="Musterweg 1",
+                postal_code="00000",
                 city=city,
+                email="rechnung@kunde.example" if is_customer else None,
                 payment_term_days=term,
             )
         session.commit()

@@ -26,6 +26,8 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/consolidation_adjustment_lines.json` | Zeilen der manuellen Konsolidierungsbuchungen |
 | `data/consolidation_history.json` | Verkettete Vorher-/Nachher-Historie der Gruppen und Buchungen einschließlich gelöschter Buchungen |
 | `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung und Storno |
+| `data/sales_invoices.json` | Ausgestellte und stornierte Ausgangsrechnungen sowie Stornorechnungen (ohne Entwürfe) mit Empfänger-Snapshot, Summen und Verweisen auf Buchung, offenen Posten und Belege |
+| `data/sales_invoice_lines.json` | Positionen dieser Rechnungen mit Menge und Einzelpreis (vier Nachkommastellen) und Steuersatz |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche

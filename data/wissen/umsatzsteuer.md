@@ -93,7 +93,7 @@ Schlagworte: E-Rechnung, XRechnung, ZUGFeRD, EN 16931, Empfangspflicht, Übergan
 - Ausnahmen von der Ausstellungspflicht: Kleinbetragsrechnungen bis 250 €, Fahrausweise, Leistungen an Privatpersonen (B2C), steuerfreie Umsätze nach § 4 Nr. 8–29, Kleinunternehmer (§ 34a UStDV). Empfangspflicht gilt trotzdem.
 - Öffentliche Auftraggeber (B2G) verlangen seit 2020 XRechnung über Leitweg-ID (ZRE/OZG-RE).
 - Verstöße: keine ordnungsgemäße Rechnung → Vorsteuerabzug des Empfängers gefährdet (Übergangszeit: Nichtbeanstandung bei inhaltlich richtiger sonstiger Rechnung), Bußgeld bis 5.000 € möglich.
-- OpenBuchhaltung: E-Rechnungen (XRechnung/ZUGFeRD) importieren, prüfen und als Buchung übernehmen (import_einvoice); Ausgangsrechnungen als E-Rechnung exportieren (export_einvoice).
+- OpenBuchhaltung: E-Rechnungen (XRechnung/ZUGFeRD) importieren, prüfen und als Buchung übernehmen (import_einvoice); Ausgangsrechnungen schreiben, ausstellen und stornieren (create_sales_invoice, issue_sales_invoice, cancel_sales_invoice), dabei entstehen Nummer, Buchung, offener Posten, XRechnung und PDF. Das PDF ist kein zertifiziertes ZUGFeRD; maßgeblich ist das XML.
 
 ## Steuerfreie Umsätze und Vorsteuerabzug (§§ 4, 15 UStG)
 Schlagworte: steuerfrei, § 4 UStG, Vermietung, Heilbehandlung, Bildung, Finanzumsätze, Versicherung, Option § 9, Vorsteuerabzug, Vorsteueraufteilung, § 15a, Berichtigung, § 17, Uneinbringlichkeit, unentgeltliche Wertabgabe

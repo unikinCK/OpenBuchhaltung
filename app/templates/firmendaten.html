@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Firmendaten – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Firmendaten</h1>
+      <p class="page-subtitle">Angaben für Rechnungen, E-Rechnung und Mahnschreiben</p>
+    </div>
+    {% if company %}
+      <div class="page-actions">
+        <a class="button-secondary" href="{{ url_for('main.sales_invoices_page', company_id=company.id) }}">Rechnungen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not company %}
+    <section class="card"><p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <form method="post" action="{{ url_for('main.update_company_master_data_action') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="company_id" value="{{ company.id }}" />
+
+      <section class="card">
+        <h2>{{ company.name }}</h2>
+        <p class="hint">Leere Felder fallen auf die Umgebungsvariablen <code>SELLER_*</code> zurück, falls gesetzt.</p>
+        <div class="form-grid">
+          <div class="field field-wide">
+            <label for="street">Straße und Hausnummer</label>
+            <input id="street" name="street" maxlength="255" value="{{ company.street or '' }}" />
+          </div>
+          <div class="field">
+            <label for="postal_code">PLZ</label>
+            <input id="postal_code" name="postal_code" maxlength="20" value="{{ company.postal_code or '' }}" />
+          </div>
+          <div class="field">
+            <label for="city">Ort</label>
+            <input id="city" name="city" maxlength="120" value="{{ company.city or '' }}" />
+          </div>
+          <div class="field">
+            <label for="country_code">Land (ISO)</label>
+            <input id="country_code" name="country_code" maxlength="2" placeholder="DE" value="{{ company.country_code or '' }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Steuer</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="vat_id">USt-IdNr</label>
+            <input id="vat_id" name="vat_id" maxlength="20" value="{{ company.vat_id or '' }}" />
+          </div>
+          <div class="field">
+            <label for="tax_number">Steuernummer</label>
+            <input id="tax_number" name="tax_number" maxlength="30" value="{{ company.tax_number or '' }}" />
+          </div>
+          <div class="field field-wide">
+            <label class="check"><input type="checkbox" name="is_small_business" value="1"{% if company.is_small_business %} checked{% endif %} /> Kleinunternehmer nach § 19 UStG (Rechnungen ohne Umsatzsteuer)</label>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Kontakt und Register</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="phone">Telefon</label>
+            <input id="phone" name="phone" maxlength="50" value="{{ company.phone or '' }}" />
+          </div>
+          <div class="field">
+            <label for="email">E-Mail</label>
+            <input id="email" name="email" type="email" maxlength="255" value="{{ company.email or '' }}" />
+          </div>
+          <div class="field">
+            <label for="website">Website</label>
+            <input id="website" name="website" maxlength="255" value="{{ company.website or '' }}" />
+          </div>
+          <div class="field">
+            <label for="register_court">Registergericht</label>
+            <input id="register_court" name="register_court" maxlength="120" placeholder="Amtsgericht …" value="{{ company.register_court or '' }}" />
+          </div>
+          <div class="field">
+            <label for="register_number">Registernummer</label>
+            <input id="register_number" name="register_number" maxlength="50" placeholder="HRB …" value="{{ company.register_number or '' }}" />
+          </div>
+          <div class="field field-wide">
+            <label for="managing_directors">Geschäftsführung</label>
+            <input id="managing_directors" name="managing_directors" maxlength="255" value="{{ company.managing_directors or '' }}" />
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Bank und Rechnungsnummern</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="bank_name">Bank</label>
+            <input id="bank_name" name="bank_name" maxlength="120" value="{{ company.bank_name or '' }}" />
+          </div>
+          <div class="field">
+            <span class="field-label">IBAN / BIC</span>
+            <div>{{ company.iban or "–" }}{% if company.bic %} · {{ company.bic }}{% endif %}</div>
+            <p class="hint">Geändert wird die Bankverbindung unter <a href="{{ url_for('main.payment_run_page', company_id=company.id) }}">Zahllauf</a>.</p>
+          </div>
+          <div class="field">
+            <label for="invoice_prefix">Präfix der Rechnungsnummer</label>
+            <input id="invoice_prefix" name="invoice_prefix" maxlength="10" value="{{ company.invoice_prefix }}" />
+            <p class="hint">Ergibt {{ company.invoice_prefix }}-Jahr-0001, je Jahr fortlaufend.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="page-actions">
+        <button type="submit">Speichern</button>
+      </div>
+    </form>
+  {% endif %}
+{% endblock %}

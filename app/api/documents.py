@@ -41,7 +41,9 @@ from app.services.document_fetch import (
     parse_allowed_hosts,
 )
 from app.services.documents import (
+    CAPTURE_SOURCE_SALES_INVOICE,
     DOCUMENT_SIGNATURE_PROBE_BYTES,
+    SALES_INVOICE_DOCUMENT_LOCKED,
     DocumentCaptureError,
     document_content_error_code,
     document_file_metadata,
@@ -466,6 +468,8 @@ def link_document_via_api(document_id: int):
         document = session.get(Document, document_id)
         if document is None or api_scoped_company(session, document.company_id) is None:
             return jsonify({"error": "Document not found."}), 404
+        if document.capture_source == CAPTURE_SOURCE_SALES_INVOICE:
+            return jsonify({"error": SALES_INVOICE_DOCUMENT_LOCKED}), 409
 
         linked_entry = None
         if journal_entry_id is not None:
@@ -635,6 +639,8 @@ def replace_document_via_api(document_id: int):
             return jsonify({"error": "Document not found."}), 404
         if not previous.is_current:
             return jsonify({"error": "Only current document versions can be replaced."}), 409
+        if previous.capture_source == CAPTURE_SOURCE_SALES_INVOICE:
+            return jsonify({"error": SALES_INVOICE_DOCUMENT_LOCKED}), 409
 
         unique_name = f"{uuid4().hex}_{file_name}"
         company_dir = (

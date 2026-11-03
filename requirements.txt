@@ -9,3 +9,7 @@ psycopg[binary]==3.2.9
 pypdf==6.14.2
 pypdfium2==5.14.0
 segno==1.6.1
+reportlab==4.2.5
+# Abhängigkeiten von reportlab, ebenfalls fest gepinnt.
+pillow==11.3.0
+chardet==5.2.0

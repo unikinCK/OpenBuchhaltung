@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}{{ invoice.invoice_number }} – Rechnungen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.sales_invoices_page', company_id=company.id) }}">‹ Alle Rechnungen</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">{% if invoice.invoice_type == "cancellation" %}Stornorechnung{% else %}Rechnung{% endif %} {{ invoice.invoice_number }}</h1>
+      <p class="page-subtitle">
+        {% if invoice.status == "cancelled" %}<span class="badge badge-danger">{{ status_labels[invoice.status] }}</span>
+        {% else %}<span class="badge badge-info">{{ status_labels[invoice.status] }}</span>{% endif %}
+        {% if payment_status %}<span class="badge{% if payment_status == 'paid' %} badge-success{% else %} badge-warning{% endif %}">{{ payment_labels[payment_status] }}</span>{% endif %}
+      </p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary btn-sm" href="{{ url_for('main.download_sales_invoice_xml', invoice_id=invoice.id) }}">XML herunterladen</a>
+      <a class="button btn-sm" href="{{ url_for('main.download_sales_invoice_pdf', invoice_id=invoice.id) }}">PDF herunterladen</a>
+    </div>
+  </div>
+
+  {% if invoice.cancels_invoice %}
+    <section class="callout">Storniert die Rechnung <a href="{{ url_for('main.sales_invoice_detail_page', invoice_id=invoice.cancels_invoice_id) }}">{{ invoice.cancels_invoice.invoice_number }}</a>.</section>
+  {% endif %}
+  {% if invoice.cancellation %}
+    <section class="callout">Storniert durch <a href="{{ url_for('main.sales_invoice_detail_page', invoice_id=invoice.cancellation.id) }}">{{ invoice.cancellation.invoice_number }}</a>.</section>
+  {% endif %}
+
+  <section class="card">
+    <dl class="meta-grid">
+      <div>
+        <dt>Empfänger</dt>
+        <dd>
+          <a href="{{ url_for('main.partner_detail_page', partner_id=invoice.partner_id) }}">{{ invoice.recipient_name }}</a><br />
+          {{ invoice.recipient_street or "" }}{% if invoice.recipient_street %}<br />{% endif %}
+          {{ [invoice.recipient_postal_code, invoice.recipient_city] | select | join(" ") }}
+          {% if invoice.recipient_country_code and invoice.recipient_country_code != "DE" %}<br />{{ invoice.recipient_country_code }}{% endif %}
+          {% if invoice.recipient_vat_id %}<br /><span class="muted small">USt-IdNr {{ invoice.recipient_vat_id }}</span>{% endif %}
+        </dd>
+      </div>
+      <div><dt>Rechnungsdatum</dt><dd>{{ invoice.issue_date | datum }}</dd></div>
+      <div>
+        <dt>Leistung</dt>
+        <dd>{% if invoice.service_date %}{{ invoice.service_date | datum }}{% else %}{{ invoice.service_period_from | datum }} bis {{ invoice.service_period_to | datum }}{% endif %}</dd>
+      </div>
+      <div><dt>Fällig am</dt><dd>{% if invoice.due_date %}{{ invoice.due_date | datum }}{% else %}<span class="muted">–</span>{% endif %}</dd></div>
+      <div><dt>Steuerbehandlung</dt><dd>{{ treatment.label }}</dd></div>
+      <div><dt>Käuferreferenz</dt><dd>{{ invoice.buyer_reference or "–" }}</dd></div>
+      <div>
+        <dt>Buchung</dt>
+        <dd>{% if invoice.journal_entry %}<a class="posting-number" href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=invoice.journal_entry_id) }}">{{ invoice.journal_entry.posting_number }}</a>{% else %}–{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Offener Posten</dt>
+        <dd>{% if invoice.open_item %}{{ invoice.open_item.open_amount | betrag }} {{ invoice.open_item.currency_code }} offen{% else %}–{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Ausgestellt</dt>
+        <dd>{{ invoice.issued_at | datum }} von {{ invoice.issued_by }}</dd>
+      </div>
+      <div>
+        <dt>E-Rechnung</dt>
+        <dd>XRechnung ({{ invoice.einvoice_syntax | upper }})</dd>
+      </div>
+    </dl>
+    {% if invoice.header_text %}<p>{{ invoice.header_text }}</p>{% endif %}
+    {% if treatment.note %}<p><strong>{{ treatment.note }}</strong></p>{% endif %}
+    {% if invoice.footer_text %}<p>{{ invoice.footer_text }}</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Positionen</h2>
+    <div class="table-scroll">
+      <table class="data" data-no-sort>
+        <thead>
+          <tr>
+            <th>Pos.</th>
+            <th>Beschreibung</th>
+            <th class="num">Menge</th>
+            <th>Einheit</th>
+            <th class="num">Einzelpreis</th>
+            <th class="num">USt</th>
+            <th>Erlöskonto</th>
+            <th class="num">Netto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in invoice.lines %}
+            <tr>
+              <td>{{ line.line_number }}</td>
+              <td>{{ line.description }}</td>
+              <td class="num">{{ line.quantity | zahl }}</td>
+              <td>{{ units.get(line.unit_code, line.unit_code) }}</td>
+              <td class="num">{{ price_text(line.unit_price) }}</td>
+              <td class="num">{{ line.tax_rate | satz }} %</td>
+              <td>{% if line.revenue_account_id in accounts %}{{ accounts[line.revenue_account_id].code }}{% endif %}</td>
+              <td class="num">{{ line.net_amount | betrag }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><th colspan="7">Summe netto</th><td class="num">{{ invoice.net_total | betrag }}</td></tr>
+          <tr><th colspan="7">Umsatzsteuer</th><td class="num">{{ invoice.tax_total | betrag }}</td></tr>
+          <tr><th colspan="7">Gesamtbetrag</th><td class="num"><strong>{{ invoice.gross_total | betrag }} {{ invoice.currency_code }}</strong></td></tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  {% if invoice.status == "issued" and invoice.invoice_type == "invoice" %}
+    <details class="card" id="storno">
+      <summary>Stornieren</summary>
+      <p class="hint">Möglich, solange der offene Posten unbezahlt ist. Es entsteht eine Stornorechnung mit eigener Nummer,
+        die Buchung wird storniert und der Posten ausgeglichen.</p>
+      <form method="post" action="{{ url_for('main.cancel_sales_invoice_action', invoice_id=invoice.id) }}" data-confirm="Rechnung {{ invoice.invoice_number }} verbindlich stornieren?">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="cancellation_date">Stornodatum</label>
+            <input id="cancellation_date" name="cancellation_date" type="date" value="{{ today }}" />
+          </div>
+          <div class="field field-wide">
+            <label for="reason">Grund (erscheint auf der Stornorechnung)</label>
+            <input id="reason" name="reason" maxlength="4000" />
+          </div>
+        </div>
+        <button type="submit" class="danger">Stornieren</button>
+      </form>
+    </details>
+  {% endif %}
+{% endblock %}

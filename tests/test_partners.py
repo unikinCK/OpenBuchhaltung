@@ -1137,7 +1137,10 @@ def _trigger_names(engine) -> set[str]:
         return {
             row[0]
             for row in connection.execute(
-                text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='trigger' "
+                    "AND name NOT LIKE 'obk_sales_invoice%'"
+                )
             )
         }
 

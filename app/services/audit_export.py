@@ -45,6 +45,8 @@ from domain.models import (
     PayrollRunLine,
     Period,
     PeriodLock,
+    SalesInvoice,
+    SalesInvoiceLine,
     TaxCode,
     Tenant,
     User,
@@ -103,6 +105,8 @@ EXPORT_TABLE_MODELS = {
     "bank_transactions": BankTransaction,
     "open_items": OpenItem,
     "open_item_settlements": OpenItemSettlement,
+    "sales_invoices": SalesInvoice,
+    "sales_invoice_lines": SalesInvoiceLine,
     "fixed_assets": FixedAsset,
     "depreciation_entries": DepreciationEntry,
     "payroll_employees": PayrollEmployee,
@@ -143,6 +147,11 @@ TABLE_DESCRIPTIONS = {
     "bank_transactions": "Importierte Bankumsätze und Buchungszuordnungen.",
     "open_items": "Offene und ausgeglichene Forderungen und Verbindlichkeiten.",
     "open_item_settlements": "Ausgleiche offener Posten mit Zahlungsdatum und Storno.",
+    "sales_invoices": (
+        "Ausgangsrechnungen und Stornorechnungen mit Nummer, Empfänger-Snapshot, Summen und "
+        "Verweisen auf Buchung, offenen Posten und Belege."
+    ),
+    "sales_invoice_lines": "Positionen der exportierten Ausgangsrechnungen.",
     "fixed_assets": "Anlagenstamm und Bewertungsparameter.",
     "depreciation_entries": "Gebuchte planmäßige und außerplanmäßige Abschreibungen.",
     "payroll_employees": "Prüfungsrelevante Beschäftigten- und Abrechnungsstammdaten.",
@@ -342,6 +351,21 @@ def build_audit_export_package(
         _date_range(ConsolidationAdjustment.adjustment_date, date_from, date_to),
         order_by=(ConsolidationAdjustment.adjustment_date, ConsolidationAdjustment.id),
     )
+    # Entwürfe sind noch keine Rechnungen und bleiben außen vor.
+    sales_invoices = _rows(
+        session,
+        SalesInvoice,
+        SalesInvoice.company_id == company.id,
+        SalesInvoice.status != "draft",
+        _date_range(SalesInvoice.issue_date, date_from, date_to),
+        order_by=(SalesInvoice.issue_date, SalesInvoice.id),
+    )
+    sales_invoice_lines = _rows(
+        session,
+        SalesInvoiceLine,
+        SalesInvoiceLine.sales_invoice_id.in_([row.id for row in sales_invoices] or [-1]),
+        order_by=(SalesInvoiceLine.sales_invoice_id, SalesInvoiceLine.line_number),
+    )
 
     tables: dict[str, list[dict[str, Any]] | dict[str, Any]] = {
         "tenant": _model_dict(tenant) if tenant is not None else {},
@@ -419,6 +443,8 @@ def build_audit_export_package(
                 order_by=(OpenItemSettlement.settlement_date, OpenItemSettlement.id),
             )
         ],
+        "sales_invoices": [_model_dict(row) for row in sales_invoices],
+        "sales_invoice_lines": [_model_dict(row) for row in sales_invoice_lines],
         "fixed_assets": [
             _model_dict(row)
             for row in _rows(
@@ -864,7 +890,8 @@ def _field_description(export_name: str, name: str, foreign_keys: list[str]) -> 
 
 def _json_value(value):
     if isinstance(value, Decimal):
-        return f"{value:.2f}"
+        # Beträge mit zwei Stellen; Mengen und Einzelpreise behalten ihre Genauigkeit.
+        return f"{value:.2f}" if value.as_tuple().exponent >= -2 else format(value, "f")
     if isinstance(value, datetime | date):
         return value.isoformat()
     return value

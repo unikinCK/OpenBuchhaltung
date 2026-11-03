@@ -703,6 +703,35 @@ button[disabled] {
   min-width: 15rem;
 }
 
+.invoice-lines-table td.col-description {
+  min-width: 16rem;
+}
+
+.invoice-lines-table td.col-description textarea {
+  width: 100%;
+  max-width: none;
+}
+
+.invoice-lines-table td.col-quantity {
+  min-width: 4.5rem;
+}
+
+.invoice-lines-table td.col-unit {
+  min-width: 7rem;
+}
+
+.invoice-lines-table td.col-price {
+  min-width: 7rem;
+}
+
+.invoice-lines-table td.col-tax {
+  min-width: 8.5rem;
+}
+
+.invoice-totals {
+  font-weight: 600;
+}
+
 .journal-lines-table td.col-side {
   width: 6.5rem;
 }

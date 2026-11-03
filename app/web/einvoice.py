@@ -19,6 +19,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
+from app.services.company_master_data import seller_party
 from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
@@ -311,14 +312,7 @@ def einvoice_export_action():
     session_factory = get_session_factory()
     with session_factory() as session:
         company = require_company_access(session, company_id)
-        seller = Party(
-            name=company.name,
-            street=current_app.config.get("SELLER_STREET", ""),
-            postal_code=current_app.config.get("SELLER_POSTAL_CODE", ""),
-            city=current_app.config.get("SELLER_CITY", ""),
-            country_code=current_app.config.get("SELLER_COUNTRY_CODE", "DE"),
-            vat_id=current_app.config.get("SELLER_VAT_ID", ""),
-        )
+        seller = seller_party(company)
         currency = company.currency_code
 
     buyer = Party(

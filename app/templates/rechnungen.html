@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination, sort_attrs, sort_hidden %}
+
+{% block title %}Rechnungen – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Rechnungen</h1>
+      <p class="page-subtitle">Ausgangsrechnungen schreiben, ausstellen und stornieren</p>
+    </div>
+    {% if selected_company_id %}
+      <div class="page-actions">
+        <a class="button-secondary" href="{{ url_for('main.company_master_data_page', company_id=selected_company_id) }}">Firmendaten</a>
+        <a class="button" href="{{ url_for('main.new_sales_invoice_page', company_id=selected_company_id) }}">+ Neue Rechnung</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <form method="get" action="{{ url_for('main.sales_invoices_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        {{ sort_hidden(sort) }}
+        <select name="status" aria-label="Status" data-autosubmit>
+          <option value="">Alle Status</option>
+          {% for value, label in status_labels.items() %}
+            <option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <select name="partner_id" aria-label="Kunde" data-autosubmit>
+          <option value="">Alle Kunden</option>
+          {% for customer in customers %}
+            <option value="{{ customer.id }}"{% if partner_id == customer.id %} selected{% endif %}>{{ customer.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="secondary">Filtern</button>
+        {% if filter_args %}<a href="{{ url_for('main.sales_invoices_page', company_id=selected_company_id) }}">Zurücksetzen</a>{% endif %}
+      </form>
+
+      {% if invoices %}
+        <div class="table-scroll">
+          <table class="data" {{ sort_attrs(sort) }}>
+            <thead>
+              <tr>
+                <th data-sort-key="number">Nummer</th>
+                <th data-sort-key="date">Datum</th>
+                <th data-sort-key="customer">Kunde</th>
+                <th data-sort-key="status">Status</th>
+                <th>Zahlung</th>
+                <th data-sort-key="due">Fällig</th>
+                <th class="num" data-sort-key="net">Netto</th>
+                <th class="num" data-sort-key="gross">Brutto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for invoice in invoices %}
+                {% set paid = payment_status(invoice) %}
+                <tr>
+                  <td class="nowrap">
+                    <a href="{{ url_for('main.sales_invoice_detail_page', invoice_id=invoice.id) }}">{{ invoice.invoice_number or "Entwurf" }}</a>
+                    {% if invoice.invoice_type == "cancellation" %}<span class="badge badge-warning">Storno</span>{% endif %}
+                  </td>
+                  <td class="date">{{ invoice.issue_date | datum }}</td>
+                  <td>{{ invoice.partner.name }}</td>
+                  <td>
+                    {% if invoice.status == "draft" %}<span class="badge">{{ status_labels[invoice.status] }}</span>
+                    {% elif invoice.status == "cancelled" %}<span class="badge badge-danger">{{ status_labels[invoice.status] }}</span>
+                    {% else %}<span class="badge badge-info">{{ status_labels[invoice.status] }}</span>{% endif %}
+                  </td>
+                  <td>{% if paid %}{{ payment_labels[paid] }}{% else %}<span class="muted">–</span>{% endif %}</td>
+                  <td class="date">{{ invoice.due_date | datum }}</td>
+                  <td class="num">{{ invoice.net_total | betrag }}</td>
+                  <td class="num">{{ invoice.gross_total | betrag }} {{ invoice.currency_code }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {{ pagination('main.sales_invoices_page', total, limit, offset, selected_company_id, extra=dict(filter_args, **sort.url_args)) }}
+      {% else %}
+        <p class="muted">Noch keine Rechnungen{% if filter_args %} für diesen Filter{% endif %}.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

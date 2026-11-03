@@ -97,8 +97,11 @@
       <p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p>
     {% else %}
       <p class="muted">Erzeugt eine XRechnung (UBL) oder ZUGFeRD/CII-Datei zum Download.
-        Die Verkäuferdaten stammen aus der Gesellschaft bzw. der Konfiguration
-        (<code>SELLER_*</code>-Variablen).</p>
+        Die Verkäuferdaten stammen aus den
+        <a href="{{ url_for('main.company_master_data_page', company_id=selected_company_id) }}">Firmendaten</a>,
+        leere Felder aus der Konfiguration (<code>SELLER_*</code>-Variablen). Dieses Formular erzeugt nur das XML;
+        <a href="{{ url_for('main.sales_invoices_page', company_id=selected_company_id) }}">Rechnungen</a>
+        schreiben Sie unter Belege → Rechnungen mit Nummer, Buchung und PDF.</p>
       <form method="post" action="{{ url_for('main.einvoice_export_action') }}" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />

@@ -124,7 +124,10 @@ def _load_item_partner(
     return partner
 
 
-def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
+def create_open_item(
+    *, session: Session, payload: OpenItemInput, commit: bool = True
+) -> OpenItem:
+    """Legt einen Posten an; mit ``commit=False`` committet der Aufrufer (Ausgangsrechnung)."""
     company = session.get(Company, payload.company_id)
     if company is None:
         raise OpenItemError("Gesellschaft nicht gefunden.")
@@ -212,8 +215,9 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
             "original_amount": str(item.original_amount),
         },
     )
-    session.commit()
-    session.refresh(item)
+    if commit:
+        session.commit()
+        session.refresh(item)
     return item
 
 
@@ -278,6 +282,7 @@ def settle_open_item(
     bank_transaction_id: int | None = None,
     journal_entry_id: int | None = None,
     settlement_date: date | None = None,
+    commit: bool = True,
 ) -> OpenItem:
     """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
     Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum."""
@@ -362,8 +367,11 @@ def settle_open_item(
             "journal_entry_id": linked_entry.id if linked_entry else None,
         },
     )
-    session.commit()
-    session.refresh(item)
+    if commit:
+        session.commit()
+        session.refresh(item)
+    else:
+        session.flush()
     return item
 
 
