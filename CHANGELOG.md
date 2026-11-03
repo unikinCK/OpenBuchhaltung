@@ -8,6 +8,12 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### KI-Chat: Werkzeuge seltener Fachgebiete auf Anforderung
+- Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss und Einrichtung sind im Chat nicht mehr von Anfang an
+  sichtbar. Obi lädt sie bei Bedarf mit dem Chat-Werkzeug `load_tools`; das spart rund ein Viertel der
+  Tool-Definitionen je Anfrage und schafft Platz für neue Fachfunktionen. Sperren und Bestätigungspflicht
+  gelten unverändert, MCP-Clients sehen weiter alle Tools.
+
 ### Istversteuerung (§ 20 UStG)
 - Versteuerungsart je Gesellschaft mit Wechsel zum Monatsersten (`company.vat_cash_basis_from`/`_until`,
   Migration `20261103_0062`, UI auf der Seite Umsatzsteuer, `GET`/`POST /api/v1/companies/<id>/vat-method`,

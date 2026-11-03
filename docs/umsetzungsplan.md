@@ -760,8 +760,8 @@ dann selbst betriebener Modellserver).
       Versionen, `evaluate_tool_call` am Bestätigungs-Hook).
 - [ ] Wissensbasis jährlich zum Jahreswechsel aktualisieren (Rechengrößen, Pauschalen,
       Gesetzesänderungen) und Rechtsstand hochsetzen; Auslandspauschalen (BMF) ergänzen.
-- [ ] Tool-Definitionen für den Chat verschlanken (rund 30.000 Token): seltene Tools erst auf
-      Anforderung einblenden oder Schemas kürzen, um Platz für Fachwissen zu gewinnen.
+- [x] Tool-Definitionen für den Chat verschlanken *(2026-11-03)*: seltene Fachgebiete erst auf
+      Anforderung (`load_tools`, Gruppen in `CHAT_TOOL_GROUPS`).
 - [ ] Konto- und Steuercode-Beschreibungen aus der Datenbank in Tool-Antworten mitliefern
       (`list_accounts`, `list_tax_codes`), damit instanzspezifisches Wissen ohne Pflege der
       Wissensbasis beim Modell ankommt.
