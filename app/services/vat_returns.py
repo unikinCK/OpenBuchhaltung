@@ -58,13 +58,20 @@ Stornobuchungen neutralisieren sich automatisch, da mit Salden gerechnet wird.
 Buchungen der Abschlussperiode (13) bleiben standardmäßig außen vor
 (``include_closing_entries``); Ergebnis- und Saldovorträge des
 Jahresabschlusses zählen nie als Umsatz.
+
+**Istversteuerung** (§ 20 UStG, ``Company.vat_cash_basis_from``): Rechnungen mit Umsatzsteuer und
+einem verknüpften offenen Posten zählen anteilig erst mit der Zahlung
+(``OpenItemSettlement``), siehe ``_apply_cash_basis``. Vorsteuer, steuerfreie Umsätze und direkt
+bezahlte Umsätze bleiben unverändert (ADR-009).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from types import SimpleNamespace
+from typing import Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -83,12 +90,16 @@ from app.services.tax_period import (
 )
 from domain.formatting import format_amount, format_rate
 from domain.models import (
+    SUBLEDGER_DEBTOR,
     TAX_KIND_INPUT,
+    TAX_KIND_OUTPUT,
     Account,
     BusinessPartner,
     Company,
     JournalEntry,
     JournalEntryLine,
+    OpenItem,
+    OpenItemSettlement,
     Period,
     TaxCode,
     VatReturn,
@@ -286,7 +297,24 @@ def vat_entries(
     fallen kann: Buchungsdatum im Zeitraum oder Leistungsdatum im Zeitraum bzw. bis
     zu zwei Monate davor. Welche Teile einer Buchung zählen, entscheidet der
     Steuerzeitpunkt (``_Entry.tax_point``)."""
-    stmt = (
+    stmt = _vat_lines_select().where(
+        JournalEntry.company_id == company_id,
+        or_(
+            and_(JournalEntry.entry_date >= date_from, JournalEntry.entry_date <= date_to),
+            and_(
+                JournalEntry.service_date >= date_from - SERVICE_DATE_LOOKBACK,
+                JournalEntry.service_date <= date_to,
+            ),
+        ),
+        JournalEntry.source.notin_(CARRYFORWARD_SOURCES),
+    )
+    if not include_closing_entries:
+        stmt = stmt.where(Period.is_closing.is_(False))
+    return _collect_entries(session.execute(stmt).all())
+
+
+def _vat_lines_select():
+    return (
         select(
             JournalEntryLine.journal_entry_id,
             JournalEntry.posting_number,
@@ -304,28 +332,19 @@ def vat_entries(
             Account.code.label("account_code"),
             Account.name.label("account_name"),
             Account.account_type.label("line_account_type"),
+            Account.subledger.label("account_subledger"),
         )
         .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
         .join(Period, Period.id == JournalEntry.period_id)
         .outerjoin(TaxCode, TaxCode.id == JournalEntryLine.tax_code_id)
         .join(Account, Account.id == JournalEntryLine.account_id)
-        .where(
-            JournalEntry.company_id == company_id,
-            or_(
-                and_(JournalEntry.entry_date >= date_from, JournalEntry.entry_date <= date_to),
-                and_(
-                    JournalEntry.service_date >= date_from - SERVICE_DATE_LOOKBACK,
-                    JournalEntry.service_date <= date_to,
-                ),
-            ),
-            JournalEntry.source.notin_(CARRYFORWARD_SOURCES),
-        )
         .order_by(JournalEntry.entry_date, JournalEntry.id, JournalEntryLine.line_number)
     )
-    if not include_closing_entries:
-        stmt = stmt.where(Period.is_closing.is_(False))
-    entries: dict[int, _Entry] = {}
-    for row in session.execute(stmt).all():
+
+
+def _collect_entries(rows) -> dict[Any, _Entry]:
+    entries: dict[Any, _Entry] = {}
+    for row in rows:
         entry = entries.setdefault(
             row.journal_entry_id,
             _Entry(
@@ -337,6 +356,172 @@ def vat_entries(
         )
         entry.rows.append(row)
     return entries
+
+
+def _output_tax_of_row(row, vat_accounts: dict[int, str]) -> Decimal:
+    """Umsatzsteuer einer Zeile (Habensaldo); null für alle anderen Zeilen."""
+    if row.tax_code_id is not None:
+        is_output_tax = (
+            row.vat_account_id is not None
+            and row.account_id == row.vat_account_id
+            and row.tax_kind != TAX_KIND_INPUT
+        )
+    else:
+        is_output_tax = vat_accounts.get(row.account_id) == TAX_KIND_OUTPUT
+    return row.credit_amount - row.debit_amount if is_output_tax else ZERO
+
+
+def _in_cash_basis(company: Company, day: date) -> bool:
+    if company.vat_cash_basis_from is None or day < company.vat_cash_basis_from:
+        return False
+    return company.vat_cash_basis_until is None or day <= company.vat_cash_basis_until
+
+
+def _paid_share(events: list[tuple[date, Decimal]], total: Decimal, up_to: date) -> Decimal:
+    """Bezahlter Anteil einer Rechnung zum Datum, begrenzt auf 0 bis 1."""
+    paid = sum((amount for day, amount in events if day <= up_to), ZERO)
+    return max(Decimal(0), min(Decimal(1), paid / total)) if total > ZERO else Decimal(0)
+
+
+def _scaled(amount: Decimal, share: Decimal) -> Decimal:
+    return (amount * share).quantize(ZERO, rounding=ROUND_HALF_UP)
+
+
+def _apply_cash_basis(
+    *,
+    session: Session,
+    company: Company,
+    entries: dict[Any, _Entry],
+    date_from: date,
+    date_to: date,
+    vat_accounts: dict[int, str],
+) -> tuple[dict[Any, _Entry], list[str]]:
+    """Ersetzt Rechnungen auf offene Posten durch den im Zeitraum bezahlten Anteil.
+
+    Eine Rechnung mit Umsatzsteuer und verknüpftem Posten, gebucht im Zeitraum der
+    Istversteuerung, zählt nicht mit dem Buchungsdatum. Stattdessen entsteht je Rechnung ein
+    Eintrag mit ihren Zeilen, skaliert auf den Anteil, der im Meldezeitraum gezahlt wurde; ein
+    storniertes Ausgleichen mindert im Zeitraum des Stornos. Gerechnet wird über den kumulierten
+    Anteil, damit sich Teilzahlungen ohne Rundungsrest zur Rechnung summieren. Der Rest wird
+    wie bisher ausgewertet, also auch die Vorsteuer und steuerfreie Umsätze.
+    """
+    filters = [
+        OpenItem.company_id == company.id,
+        OpenItem.item_type == "receivable",
+        JournalEntry.entry_date >= company.vat_cash_basis_from,
+    ]
+    if company.vat_cash_basis_until is not None:
+        filters.append(JournalEntry.entry_date <= company.vat_cash_basis_until)
+    item_rows = session.execute(
+        select(OpenItem.id, OpenItem.journal_entry_id, OpenItem.original_amount)
+        .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
+        .where(*filters)
+    ).all()
+
+    items_by_entry: dict[int, dict[int, Decimal]] = {}
+    for item_id, entry_id, original_amount in item_rows:
+        items_by_entry.setdefault(entry_id, {})[item_id] = original_amount
+
+    invoices = (
+        _collect_entries(
+            session.execute(
+                _vat_lines_select().where(JournalEntry.id.in_(items_by_entry))
+            ).all()
+        )
+        if items_by_entry
+        else {}
+    )
+    deferred = {
+        entry_id: invoice
+        for entry_id, invoice in invoices.items()
+        if any(_output_tax_of_row(row, vat_accounts) != ZERO for row in invoice.rows)
+    }
+
+    events_by_item: dict[int, list[tuple[date, Decimal]]] = {}
+    item_ids = [item_id for entry_id in deferred for item_id in items_by_entry[entry_id]]
+    if item_ids:
+        for settlement in session.execute(
+            select(OpenItemSettlement).where(OpenItemSettlement.open_item_id.in_(item_ids))
+        ).scalars():
+            events = events_by_item.setdefault(settlement.open_item_id, [])
+            events.append((settlement.settlement_date, settlement.amount))
+            if settlement.reversed_on is not None:
+                events.append((settlement.reversed_on, -settlement.amount))
+
+    # Stornos solcher Rechnungen entfallen wie die Rechnung selbst.
+    result = {
+        key: entry
+        for key, entry in entries.items()
+        if key not in deferred and entry.reversal_of_id not in deferred
+    }
+
+    not_due = ZERO
+    before = date_from - timedelta(days=1)
+    for entry_id, invoice in deferred.items():
+        item_amounts = items_by_entry[entry_id]
+        total = sum(item_amounts.values(), ZERO)
+        events = [
+            event for item_id in item_amounts for event in events_by_item.get(item_id, [])
+        ]
+        share_before = _paid_share(events, total, before)
+        share_after = _paid_share(events, total, date_to)
+        if invoice.entry_date <= date_to:
+            not_due += sum(
+                (
+                    _output_tax_of_row(row, vat_accounts)
+                    - _scaled(_output_tax_of_row(row, vat_accounts), share_after)
+                    for row in invoice.rows
+                ),
+                ZERO,
+            )
+        if share_after == share_before:
+            continue
+        paid = _Entry(invoice.posting_number, date_to)
+        for row in invoice.rows:
+            values = row._asdict()
+            for column in ("debit_amount", "credit_amount"):
+                values[column] = _scaled(values[column], share_after) - _scaled(
+                    values[column], share_before
+                )
+            paid.rows.append(SimpleNamespace(**values))
+        result[f"cash-basis-{entry_id}"] = paid
+
+    warnings: list[str] = []
+    overlaps = date_to >= company.vat_cash_basis_from and (
+        company.vat_cash_basis_until is None or date_from <= company.vat_cash_basis_until
+    )
+    if overlaps:
+        warnings.append(
+            "Istversteuerung: Rechnungen auf offene Posten zählen anteilig mit der Zahlung, "
+            "die Vorsteuer und steuerfreie Umsätze unverändert."
+        )
+    if not_due != ZERO:
+        warnings.append(
+            f"Istversteuerung: {format_amount(not_due)} € Umsatzsteuer aus bis zum "
+            f"{date_to.strftime('%d.%m.%Y')} gebuchten Rechnungen sind noch nicht fällig. "
+            "Das Steuerkonto enthält sie bereits, deshalb weicht sein Saldo von der Zahllast ab."
+        )
+    without_item = sorted(
+        entry.posting_number
+        for key, entry in result.items()
+        if isinstance(key, int)
+        and entry.reversal_of_id is None
+        and date_from <= entry.entry_date <= date_to
+        and _in_cash_basis(company, entry.entry_date)
+        and any(_output_tax_of_row(row, vat_accounts) != ZERO for row in entry.rows)
+        and any(
+            row.account_subledger == SUBLEDGER_DEBTOR and row.debit_amount > ZERO
+            for row in entry.rows
+        )
+    )
+    if without_item:
+        warnings.append(
+            "Istversteuerung: Für diese Rechnungen auf Forderungskonten gibt es keinen "
+            "verknüpften offenen Posten, sie zählen deshalb mit dem Buchungsdatum: "
+            + ", ".join(without_item[:10])
+            + (" …" if len(without_item) > 10 else "")
+        )
+    return result, warnings
 
 
 def _floor_euro(value: Decimal) -> Decimal:
@@ -396,9 +581,20 @@ def compute_vat_return_details(
     def add(kennzahl: str, amount: Decimal) -> None:
         bases[kennzahl] = bases.get(kennzahl, ZERO) + amount
 
-    for entry in vat_entries(
-        session, company_id, date_from, date_to, include_closing_entries
-    ).values():
+    entries = vat_entries(session, company_id, date_from, date_to, include_closing_entries)
+    cash_basis_warnings: list[str] = []
+    company = session.get(Company, company_id)
+    if company is not None and company.vat_cash_basis_from is not None:
+        entries, cash_basis_warnings = _apply_cash_basis(
+            session=session,
+            company=company,
+            entries=entries,
+            date_from=date_from,
+            date_to=date_to,
+            vat_accounts=vat_accounts,
+        )
+
+    for entry in entries.values():
 
         def due(rule: str, entry: _Entry = entry) -> bool:
             # Gehört dieser Teil der Buchung (Umsatz, Vorsteuer, Erwerb …) in den Zeitraum?
@@ -655,7 +851,9 @@ def compute_vat_return_details(
             "Kontenrahmen nicht erkannt: Steuerfreie Umsätze lassen sich nicht über die "
             "DATEV-Kontenfunktion zuordnen."
         )
-    return VatReturnResult(rows=rows, warnings=warnings, unassigned=unassigned)
+    return VatReturnResult(
+        rows=rows, warnings=[*cash_basis_warnings, *warnings], unassigned=unassigned
+    )
 
 
 def compute_vat_return(
@@ -746,6 +944,97 @@ def save_vat_return(
     session.commit()
     session.refresh(vat_return)
     return vat_return
+
+
+VAT_METHOD_ACCRUAL = "soll"
+VAT_METHOD_CASH = "ist"
+
+
+def company_vat_method(company: Company, *, on: date | None = None) -> dict[str, object]:
+    """Versteuerungsart der Gesellschaft: ``soll`` oder ``ist`` am Stichtag (Standard heute)."""
+    day = on or date.today()
+    return {
+        "company_id": company.id,
+        "method": VAT_METHOD_CASH if _in_cash_basis(company, day) else VAT_METHOD_ACCRUAL,
+        "as_of": day.isoformat(),
+        "cash_basis_from": (
+            company.vat_cash_basis_from.isoformat() if company.vat_cash_basis_from else None
+        ),
+        "cash_basis_until": (
+            company.vat_cash_basis_until.isoformat() if company.vat_cash_basis_until else None
+        ),
+    }
+
+
+def set_company_vat_method(
+    *,
+    session: Session,
+    company: Company,
+    method: str,
+    valid_from: date,
+    changed_by: str,
+) -> list[str]:
+    """Wechselt die Versteuerungsart zum Monatsersten und liefert Hinweise.
+
+    Abgebildet wird ein zusammenhängender Zeitraum der Istversteuerung. Liegt der Wechsel zurück
+    auf ``soll`` am Beginn dieses Zeitraums, war die Eingabe ein Irrtum und er wird entfernt.
+    Festgehaltene Voranmeldungen ändern sich nicht; sie werden als Hinweis genannt.
+    """
+    if method not in {VAT_METHOD_ACCRUAL, VAT_METHOD_CASH}:
+        raise VatReturnError("Versteuerungsart muss soll oder ist sein.")
+    if valid_from.day != 1:
+        raise VatReturnError("Die Versteuerungsart wechselt zum Ersten eines Monats.")
+
+    before = company_vat_method(company)
+    if method == VAT_METHOD_CASH:
+        if company.vat_cash_basis_until is not None:
+            raise VatReturnError(
+                "Ein erneuter Wechsel zur Istversteuerung nach deren Ende wird nicht abgebildet."
+            )
+        if company.vat_cash_basis_from is not None and company.vat_cash_basis_from != valid_from:
+            raise VatReturnError("Die Istversteuerung ist bereits eingerichtet.")
+        company.vat_cash_basis_from = valid_from
+    else:
+        if company.vat_cash_basis_from is None:
+            raise VatReturnError("Die Gesellschaft nutzt bereits die Sollversteuerung.")
+        if valid_from < company.vat_cash_basis_from:
+            raise VatReturnError("Das Datum liegt vor dem Beginn der Istversteuerung.")
+        if valid_from == company.vat_cash_basis_from:
+            company.vat_cash_basis_from = None
+            company.vat_cash_basis_until = None
+        else:
+            company.vat_cash_basis_until = valid_from - timedelta(days=1)
+
+    after = company_vat_method(company)
+    if {key: before[key] for key in ("cash_basis_from", "cash_basis_until")} == {
+        key: after[key] for key in ("cash_basis_from", "cash_basis_until")
+    }:
+        return []
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="company",
+        entity_id=str(company.id),
+        action="vat_method_changed",
+        changed_by=changed_by,
+        payload={"before": before, "after": after, "valid_from": valid_from.isoformat()},
+    )
+    session.commit()
+    saved = (
+        session.execute(
+            select(VatReturn.period_label).where(
+                VatReturn.company_id == company.id, VatReturn.date_to >= valid_from
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if saved:
+        return [
+            "Bereits festgehaltene Voranmeldungen bleiben unverändert: " + ", ".join(sorted(saved))
+        ]
+    return []
 
 
 def list_vat_returns(*, session: Session, company_id: int) -> list[VatReturn]:

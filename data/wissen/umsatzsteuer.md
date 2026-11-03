@@ -28,6 +28,7 @@ Schlagworte: Sollbesteuerung, Istbesteuerung, vereinbarte Entgelte, vereinnahmte
 
 - Regelfall Sollversteuerung: Umsatzsteuer entsteht mit Ablauf des Voranmeldungszeitraums der Leistungsausführung (§ 13 Abs. 1 Nr. 1a), unabhängig von der Zahlung.
 - Istversteuerung auf Antrag (§ 20 UStG): Steuer entsteht erst bei Zahlungseingang. Zulässig bei Gesamtumsatz des Vorjahres bis 800.000 € (seit 2024, vorher 600.000 €), bei Befreiung von der Buchführungspflicht nach § 148 AO oder für Freiberufler (§ 18 Abs. 1 Nr. 1 EStG) ohne Buchführungspflicht unabhängig vom Umsatz.
+- In OpenBuchhaltung: Versteuerungsart über `get_company_vat_method`. Bei Istversteuerung zählen Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten anteilig mit der Zahlung; den Wechsel nimmt ein Mensch auf der Seite Umsatzsteuer vor.
 - Anzahlungen werden immer bei Zahlungseingang versteuert (§ 13 Abs. 1 Nr. 1a Satz 4).
 - Vorsteuerabzug ist unabhängig von der eigenen Versteuerungsart; er setzt Leistungsbezug und ordnungsgemäße Rechnung voraus. Ab 1.1.2028 (JStG 2024): Bezieht man eine Leistung von einem Istversteuerer, ist die Vorsteuer erst bei Zahlung abziehbar; der Istversteuerer muss ab 2028 in seiner Rechnung auf „Versteuerung nach vereinnahmten Entgelten“ hinweisen (§ 14 Abs. 4 Nr. 6a UStG).
 - Wechsel zwischen den Verfahren: Umsätze dürfen weder doppelt noch gar nicht erfasst werden (§ 20 Satz 3).

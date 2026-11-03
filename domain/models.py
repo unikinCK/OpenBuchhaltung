@@ -79,6 +79,9 @@ class Company(Base):
     # Auftraggeber-Bankverbindung für SEPA-Zahlläufe (pain.001).
     iban: Mapped[str | None] = mapped_column(String(34))
     bic: Mapped[str | None] = mapped_column(String(11))
+    # Istversteuerung (§ 20 UStG) in diesem Zeitraum; ohne ``from`` gilt Sollversteuerung.
+    vat_cash_basis_from: Mapped[date | None] = mapped_column(Date)
+    vat_cash_basis_until: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -979,6 +982,54 @@ class OpenItem(Base):
         foreign_keys=[settlement_journal_entry_id]
     )
     bank_transaction: Mapped[BankTransaction | None] = relationship()
+    settlements: Mapped[list[OpenItemSettlement]] = relationship(
+        back_populates="open_item", cascade="all, delete-orphan"
+    )
+
+
+class OpenItemSettlement(Base):
+    """Ein Ausgleich eines offenen Postens mit Datum und Betrag.
+
+    Grundlage der Istversteuerung: Die Umsatzsteuer entsteht anteilig mit der Zahlung. Wird die
+    Ausgleichsbuchung storniert, bleibt die Zeile stehen und trägt das Stornodatum, damit bereits
+    gemeldete Zeiträume unverändert bleiben und die Korrektur im Zeitraum des Stornos erscheint.
+    """
+
+    __tablename__ = "open_item_settlement"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_open_item_settlement_amount_positive"),
+        Index("ix_open_item_settlement_item", "open_item_id", "settlement_date"),
+        Index("ix_open_item_settlement_entry", "journal_entry_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    open_item_id: Mapped[int] = mapped_column(
+        ForeignKey("open_item.id", ondelete="CASCADE"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    settlement_date: Mapped[date] = mapped_column(Date, nullable=False)
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    bank_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_transaction.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    reversed_on: Mapped[date | None] = mapped_column(Date)
+    reversal_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+
+    open_item: Mapped[OpenItem] = relationship(back_populates="settlements")
 
 
 class FixedAsset(Base):

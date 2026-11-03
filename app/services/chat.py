@@ -120,6 +120,8 @@ CHAT_BLOCKED_TOOL_NAMES = {
     "set_partner_bank_details",
     # Übernimmt eine IBAN aus dem Freitext eines Postens in den Partnerstamm.
     "apply_partner_takeover",
+    # Die Versteuerungsart braucht die Gestattung des Finanzamts und ändert alle Meldungen.
+    "set_company_vat_method",
     "set_company_knowledge_entry_status",
     "set_company_knowledge_source_active",
     "update_company_knowledge_source",

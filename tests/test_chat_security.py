@@ -44,6 +44,7 @@ from domain.models import Account, ChatMessage, Tenant, User
 EXPECTED_BLOCKED_TOOLS = {
     # Übernimmt eine IBAN in den Partnerstamm
     "apply_partner_takeover",
+    "set_company_vat_method",
     # Chat-Tools (Rekursion)
     "list_chat_conversations",
     "get_chat_conversation",

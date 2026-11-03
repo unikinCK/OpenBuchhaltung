@@ -149,6 +149,8 @@ EXPECTED_TOOL_NAMES = {
     "complete_open_banking_authorization",
     "sync_open_banking_transactions",
     "list_open_items",
+    "get_company_vat_method",
+    "set_company_vat_method",
     "set_open_item_partner",
     "get_partner_statement",
     "get_partner_balances",
