@@ -779,6 +779,18 @@ ebenso (Partner der Buchung, auch bei `PATCH /api/v1/journal-entries/<id>` und
 `get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
 `get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
 
+### Altdaten aus offenen Posten übernehmen
+
+Unter **Partner → Aus offenen Posten übernehmen** stehen die offenen Posten ohne Partner, gruppiert
+nach dem normalisierten Freitext der Gegenseite, mit Summen, IBANs und einem passenden bestehenden
+Partner (gleicher Name oder gleiche IBAN). Die Übernahme verknüpft die Gruppe mit diesem Partner oder
+legt einen neuen an; eine eindeutige IBAN der Gruppe wandert dabei in den Stamm. Der Freitext bleibt
+unverändert. Posten auf Konten ohne passendes Sammelkonto-Kennzeichen werden übersprungen und
+gemeldet. Festgeschriebene Buchungen bleiben ohne Partner. API:
+`GET /api/v1/partners/takeover-proposals`, `POST /api/v1/partners/takeover`; MCP:
+`list_partner_takeover_proposals`, `apply_partner_takeover` (im KI-Chat gesperrt, weil es
+Bankdaten in den Stamm übernehmen kann).
+
 ### Partnerkonto und Saldenliste
 
 Die Partnerseite zeigt das **Partnerkonto**: die Zeilen des Partners auf Sammelkonten mit
@@ -1073,8 +1085,23 @@ einzustellen); andere Zeichen werden zu `_` (`KST-10` → `KST_10`). Eine Umbuch
 zwischen zwei Kostenstellen auf demselben Konto ergäbe einen Satz mit Konto gleich
 Gegenkonto und entfällt.
 
-Noch offen: Personenkonten (Debitoren/Kreditoren) und Golden-File-Tests. Der Export
-ist DATEV-kompatibel, aber nicht zertifiziert.
+**Personenkonten.** Eine Zeile auf einem Debitoren- oder Kreditoren-Sammelkonto mit
+Geschäftspartner steht im Stapel unter der Personenkontonummer des Partners (10000–69999 bzw.
+70000–99999 bei vierstelligen Sachkonten), Partnerbezüge auf anderen Konten bleiben Sachkontozeilen
+(ADR-002). Zeilen ohne Partner bleiben auf dem Sammelkonto. Wer auf Sammelkonten importieren
+möchte, setzt das Häkchen „auf Sammelkonten“ bzw. in API und MCP `personal_accounts=false`.
+
+**Stammdaten Debitoren/Kreditoren.** Der Export `GET /api/v1/exports/datev-partners.csv` (MCP
+`export_datev_partners_csv`, Link auf der Berichte-Seite) liefert alle Partner im DATEV-Format
+(EXTF, Datenkategorie 16, Formatversion 5, 254 Felder, Windows-1252): Personenkonto, Name je
+Adressatentyp, USt-IdNr, Anschrift, Telefon, E-Mail, IBAN/BIC, Steuernummer, Ansprechpartner,
+Zahlungsziel, verknüpftes OPOS-Konto bei Partnern mit beiden Rollen und Status. Ein Partner mit
+beiden Rollen ergibt zwei Sätze. Natürliche Personen haben bei uns nur ein Namensfeld: Das letzte
+Wort gilt als Nachname. Postleitzahlen mit Buchstaben stehen im Ort, weil das Feld im Format rein
+numerisch ist. Vor dem ersten Stapel einspielen, damit die Personenkonten Namen tragen.
+
+Der Export ist DATEV-kompatibel, aber nicht zertifiziert; die Dateien wurden gegen die
+Formatbeschreibung gebaut, nicht in einem DATEV-Programm importiert.
 
 ## Steuercodes (USt/VSt)
 

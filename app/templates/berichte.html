@@ -94,12 +94,18 @@
           <input id="datev_date_from" name="date_from" type="date" value="{{ datev_selection.date_from }}" style="width:auto;" />
           <label for="datev_date_to">Bis</label>
           <input id="datev_date_to" name="date_to" type="date" value="{{ datev_selection.date_to }}" style="width:auto;" />
+          <label for="datev_collective_accounts">
+            <input id="datev_collective_accounts" name="collective_accounts" type="checkbox" value="1" />
+            auf Sammelkonten
+          </label>
           <button type="submit">Exportieren</button>
         </form>
         <p class="muted">
           Ein Stapel je Wirtschaftsjahr: DATEV liest das Jahr des Belegdatums (TTMM) aus dem
           WJ-Beginn im Kopf der Datei. Ohne Von/Bis wird das ganze Wirtschaftsjahr exportiert,
-          sonst nur der Zeitraum darin (z. B. ein Monat).
+          sonst nur der Zeitraum darin (z. B. ein Monat). Sammelkontozeilen mit Geschäftspartner stehen
+          unter der Debitoren- bzw. Kreditorennummer, außer mit Haken bei „auf Sammelkonten“; die
+          Stammdaten dazu liefert der <a href="{{ url_for('api.export_datev_partners_csv', company_id=selected_company_id) }}">Export Debitoren/Kreditoren</a>.
         </p>
       {% else %}
         <p class="muted">DATEV-Buchungsstapel: noch kein Wirtschaftsjahr angelegt – es entsteht mit der ersten Buchung.</p>

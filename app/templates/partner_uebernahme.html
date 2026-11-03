@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Partner aus offenen Posten – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.partners_page', company_id=selected_company_id) }}">‹ Alle Geschäftspartner</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Partner aus offenen Posten übernehmen</h1>
+      <p class="page-subtitle">Offene Posten ohne Partner, gruppiert nach dem Freitext der Gegenseite</p>
+    </div>
+  </div>
+
+  <section class="card">
+    {% if proposals %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Gegenseite</th>
+              <th>Rolle</th>
+              <th class="num">Posten</th>
+              <th class="num">Offen</th>
+              <th>IBAN</th>
+              <th>Passender Partner</th>
+              <th class="actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for proposal in proposals %}
+              <tr>
+                <td>{{ proposal.name }}</td>
+                <td>
+                  {% if proposal.is_customer %}<span class="badge badge-info">Kunde</span>{% endif %}
+                  {% if proposal.is_supplier %}<span class="badge badge-warning">Lieferant</span>{% endif %}
+                </td>
+                <td class="num">
+                  {{ proposal.item_count }}
+                  {% if proposal.usable_item_count < proposal.item_count %}
+                    <br /><span class="muted small" title="Die übrigen Posten liegen nicht auf einem passenden Sammelkonto.">davon {{ proposal.usable_item_count }} übernehmbar</span>
+                  {% endif %}
+                </td>
+                <td class="num">{{ proposal.open_total | betrag }}</td>
+                <td class="small">{{ proposal.ibans | join(", ") or "–" }}</td>
+                <td>
+                  {% if proposal.partner_id %}
+                    <a href="{{ url_for('main.partner_detail_page', partner_id=proposal.partner_id) }}">{{ proposal.partner_name }}</a>
+                    <span class="muted small">{{ proposal.partner_number }}</span>
+                  {% else %}
+                    <span class="muted">keiner</span>
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  <form method="post" action="{{ url_for('main.apply_partner_takeover_action') }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <input type="hidden" name="key" value="{{ proposal.key }}" />
+                    {% if proposal.partner_id %}
+                      <input type="hidden" name="partner_id" value="{{ proposal.partner_id }}" />
+                      <button type="submit" class="btn-sm" data-confirm="{{ proposal.usable_item_count }} Posten mit {{ proposal.partner_name }} verknüpfen?">Verknüpfen</button>
+                    {% else %}
+                      <button type="submit" class="btn-sm" {% if not proposal.usable_item_count %}disabled{% endif %} data-confirm="Partner „{{ proposal.name }}“ anlegen und {{ proposal.usable_item_count }} Posten zuordnen?">Partner anlegen</button>
+                    {% endif %}
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted small">Der Freitext der Posten bleibt unverändert. Eine eindeutige IBAN der Gegenseite wird beim
+        Anlegen in den Partnerstamm übernommen, bei mehreren entscheiden Sie selbst. Posten ohne passendes
+        Sammelkonto bleiben ohne Partner; das Kennzeichen wird unter <a href="{{ url_for('main.accounts_page', company_id=selected_company_id) }}">Konten</a> gesetzt.
+        Festgeschriebene Buchungen bleiben unverändert.</p>
+    {% else %}
+      <p class="empty-state">Keine offenen Posten ohne Geschäftspartner.</p>
+    {% endif %}
+  </section>
+{% endblock %}

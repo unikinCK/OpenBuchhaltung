@@ -27,6 +27,12 @@ from app.services.partner_ledger import (
     serialize_partner_balances,
     serialize_statement_side,
 )
+from app.services.partner_takeover import (
+    PartnerTakeoverError,
+    apply_partner_takeover,
+    partner_takeover_proposals,
+    serialize_takeover_proposal,
+)
 from app.services.partners import (
     UPDATABLE_FIELDS,
     PartnerError,
@@ -320,6 +326,53 @@ def get_partner_statement_via_api(partner_id: int):
                 ],
             }
         )
+
+
+@api_bp.get("/partners/takeover-proposals")
+def list_partner_takeover_proposals_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        proposals = partner_takeover_proposals(session=session, company_id=company_id)
+    return jsonify(
+        {
+            "company_id": company_id,
+            "proposals": [serialize_takeover_proposal(proposal) for proposal in proposals],
+        }
+    )
+
+
+@api_bp.post("/partners/takeover")
+def apply_partner_takeover_via_api():
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        partner_id = (
+            int(payload["partner_id"]) if payload.get("partner_id") not in (None, "") else None
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id and partner_id must be integers."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            result = apply_partner_takeover(
+                session=session,
+                company_id=company_id,
+                key=str(payload.get("key") or ""),
+                partner_id=partner_id,
+                changed_by=_api_changed_by(),
+            )
+        except PartnerTakeoverError as exc:
+            return jsonify({"error": str(exc)}), 422
+    return jsonify(result), 200
 
 
 def _partner_balances_report(session, company_id: int):

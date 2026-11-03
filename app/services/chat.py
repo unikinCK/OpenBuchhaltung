@@ -118,6 +118,8 @@ CHAT_BLOCKED_TOOL_KEYWORDS = (
 CHAT_BLOCKED_TOOL_NAMES = {
     "set_company_bank_details",
     "set_partner_bank_details",
+    # Übernimmt eine IBAN aus dem Freitext eines Postens in den Partnerstamm.
+    "apply_partner_takeover",
     "set_company_knowledge_entry_status",
     "set_company_knowledge_source_active",
     "update_company_knowledge_source",

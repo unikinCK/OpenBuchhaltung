@@ -24,7 +24,9 @@ from app.services.datev_export import (
     DatevExportError,
     DatevExportOptions,
     build_datev_export,
+    build_datev_partner_export,
     datev_export_file_name,
+    datev_partner_export_file_name,
     resolve_datev_export_period,
 )
 from app.services.reports import trial_balance_for_company
@@ -306,6 +308,7 @@ def export_datev_csv():
         options = DatevExportOptions(
             consultant_number=current_app.config.get("DATEV_CONSULTANT_NUMBER") or 1000,
             client_number=current_app.config.get("DATEV_CLIENT_NUMBER") or company_id,
+            personal_accounts=bool_arg("personal_accounts", default=True),
         )
         content = build_datev_export(
             session=session,
@@ -320,6 +323,37 @@ def export_datev_csv():
     file_name = datev_export_file_name(company_id, period)
     return Response(
         payload,
+        content_type="text/csv; charset=windows-1252",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@api_bp.get("/exports/datev-partners.csv")
+@linkable_download
+def export_datev_partners_csv():
+    """Stammdaten Debitoren/Kreditoren (EXTF, Datenkategorie 16)."""
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    generated_at = datetime.now(timezone.utc)
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        content = build_datev_partner_export(
+            session=session,
+            company_id=company_id,
+            options=DatevExportOptions(
+                consultant_number=current_app.config.get("DATEV_CONSULTANT_NUMBER") or 1000,
+                client_number=current_app.config.get("DATEV_CLIENT_NUMBER") or company_id,
+            ),
+            generated_at=generated_at,
+        )
+
+    file_name = datev_partner_export_file_name(company_id, generated_at)
+    return Response(
+        content.encode("cp1252", errors="replace"),
         content_type="text/csv; charset=windows-1252",
         headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
     )
