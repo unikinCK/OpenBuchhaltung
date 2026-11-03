@@ -221,6 +221,12 @@ TOOL_TITLES: dict[str, str] = {
 }
 
 
+# Chat-eigene Werkzeuge, die es im MCP-Server nicht gibt.
+CHAT_TOOL_TITLES: dict[str, str] = {"load_tools": "Werkzeuge einblenden"}
+
+
 def tool_title(name: str) -> str:
     """Anzeigename eines Tools; unbekannte Namen lesbar machen statt scheitern."""
-    return TOOL_TITLES.get(name) or name.replace("_", " ").capitalize()
+    return (
+        TOOL_TITLES.get(name) or CHAT_TOOL_TITLES.get(name) or name.replace("_", " ").capitalize()
+    )

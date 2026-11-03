@@ -1744,6 +1744,12 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 `rename_chat_conversation`, `delete_chat_conversation`, `confirm_chat_action`,
 `reject_chat_action`).
 
+**Werkzeuge auf Anforderung.** Jede Tool-Definition belegt bei jeder Anfrage Platz im Kontext des
+Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Einrichtung) blendet
+Obi deshalb erst ein, wenn es sie braucht: über das Chat-Werkzeug `load_tools`, das keine Bestätigung
+braucht und in der Unterhaltung erhalten bleibt. Was im Chat gesperrt ist, bleibt auch danach gesperrt, und
+schreibende Werkzeuge bleiben bestätigungspflichtig. Für MCP-Clients ändert sich nichts.
+
 ## Fachwissen für Obi (Wissensbasis)
 
 Obi bekommt neben den Tool-Definitionen Fachwissen mit: Der Systemprompt enthält die

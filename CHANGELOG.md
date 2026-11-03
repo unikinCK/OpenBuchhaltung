@@ -8,6 +8,12 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### KI-Chat: Werkzeuge seltener Fachgebiete auf Anforderung
+- Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss und Einrichtung sind im Chat nicht mehr von Anfang an
+  sichtbar. Obi lädt sie bei Bedarf mit dem Chat-Werkzeug `load_tools`; das spart rund ein Viertel der
+  Tool-Definitionen je Anfrage und schafft Platz für neue Fachfunktionen. Sperren und Bestätigungspflicht
+  gelten unverändert, MCP-Clients sehen weiter alle Tools.
+
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf
