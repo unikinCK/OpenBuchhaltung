@@ -249,6 +249,7 @@ def test_demo_mode_blocks_locked_areas_via_mcp(tmp_path):
     blocked_calls = (
         ("create_user", {"username": "mallory", "password": "geheim12345"}),
         ("rotate_user_api_token", {"user_id": demo_user_id}),
+        ("reset_user_two_factor", {"user_id": demo_user_id}),
         ("change_own_password", {"current_password": "demo1234", "new_password": "x" * 12}),
         ("set_user_llm_settings", {"user_id": demo_user_id, "api_key": "sk-test"}),
         ("create_tenant_with_company", {"tenant_name": "T", "company_name": "C"}),

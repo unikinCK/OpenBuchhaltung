@@ -10,7 +10,15 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .api import api_bp
-from .auth import auth_bp, ensure_csrf_token
+from .auth import (
+    ROLE_ADMIN,
+    ROLE_BUCHHALTER,
+    ROLE_PRUEFER,
+    ROLE_SUPPORT,
+    auth_bp,
+    ensure_csrf_token,
+    two_factor_setup_required,
+)
 from .cli import register_cli_commands
 from .db import auto_migrate_enabled, create_session_factory, running_from_cli
 from .demo_mode import register_demo_mode
@@ -189,6 +197,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         LOGIN_RATE_LIMIT_WINDOW_SECONDS=int(
             os.environ.get("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "900")
         ),
+        TWO_FACTOR_REQUIRED_ROLES=os.environ.get("TWO_FACTOR_REQUIRED_ROLES", ""),
         DATEV_CONSULTANT_NUMBER=int(os.environ.get("DATEV_CONSULTANT_NUMBER", "1000")),
         DATEV_CLIENT_NUMBER=(
             int(os.environ["DATEV_CLIENT_NUMBER"])
@@ -249,6 +258,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             "Deutschen Kreditwirtschaft muss vollständig und unverändert eingetragen werden.",
             len(fints_product_id),
         )
+    _warn_unknown_two_factor_roles(app)
     _configure_hardening(app)
 
     Path(app.config["DOCUMENT_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -269,7 +279,10 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.context_processor
     def _inject_csrf_token():
-        return {"csrf_token": ensure_csrf_token}
+        return {
+            "csrf_token": ensure_csrf_token,
+            "two_factor_setup_forced": two_factor_setup_required,
+        }
 
     @app.after_request
     def _add_security_headers(response):
@@ -301,6 +314,20 @@ def create_app(test_config: dict | None = None) -> Flask:
         return {"error": "Uploaded file is too large."}, 413
 
     return app
+
+
+def _warn_unknown_two_factor_roles(app: Flask) -> None:
+    """Ein Tippfehler in der Rollenliste würde die Pflicht sonst still aussetzen."""
+    known = {
+        role.casefold() for role in (ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT)
+    }
+    raw = str(app.config.get("TWO_FACTOR_REQUIRED_ROLES") or "")
+    parts = [part.strip() for part in raw.split(",")]
+    unknown = sorted(part for part in parts if part and part.casefold() not in known)
+    if unknown:
+        logger.warning(
+            "TWO_FACTOR_REQUIRED_ROLES enthält unbekannte Rollen: %s", ", ".join(unknown)
+        )
 
 
 def _configure_secret_key(app: Flask) -> None:

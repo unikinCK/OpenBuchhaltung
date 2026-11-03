@@ -295,7 +295,9 @@ Open Banking (PSD2 ueber Enable Banking, fuer Banken ohne FinTS wie Finom):
   Enable Banking hinterlegt sein.
 - Gespeichert wird nur die Sitzungs-ID von Enable Banking, Fernet-verschluesselt
   mit einem aus `SECRET_KEY` abgeleiteten Schluessel. Wird `SECRET_KEY`
-  gewechselt, muss die Bank-Zustimmung neu erteilt werden.
+  gewechselt, muss die Bank-Zustimmung neu erteilt werden. Dasselbe gilt fuer die
+  Zwei-Faktor-Anmeldung: Betroffene melden sich mit einem Wiederherstellungscode an und
+  richten neu ein, oder ein Administrator setzt zurueck (`flask reset-2fa --username ...`).
 - Anlegen, Zustimmung, Abruf und Deaktivieren (mit Widerruf der Sitzung)
   werden im Audit-Log protokolliert.
 - Der kostenlose Enable-Banking-Modus deckt laut AGB nur private Konten ab;

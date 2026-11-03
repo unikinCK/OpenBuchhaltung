@@ -46,6 +46,8 @@ from app.auth import (
     constant_time_equals,
     current_user,
     hash_api_token,
+    redirect_to_two_factor_setup,
+    two_factor_setup_required,
     validate_csrf,
 )
 from app.services.security_events import record_security_event
@@ -362,6 +364,8 @@ def authorize_form():
     if current_user() is None:
         flash("Bitte anmelden, um den Zugriff zu erlauben.", "error")
         return redirect(url_for("auth.login_form", next=request.full_path))
+    if two_factor_setup_required():
+        return redirect_to_two_factor_setup()
 
     response = current_app.make_response(
         render_template(
@@ -386,6 +390,8 @@ def authorize_decision():
     user = current_user()
     if user is None:
         abort(401)
+    if two_factor_setup_required():
+        abort(403)
     params = _authorization_params(request.form)
     with _get_session_factory()() as db_session:
         client, redirect_error, fatal_error = _validate_authorization_request(db_session, params)

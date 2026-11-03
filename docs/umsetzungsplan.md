@@ -651,8 +651,12 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Zeile bleibt der chronologisch laufende. GuV, Steuerberechnung, Mahnschreiben
         und Eingabetabellen bleiben unsortiert. Offen: Sortierung der übrigen
         Listen-Endpunkte in REST/MCP.
+  - [x] Zwei-Faktor-Anmeldung (TOTP) *(2026-11-03, Review #13)*: Einrichtung mit QR-Code und
+        Wiederherstellungscodes, zweiter Login-Schritt, Rollenpflicht
+        `TWO_FACTOR_REQUIRED_ROLES`, Admin-Reset über UI, REST, MCP und CLI. API-Tokens bleiben
+        bewusst ohne zweiten Faktor.
 - [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10),
-      Kassenbuch (#9), 2FA (#13), Ist-Versteuerung (#15), Fremdwährung (#14).
+      Kassenbuch (#9), Ist-Versteuerung (#15), Fremdwährung (#14).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 
