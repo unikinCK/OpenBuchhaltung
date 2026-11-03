@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app import create_app
-from app.auth import hash_password
+from app.auth import hash_api_token, hash_password
 from app.services.dunning import dunning_proposals, dunning_recipient_lines, serialize_proposal
 from app.services.journal_entries import (
     JournalEntryInput,
@@ -900,3 +900,78 @@ def test_ui_pages_show_partner(tmp_path: Path) -> None:
         "/partner/saldenliste", query_string={"company_id": company_id}
     ).get_data(as_text=True)
     assert "UI Kunde" in balances
+
+
+def test_partner_assignment_and_reports_respect_rights_and_tenants(tmp_path: Path) -> None:
+    app = create_app(
+        {
+            "TESTING": True,
+            "API_REQUIRE_AUTH": True,
+            "DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'rights.db'}",
+        }
+    )
+    with app.extensions["db_session_factory"]() as db:
+        company, accounts = _seed(db)
+        foreign, foreign_accounts = _seed(db, "Fremd GmbH")
+        foreign_customer = _customer(db, foreign, "Fremdkunde")
+        own_item = _item(db, company, accounts["1400"])
+        foreign_item = _item(db, foreign, foreign_accounts["1400"], reference="RE-F")
+        for username, role, token in (
+            ("pruefer", "Pruefer", "obk_pruefer-sub"),
+            ("buchhalter", "Buchhalter", "obk_buchhalter-sub"),
+        ):
+            db.add(
+                User(
+                    username=username,
+                    password_hash=hash_password("geheim123"),
+                    role=role,
+                    tenant_id=company.tenant_id,
+                    api_token_hash=hash_api_token(token),
+                    api_token_last4=token[-4:],
+                )
+            )
+        db.commit()
+        own_item_id, foreign_item_id = own_item.id, foreign_item.id
+        foreign_company_id, foreign_partner_id = foreign.id, foreign_customer.id
+        company_id = company.id
+
+    client = app.test_client()
+    reader = {"Authorization": "Bearer obk_pruefer-sub"}
+    writer = {"Authorization": "Bearer obk_buchhalter-sub"}
+    assert (
+        client.post(
+            f"/api/v1/open-items/{own_item_id}/partner", headers=reader, json={}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/v1/open-items/{foreign_item_id}/partner", headers=writer, json={}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/api/v1/open-items/{own_item_id}/partner",
+            headers=writer,
+            json={"partner_id": foreign_partner_id},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"/api/v1/partners/{foreign_partner_id}/statement", headers=writer
+        ).status_code
+        == 404
+    )
+    for path in ("/api/v1/reports/partner-balances", "/api/v1/exports/partner-balances.csv"):
+        assert (
+            client.get(
+                path, headers=writer, query_string={"company_id": foreign_company_id}
+            ).status_code
+            == 404
+        )
+        assert (
+            client.get(path, headers=reader, query_string={"company_id": company_id}).status_code
+            == 200
+        )

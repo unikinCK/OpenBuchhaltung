@@ -622,8 +622,11 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
   - [x] Kunden-/Lieferantenstamm, PR 2 *(2026-11-03)*: OPOS, Zahllauf und Mahnwesen am
         Partner, Partnerkonto und Saldenliste mit Abstimmung je Sammelkonto; UI/API/MCP
         (Migration `20261103_0057`). Offen: Sammelmahnung je Partner.
-  - [ ] Kunden-/Lieferantenstamm, PR 3–4: Partnererkennung in automatischen
-        Quellen (deckt #5 ab), DATEV-Personenkonten und Stammdatenexport.
+  - [x] Kunden-/Lieferantenstamm, PR 4 *(2026-11-03)*: DATEV-Personenkonten im
+        Buchungsstapel, Stammdatenexport Debitoren/Kreditoren (Kategorie 16) und
+        Altdatenübernahme aus den Freitexten offener Posten; UI/API/MCP.
+  - [ ] Kunden-/Lieferantenstamm, PR 3: Partnererkennung in automatischen Quellen
+        (deckt #5 ab).
 - [ ] **Sprint 6 – UX**: deutsches Betrags-/Datumsformat (U2);
       Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
       Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit

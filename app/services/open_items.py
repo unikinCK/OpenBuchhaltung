@@ -216,19 +216,14 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
     return item
 
 
-def set_open_item_partner(
-    *, session: Session, open_item_id: int, partner_id: int | None, changed_by: str
-) -> OpenItem:
-    """Ordnet einem Posten einen Partner zu oder entfernt ihn (auch nach dem Ausgleich).
-
-    Name, Bankdaten und Fälligkeit bleiben unverändert; fehlende Angaben werden aus dem
-    Partner ergänzt. Der Freitext bleibt erhalten, er ist der Stand zum Zeitpunkt der Erfassung.
-    """
-    item = session.get(OpenItem, open_item_id)
-    if item is None:
-        raise OpenItemError("Offener Posten nicht gefunden.")
+def assign_partner_to_item(
+    *, session: Session, item: OpenItem, partner_id: int | None, changed_by: str
+) -> bool:
+    """Setzt den Partner eines Postens ohne Commit; liefert, ob sich etwas geändert hat."""
     before = item.partner_id
-    if partner_id is not None and partner_id != before:
+    if partner_id == before:
+        return False
+    if partner_id is not None:
         partner = _load_item_partner(
             session=session,
             company_id=item.company_id,
@@ -240,8 +235,6 @@ def set_open_item_partner(
         if item.counterparty_iban is None:
             item.counterparty_iban = partner.iban
             item.counterparty_bic = item.counterparty_bic or partner.bic
-    if partner_id == before:
-        return item
     item.partner_id = partner_id
     log_audit_event(
         session=session,
@@ -253,8 +246,25 @@ def set_open_item_partner(
         changed_by=changed_by,
         payload={"reference": item.reference, "before": before, "after": partner_id},
     )
-    session.commit()
-    session.refresh(item)
+    return True
+
+
+def set_open_item_partner(
+    *, session: Session, open_item_id: int, partner_id: int | None, changed_by: str
+) -> OpenItem:
+    """Ordnet einem Posten einen Partner zu oder entfernt ihn (auch nach dem Ausgleich).
+
+    Name, Bankdaten und Fälligkeit bleiben unverändert; fehlende Angaben werden aus dem
+    Partner ergänzt. Der Freitext bleibt erhalten, er ist der Stand zum Zeitpunkt der Erfassung.
+    """
+    item = session.get(OpenItem, open_item_id)
+    if item is None:
+        raise OpenItemError("Offener Posten nicht gefunden.")
+    if assign_partner_to_item(
+        session=session, item=item, partner_id=partner_id, changed_by=changed_by
+    ):
+        session.commit()
+        session.refresh(item)
     return item
 
 

@@ -14,6 +14,11 @@ from app.services.partner_ledger import (
     partner_balances,
     partner_statement,
 )
+from app.services.partner_takeover import (
+    PartnerTakeoverError,
+    apply_partner_takeover,
+    partner_takeover_proposals,
+)
 from app.services.partners import (
     PartnerError,
     create_partner,
@@ -305,6 +310,51 @@ def partner_detail_page(partner_id: int):
             entries_total=entries_total,
             overview=overview,
         )
+
+
+@main_bp.get("/partner/uebernahme")
+def partner_takeover_page():
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        companies, selected_company_id = company_context(session)
+        proposals = (
+            partner_takeover_proposals(session=session, company_id=selected_company_id)
+            if selected_company_id
+            else []
+        )
+    return render_template(
+        "partner_uebernahme.html",
+        companies=companies,
+        selected_company_id=selected_company_id,
+        proposals=proposals,
+    )
+
+
+@main_bp.post("/partner/uebernahme")
+def apply_partner_takeover_action():
+    company_id = request.form.get("company_id", type=int)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        require_company_access(session, company_id)
+        try:
+            result = apply_partner_takeover(
+                session=session,
+                company_id=company_id,
+                key=request.form.get("key", ""),
+                partner_id=request.form.get("partner_id", type=int),
+                changed_by=changed_by(),
+            )
+        except PartnerTakeoverError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.partner_takeover_page", company_id=company_id))
+    flash(
+        f"{len(result['linked_open_item_ids'])} Posten sind jetzt {result['partner_name']} "
+        "zugeordnet.",
+        "success",
+    )
+    for skipped in result["skipped"]:
+        flash(f"{skipped['reference']}: {skipped['reason']}", "warning")
+    return redirect(url_for("main.partner_takeover_page", company_id=company_id))
 
 
 @main_bp.get("/partner/saldenliste")
