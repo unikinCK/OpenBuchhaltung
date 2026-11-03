@@ -8,6 +8,20 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Zwei-Faktor-Anmeldung (TOTP)
+- Der Browser-Login lässt sich mit einer Authenticator-App absichern (RFC 6238): Einrichtung im
+  Benutzermenü mit QR-Code, zehn einmal verwendbare Wiederherstellungscodes, Abschalten und neue
+  Codes nur mit Passwort plus Code. Neue Felder am Benutzer und Tabelle
+  `two_factor_recovery_code` (Migration `20261103_0060`), neue Abhängigkeit `segno`.
+- Nach dem richtigen Passwort gibt es nur einen 5 Minuten gültigen Zwischenstand; angemeldet ist
+  erst, wer den zweiten Schritt besteht. Das gilt auch für OAuth-Zugriffe und die iOS-App.
+  Fehlversuche zählen im Login-Rate-Limit, zusätzlich je Benutzername über alle Adressen.
+- `TWO_FACTOR_REQUIRED_ROLES` schreibt die Einrichtung je Rolle vor. Administratoren setzen zurück
+  über Verwaltung, `POST /api/v1/users/<id>/two-factor/reset`, MCP `reset_user_two_factor` und
+  `flask reset-2fa`. REST: `/api/v1/users/me/two-factor` mit `setup`, `confirm`, `disable` und
+  `recovery-codes`; MCP zusätzlich `get_user_two_factor_status`.
+- API-Tokens bleiben ein eigener Zugang ohne zweiten Faktor. Einrichten und Abschalten gibt es
+  bewusst nicht per MCP, damit das Secret durch keinen KI-Kontext läuft.
 ### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
 - DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
   unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf

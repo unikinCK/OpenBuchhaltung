@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Wiederherstellungscodes – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Wiederherstellungscodes</h1>
+
+  <section class="card">
+    <p class="callout callout-warning">Diese Codes werden nur jetzt angezeigt. Bewahren Sie sie
+      getrennt von Ihrem Gerät auf, zum Beispiel im Passwort-Manager oder ausgedruckt. Jeder Code
+      ersetzt einmal den Code aus der App, falls das Gerät verloren geht.</p>
+    <ul class="two-factor-codes">
+      {% for code in recovery_codes %}
+        <li>{{ code }}</li>
+      {% endfor %}
+    </ul>
+    <p><a class="button" href="{{ continue_url }}">Weiter</a></p>
+  </section>
+{% endblock %}

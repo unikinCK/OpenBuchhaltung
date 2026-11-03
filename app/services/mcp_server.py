@@ -966,6 +966,43 @@ TOOLS: list[ToolSpec] = [
         path="/users/{user_id}/unlock",
         arg_location="json",
     ),
+    # Einrichten und Abschalten der Zwei-Faktor-Anmeldung gibt es bewusst nicht als Tool:
+    # Das Secret soll durch keinen KI-Kontext laufen (Ausnahme von der Parität, siehe README).
+    ToolSpec(
+        name="get_user_two_factor_status",
+        description=(
+            "Zeigt den Status der Zwei-Faktor-Anmeldung: den eigenen oder mit user_id den eines "
+            "Benutzers (Administrator). Enthält nie Secret oder Codes."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers (optional)."},
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/users/me/two-factor",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="reset_user_two_factor",
+        description=(
+            "Setzt die Zwei-Faktor-Anmeldung eines anderen Benutzers zurück (Administrator), "
+            "z. B. nach Verlust des Geräts. Danach reicht für diesen Benutzer wieder das Passwort."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/two-factor/reset",
+        arg_location="json",
+    ),
     ToolSpec(
         name="set_user_password",
         description="Setzt das Passwort eines Benutzers neu (Administrator).",

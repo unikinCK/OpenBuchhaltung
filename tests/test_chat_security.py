@@ -59,6 +59,8 @@ EXPECTED_BLOCKED_TOOLS = {
     "rotate_user_api_token",
     "set_user_active",
     "unlock_user_login",
+    "get_user_two_factor_status",
+    "reset_user_two_factor",
     "set_user_password",
     "set_user_llm_settings",
     "clear_user_llm_settings",

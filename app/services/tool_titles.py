@@ -35,6 +35,8 @@ TOOL_TITLES: dict[str, str] = {
     "clear_mcp_server_credential": "MCP-Zugang entfernen",
     "start_mcp_server_oauth": "MCP-Anmeldung (OAuth) starten",
     "unlock_user_login": "Anmeldesperre aufheben",
+    "get_user_two_factor_status": "Zwei-Faktor-Status abrufen",
+    "reset_user_two_factor": "Zwei-Faktor-Anmeldung zurücksetzen",
     "set_user_password": "Passwort setzen",
     "change_own_password": "Eigenes Passwort ändern",
     # Kontenplan, Controlling
