@@ -38,6 +38,7 @@ from app.services.llm_settings import (
 )
 from app.services.scoping import scoped_select
 from app.services.security_events import record_security_event
+from app.services.two_factor import reset_two_factor, two_factor_summary
 from app.web.blueprint import main_bp
 from app.web.helpers import company_context, get_session_factory
 from domain.models import Account, Company, Tenant, User
@@ -78,6 +79,7 @@ def _render_admin_page(**extra):
             user_query = user_query.where(User.tenant_id == tenant_scope)
         users = session.execute(user_query).scalars().all() if _is_admin() else []
         llm_summaries = {user.id: user_llm_summary(user) for user in users}
+        two_factor_summaries = {user.id: two_factor_summary(user) for user in users}
         fints_institute_status = fints_institute_list_status(session)
 
     return render_template(
@@ -86,6 +88,7 @@ def _render_admin_page(**extra):
         companies=companies,
         users=users,
         llm_summaries=llm_summaries,
+        two_factor_summaries=two_factor_summaries,
         llm_provider_labels=PROVIDER_LABELS,
         llm_default_model=DEFAULT_LLM_MODEL,
         llm_openai_url=OPENAI_RESPONSES_URL,
@@ -309,6 +312,32 @@ def unlock_user_action(user_id: int):
         session.commit()
 
     flash("Login-Sperre wurde aufgehoben.", "success")
+    return redirect(url_for("main.admin_page"))
+
+
+@main_bp.post("/users/<int:user_id>/two-factor/reset")
+def reset_user_two_factor_action(user_id: int):
+    """Setzt die Zwei-Faktor-Anmeldung eines Benutzers zurück (z. B. Gerät verloren)."""
+    if not _is_admin():
+        flash("Benutzer verwalten kann nur ein Administrator.", "error")
+        return redirect(url_for("main.admin_page"))
+    if user_id == current_user()["id"]:
+        flash(
+            "Die eigene Zwei-Faktor-Anmeldung schalten Sie mit Passwort und Code ab.",
+            "error",
+        )
+        return redirect(url_for("main.admin_page"))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user = _load_managed_user(session, user_id)
+        if user is None:
+            flash("Benutzer wurde nicht gefunden.", "error")
+            return redirect(url_for("main.admin_page"))
+        reset_two_factor(session, user, actor=_actor())
+        session.commit()
+
+    flash("Zwei-Faktor-Anmeldung wurde zurückgesetzt.", "success")
     return redirect(url_for("main.admin_page"))
 
 

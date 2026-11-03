@@ -42,6 +42,7 @@ from app.api import (  # noqa: F401
     system,
     tax_codes,
     tenants,
+    two_factor,
     users,
     vat_returns,
 )

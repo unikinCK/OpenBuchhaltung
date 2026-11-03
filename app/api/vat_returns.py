@@ -3,6 +3,8 @@ Voranmeldungen festhalten, ZM-Zeilen je Kunden-USt-IdNr. ermitteln."""
 
 from __future__ import annotations
 
+from datetime import date
+
 from flask import jsonify, request
 
 from app.api.blueprint import api_bp
@@ -20,11 +22,13 @@ from app.api.helpers import (
 from app.auth import current_api_user
 from app.services.vat_returns import (
     VatReturnError,
+    company_vat_method,
     compute_vat_return,
     compute_vat_return_details,
     list_vat_returns,
     period_bounds,
     save_vat_return,
+    set_company_vat_method,
     vat_return_kind_from_label,
 )
 from app.services.zm import compute_zm
@@ -295,3 +299,40 @@ def create_vat_annual_return_via_api():
         except VatReturnError as exc:
             return validation_error(str(exc))
         return jsonify(_vat_return_payload(vat_return)), 201
+
+
+@api_bp.get("/companies/<int:company_id>/vat-method")
+def get_company_vat_method_via_api(company_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        return jsonify(company_vat_method(company))
+
+
+@api_bp.post("/companies/<int:company_id>/vat-method")
+def set_company_vat_method_via_api(company_id: int):
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    try:
+        valid_from = date.fromisoformat(str(payload.get("valid_from") or ""))
+    except ValueError:
+        return jsonify({"error": "valid_from must be an ISO date (YYYY-MM-DD)."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            hints = set_company_vat_method(
+                session=session,
+                company=company,
+                method=str(payload.get("method") or "").strip().lower(),
+                valid_from=valid_from,
+                changed_by=(current_api_user() or {}).get("username", "api"),
+            )
+        except VatReturnError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify({**company_vat_method(company), "hints": hints})

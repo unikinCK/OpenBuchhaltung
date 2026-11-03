@@ -1005,6 +1005,43 @@ TOOLS: list[ToolSpec] = [
         path="/users/{user_id}/unlock",
         arg_location="json",
     ),
+    # Einrichten und Abschalten der Zwei-Faktor-Anmeldung gibt es bewusst nicht als Tool:
+    # Das Secret soll durch keinen KI-Kontext laufen (Ausnahme von der Parität, siehe README).
+    ToolSpec(
+        name="get_user_two_factor_status",
+        description=(
+            "Zeigt den Status der Zwei-Faktor-Anmeldung: den eigenen oder mit user_id den eines "
+            "Benutzers (Administrator). Enthält nie Secret oder Codes."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers (optional)."},
+            },
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/users/me/two-factor",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="reset_user_two_factor",
+        description=(
+            "Setzt die Zwei-Faktor-Anmeldung eines anderen Benutzers zurück (Administrator), "
+            "z. B. nach Verlust des Geräts. Danach reicht für diesen Benutzer wieder das Passwort."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "ID des Benutzers."},
+            },
+            "required": ["user_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/users/{user_id}/two-factor/reset",
+        arg_location="json",
+    ),
     ToolSpec(
         name="set_user_password",
         description="Setzt das Passwort eines Benutzers neu (Administrator).",
@@ -4263,6 +4300,48 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="get_company_vat_method",
+        description=(
+            "Versteuerungsart der Gesellschaft: soll (Sollversteuerung, Standard) oder ist "
+            "(Istversteuerung nach § 20 UStG) mit dem Zeitraum der Istversteuerung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/companies/{company_id}/vat-method",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="set_company_vat_method",
+        description=(
+            "Wechselt die Versteuerungsart zum Monatsersten. Bei Istversteuerung zählen "
+            "Rechnungen mit Umsatzsteuer und verknüpftem offenen Posten anteilig mit der "
+            "Zahlung. Der Wechsel braucht die Gestattung durch das Finanzamt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "method": {"type": "string", "enum": ["soll", "ist"]},
+                "valid_from": {
+                    "type": "string",
+                    "description": "Gültig ab, Erster eines Monats (JJJJ-MM-TT).",
+                },
+            },
+            "required": ["company_id", "method", "valid_from"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/vat-method",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_vat_return",
         description=(
             "Berechnet die Kennziffern der Umsatzsteuer-Voranmeldung (UStVA) für einen "
@@ -4272,7 +4351,9 @@ TOOLS: list[ToolSpec] = [
             "(nicht steuerbar: EU-Leistungen § 18b, übrige), Kz 60, Kz 89/93 (ig. Erwerb), "
             "Kz 46/47 und 84/85 (§ 13b), Kz 66/61/67 (Vorsteuer), Kz 83 (Zahllast/Überschuss). "
             "Erträge ohne Umsatzsteuer ordnet die DATEV-Kontenfunktion zu (z. B. 8125 → 41, "
-            "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist."
+            "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist. "
+            "Bei Istversteuerung (get_company_vat_method) zählen Rechnungen auf offene Posten "
+            "anteilig mit der Zahlung."
         ),
         input_schema={
             "type": "object",

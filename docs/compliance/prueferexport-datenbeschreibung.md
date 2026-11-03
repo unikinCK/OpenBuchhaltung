@@ -25,6 +25,7 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/consolidation_adjustments.json` | Manuelle Konsolidierungsbuchungen dieser Gruppen |
 | `data/consolidation_adjustment_lines.json` | Zeilen der manuellen Konsolidierungsbuchungen |
 | `data/consolidation_history.json` | Verkettete Vorher-/Nachher-Historie der Gruppen und Buchungen einschließlich gelöschter Buchungen |
+| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung und Storno |
 | `documents/*` | Optional eingebettete Originalbelege |
 
 Der Feldkatalog beschreibt je Datei die JSON-Form, Quelltabelle, fachliche
@@ -79,7 +80,8 @@ sind keine Buchungen einer Gesellschaft und stehen nicht im Journal; sie werden 
 
 Mandantenbezogene Benutzer werden mit Benutzername, Rolle, Aktivstatus und der
 Information exportiert, ob ein API-Token konfiguriert ist. Passwort-Hashes,
-Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert. Beim
+Token-Hashes und Token-Endungen werden ausdrücklich nicht exportiert, ebenso wenig
+die Daten der Zwei-Faktor-Anmeldung (Secret, Zeitstempel, Wiederherstellungscodes). Beim
 Belegindex wird der interne Speicherpfad ebenfalls nicht ausgegeben.
 
 ## 4. Prüfsummen und Reproduzierbarkeit

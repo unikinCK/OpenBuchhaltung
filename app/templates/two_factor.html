@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Zwei-Faktor-Anmeldung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <h1 class="page-title">Zwei-Faktor-Anmeldung</h1>
+
+  {% if demo_mode %}
+    <section class="card">
+      <p class="callout">In der Demo-Instanz lässt sich die Zwei-Faktor-Anmeldung nicht aktivieren.</p>
+    </section>
+  {% elif status.enabled %}
+    <section class="card">
+      <p><span class="badge">aktiv</span> seit {{ status.enabled_at[:10] | datum }}.
+        Noch {{ status.recovery_codes_remaining }} Wiederherstellungscodes verfügbar.</p>
+      {% if status.secret_readable is false %}
+        <p class="callout callout-warning">Der gespeicherte Schlüssel ist nicht mehr lesbar, vermutlich
+          wurde <code>SECRET_KEY</code> geändert. Codes aus der App funktionieren nicht mehr. Schalten
+          Sie die Zwei-Faktor-Anmeldung mit einem Wiederherstellungscode ab und richten Sie sie neu
+          ein, oder bitten Sie einen Administrator um das Zurücksetzen.</p>
+      {% endif %}
+      {% if status.recovery_codes_remaining == 0 %}
+        <p class="callout callout-warning">Sie haben keine Wiederherstellungscodes mehr. Erzeugen Sie
+          neue, solange Ihre Authenticator-App verfügbar ist.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Neue Wiederherstellungscodes</h2>
+      <p class="muted">Die bisherigen Codes werden dabei ungültig.</p>
+      <form method="post" action="{{ url_for('auth.two_factor_recovery_codes') }}" class="stacked">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="codes_password">Aktuelles Passwort</label>
+        <input id="codes_password" name="current_password" type="password"
+               autocomplete="current-password" required />
+        <label for="codes_code">Code aus der App oder Wiederherstellungscode</label>
+        <input id="codes_code" name="code" autocomplete="one-time-code" spellcheck="false" required />
+        <button type="submit">Codes neu erzeugen</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Abschalten</h2>
+      {% if status.required %}
+        <p class="callout callout-warning">Für Ihre Rolle ist die Zwei-Faktor-Anmeldung vorgeschrieben.
+          Nach dem Abschalten müssen Sie sie sofort neu einrichten.</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('auth.two_factor_disable') }}" class="stacked"
+            data-confirm="Zwei-Faktor-Anmeldung wirklich abschalten?">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <label for="disable_password">Aktuelles Passwort</label>
+        <input id="disable_password" name="current_password" type="password"
+               autocomplete="current-password" required />
+        <label for="disable_code">Code aus der App oder Wiederherstellungscode</label>
+        <input id="disable_code" name="code" autocomplete="one-time-code" spellcheck="false" required />
+        <button type="submit">Abschalten</button>
+      </form>
+    </section>
+  {% else %}
+    {% if status.required %}
+      <p class="callout callout-warning">Für Ihre Rolle ist die Zwei-Faktor-Anmeldung vorgeschrieben.
+        Richten Sie sie jetzt ein, danach geht es weiter.</p>
+    {% endif %}
+    {% if qr_svg %}
+      <section class="card">
+        <h2>Schritt 2: App verbinden</h2>
+        <p>Scannen Sie den QR-Code mit einer Authenticator-App oder tippen Sie den Schlüssel ab.</p>
+        <div class="two-factor-qr" role="img" aria-label="QR-Code für die Authenticator-App">{{ qr_svg | safe }}</div>
+        <p>Schlüssel: <span class="two-factor-key">{{ secret_grouped }}</span></p>
+        <p class="muted">Zeitbasiert (TOTP), 6 Stellen, alle 30 Sekunden neu.</p>
+        <form method="post" action="{{ url_for('auth.two_factor_confirm') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <label for="code">Code aus der App</label>
+          <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7"
+                 required autofocus />
+          <button type="submit">Aktivieren</button>
+        </form>
+      </section>
+    {% else %}
+      <section class="card">
+        <h2>Schritt 1: Einrichtung beginnen</h2>
+        <p>Nach dem Passwort fragt die Anmeldung zusätzlich nach einem Code aus einer Authenticator-App
+          auf Ihrem Gerät. Bestätigen Sie zum Beginnen Ihr Passwort.</p>
+        <form method="post" action="{{ url_for('auth.two_factor_setup') }}" class="stacked">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <label for="current_password">Aktuelles Passwort</label>
+          <input id="current_password" name="current_password" type="password"
+                 autocomplete="current-password" required autofocus />
+          <button type="submit">Einrichtung beginnen</button>
+        </form>
+      </section>
+    {% endif %}
+  {% endif %}
+{% endblock %}

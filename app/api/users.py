@@ -31,6 +31,7 @@ from app.services.llm_settings import (
     user_llm_summary,
 )
 from app.services.security_events import record_security_event
+from app.services.two_factor import two_factor_summary
 from domain.models import Tenant, User
 
 ROLES = {ROLE_ADMIN, ROLE_BUCHHALTER, ROLE_PRUEFER, ROLE_SUPPORT}
@@ -64,6 +65,7 @@ def _user_dict(user: User) -> dict[str, object]:
         "is_active": user.is_active,
         "api_token_last4": user.api_token_last4,
         "llm": user_llm_summary(user),
+        "two_factor": two_factor_summary(user),
         "created_at": user.created_at.isoformat(),
     }
 
