@@ -1,7 +1,7 @@
 # Sprint 5a – Geschäftspartner-Stammdaten (Debitoren/Kreditoren) – Detailplan
 
 - **Stand:** 2026-11-03; Entscheidungen aus Abschnitt 9 angenommen (ADR-002),
-  PR 1 (Schritte 0–2) und PR 2 (Schritte 3–4) umgesetzt
+  PR 1 (Schritte 0–2), PR 2 (Schritte 3–4) und PR 4 (Schritte 6–7) umgesetzt
 - **Bezug:** Projektreview 2026-09-19, Feature #1 „Kunden-/Lieferantenstamm“
   (Phase 5, Sprint 5 – Produkt-Basis). Berührt #5 (Eingangsrechnung → OPOS),
   F3 (DATEV-Export) und F8 (OPOS/Zahllauf).
@@ -378,19 +378,19 @@ anderen Konten erscheinen höchstens als Buchungsliste des Partners.
     Name geschrieben.
 
 ### Schritt 6 – DATEV (M, nach oder zusammen mit F3)
-- [ ] Buchungsstapel: Eine Sammelkontozeile mit Partner wird mit der
+- [x] Buchungsstapel: Eine Sammelkontozeile mit Partner wird mit der
   Personenkontonummer als Konto ausgegeben. Zeilen mit Partnerbezug auf anderen
   Konten bleiben Sachkontozeilen.
-- [ ] Stammdatenexport Debitoren/Kreditoren (EXTF, Datenkategorie 16). Die
+- [x] Stammdatenexport Debitoren/Kreditoren (EXTF, Datenkategorie 16). Die
   Feldbelegung gegen die DATEV-Formatbeschreibung prüfen.
-- [ ] Golden-File-Tests.
+- [x] Golden-File-Tests.
 
 ### Schritt 7 – Altdatenübernahme (S)
-- [ ] Vorschlagsliste aus `OpenItem.counterparty` (und IBAN), gruppiert nach
+- [x] Vorschlagsliste aus `OpenItem.counterparty` (und IBAN), gruppiert nach
   normalisiertem Namen.
   - Die Übernahme legt Partner an und verknüpft die OPOS über `partner_id`.
   - Der Freitext bleibt unverändert.
-- [ ] UI/API/MCP. Festgeschriebene Buchungen sind unveränderlich und bleiben
+- [x] UI/API/MCP. Festgeschriebene Buchungen sind unveränderlich und bleiben
   ohne Partner; die Zuordnung läuft nur über die OPOS.
 
 ## 8. Tests

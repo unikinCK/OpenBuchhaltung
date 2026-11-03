@@ -1522,6 +1522,42 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_partner_takeover_proposals",
+        description=(
+            "Altdatenübernahme: offene Posten ohne Geschäftspartner, gruppiert nach dem "
+            "normalisierten Freitext der Gegenseite, mit Summen, IBANs und einem passenden "
+            "bestehenden Partner (gleicher Name oder gleiche IBAN)."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/partners/takeover-proposals",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="apply_partner_takeover",
+        description=(
+            "Verknüpft eine Gruppe aus list_partner_takeover_proposals (key) mit einem "
+            "bestehenden Partner oder legt ohne partner_id einen neuen an. Der Freitext bleibt; "
+            "Posten ohne passendes Sammelkonto bleiben ohne Partner und stehen unter skipped."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "key": {"type": "string", "description": "Schlüssel der Gruppe."},
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Bestehender Partner; ohne Angabe wird einer angelegt.",
+                },
+            },
+            "required": ["company_id", "key"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/partners/takeover",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_partner_statement",
         description=(
             "Partnerkonto: Zeilen des Geschäftspartners auf Sammelkonten mit Anfangssaldo und "
@@ -2206,6 +2242,14 @@ TOOLS: list[ToolSpec] = [
                         "(JJJJ-MM-TT, optional; Standard: WJ-Ende)."
                     ),
                 },
+                "personal_accounts": {
+                    "type": "boolean",
+                    "description": (
+                        "Sammelkontozeilen mit Geschäftspartner unter der Personenkontonummer "
+                        "ausgeben (Standard true); false lässt sie auf dem Sachkonto."
+                    ),
+                    "default": True,
+                },
                 "download_link": _download_link_property(),
             },
             "required": ["company_id"],
@@ -2213,6 +2257,18 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="GET",
         path="/exports/datev.csv",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="export_datev_partners_csv",
+        description=(
+            "Exportiert die Stammdaten aller Debitoren und Kreditoren im DATEV-Format (EXTF, "
+            "Datenkategorie 16): Personenkonto, Anschrift, USt-IdNr, Bankverbindung, "
+            "Zahlungsziel. Passt zu den Personenkonten im Buchungsstapel."
+        ),
+        input_schema=_with_download_link(_company_id_schema()),
+        http_method="GET",
+        path="/exports/datev-partners.csv",
         arg_location="query",
     ),
     ToolSpec(

@@ -22,6 +22,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   `recovery-codes`; MCP zusätzlich `get_user_two_factor_status`.
 - API-Tokens bleiben ein eigener Zugang ohne zweiten Faktor. Einrichten und Abschalten gibt es
   bewusst nicht per MCP, damit das Secret durch keinen KI-Kontext läuft.
+### DATEV-Personenkonten, Stammdatenexport und Altdatenübernahme
+- DATEV-Buchungsstapel: Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen
+  unter der Personenkontonummer. Abschaltbar über `personal_accounts=false` bzw. das Häkchen „auf
+  Sammelkonten“ auf der Berichte-Seite.
+- Neuer Export der Stammdaten Debitoren/Kreditoren im DATEV-Format (EXTF, Datenkategorie 16,
+  Formatversion 5): `GET /api/v1/exports/datev-partners.csv`, MCP `export_datev_partners_csv`.
+- Altdatenübernahme: Vorschlagsliste aus den Freitexten offener Posten, Verknüpfung mit einem
+  bestehenden oder neuen Partner (`/partner/uebernahme`, `GET /api/v1/partners/takeover-proposals`,
+  `POST /api/v1/partners/takeover`, MCP `list_partner_takeover_proposals`,
+  `apply_partner_takeover`; im KI-Chat gesperrt).
 
 ### Geschäftspartner in offenen Posten, Zahllauf und Mahnwesen; Partnerkonto und Saldenliste
 - Offene Posten tragen einen Geschäftspartner (`open_item.partner_id`, Migration `20261103_0057`).

@@ -62,6 +62,10 @@ Aufbau des Exports:
    einer SKR03-Buchhaltung) stehen im Stapel unter der Nummer des erkannten
    Rahmens (1576); Sätze, die danach Konto und Gegenkonto gleich hätten (die
    Umbuchung 1406 → 1576), entfallen.
+7. Zeilen auf Debitoren-/Kreditoren-Sammelkonten mit Geschäftspartner stehen unter der
+   Personenkontonummer des Partners (ADR-002); Zeilen ohne Partner bleiben auf dem
+   Sachkonto. Die Stammdaten dazu liefert ``build_datev_partner_export`` (Datenkategorie
+   16). ``DatevExportOptions.personal_accounts`` schaltet das ab.
 
 Welche Konten Automatikkonten sind, hängt vom Kontenrahmen ab (SKR04 4400 ist
 Erlöse 19 % USt, SKR03 4400 frei verfügbar). Der Export erkennt ihn wie die
@@ -115,6 +119,9 @@ from app.services.vat_returns import (
     revenue_kennzahl,
 )
 from domain.models import (
+    PARTNER_KIND_PERSON,
+    SUBLEDGER_CREDITOR,
+    SUBLEDGER_DEBTOR,
     TAX_KIND_INPUT,
     TAX_KIND_OUTPUT,
     Account,
@@ -276,6 +283,8 @@ class DatevExportOptions:
     client_number: int = 1  # Mandantennummer
     account_length: int = 4  # Sachkontennummernlänge
     description: str = "OpenBuchhaltung Buchungsstapel"
+    # Sammelkontozeilen mit Partner unter der Personenkontonummer ausgeben.
+    personal_accounts: bool = True
 
 
 def datev_tax_from_gross(gross: Decimal, rate: Decimal) -> Decimal:
@@ -529,8 +538,13 @@ def _gross_tax_key(function: DatevAccountFunction, kind: str, rate: Decimal) -> 
     return key if key is not None and function.allows_tax_key(kind) else None
 
 
-def _export_code(line, tax_accounts, chart: str | None) -> str:
-    """Kontonummer im Stapel: Steuerkonten des anderen Kontenrahmens unter der eigenen Nummer."""
+def _export_code(line, tax_accounts, chart: str | None, personal_numbers=None) -> str:
+    """Kontonummer im Stapel: Personenkonto des Partners auf Sammelkonten, Steuerkonten des
+    anderen Kontenrahmens unter der eigenen Nummer."""
+    if personal_numbers and line.subledger and line.partner_id is not None:
+        number = personal_numbers.get((line.partner_id, line.subledger))
+        if number:
+            return number
     if line.account_id in tax_accounts:
         return FOREIGN_TAX_ACCOUNT_CODES.get(chart or "", {}).get(line.code, line.code)
     return line.code
@@ -571,7 +585,7 @@ def _net_same_accounts(positions: list[_Position]) -> list[_Position]:
 
 
 def _positions(
-    entry, lines, groups: list[_TaxGroup], chart: str | None, tax_accounts
+    entry, lines, groups: list[_TaxGroup], chart: str | None, tax_accounts, personal_numbers=None
 ) -> list[_Position]:
     tax_by_base: dict[int, tuple[_TaxGroup, Decimal]] = {}
     grouped_tax_lines = set()
@@ -584,7 +598,7 @@ def _positions(
     for line in lines:
         if id(line) in grouped_tax_lines:
             continue
-        code = _export_code(line, tax_accounts, chart)
+        code = _export_code(line, tax_accounts, chart, personal_numbers)
         function = datev_account_function(chart, code)
         position = _Position(
             code=code,
@@ -703,7 +717,9 @@ def _correction_booking(position: _Position, chart: str | None, entry) -> _Booki
     return _Booking(base_position, tax_position, amount)
 
 
-def _entry_bookings(entry, lines, tax_codes, tax_accounts, chart) -> list[_Booking]:
+def _entry_bookings(
+    entry, lines, tax_codes, tax_accounts, chart, personal_numbers=None
+) -> list[_Booking]:
     """Buchungssätze einer Buchung; Steuer im Brutto, wo DATEV sie (bis auf einen
     Korrektursatz für Rundungscent) nachrechnet."""
     # Ohne passenden BU-Schlüssel (anderer Steuersatz, Sonderfunktion, KU-Konto)
@@ -718,7 +734,7 @@ def _entry_bookings(entry, lines, tax_codes, tax_accounts, chart) -> list[_Booki
         )
     ]
     while True:
-        positions = _positions(entry, lines, groups, chart, tax_accounts)
+        positions = _positions(entry, lines, groups, chart, tax_accounts, personal_numbers)
         bookings, failed = _match(positions, chart)
         if failed is None:
             return bookings + [
@@ -1017,6 +1033,23 @@ def datev_export_file_name(company_id: int, period: DatevExportPeriod) -> str:
     )
 
 
+def _personal_account_numbers(
+    session: Session, company_id: int
+) -> dict[tuple[int, str], str]:
+    """Personenkontonummer je (Partner, Sammelkontoseite)."""
+    numbers: dict[tuple[int, str], str] = {}
+    for partner_id, debtor_number, creditor_number in session.execute(
+        select(
+            BusinessPartner.id, BusinessPartner.debtor_number, BusinessPartner.creditor_number
+        ).where(BusinessPartner.company_id == company_id)
+    ).all():
+        if debtor_number:
+            numbers[(partner_id, SUBLEDGER_DEBTOR)] = debtor_number
+        if creditor_number:
+            numbers[(partner_id, SUBLEDGER_CREDITOR)] = creditor_number
+    return numbers
+
+
 def build_datev_export(
     *,
     session: Session,
@@ -1071,6 +1104,7 @@ def build_datev_export(
             JournalEntryLine.credit_amount,
             JournalEntryLine.description,
             JournalEntryLine.partner_id,
+            Account.subledger,
             Account.account_type,
             cost_center.code.label("cost_center_code"),
             profit_center.code.label("profit_center_code"),
@@ -1094,6 +1128,9 @@ def build_datev_export(
         .all()
     }
     tax_accounts = company_tax_accounts(session=session, company_id=company_id)
+    personal_numbers = (
+        _personal_account_numbers(session, company_id) if options.personal_accounts else {}
+    )
 
     buffer = StringIO()
     buffer.write(
@@ -1154,7 +1191,9 @@ def build_datev_export(
                         )
                     ),
                 )
-        for booking in _entry_bookings(entry, lines, tax_codes, tax_accounts, chart):
+        for booking in _entry_bookings(
+            entry, lines, tax_codes, tax_accounts, chart, personal_numbers
+        ):
             row = _booking_row(
                 booking, entry=entry, width=width, service_fields=service_fields
             )
@@ -1163,3 +1202,389 @@ def build_datev_export(
                 buffer.write("\r\n")
 
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Stammdaten Debitoren/Kreditoren (EXTF, Datenkategorie 16, Formatversion 5)
+# ---------------------------------------------------------------------------
+
+PARTNER_FORMAT_NAME = "Debitoren/Kreditoren"
+PARTNER_FORMAT_CATEGORY = 16
+PARTNER_FORMAT_VERSION = 5
+
+
+def _bank_columns(number: int) -> tuple[str, ...]:
+    return (
+        f"Bankleitzahl {number}",
+        f"Bankbezeichnung {number}",
+        f"Bankkonto-Nummer {number}",
+        f"Länderkennzeichen {number}",
+        f"IBAN-Nr. {number}",
+        "Leerfeld",
+        f"SWIFT-Code {number}",
+        f"Abw. Kontoinhaber {number}",
+        f"Kennz. Hauptbankverb. {number}",
+        f"Bankverb. {number} Gültig von",
+        f"Bankverb. {number} Gültig bis",
+    )
+
+
+# Satzaufbau nach der DATEV-Formatbeschreibung „Debitoren/Kreditoren“ (254 Felder).
+PARTNER_COLUMNS = (
+    "Konto",
+    "Name (Adressatentyp Unternehmen)",
+    "Unternehmensgegenstand",
+    "Name (Adressatentyp natürl. Person)",
+    "Vorname (Adressatentyp natürl. Person)",
+    "Name (Adressatentyp keine Angabe)",
+    "Adressatentyp",
+    "Kurzbezeichnung",
+    "EU-Land",
+    "EU-UStID",
+    "Anrede",
+    "Titel / Akad. Grad",
+    "Adelstitel",
+    "Namensvorsatz",
+    "Adressart",
+    "Straße",
+    "Postfach",
+    "Postleitzahl",
+    "Ort",
+    "Land",
+    "Versandzusatz",
+    "Adresszusatz",
+    "Abweichende Anrede",
+    "Abw. Zustellbezeichnung 1",
+    "Abw. Zustellbezeichnung 2",
+    "Kennz. Korrespondenzadresse",
+    "Adresse Gültig von",
+    "Adresse Gültig bis",
+    "Telefon",
+    "Bemerkung (Telefon)",
+    "Telefon Geschäftsleitung",
+    "Bemerkung (Telefon GL)",
+    "E-Mail",
+    "Bemerkung (E-Mail)",
+    "Internet",
+    "Bemerkung (Internet)",
+    "Fax",
+    "Bemerkung (Fax)",
+    "Sonstige",
+    "Bemerkung (Sonstige)",
+    *(column for number in range(1, 6) for column in _bank_columns(number)),
+    "Leerfeld",
+    "Briefanrede",
+    "Grußformel",
+    "Kundennummer",
+    "Steuernummer",
+    "Sprache",
+    "Ansprechpartner",
+    "Vertreter",
+    "Sachbearbeiter",
+    "Diverse-Konto",
+    "Ausgabeziel",
+    "Währungssteuerung",
+    "Kreditlimit (Debitor)",
+    "Zahlungsbedingung",
+    "Fälligkeit in Tagen (Debitor)",
+    "Skonto in Prozent (Debitor)",
+    "Kreditoren-Ziel 1 (Tage)",
+    "Kreditoren-Skonto 1 (%)",
+    "Kreditoren-Ziel 2 (Tage)",
+    "Kreditoren-Skonto 2 (%)",
+    "Kreditoren-Ziel 3 Brutto (Tage)",
+    "Kreditoren-Ziel 4 (Tage)",
+    "Kreditoren-Skonto 4 (%)",
+    "Kreditoren-Ziel 5 (Tage)",
+    "Kreditoren-Skonto 5 (%)",
+    "Mahnung",
+    "Kontoauszug",
+    "Mahntext 1",
+    "Mahntext 2",
+    "Mahntext 3",
+    "Kontoauszugstext",
+    "Mahnlimit Betrag",
+    "Mahnlimit %",
+    "Zinsberechnung",
+    "Mahnzinssatz 1",
+    "Mahnzinssatz 2",
+    "Mahnzinssatz 3",
+    "Lastschrift",
+    "Leerfeld",
+    "Mandantenbank",
+    "Zahlungsträger",
+    *(f"Indiv. Feld {number}" for number in range(1, 16)),
+    "Abweichende Anrede (Rechnungsadresse)",
+    "Adressart (Rechnungsadresse)",
+    "Straße (Rechnungsadresse)",
+    "Postfach (Rechnungsadresse)",
+    "Postleitzahl (Rechnungsadresse)",
+    "Ort (Rechnungsadresse)",
+    "Land (Rechnungsadresse)",
+    "Versandzusatz (Rechnungsadresse)",
+    "Adresszusatz (Rechnungsadresse)",
+    "Abw. Zustellbezeichnung 1 (Rechnungsadresse)",
+    "Abw. Zustellbezeichnung 2 (Rechnungsadresse)",
+    "Adresse Gültig von (Rechnungsadresse)",
+    "Adresse Gültig bis (Rechnungsadresse)",
+    *(column for number in range(6, 11) for column in _bank_columns(number)),
+    "Nummer Fremdsystem",
+    "Insolvent",
+    *(f"SEPA-Mandatsreferenz {number}" for number in range(1, 11)),
+    "Verknüpftes OPOS-Konto",
+    "Mahnsperre bis",
+    "Lastschriftsperre bis",
+    "Zahlungssperre bis",
+    "Gebührenberechnung",
+    "Mahngebühr 1",
+    "Mahngebühr 2",
+    "Mahngebühr 3",
+    "Pauschalenberechnung",
+    "Verzugspauschale 1",
+    "Verzugspauschale 2",
+    "Verzugspauschale 3",
+    "Alternativer Suchname",
+    "Status",
+    "Anschrift manuell geändert (Korrespondenzadresse)",
+    "Anschrift individuell (Korrespondenzadresse)",
+    "Anschrift manuell geändert (Rechnungsadresse)",
+    "Anschrift individuell (Rechnungsadresse)",
+    "Fristberechnung bei Debitor",
+    "Mahnfrist 1",
+    "Mahnfrist 2",
+    "Mahnfrist 3",
+    "Letzte Frist",
+)
+
+# Felder (1-basiert), die im Format kein Textfeld sind: Zahlen, Daten und Kennzeichen ohne
+# Anführungszeichen. Alle übrigen Felder sind Text und stehen in Anführungszeichen.
+_BANK_DATE_FIELDS = tuple(
+    start + offset for start in (41, 52, 63, 74, 85, 165, 176, 187, 198, 209) for offset in (9, 10)
+)
+PARTNER_UNQUOTED_FIELDS = frozenset(
+    {
+        1,
+        26,
+        27,
+        28,
+        *_BANK_DATE_FIELDS,
+        101,
+        *range(105, 133),
+        135,
+        163,
+        164,
+        221,
+        *range(232, 244),
+        245,
+        246,
+        248,
+        *range(250, 255),
+    }
+)
+
+_FIELD_ACCOUNT = 1
+_FIELD_NAME_COMPANY = 2
+_FIELD_NAME_PERSON = 4
+_FIELD_FIRST_NAME_PERSON = 5
+_FIELD_ADDRESSEE_TYPE = 7
+_FIELD_SHORT_NAME = 8
+_FIELD_EU_COUNTRY = 9
+_FIELD_EU_VAT_ID = 10
+_FIELD_ADDRESS_KIND = 15
+_FIELD_STREET = 16
+_FIELD_POSTAL_CODE = 18
+_FIELD_CITY = 19
+_FIELD_COUNTRY = 20
+_FIELD_CORRESPONDENCE_ADDRESS = 26
+_FIELD_PHONE = 29
+_FIELD_EMAIL = 33
+_FIELD_BANK_COUNTRY = 44
+_FIELD_IBAN = 45
+_FIELD_BIC = 47
+_FIELD_MAIN_BANK = 49
+_FIELD_TAX_NUMBER = 100
+_FIELD_CONTACT_PERSON = 102
+_FIELD_DEBTOR_DUE_DAYS = 110
+_FIELD_CREDITOR_GROSS_DAYS = 116
+_FIELD_EXTERNAL_NUMBER = 220
+_FIELD_LINKED_ACCOUNT = 232
+_FIELD_STATUS = 245
+
+
+def _partner_header_row(
+    *, options: DatevExportOptions, generated_at: datetime, fiscal_year_start: date, chart
+) -> str:
+    fields = [
+        _quote("EXTF"),
+        str(EXTF_VERSION),
+        str(PARTNER_FORMAT_CATEGORY),
+        _quote(PARTNER_FORMAT_NAME),
+        str(PARTNER_FORMAT_VERSION),
+        generated_at.strftime("%Y%m%d%H%M%S000"),
+        "",  # importiert
+        _quote("OB"),  # Herkunft
+        _quote(""),  # exportiert von
+        _quote(""),  # importiert von
+        str(options.consultant_number),
+        str(options.client_number),
+        fiscal_year_start.strftime("%Y%m%d"),
+        str(options.account_length),
+        "",  # Datum von
+        "",  # Datum bis
+        _quote(""),  # Bezeichnung
+        _quote(""),  # Diktatkürzel
+        "",  # Buchungstyp
+        "",  # Rechnungslegungszweck
+        "",  # Festschreibung
+        _quote(""),  # WKZ
+        "",  # reserviert
+        _quote(""),  # Derivatskennzeichen
+        "",  # reserviert
+        "",  # reserviert
+        _quote(CHART_HEADER_CODES.get(chart or "", "")),
+        "",  # ID der Branchenlösung
+        "",  # reserviert
+        _quote(""),  # reserviert
+        _quote(""),  # Anwendungsinformation
+    ]
+    return ";".join(fields)
+
+
+def _split_person_name(name: str) -> tuple[str, str]:
+    """(Nachname, Vorname) aus dem einen Namensfeld: das letzte Wort gilt als Nachname."""
+    parts = name.split()
+    if len(parts) < 2:
+        return name, ""
+    return parts[-1], " ".join(parts[:-1])
+
+
+def _partner_row(partner: BusinessPartner, *, number: str, linked_number: str | None, side: str):
+    """Ein Stammdatensatz je Personenkonto; ein Partner mit beiden Rollen ergibt zwei Sätze."""
+    fields: dict[int, str] = {
+        _FIELD_ACCOUNT: number,
+        _FIELD_SHORT_NAME: _clip(partner.name, 15).strip(),
+        _FIELD_COUNTRY: partner.country_code,
+        _FIELD_EXTERNAL_NUMBER: f"OB{partner.id}",
+        _FIELD_STATUS: "0" if partner.is_active else "1",
+    }
+    if partner.partner_kind == PARTNER_KIND_PERSON:
+        last_name, first_name = _split_person_name(partner.name)
+        fields[_FIELD_ADDRESSEE_TYPE] = "1"
+        fields[_FIELD_NAME_PERSON] = _clip(last_name, 30)
+        fields[_FIELD_FIRST_NAME_PERSON] = _clip(first_name, 30)
+    else:
+        fields[_FIELD_ADDRESSEE_TYPE] = "2"
+        fields[_FIELD_NAME_COMPANY] = _clip(partner.name, 50)
+
+    vat_id = (partner.vat_id or "").replace(" ", "").upper()
+    if len(vat_id) > 2 and vat_id[:2] in EU_COUNTRY_CODES:
+        fields[_FIELD_EU_COUNTRY] = vat_id[:2]
+        fields[_FIELD_EU_VAT_ID] = _clip(vat_id[2:], 13)
+
+    # Die Postleitzahl ist im Format rein numerisch; ausländische mit Buchstaben stehen im Ort.
+    postal_code = (partner.postal_code or "").strip()
+    city = (partner.city or "").strip()
+    if postal_code and not (postal_code.isascii() and postal_code.isdigit()):
+        city = f"{postal_code} {city}".strip()
+        postal_code = ""
+    if partner.street:
+        fields[_FIELD_ADDRESS_KIND] = "STR"
+        fields[_FIELD_STREET] = _clip(partner.street, 36)
+    if postal_code:
+        fields[_FIELD_POSTAL_CODE] = _clip(postal_code, 10)
+    if city:
+        fields[_FIELD_CITY] = _clip(city, 30)
+    if partner.street or postal_code or city:
+        fields[_FIELD_CORRESPONDENCE_ADDRESS] = "1"
+
+    if partner.phone:
+        fields[_FIELD_PHONE] = _clip(partner.phone, 60)
+    if partner.email:
+        fields[_FIELD_EMAIL] = _clip(partner.email, 60)
+    if partner.iban:
+        fields[_FIELD_BANK_COUNTRY] = partner.iban[:2]
+        fields[_FIELD_IBAN] = partner.iban
+        fields[_FIELD_MAIN_BANK] = "1"
+        if partner.bic:
+            fields[_FIELD_BIC] = partner.bic
+    if partner.tax_number:
+        fields[_FIELD_TAX_NUMBER] = _clip(partner.tax_number, 20)
+    if partner.contact_person:
+        fields[_FIELD_CONTACT_PERSON] = _clip(partner.contact_person, 40)
+    if partner.payment_term_days is not None and partner.payment_term_days <= 999:
+        due_field = (
+            _FIELD_DEBTOR_DUE_DAYS if side == SUBLEDGER_DEBTOR else _FIELD_CREDITOR_GROSS_DAYS
+        )
+        fields[due_field] = str(partner.payment_term_days)
+    if linked_number:
+        fields[_FIELD_LINKED_ACCOUNT] = linked_number
+
+    rendered = []
+    for number_of_field in range(1, len(PARTNER_COLUMNS) + 1):
+        value = fields.get(number_of_field, "")
+        rendered.append(value if number_of_field in PARTNER_UNQUOTED_FIELDS else _quote(value))
+    return ";".join(rendered)
+
+
+def datev_partner_export_file_name(company_id: int, generated_at: datetime) -> str:
+    return f"EXTF_Debitoren_Kreditoren_{company_id}_{generated_at.strftime('%Y%m%d')}.csv"
+
+
+def build_datev_partner_export(
+    *,
+    session: Session,
+    company_id: int,
+    options: DatevExportOptions | None = None,
+    generated_at: datetime | None = None,
+) -> str:
+    """Stammdaten aller Debitoren und Kreditoren (auch inaktive, Feld 245 „Status“)."""
+    options = options or DatevExportOptions()
+    generated_at = generated_at or datetime.now()
+    company = session.get(Company, company_id)
+    if company is None:
+        raise DatevExportError("Gesellschaft nicht gefunden.")
+    fiscal_year_start, _, _ = fiscal_year_bounds(
+        company.fiscal_year_start_month, generated_at.date()
+    )
+
+    rows: list[tuple[str, str]] = []
+    for partner in session.execute(
+        select(BusinessPartner).where(BusinessPartner.company_id == company_id)
+    ).scalars():
+        if partner.debtor_number:
+            rows.append(
+                (
+                    partner.debtor_number,
+                    _partner_row(
+                        partner,
+                        number=partner.debtor_number,
+                        linked_number=partner.creditor_number,
+                        side=SUBLEDGER_DEBTOR,
+                    ),
+                )
+            )
+        if partner.creditor_number:
+            rows.append(
+                (
+                    partner.creditor_number,
+                    _partner_row(
+                        partner,
+                        number=partner.creditor_number,
+                        linked_number=partner.debtor_number,
+                        side=SUBLEDGER_CREDITOR,
+                    ),
+                )
+            )
+    rows.sort(key=lambda row: row[0])
+
+    lines = [
+        _partner_header_row(
+            options=options,
+            generated_at=generated_at,
+            fiscal_year_start=fiscal_year_start,
+            chart=detect_company_chart(session=session, company_id=company_id),
+        ),
+        ";".join(_quote(column) for column in PARTNER_COLUMNS),
+        *(row for _, row in rows),
+    ]
+    return "\r\n".join(lines) + "\r\n"

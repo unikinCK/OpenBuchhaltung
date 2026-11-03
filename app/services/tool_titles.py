@@ -77,6 +77,9 @@ TOOL_TITLES: dict[str, str] = {
     "get_partner_statement": "Partnerkonto abrufen",
     "get_partner_balances": "Saldenliste Debitoren/Kreditoren abrufen",
     "export_partner_balances_csv": "Saldenliste Debitoren/Kreditoren exportieren",
+    "export_datev_partners_csv": "DATEV-Stammdaten Debitoren/Kreditoren exportieren",
+    "list_partner_takeover_proposals": "Partner-Vorschläge aus offenen Posten auflisten",
+    "apply_partner_takeover": "Partner aus offenen Posten übernehmen",
     "set_open_item_partner": "Partner am offenen Posten zuordnen",
     "set_partner_bank_details": "Partner-Bankverbindung setzen",
     # Buchungen

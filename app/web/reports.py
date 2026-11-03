@@ -211,6 +211,13 @@ def download_datev_csv():
         url_for(
             "api.export_datev_csv",
             company_id=company_id,
-            **filter_url_args(None, date_from, date_to, fiscal_year_id=period.fiscal_year_id),
+            **filter_url_args(
+                None,
+                date_from,
+                date_to,
+                fiscal_year_id=period.fiscal_year_id,
+                # Personenkonten sind Standard; der Haken lässt die Zeilen auf den Sammelkonten.
+                personal_accounts="0" if request.args.get("collective_accounts") else None,
+            ),
         )
     )

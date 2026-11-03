@@ -11,6 +11,7 @@
     </div>
     {% if selected_company_id %}
       <div class="page-actions">
+        <a class="button-secondary" href="{{ url_for('main.partner_takeover_page', company_id=selected_company_id) }}">Aus offenen Posten übernehmen</a>
         <a class="button-secondary" href="{{ url_for('main.partner_balances_page', company_id=selected_company_id) }}">Saldenliste</a>
         <a class="button" href="#partner-anlegen" data-open-details="#partner-anlegen">+ Partner anlegen</a>
       </div>
