@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import pagination %}
+{% from "_journal.html" import account_link %}
+
+{% block title %}Kassenbuch – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Kassenbuch</h1>
+      <p class="page-subtitle">Bareinnahmen und -ausgaben fortlaufend, unveränderbar und mit Tagesabschluss</p>
+    </div>
+    {% if selected_company_id and can_write %}
+      <div class="page-actions">
+        {% if selected_book and selected_book.is_active %}
+          <a class="button" href="#eintrag-erfassen" data-open-details="#eintrag-erfassen">+ Eintrag erfassen</a>
+          <a class="button-secondary" href="#kassensturz" data-open-details="#kassensturz">Kassensturz</a>
+        {% endif %}
+        <a class="button-secondary" href="#kasse-anlegen" data-open-details="#kasse-anlegen">Kasse anlegen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    {% if can_write %}
+      <details class="card card-primary" id="kasse-anlegen"{% if not books %} open{% endif %}>
+        <summary>Kasse anlegen <span class="summary-hint">je Aktivkonto eine Kasse</span></summary>
+        <p class="hint" style="margin-top:0;">Der Anfangsbestand wird der erste Eintrag. Mit Gegenkonto (z. B. Saldenvorträge) wird er gebucht; das Konto darf dann noch keinen Saldo haben.
+          Ohne Gegenkonto entsteht keine Buchung: Das Konto muss den Bestand am Stichtag schon tragen. Ohne Betrag gilt dann der Kontensaldo.</p>
+        <form method="post" action="{{ url_for('main.create_cash_book_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="book_name">Name</label>
+              <input id="book_name" name="name" required maxlength="120" placeholder="z. B. Hauptkasse" />
+            </div>
+            <div class="field field-wide">
+              <label for="book_account">Kassenkonto (Aktivkonto)</label>
+              <select id="book_account" name="account_id" required>
+                <option value="">Konto wählen</option>
+                {% for account in free_cash_accounts %}
+                  <option value="{{ account.id }}"{% if account.id == default_cash_account_id %} selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="book_opening_amount">Anfangsbestand</label>
+              <input id="book_opening_amount" name="opening_amount" inputmode="decimal" placeholder="0,00" />
+            </div>
+            <div class="field">
+              <label for="book_opening_date">Stichtag</label>
+              <input id="book_opening_date" type="date" name="opening_date" value="{{ today }}" max="{{ today }}" />
+            </div>
+            <div class="field field-wide">
+              <label for="book_opening_contra">Gegenkonto des Anfangsbestands</label>
+              <select id="book_opening_contra" name="opening_contra_account_id">
+                <option value="">Ohne Buchung (Konto trägt den Bestand schon)</option>
+                {% for account in accounts %}
+                  <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <button type="submit">Kasse anlegen</button>
+        </form>
+      </details>
+    {% endif %}
+
+    {% if books %}
+      <section class="card">
+        <h2>Kassen</h2>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Kasse</th>
+                <th>Konto</th>
+                <th class="num">Bestand</th>
+                <th>Letzter Kassensturz</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in books %}
+                <tr{% if selected_book and row.book.id == selected_book.id %} aria-current="true"{% endif %}>
+                  <td><a href="{{ url_for('main.cash_book_page', company_id=selected_company_id, cash_book_id=row.book.id) }}">{{ row.book.name }}</a></td>
+                  <td class="nowrap">{{ account_link(row.book.account_id, row.book.account.code, row.book.account.name) }}</td>
+                  <td class="num">{{ row.balance | betrag }}</td>
+                  <td>{{ row.last_closing.closing_date | datum if row.last_closing else "–" }}</td>
+                  <td>{% if row.book.is_active %}<span class="badge badge-success">Aktiv</span>{% else %}<span class="badge">Inaktiv</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if selected_book %}
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Bestand {{ selected_book.name }}</div>
+          <div class="stat-value">{{ balance | betrag }} €</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Saldo Konto {{ selected_book.account.code }}</div>
+          <div class="stat-value">{{ account_balance | betrag }} €</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Abgeschlossen bis</div>
+          <div class="stat-value">{{ last_closing.closing_date | datum if last_closing else "–" }}</div>
+        </div>
+      </div>
+
+      {% if balance != account_balance %}
+        <section class="card">
+          <p><span class="badge badge-warning">Abweichung</span>
+            Kassenbestand und Kontensaldo unterscheiden sich um {{ (account_balance - balance) | betrag }} €. Das deutet auf Buchungen am Kassenbuch vorbei hin.
+            <a href="{{ url_for('main.cash_book_integrity_page', cash_book_id=selected_book.id) }}">Zur Prüfung</a></p>
+        </section>
+      {% endif %}
+
+      {% if not selected_book.is_active %}
+        <section class="card"><p class="muted">Diese Kasse ist inaktiv und nimmt keine neuen Einträge an.</p></section>
+      {% endif %}
+
+      {% if can_write and selected_book.is_active %}
+        <details class="card card-primary" id="eintrag-erfassen">
+          <summary>Eintrag erfassen <span class="summary-hint">Bruttobetrag, wird sofort gebucht und ist danach nur per Storno korrigierbar</span></summary>
+          {% if last_closing %}<p class="hint" style="margin-top:0;">Abgeschlossen bis {{ last_closing.closing_date | datum }}: Neue Einträge und Stornos müssen danach liegen.</p>{% endif %}
+          <form method="post" action="{{ url_for('main.create_cash_entry_action', cash_book_id=selected_book.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <div class="form-grid">
+              <div class="field">
+                <label for="entry_type">Art</label>
+                <select id="entry_type" name="entry_type" required>
+                  <option value="receipt">Einnahme</option>
+                  <option value="payment">Ausgabe</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="entry_date">Datum</label>
+                <input id="entry_date" type="date" name="entry_date" required value="{{ today }}" max="{{ today }}" />
+              </div>
+              <div class="field">
+                <label for="entry_amount">Betrag (brutto)</label>
+                <input id="entry_amount" name="amount" required inputmode="decimal" placeholder="0,00" />
+              </div>
+              <div class="field field-wide">
+                <label for="entry_description">Beschreibung</label>
+                <input id="entry_description" name="description" required maxlength="255" />
+              </div>
+              <div class="field field-wide">
+                <label for="entry_contra">Gegenkonto</label>
+                <select id="entry_contra" name="contra_account_id" required>
+                  <option value="">Gegenkonto wählen</option>
+                  {% for account in accounts if account.id != selected_book.account_id %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="entry_tax">Steuercode</label>
+                <select id="entry_tax" name="tax_code_id">
+                  <option value="">Ohne Steuer</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }} ({{ tax_code.rate | satz }} % {{ "VSt" if tax_code.kind == "input" else "USt" }})</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="entry_partner">Geschäftspartner</label>
+                <select id="entry_partner" name="partner_id">
+                  <option value="">Ohne Partner</option>
+                  {% for partner in partners %}<option value="{{ partner.id }}">{{ partner.name }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="entry_document">Beleg</label>
+                <select id="entry_document" name="document_id">
+                  <option value="">Ohne Beleg</option>
+                  {% for document in documents %}
+                    <option value="{{ document.id }}">{{ document.file_name }}{% if document.document_date %} ({{ document.document_date | datum }}){% endif %}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <button type="submit">Erfassen und buchen</button>
+          </form>
+        </details>
+
+        <details class="card" id="kassensturz">
+          <summary>Kassensturz (Tagesabschluss) <span class="summary-hint">Soll-Bestand {{ balance | betrag }} €</span></summary>
+          <p class="hint" style="margin-top:0;">Bargeld zählen und den Bestand eintragen. Danach sind alle Tage bis zu diesem Datum gesperrt.
+            Eine Differenz wird als eigener Eintrag gegen das gewählte Konto gebucht (z. B. Kassendifferenzen oder sonstige betriebliche Aufwendungen).</p>
+          <form method="post" action="{{ url_for('main.create_cash_closing_action', cash_book_id=selected_book.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <div class="form-grid">
+              <div class="field">
+                <label for="closing_date">Datum</label>
+                <input id="closing_date" type="date" name="closing_date" required value="{{ today }}" max="{{ today }}" />
+              </div>
+              <div class="field">
+                <label for="counted_balance">Gezählter Bestand</label>
+                <input id="counted_balance" name="counted_balance" required inputmode="decimal" placeholder="0,00" />
+              </div>
+              <div class="field field-wide">
+                <label for="difference_account">Konto für eine Differenz</label>
+                <select id="difference_account" name="difference_account_id">
+                  <option value="">Keine Differenz erwartet</option>
+                  {% for account in accounts if account.id != selected_book.account_id %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="closing_description">Beschreibung der Differenz (optional)</label>
+                <input id="closing_description" name="description" maxlength="255" />
+              </div>
+            </div>
+            <button type="submit" data-confirm="Kassensturz erfassen? Die Tage bis zu diesem Datum sind danach gesperrt.">Kassensturz erfassen</button>
+          </form>
+        </details>
+      {% endif %}
+
+      <section class="card">
+        <div class="page-header">
+          <h2>Einträge {{ selected_book.name }}</h2>
+          <div class="page-actions">
+            <a class="button-secondary btn-sm" href="{{ url_for('main.cash_report_page', cash_book_id=selected_book.id) }}">Kassenbericht</a>
+            <a class="button-secondary btn-sm" href="{{ url_for('main.cash_report_csv_download', cash_book_id=selected_book.id) }}">CSV</a>
+            <a class="button-secondary btn-sm" href="{{ url_for('main.cash_book_integrity_page', cash_book_id=selected_book.id) }}">Prüfen</a>
+          </div>
+        </div>
+        {% if entries %}
+          <div class="table-scroll">
+            <table class="data" data-no-sort>
+              <thead>
+                <tr>
+                  <th class="num">Nr.</th>
+                  <th>Datum</th>
+                  <th>Art</th>
+                  <th>Beschreibung</th>
+                  <th>Gegenkonto</th>
+                  <th class="num">Einnahme</th>
+                  <th class="num">Ausgabe</th>
+                  <th class="num">Bestand</th>
+                  <th>Buchung</th>
+                  <th class="actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in entries %}
+                  <tr>
+                    <td class="num">{{ entry.entry_number }}</td>
+                    <td class="nowrap">{{ entry.entry_date | datum }}</td>
+                    <td class="nowrap">{{ entry_type_labels.get(entry.entry_type, entry.entry_type) }}</td>
+                    <td>{{ entry.description }}
+                      {% if reversed_by.get(entry.id) %}<br /><span class="badge badge-warning">storniert durch Nr. {{ reversed_by[entry.id] }}</span>{% endif %}
+                      {% if entry.partner %}<br /><span class="muted small">{{ entry.partner.name }}</span>{% endif %}
+                      {% if entry.tax_code %}<br /><span class="muted small">{{ entry.tax_code.code }}</span>{% endif %}
+                      {% if entry.document %}<br /><span class="muted small">Beleg: {{ entry.document.file_name }}</span>{% endif %}
+                    </td>
+                    <td class="nowrap">{% if entry.contra_account %}{{ account_link(entry.contra_account_id, entry.contra_account.code) }}{% else %}–{% endif %}</td>
+                    <td class="num">{% if entry.direction == "in" %}{{ entry.amount | betrag }}{% endif %}</td>
+                    <td class="num">{% if entry.direction == "out" %}{{ entry.amount | betrag }}{% endif %}</td>
+                    <td class="num"><strong>{{ entry.balance_after | betrag }}</strong></td>
+                    <td class="nowrap">{% if entry.journal_entry %}<a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=entry.journal_entry_id) }}">{{ entry.journal_entry.posting_number }}</a>{% else %}–{% endif %}</td>
+                    <td class="actions">
+                      {% if can_write and selected_book.is_active and entry.entry_type != "reversal" and entry.journal_entry_id and not reversed_by.get(entry.id) %}
+                        <form method="post" class="inline-form" action="{{ url_for('main.reverse_cash_entry_action', cash_book_id=selected_book.id, entry_id=entry.id) }}">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                          <button type="submit" class="danger btn-sm" data-confirm="Eintrag Nr. {{ entry.entry_number }} stornieren? Der Storno-Eintrag trägt das heutige Datum.">Stornieren</button>
+                        </form>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {{ pagination('main.cash_book_page', entries_total, limit, offset, selected_company_id, extra={'cash_book_id': selected_book.id}) }}
+        {% else %}
+          <p class="muted">Noch keine Einträge.</p>
+        {% endif %}
+      </section>
+
+      {% if closings %}
+        <section class="card">
+          <h2>Kassenstürze</h2>
+          <div class="table-scroll">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th class="num">Soll-Bestand</th>
+                  <th class="num">Gezählt</th>
+                  <th class="num">Differenz</th>
+                  <th>Differenz-Eintrag</th>
+                  <th>Erfasst von</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for closing in closings %}
+                  <tr>
+                    <td class="nowrap">{{ closing.closing_date | datum }}</td>
+                    <td class="num">{{ closing.expected_balance | betrag }}</td>
+                    <td class="num">{{ closing.counted_balance | betrag }}</td>
+                    <td class="num">{{ closing.difference | betrag }}</td>
+                    <td>{% if closing.difference_entry %}Nr. {{ closing.difference_entry.entry_number }}{% else %}–{% endif %}</td>
+                    <td>{{ closing.created_by }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+
+      {% if can_write %}
+        <details class="card">
+          <summary>Kasse bearbeiten</summary>
+          <form method="post" action="{{ url_for('main.update_cash_book_action', cash_book_id=selected_book.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <div class="form-grid">
+              <div class="field">
+                <label for="edit_name">Name</label>
+                <input id="edit_name" name="name" required maxlength="120" value="{{ selected_book.name }}" />
+              </div>
+              <div class="field">
+                <label for="edit_active">Status</label>
+                <select id="edit_active" name="is_active">
+                  <option value="1"{% if selected_book.is_active %} selected{% endif %}>Aktiv</option>
+                  <option value="0"{% if not selected_book.is_active %} selected{% endif %}>Inaktiv</option>
+                </select>
+              </div>
+            </div>
+            <p class="hint">Das Konto bleibt fest. Inaktiv setzen lässt sich eine Kasse nur mit Bestand 0.</p>
+            <button type="submit">Speichern</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+
+    <p class="hint">Manuell geführtes Kassenbuch: Es ersetzt keine TSE und keinen DSFinV-K-Export für elektronische Kassensysteme und ist nicht zertifiziert.</p>
+  {% endif %}
+{% endblock %}

@@ -22,6 +22,7 @@ from app.services.documents import documents_by_journal_entry
 from app.services.journal_entries import (
     CARRYFORWARD_SOURCES,
     KEEP_PARTNER,
+    SOURCE_CASH_BOOK,
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
@@ -76,6 +77,7 @@ SOURCE_LABELS = {
     "carryforward": "Saldovortrag",
     "payroll": "Lohn",
     "sales_invoice": "Rechnung",
+    "cash_book": "Kassenbuch",
 }
 STATUS_FILTERS = {"offen": False, "festgeschrieben": True}
 
@@ -786,7 +788,11 @@ def _render_entry_detail(journal_entry_id: int):
             "period_number": entry.period.period_number if entry.period else None,
             "amendable": _is_amendable(entry, reversed_by),
             "is_system_entry": entry.source in CARRYFORWARD_SOURCES,
-            "can_reverse": not entry.reversal_of_id and not reversed_by,
+            "can_reverse": (
+                not entry.reversal_of_id
+                and not reversed_by
+                and entry.source not in {SOURCE_CASH_BOOK, "sales_invoice"}
+            ),
             "history": history,
             "source_label": SOURCE_LABELS.get(entry.source),
             "all_partners": [partner for partner in partners if partner.is_active],

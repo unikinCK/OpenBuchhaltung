@@ -54,8 +54,8 @@ from app.services.journal_entries import (
 from app.services.open_items import (
     OpenItemError,
     OpenItemInput,
+    close_open_item_by_cancellation,
     create_open_item,
-    settle_open_item,
 )
 from app.services.sales_invoice_pdf import (
     PdfInvoice,
@@ -63,7 +63,7 @@ from app.services.sales_invoice_pdf import (
     build_invoice_pdf,
     embed_xml_attachment,
 )
-from app.services.vat_returns import EU_COUNTRY_CODES, revenue_kennzahl
+from app.services.vat_returns import EU_COUNTRY_CODES, company_on_cash_basis, revenue_kennzahl
 from domain.formatting import format_amount
 from domain.models import (
     SALES_INVOICE_CANCELLED,
@@ -170,6 +170,10 @@ class TaxTreatmentRule:
     kennzahlen: frozenset[str] = frozenset()
     account_hint: str = ""
 
+
+# § 14 Abs. 4 Nr. 6a UStG: Istversteuerer weisen ab 2028 auf der Rechnung darauf hin.
+CASH_BASIS_NOTE_FROM = date(2028, 1, 1)
+CASH_BASIS_NOTE = "Versteuerung nach vereinnahmten Entgelten."
 
 TAX_TREATMENT_RULES = {
     TAX_TREATMENT_STANDARD: TaxTreatmentRule("Regelbesteuerung (Steuerausweis)", "S", ""),
@@ -1035,7 +1039,7 @@ def _outgoing_invoice(
     """E-Rechnung zur Rechnung. Eine Stornorechnung (381) trägt positive Beträge."""
     rule = TAX_TREATMENT_RULES[invoice.tax_treatment]
     sign = Decimal("-1") if original is not None else Decimal("1")
-    notes = [invoice.header_text or "", rule.note, invoice.footer_text or ""]
+    notes = [invoice.header_text or "", _tax_note(invoice, company), invoice.footer_text or ""]
     return OutgoingInvoice(
         invoice_number=invoice.invoice_number,
         issue_date=invoice.issue_date,
@@ -1119,15 +1123,25 @@ def _payment_lines(invoice: SalesInvoice, seller: SellerData, *, is_storno: bool
     return [f"{terms} unter Angabe der Rechnungsnummer {invoice.invoice_number}."]
 
 
+def _tax_note(invoice: SalesInvoice, company: Company) -> str:
+    """Pflichthinweis der Steuerbehandlung, ab 2028 auch der auf die Istversteuerung."""
+    note = TAX_TREATMENT_RULES[invoice.tax_treatment].note
+    if invoice.issue_date >= CASH_BASIS_NOTE_FROM and company_on_cash_basis(
+        company, invoice.issue_date
+    ):
+        return " ".join(part for part in (note, CASH_BASIS_NOTE) if part)
+    return note
+
+
 def _pdf_invoice(
     *,
     invoice: SalesInvoice,
+    company: Company,
     seller: SellerData,
     partner: BusinessPartner,
     original: SalesInvoice | None,
 ) -> PdfInvoice:
     totals = compute_invoice_totals(invoice.lines)
-    rule = TAX_TREATMENT_RULES[invoice.tax_treatment]
     service_label, service_text = _service_text(invoice)
     return PdfInvoice(
         title="Stornorechnung" if original is not None else "Rechnung",
@@ -1163,7 +1177,7 @@ def _pdf_invoice(
             else ""
         ),
         header_text=invoice.header_text or "",
-        tax_note=rule.note,
+        tax_note=_tax_note(invoice, company),
         payment_lines=_payment_lines(invoice, seller, is_storno=original is not None),
         footer_text=invoice.footer_text or "",
     )
@@ -1191,7 +1205,13 @@ def _store_output_documents(
     base_name = secure_filename(f"{prefix}_{invoice.invoice_number}") or prefix
     pdf_bytes = embed_xml_attachment(
         build_invoice_pdf(
-            _pdf_invoice(invoice=invoice, seller=seller, partner=partner, original=original)
+            _pdf_invoice(
+                invoice=invoice,
+                company=company,
+                seller=seller,
+                partner=partner,
+                original=original,
+            )
         ),
         file_name=f"{base_name}.xml",
         xml_bytes=xml_bytes,
@@ -1614,13 +1634,8 @@ def _cancel(
         commit=False,
         from_sales_invoice=True,
     )
-    settle_open_item(
-        session=session,
-        open_item_id=item.id,
-        changed_by=changed_by,
-        amount=item.open_amount,
-        journal_entry_id=reversal.id,
-        commit=False,
+    close_open_item_by_cancellation(
+        session=session, item=item, reversal_entry=reversal, changed_by=changed_by
     )
     pdf_document, xml_document = _store_output_documents(
         session=session,

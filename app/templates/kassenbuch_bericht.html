@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kassenbericht – {{ report.book.name }}</title>
+    <style>
+      body {
+        font-family: Georgia, "Times New Roman", serif;
+        max-width: 64rem;
+        margin: 2rem auto;
+        line-height: 1.4;
+        color: #1a1a1a;
+        padding: 0 1rem;
+        font-size: 0.9rem;
+      }
+      h1 { font-size: 1.3rem; margin-bottom: 0.2rem; }
+      h2 { font-size: 1rem; margin: 1.5rem 0 0.4rem; }
+      .meta { color: #555; margin: 0 0 1rem; }
+      .scroll { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #bbb; padding: 0.25rem 0.45rem; text-align: left; vertical-align: top; }
+      td.num, th.num { text-align: right; white-space: nowrap; }
+      td.nowrap { white-space: nowrap; }
+      table.summary { max-width: 26rem; }
+      tr.total td { font-weight: bold; }
+      .controls { background: #fdf3e1; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+      .controls form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.4rem; }
+      .note { color: #555; font-size: 0.8rem; margin-top: 1.5rem; }
+      @media print {
+        .controls { display: none; }
+        .scroll { overflow: visible; }
+        body { margin: 1cm auto; max-width: none; font-size: 0.75rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      Über die Druckfunktion des Browsers als PDF speichern oder drucken.
+      <a href="{{ url_for('main.cash_book_page', company_id=report.book.company_id, cash_book_id=report.book.id) }}">Zurück zum Kassenbuch</a>
+      <form method="get" action="{{ url_for('main.cash_report_page', cash_book_id=report.book.id) }}">
+        <label>Von <input type="date" name="date_from" value="{{ report.date_from.isoformat() if report.date_from else '' }}" /></label>
+        <label>Bis <input type="date" name="date_to" value="{{ report.date_to.isoformat() if report.date_to else '' }}" /></label>
+        <button type="submit">Anzeigen</button>
+        <a href="{{ url_for('main.cash_report_csv_download', cash_book_id=report.book.id, date_from=report.date_from.isoformat() if report.date_from else '', date_to=report.date_to.isoformat() if report.date_to else '') }}">Als CSV</a>
+      </form>
+    </div>
+
+    <h1>Kassenbericht {{ report.book.name }}</h1>
+    <p class="meta">{{ company.name }} · Konto {{ report.book.account.code }} {{ report.book.account.name }}<br />
+      Zeitraum: {{ report.date_from | datum if report.date_from else "Beginn" }} bis {{ report.date_to | datum if report.date_to else printed_on | datum }} · Erstellt am {{ printed_on | datum }}</p>
+
+    <table class="summary" data-no-sort>
+      <tbody>
+        <tr><td>Anfangsbestand</td><td class="num">{{ report.opening_balance | betrag }} €</td></tr>
+        <tr><td>+ Einnahmen</td><td class="num">{{ report.total_receipts | betrag }} €</td></tr>
+        <tr><td>− Ausgaben</td><td class="num">{{ report.total_payments | betrag }} €</td></tr>
+        <tr class="total"><td>Endbestand</td><td class="num">{{ report.closing_balance | betrag }} €</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Tagessalden</h2>
+    {% if report.days %}
+      <div class="scroll">
+        <table data-no-sort>
+          <thead>
+            <tr><th>Datum</th><th class="num">Einnahmen</th><th class="num">Ausgaben</th><th class="num">Bestand</th></tr>
+          </thead>
+          <tbody>
+            {% for day in report.days %}
+              <tr>
+                <td class="nowrap">{{ day.day | datum }}</td>
+                <td class="num">{{ day.receipts | betrag }}</td>
+                <td class="num">{{ day.payments | betrag }}</td>
+                <td class="num">{{ day.balance | betrag }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>Keine Einträge im Zeitraum.</p>
+    {% endif %}
+
+    <h2>Einzelzeilen</h2>
+    {% if report.entries %}
+      <div class="scroll">
+        <table data-no-sort>
+          <thead>
+            <tr>
+              <th class="num">Nr.</th>
+              <th>Datum</th>
+              <th>Art</th>
+              <th>Beschreibung</th>
+              <th>Gegenkonto</th>
+              <th>Steuer</th>
+              <th>Buchung</th>
+              <th>Beleg</th>
+              <th class="num">Einnahme</th>
+              <th class="num">Ausgabe</th>
+              <th class="num">Bestand</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in report.entries %}
+              <tr>
+                <td class="num">{{ entry.entry_number }}</td>
+                <td class="nowrap">{{ entry.entry_date | datum }}</td>
+                <td>{{ entry_type_labels.get(entry.entry_type, entry.entry_type) }}{% if report.reversed_by.get(entry.id) %} (storniert durch Nr. {{ report.reversed_by[entry.id] }}){% endif %}</td>
+                <td>{{ entry.description }}{% if entry.partner %}<br />{{ entry.partner.name }}{% endif %}</td>
+                <td class="nowrap">{{ entry.contra_account.code if entry.contra_account else "–" }}</td>
+                <td class="nowrap">{{ entry.tax_code.code if entry.tax_code else "" }}</td>
+                <td class="nowrap">{{ entry.journal_entry.posting_number if entry.journal_entry else "–" }}</td>
+                <td>{{ entry.document.file_name if entry.document else "" }}</td>
+                <td class="num">{% if entry.direction == "in" and entry.entry_type != "opening" %}{{ entry.amount | betrag }}{% endif %}</td>
+                <td class="num">{% if entry.direction == "out" %}{{ entry.amount | betrag }}{% endif %}</td>
+                <td class="num">{{ entry.balance_after | betrag }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>Keine Einträge im Zeitraum.</p>
+    {% endif %}
+
+    {% if report.closings %}
+      <h2>Kassenstürze</h2>
+      <div class="scroll">
+        <table data-no-sort>
+          <thead>
+            <tr><th>Datum</th><th class="num">Soll-Bestand</th><th class="num">Gezählt</th><th class="num">Differenz</th><th>Erfasst von</th></tr>
+          </thead>
+          <tbody>
+            {% for closing in report.closings %}
+              <tr>
+                <td class="nowrap">{{ closing.closing_date | datum }}</td>
+                <td class="num">{{ closing.expected_balance | betrag }}</td>
+                <td class="num">{{ closing.counted_balance | betrag }}</td>
+                <td class="num">{{ closing.difference | betrag }}</td>
+                <td>{{ closing.created_by }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <p class="note">Der Anfangsbestand einer neuen Kasse zählt nicht als Einnahme. Storno- und Differenz-Einträge zählen nach ihrer Richtung zu Einnahmen oder Ausgaben.
+      Manuell geführtes Kassenbuch: ersetzt keine TSE und keinen DSFinV-K-Export und ist nicht zertifiziert.</p>
+  </body>
+</html>

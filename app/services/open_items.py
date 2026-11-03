@@ -273,6 +273,31 @@ def set_open_item_partner(
     return item
 
 
+def close_open_item_by_cancellation(
+    *, session: Session, item: OpenItem, reversal_entry: JournalEntry, changed_by: str
+) -> None:
+    """Schließt den Posten einer stornierten Rechnung, ohne Commit.
+
+    Kein Ausgleich: Es floss kein Geld, deshalb entsteht keine Zeile in ``OpenItemSettlement``.
+    Bei Istversteuerung gälte sie sonst als Zahlung und löste Umsatzsteuer aus.
+    """
+    item.open_amount = Decimal("0.00")
+    item.status = "settled"
+    item.settled_at = datetime.now(timezone.utc)
+    item.settled_by = changed_by
+    log_audit_event(
+        session=session,
+        tenant_id=item.tenant_id,
+        company_id=item.company_id,
+        entity_type="open_item",
+        entity_id=str(item.id),
+        action="cancelled",
+        changed_by=changed_by,
+        payload={"reference": item.reference, "reversal_entry_id": reversal_entry.id},
+    )
+    session.flush()
+
+
 def settle_open_item(
     *,
     session: Session,
@@ -282,7 +307,6 @@ def settle_open_item(
     bank_transaction_id: int | None = None,
     journal_entry_id: int | None = None,
     settlement_date: date | None = None,
-    commit: bool = True,
 ) -> OpenItem:
     """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
     Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum."""
@@ -367,11 +391,8 @@ def settle_open_item(
             "journal_entry_id": linked_entry.id if linked_entry else None,
         },
     )
-    if commit:
-        session.commit()
-        session.refresh(item)
-    else:
-        session.flush()
+    session.commit()
+    session.refresh(item)
     return item
 
 

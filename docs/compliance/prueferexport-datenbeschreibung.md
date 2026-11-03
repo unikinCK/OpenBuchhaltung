@@ -20,6 +20,9 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/controlling_unit_history.json` | Verkettete Vorher-/Nachher-Historie der Controlling-Einheiten |
 | `data/business_partners.json` | Geschäftspartner (Debitoren/Kreditoren) mit Personenkontonummern |
 | `data/business_partner_history.json` | Verkettete Vorher-/Nachher-Historie der Geschäftspartner inklusive Bankdatenänderungen |
+| `data/cash_books.json` | Kassen der Gesellschaft mit Kassenkonto, Status und Nummernkreis |
+| `data/cash_entries.json` | Unveränderbare Kassenbuch-Einträge mit fortlaufender Nummer, Bestand, Buchung und Hashkette |
+| `data/cash_closings.json` | Unveränderbare Tagesabschlüsse (Kassensturz) mit Soll-Bestand, gezähltem Bestand und Differenz |
 | `data/consolidation_groups.json` | Konsolidierungsgruppen, deren Muttergesellschaft die exportierte Gesellschaft ist |
 | `data/consolidation_members.json` | Mitglieder dieser Gruppen mit Beteiligungsquote und Einbeziehungszeitraum |
 | `data/consolidation_adjustments.json` | Manuelle Konsolidierungsbuchungen dieser Gruppen |
@@ -73,6 +76,16 @@ Nachträge vor der Festschreibung (Leistungsdatum, Partner) stehen als Aktion
 Änderungen und Bankdatenänderungen (`bank_details_changed`) stehen mit
 Audit-Hashes in `business_partner_history.json`.
 
+Das Kassenbuch steht in `cash_books.json`, `cash_entries.json` und
+`cash_closings.json`. Einträge tragen eine je Kasse lückenlose Nummer, Art,
+Richtung, Betrag, Bestand nach dem Eintrag, Verweise auf Buchung, Gegenkonto,
+Steuercode, Partner, Beleg und Storno sowie die Hashkette `previous_hash` und
+`content_hash` (SHA-256 über die kanonischen Felder einschließlich des
+Vorgänger-Hashs, Verfahren in `hash_version`). Einträge und Tagesabschlüsse sind
+per Datenbank-Trigger unveränderbar. `date_from`/`date_to` filtern Einträge nach
+`entry_date` und Abschlüsse nach `closing_date`; die Kette lässt sich deshalb nur
+in einem ungefilterten Export von Anfang an nachrechnen. Das Kassenbuch ist manuell
+geführt und ersetzt keine TSE und keinen DSFinV-K-Export.
 Konsolidierungsgruppen (ADR-008) gehören zum Paket ihrer Muttergesellschaft; der
 Export einer Tochtergesellschaft enthält sie nicht. Manuelle Konsolidierungsbuchungen
 sind keine Buchungen einer Gesellschaft und stehen nicht im Journal; sie werden nach

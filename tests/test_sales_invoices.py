@@ -61,7 +61,12 @@ from app.services.sales_invoices import (
     next_invoice_number,
     update_sales_invoice,
 )
-from app.services.vat_returns import compute_vat_return
+from app.services.vat_returns import (
+    VatReturnResult,
+    compute_vat_return,
+    compute_vat_return_details,
+    set_company_vat_method,
+)
 from domain.models import (
     Account,
     AuditLog,
@@ -71,6 +76,7 @@ from domain.models import (
     JournalEntry,
     JournalEntryLine,
     OpenItem,
+    OpenItemSettlement,
     Period,
     SalesInvoice,
     SalesInvoiceLine,
@@ -2316,7 +2322,7 @@ def test_migration_roundtrip(tmp_path: Path) -> None:
     assert "sales_invoice" in inspect(engine).get_table_names()
 
     # Downgrade entfernt Trigger, Tabellen und Spalten.
-    command.downgrade(config, "20261103_0061")
+    command.downgrade(config, "20261103_0059")
     tables = inspect(engine).get_table_names()
     assert "sales_invoice" not in tables
     assert "sales_invoice_line" not in tables
@@ -2352,3 +2358,121 @@ def test_migration_roundtrip(tmp_path: Path) -> None:
         assert company.invoice_prefix == "RE"
         assert company.is_small_business is False
         assert db.execute(select(SalesInvoiceLine)).scalars().first() is None
+
+
+# ---------------------------------------------------------------------------
+# Istversteuerung (ADR-009)
+# ---------------------------------------------------------------------------
+
+
+def _ist(session: Session, books: _Books, valid_from: date = date(2026, 1, 1)) -> None:
+    set_company_vat_method(
+        session=session,
+        company=books.company,
+        method="ist",
+        valid_from=valid_from,
+        changed_by="pytest",
+    )
+
+
+def _vat(session: Session, company_id: int, date_from: date, date_to: date) -> VatReturnResult:
+    return compute_vat_return_details(
+        session=session, company_id=company_id, date_from=date_from, date_to=date_to
+    )
+
+
+def _kz(result: VatReturnResult, kennziffer: str) -> Decimal:
+    return next(
+        (row.amount for row in result.rows if row.kennziffer == kennziffer), Decimal("0.00")
+    )
+
+
+def test_cash_basis_invoice_counts_with_payment(session: Session, upload_dir: Path) -> None:
+    books = _Books(session)
+    _ist(session, books)
+    issued = books.issued(upload_dir)
+    entry_day = issued.issue_date
+
+    open_period = _vat(session, books.company.id, entry_day, entry_day)
+    assert _kz(open_period, "83") == Decimal("0.00")
+    assert any("nicht fällig" in warning for warning in open_period.warnings)
+
+    settle_open_item(
+        session=session,
+        open_item_id=issued.open_item_id,
+        changed_by="pytest",
+        settlement_date=date(2026, 6, 15),
+    )
+    paid_period = _vat(session, books.company.id, date(2026, 6, 1), date(2026, 6, 30))
+    assert _kz(paid_period, "83") == issued.tax_total
+
+
+def test_cancelled_invoice_owes_no_tax_on_cash_basis(session: Session, upload_dir: Path) -> None:
+    books = _Books(session)
+    _ist(session, books)
+    issued = books.issued(upload_dir)
+    entry_day = issued.issue_date
+    cancel_sales_invoice(
+        session=session,
+        invoice_id=issued.id,
+        changed_by="pytest",
+        upload_dir=upload_dir,
+        cancellation_date=date(2026, 7, 10),
+    )
+    session.expire_all()
+    fresh = session.get(SalesInvoice, issued.id)
+    assert fresh.status == "cancelled"
+    assert fresh.open_item.status == "settled"
+    assert fresh.open_item.open_amount == Decimal("0.00")
+    # Es floss kein Geld: keine Zeile, die als Zahlung zählt.
+    assert session.execute(select(OpenItemSettlement)).scalars().first() is None
+
+    for date_from, date_to in (
+        (entry_day, entry_day),
+        (date(2026, 7, 1), date(2026, 7, 31)),
+        (date(2026, 1, 1), date(2026, 12, 31)),
+    ):
+        result = _vat(session, books.company.id, date_from, date_to)
+        assert _kz(result, "83") == Decimal("0.00"), (date_from, date_to)
+        assert _kz(result, "81") == Decimal("0.00"), (date_from, date_to)
+
+    # Nach dem Storno ist nichts mehr „noch nicht fällig“, vorher schon.
+    after = _vat(session, books.company.id, date(2026, 7, 1), date(2026, 7, 31))
+    assert not any("nicht fällig" in warning for warning in after.warnings)
+    before = _vat(session, books.company.id, entry_day, entry_day)
+    assert any("nicht fällig" in warning for warning in before.warnings)
+
+
+def test_cancelled_invoice_stays_neutral_on_accrual_basis(
+    session: Session, upload_dir: Path
+) -> None:
+    books = _Books(session)
+    issued = books.issued(upload_dir)
+    entry_day = issued.issue_date
+    cancel_sales_invoice(
+        session=session,
+        invoice_id=issued.id,
+        changed_by="pytest",
+        upload_dir=upload_dir,
+        cancellation_date=entry_day,
+    )
+    result = _vat(session, books.company.id, entry_day, entry_day)
+    assert _kz(result, "83") == Decimal("0.00")
+
+
+def test_cash_basis_note_appears_from_2028(session: Session, upload_dir: Path) -> None:
+    books = _Books(session)
+    _ist(session, books)
+    before = books.issued(upload_dir)
+    assert "vereinnahmten Entgelten" not in _pdf_text(
+        _document_bytes(session, before.pdf_document_id)
+    )
+
+    issued = books.issued(
+        upload_dir, issue_date=date(2028, 2, 1), service_date=date(2028, 1, 31)
+    )
+    assert "vereinnahmten Entgelten" in _pdf_text(
+        _document_bytes(session, issued.pdf_document_id)
+    )
+    xml = _document_bytes(session, issued.xml_document_id).decode("utf-8")
+    assert "vereinnahmten Entgelten" in xml

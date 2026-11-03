@@ -371,7 +371,8 @@ def _output_tax_of_row(row, vat_accounts: dict[int, str]) -> Decimal:
     return row.credit_amount - row.debit_amount if is_output_tax else ZERO
 
 
-def _in_cash_basis(company: Company, day: date) -> bool:
+def company_on_cash_basis(company: Company, day: date) -> bool:
+    """Ob die Gesellschaft an diesem Tag nach vereinnahmten Entgelten versteuert."""
     if company.vat_cash_basis_from is None or day < company.vat_cash_basis_from:
         return False
     return company.vat_cash_basis_until is None or day <= company.vat_cash_basis_until
@@ -448,6 +449,20 @@ def _apply_cash_basis(
             if settlement.reversed_on is not None:
                 events.append((settlement.reversed_on, -settlement.amount))
 
+    # Bis zum Periodenende stornierte Rechnungen werden nicht mehr fällig.
+    cancelled = (
+        set(
+            session.execute(
+                select(JournalEntry.reversal_of_id).where(
+                    JournalEntry.reversal_of_id.in_(deferred),
+                    JournalEntry.entry_date <= date_to,
+                )
+            ).scalars()
+        )
+        if deferred
+        else set()
+    )
+
     # Stornos solcher Rechnungen entfallen wie die Rechnung selbst.
     result = {
         key: entry
@@ -465,7 +480,7 @@ def _apply_cash_basis(
         ]
         share_before = _paid_share(events, total, before)
         share_after = _paid_share(events, total, date_to)
-        if invoice.entry_date <= date_to:
+        if invoice.entry_date <= date_to and entry_id not in cancelled:
             not_due += sum(
                 (
                     _output_tax_of_row(row, vat_accounts)
@@ -507,7 +522,7 @@ def _apply_cash_basis(
         if isinstance(key, int)
         and entry.reversal_of_id is None
         and date_from <= entry.entry_date <= date_to
-        and _in_cash_basis(company, entry.entry_date)
+        and company_on_cash_basis(company, entry.entry_date)
         and any(_output_tax_of_row(row, vat_accounts) != ZERO for row in entry.rows)
         and any(
             row.account_subledger == SUBLEDGER_DEBTOR and row.debit_amount > ZERO
@@ -955,7 +970,7 @@ def company_vat_method(company: Company, *, on: date | None = None) -> dict[str,
     day = on or date.today()
     return {
         "company_id": company.id,
-        "method": VAT_METHOD_CASH if _in_cash_basis(company, day) else VAT_METHOD_ACCRUAL,
+        "method": VAT_METHOD_CASH if company_on_cash_basis(company, day) else VAT_METHOD_ACCRUAL,
         "as_of": day.isoformat(),
         "cash_basis_from": (
             company.vat_cash_basis_from.isoformat() if company.vat_cash_basis_from else None
