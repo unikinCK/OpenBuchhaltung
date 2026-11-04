@@ -1026,7 +1026,14 @@ def _resolve_foreign_amounts(
             rate = (line.foreign_amount / amount).quantize(Decimal("0.000001"))
         elif rate <= 0:
             raise JournalEntryCreationError(f"Zeile {number}: Der Kurs muss größer 0 sein.")
-        elif abs(line.foreign_amount / rate - amount) > Decimal("0.01"):
+        else:
+            # So genau wie die Spalte: Das Siegel entsteht vor dem Speichern.
+            rate = rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        if rate <= 0:
+            raise JournalEntryCreationError(f"Zeile {number}: Der Kurs muss größer 0 sein.")
+        if line.exchange_rate is not None and abs(line.foreign_amount / rate - amount) > Decimal(
+            "0.01"
+        ):
             raise JournalEntryCreationError(
                 f"Zeile {number}: {line.foreign_amount} {code} ergeben zum Kurs {rate} nicht "
                 f"{amount} {company.currency_code}."

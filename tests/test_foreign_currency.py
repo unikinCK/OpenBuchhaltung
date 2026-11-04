@@ -21,6 +21,7 @@ from app.services.compliance_integrity import (
     JOURNAL_CONTENT_HASH_VERSION,
     verify_compliance_integrity,
 )
+from app.services.dunning import dunning_proposals, serialize_proposal
 from app.services.exchange_rates import (
     ExchangeRateError,
     fetch_ecb_rates,
@@ -55,6 +56,7 @@ from app.services.sales_invoices import (
     create_sales_invoice,
     issue_sales_invoice,
 )
+from app.services.sepa_export import SepaExportError, create_payment_run, payable_items_for_run
 from app.services.tax_codes import ensure_default_tax_codes
 from domain.models import (
     Account,
@@ -594,6 +596,97 @@ def test_euro_item_rejects_foreign_bank_transaction(session: Session) -> None:
             changed_by="t",
             bank_transaction_id=transaction.id,
         )
+
+
+def test_euro_bank_payment_of_foreign_item_uses_the_euro_amount(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _bank_tx(session, company, accounts["1200"], "1010.00", "EUR")
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+    )
+    assert settled.status == "settled"
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.paid_amount == Decimal("1010.00")
+    assert row.fx_difference == Decimal("10.00")
+    # Noch keine Buchung zum Umsatz: festgehalten, aber nicht gebucht.
+    assert row.fx_journal_entry_id is None
+
+
+def test_payment_line_without_partner_counts_for_item_with_partner(session: Session) -> None:
+    company, accounts = _seed(session)
+    customer = create_partner(
+        session=session, company=company, changed_by="t", name="Kunde", is_customer=True
+    )
+    session.commit()
+    item = _fx_item(session, company, accounts["1400"], partner_id=customer.id)
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1020.00")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+    )
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.paid_amount == Decimal("1020.00")
+
+
+def test_collective_payment_needs_the_amount_of_the_item(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "5000.00")
+    with pytest.raises(OpenItemError, match="weicht stark"):
+        settle_open_item(
+            session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+        )
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        amount=Decimal("1010.00"),
+    )
+    assert settled.status == "settled"
+
+
+def test_payment_run_refuses_foreign_items(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(
+        session,
+        company,
+        accounts["1600"],
+        item_type="payable",
+        counterparty_iban="DE89370400440532013000",
+    )
+    assert payable_items_for_run(session=session, company_id=company.id) == []
+    with pytest.raises(SepaExportError, match="nur in EUR"):
+        create_payment_run(
+            session=session, company_id=company.id, open_item_ids=[item.id], changed_by="t"
+        )
+
+
+def test_dunning_shows_the_foreign_amount(session: Session) -> None:
+    company, accounts = _seed(session)
+    _fx_item(session, company, accounts["1400"], due_date=date(2026, 3, 10))
+    proposal = dunning_proposals(session=session, company_id=company.id)[0]
+    payload = serialize_proposal(proposal)
+    assert payload["foreign_currency_code"] == "USD"
+    assert payload["foreign_open_amount"] == "1080.00"
+
+
+def test_rate_is_rounded_like_the_column_before_sealing(session: Session) -> None:
+    company, accounts = _seed(session)
+    entry = _fx_entry(
+        session,
+        company,
+        accounts,
+        foreign_currency_code="USD",
+        foreign_amount=Decimal("108.00"),
+        exchange_rate=Decimal("1.0800004"),
+    )
+    finalize_journal_entry(session=session, journal_entry_id=entry.id, changed_by="t")
+    session.expire_all()
+    assert verify_compliance_integrity(session=session, company_id=company.id).valid is True
 
 
 # ---------------------------------------------------------------------------

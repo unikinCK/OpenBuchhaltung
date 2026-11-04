@@ -1250,6 +1250,9 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   festgehalten. Fehlt das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
   bestehende Gesellschaften legen es im Kontenplan an. Ein storniertes Ausgleichen nimmt auch die Differenz
   zurück.
+- **Zahllauf und Mahnwesen:** SEPA-Überweisungen gehen nur in Euro, Posten in Fremdwährung erscheinen nicht im
+  Zahllauf. Das Mahnschreiben nennt den offenen Fremdbetrag. Eine Zahlungsbuchung, die mehr als 20 % vom Buchwert
+  abweicht, gilt nicht als Zahlbetrag des Postens (vermutlich eine Sammelzahlung); dann ist er anzugeben.
 - **Bankumsätze** in Fremdwährung werden zum Kurs des Buchungstags oder einem angegebenen Kurs in Euro
   gebucht (`exchange_rate` in API und MCP, Feld in der Oberfläche). Der Fremdbetrag steht auf der Bankzeile.
   Der Saldenabgleich vergleicht nur Umsätze in Euro, weil sich Fremdwährung nicht gegen den Buchsaldo summieren

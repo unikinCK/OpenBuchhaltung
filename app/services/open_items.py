@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
@@ -37,6 +37,9 @@ from domain.models import (
 )
 
 OPEN_ITEM_TYPES = {"receivable", "payable"}
+# Weicht der aus einer Buchung abgeleitete Zahlbetrag stärker vom Buchwert ab, ist es vermutlich
+# eine Sammelzahlung und keine Kursdifferenz: Dann muss der Betrag angegeben werden.
+MAX_DERIVED_FX_DEVIATION = Decimal("0.20")
 # Sammelkontoseite und Rollenfeld des Partners je OPOS-Typ.
 ITEM_TYPE_SUBLEDGER = {"receivable": SUBLEDGER_DEBTOR, "payable": SUBLEDGER_CREDITOR}
 
@@ -593,8 +596,14 @@ def _paid_on_item_account(session: Session, item: OpenItem, entry_id: int) -> De
         JournalEntryLine.journal_entry_id == entry_id,
         JournalEntryLine.account_id == item.account_id,
     ]
+    # Zeilen ohne Partner zählen mit, solche eines anderen Partners nicht (Sammelzahlung).
     if item.partner_id is not None:
-        conditions.append(JournalEntryLine.partner_id == item.partner_id)
+        conditions.append(
+            or_(
+                JournalEntryLine.partner_id == item.partner_id,
+                JournalEntryLine.partner_id.is_(None),
+            )
+        )
     return sum(session.execute(select(column).where(*conditions)).scalars(), Decimal("0.00"))
 
 
@@ -646,34 +655,41 @@ def _foreign_settlement(
         )
 
     if amount is not None:
-        paid = _positive_amount(amount)
-    elif exchange_rate is not None:
+        return settled, carrying, _positive_amount(amount)
+    if exchange_rate is not None:
         if exchange_rate <= 0:
             raise OpenItemError("Der Kurs muss größer 0 sein.")
-        paid = to_company_amount(settled, exchange_rate)
-    else:
-        entry_id = (linked_entry.id if linked_entry else None) or (
-            bank_transaction.journal_entry_id if bank_transaction else None
+        return settled, carrying, to_company_amount(settled, exchange_rate)
+
+    paid = Decimal("0.00")
+    entry_id = (linked_entry.id if linked_entry else None) or (
+        bank_transaction.journal_entry_id if bank_transaction else None
+    )
+    if entry_id is not None:
+        paid = _paid_on_item_account(session, item, entry_id)
+    if paid <= 0 and bank_transaction is not None and (
+        bank_transaction.currency_code == item.currency_code
+    ):
+        paid = abs(bank_transaction.amount)
+    if paid > 0:
+        # Eine Buchung kann mehrere Posten bezahlen; ihr Betrag wäre dann keine Kursdifferenz.
+        if abs(paid - carrying) > carrying * MAX_DERIVED_FX_DEVIATION:
+            raise OpenItemError(
+                f"Die Zahlung über {paid} {item.currency_code} weicht stark vom Buchwert "
+                f"{carrying} {item.currency_code} ab. Bitte den auf diesen Posten gezahlten "
+                "Betrag angeben."
+            )
+        return settled, carrying, paid
+    try:
+        rate = rate_for(
+            session=session,
+            tenant_id=item.tenant_id,
+            currency_code=item.foreign_currency_code,
+            on=settlement_date,
         )
-        paid = (
-            _paid_on_item_account(session, item, entry_id)
-            if entry_id is not None
-            else Decimal("0.00")
-        )
-        if paid <= 0:
-            try:
-                paid = to_company_amount(
-                    settled,
-                    rate_for(
-                        session=session,
-                        tenant_id=item.tenant_id,
-                        currency_code=item.foreign_currency_code,
-                        on=settlement_date,
-                    ),
-                )
-            except ExchangeRateError as exc:
-                raise OpenItemError(str(exc)) from exc
-    return settled, carrying, paid
+    except ExchangeRateError as exc:
+        raise OpenItemError(str(exc)) from exc
+    return settled, carrying, to_company_amount(settled, rate)
 
 
 def _book_fx_difference(

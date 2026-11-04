@@ -127,7 +127,7 @@ def set_company_bank_details(
 
 
 def payable_items_for_run(*, session: Session, company_id: int) -> list[OpenItem]:
-    """Offene Kreditoren-Posten mit IBAN (am Posten oder am Partner), fällige zuerst."""
+    """Offene Kreditoren-Posten in Euro mit IBAN (am Posten oder am Partner), fällige zuerst."""
     return list(
         session.execute(
             select(OpenItem)
@@ -137,6 +137,8 @@ def payable_items_for_run(*, session: Session, company_id: int) -> list[OpenItem
                 OpenItem.company_id == company_id,
                 OpenItem.item_type == "payable",
                 OpenItem.status == "open",
+                OpenItem.currency_code == "EUR",
+                OpenItem.foreign_currency_code.is_(None),
                 or_(OpenItem.counterparty_iban.is_not(None), BusinessPartner.iban.is_not(None)),
             )
             .order_by(OpenItem.due_date.is_(None), OpenItem.due_date, OpenItem.id)
@@ -197,7 +199,7 @@ def create_payment_run(
             raise SepaExportError(f"Posten {item.reference} ist kein offener Kreditoren-Posten.")
         if not payment_recipient(item).iban:
             raise SepaExportError(f"Posten {item.reference} hat keine Empfänger-IBAN.")
-        if item.currency_code != "EUR":
+        if item.currency_code != "EUR" or item.foreign_currency_code:
             raise SepaExportError(
                 f"Posten {item.reference}: SEPA-Überweisungen sind nur in EUR möglich."
             )

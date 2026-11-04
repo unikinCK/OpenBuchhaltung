@@ -173,6 +173,10 @@ def serialize_proposal(proposal: DunningProposal) -> dict[str, object]:
         "days_overdue": proposal.days_overdue,
         "open_amount": str(item.open_amount),
         "currency_code": item.currency_code,
+        "foreign_currency_code": item.foreign_currency_code,
+        "foreign_open_amount": (
+            str(item.foreign_open_amount) if item.foreign_open_amount is not None else None
+        ),
         "dunning_level": item.dunning_level,
         "last_dunning_date": (
             item.last_dunning_date.isoformat() if item.last_dunning_date else None
