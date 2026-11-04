@@ -68,7 +68,7 @@ bezahlte Umsätze bleiben unverändert (ADR-009).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -534,6 +534,46 @@ def _apply_cash_basis(
             "Entgelten den Durchschnittskurs des Zahlungsmonats; bitte die Steuer prüfen und "
             "korrigieren: " + ", ".join(sorted(foreign_paid)[:10])
             + (" …" if len(foreign_paid) > 10 else "")
+        )
+    # Die Steuer entsteht mit der Zahlung; wird sie nach der Meldung zugeordnet, fehlt sie dort.
+    late_payments = session.execute(
+        select(OpenItem.reference, VatReturn.period_label)
+        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
+        .join(
+            VatReturn,
+            and_(
+                VatReturn.company_id == company.id,
+                VatReturn.date_from <= OpenItemSettlement.settlement_date,
+                VatReturn.date_to >= OpenItemSettlement.settlement_date,
+                VatReturn.created_at < OpenItemSettlement.created_at,
+            ),
+        )
+        .where(
+            OpenItem.id.in_(item_ids),
+            OpenItemSettlement.reversed_on.is_(None),
+            # Nur im betroffenen Zeitraum und in dem der Zuordnung: Eine gespeicherte Meldung lässt
+            # sich hier nicht ersetzen, sonst stünde der Hinweis für immer da.
+            or_(
+                and_(
+                    OpenItemSettlement.settlement_date >= date_from,
+                    OpenItemSettlement.settlement_date <= date_to,
+                ),
+                and_(
+                    OpenItemSettlement.created_at
+                    >= datetime.combine(date_from, time.min, tzinfo=timezone.utc),
+                    OpenItemSettlement.created_at
+                    < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        .order_by(VatReturn.date_from, OpenItem.reference)
+    ).all()
+    if late_payments:
+        warnings.append(
+            "Istversteuerung: Diese Zahlungen liegen in einem schon gespeicherten Zeitraum, wurden "
+            "aber erst danach zugeordnet. Dort fehlt ihre Umsatzsteuer, bitte berichtigen: "
+            + ", ".join(f"{reference} ({label})" for reference, label in late_payments[:10])
+            + (" …" if len(late_payments) > 10 else "")
         )
     without_item = sorted(
         entry.posting_number

@@ -510,6 +510,9 @@ def suggest_matches_for(
             JournalEntryLine.account_id.in_({t.bank_account_id for t in open_transactions}),
             or_(*amount_filters),
             JournalEntry.id.not_in(already_linked),
+            JournalEntry.id.not_in(
+                select(JournalEntry.reversal_of_id).where(JournalEntry.reversal_of_id.is_not(None))
+            ),
         )
         .order_by(JournalEntry.entry_date.desc())
     ).all()
@@ -715,6 +718,13 @@ def match_transaction(
     entry = session.get(JournalEntry, journal_entry_id)
     if entry is None or entry.company_id != transaction.company_id:
         raise BankImportError("Buchung nicht gefunden.")
+    reversal = session.execute(
+        select(JournalEntry.posting_number).where(JournalEntry.reversal_of_id == entry.id)
+    ).first()
+    if reversal is not None:
+        raise BankImportError(
+            f"Buchung {entry.posting_number} ist storniert ({reversal.posting_number})."
+        )
 
     already_linked = session.execute(
         select(BankTransaction.id).where(
@@ -963,7 +973,8 @@ def _booked_net(session: Session, transaction: BankTransaction, account_id: int)
     """Eurobetrag eines Umsatzes in Fremdwährung: aus der Bankzeile seiner Buchung.
 
     Die steht nach dem ersten Umhängen auf einem anderen Konto als der Umsatz. Nennt die Buchung
-    den Fremdbetrag nicht, zählt, was sie auf dem bisherigen Konto bewegt hat.
+    den Fremdbetrag nicht, zählt, was sie auf dem bisherigen Konto bewegt hat, und nach einem
+    früheren Umhängen ihre Geldzeile.
     """
     side = (
         JournalEntryLine.debit_amount if transaction.amount > 0 else JournalEntryLine.credit_amount
@@ -984,6 +995,17 @@ def _booked_net(session: Session, transaction: BankTransaction, account_id: int)
             JournalEntryLine.account_id == account_id,
         )
     ).all()
+    if not rows:
+        rows = session.execute(
+            select(JournalEntryLine.debit_amount, JournalEntryLine.credit_amount)
+            .join(Account, Account.id == JournalEntryLine.account_id)
+            .where(
+                JournalEntryLine.journal_entry_id == transaction.journal_entry_id,
+                Account.account_type == "asset",
+                Account.subledger.is_(None),
+                side > 0,
+            )
+        ).all()
     return sum((debit - credit for debit, credit in rows), Decimal("0.00"))
 
 

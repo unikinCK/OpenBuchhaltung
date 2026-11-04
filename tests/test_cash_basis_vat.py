@@ -221,6 +221,122 @@ def test_rebooked_payment_does_not_count_twice(session: Session) -> None:
     assert _kennzahlen(session, company, *march).get("83", Decimal("0.00")) == Decimal("0.00")
 
 
+def _booked_receipt(session, company, accounts, amount, day, tag):
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=accounts["1200"].id,
+        booking_date=day,
+        amount=Decimal(amount),
+        currency_code="EUR",
+        purpose="Zahlung",
+        status="open",
+        dedup_hash=tag,
+    )
+    session.add(transaction)
+    session.commit()
+    return book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+
+
+def test_payment_moved_to_another_item_stays_in_the_later_period(session: Session) -> None:
+    """Falsch zugeordnet und korrigiert: Der gemeldete Februar bleibt, der April geht auf."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, wrong = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    _, right = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 16))
+    transaction = _booked_receipt(
+        session, company, accounts, "119.00", date(2027, 2, 10), "falscher-posten"
+    )
+    settle_open_item(
+        session=session, open_item_id=wrong.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2027, 4, 5),
+        changed_by="t",
+    )
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+    settle_open_item(
+        session=session, open_item_id=right.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    assert _kennzahlen(session, company, date(2027, 2, 1), date(2027, 2, 28))["83"] == Decimal(
+        "19.00"
+    )
+    assert _kennzahlen(session, company, date(2027, 4, 1), date(2027, 4, 30)).get(
+        "83", Decimal("0.00")
+    ) == Decimal("0.00")
+
+
+def test_second_reversal_dated_before_the_settlement_keeps_the_sum(session: Session) -> None:
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = _booked_receipt(session, company, accounts, "59.50", date(2027, 2, 10), "zweimal")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2027, 4, 5),
+        changed_by="t",
+    )
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2027, 3, 20),
+        changed_by="t",
+    )
+    total = sum(
+        (
+            _kennzahlen(session, company, start, end).get("83", Decimal("0.00"))
+            for start, end in (
+                (date(2027, 2, 1), date(2027, 2, 28)),
+                (date(2027, 3, 1), date(2027, 3, 31)),
+                (date(2027, 4, 1), date(2027, 4, 30)),
+            )
+        ),
+        Decimal("0.00"),
+    )
+    assert total == Decimal("0.00")
+
+
+def test_payment_assigned_after_the_return_is_named(session: Session) -> None:
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = _booked_receipt(session, company, accounts, "119.00", date(2027, 2, 10), "spaet")
+    february = {"date_from": date(2027, 2, 1), "date_to": date(2027, 2, 28)}
+    save_vat_return(
+        session=session, company_id=company.id, period_label="2027-02", changed_by="t"
+    )
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    result = compute_vat_return_details(session=session, company_id=company.id, **february)
+    assert any(item.reference in warning and "2027-02" in warning for warning in result.warnings)
+
+
 def test_accrual_method_stays_unchanged(session: Session) -> None:
     company, accounts = _seed(session)
     _invoice(session, company, accounts)

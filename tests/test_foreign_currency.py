@@ -1076,6 +1076,43 @@ def _euro_item(session, company, account, amount, reference="EUR-1"):
     )
 
 
+def test_reversed_entry_cannot_settle_or_match_through_a_bank_transaction(
+    session: Session,
+) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1020.00")
+    reversal = reverse_journal_entry(
+        session=session,
+        journal_entry_id=payment.id,
+        reversal_date=date(2026, 3, 25),
+        changed_by="t",
+    )
+    transaction = _bank_tx(session, company, accounts["1200"], "1020.00", "EUR")
+    assert suggest_matches(session=session, transaction=transaction) == []
+    with pytest.raises(BankImportError, match="ist storniert"):
+        match_transaction(
+            session=session,
+            transaction_id=transaction.id,
+            journal_entry_id=payment.id,
+            changed_by="t",
+        )
+    # Auch ein schon vorhandener Link führt nicht zum Ausgleich.
+    transaction.journal_entry_id = payment.id
+    transaction.status = "matched"
+    session.commit()
+    with pytest.raises(OpenItemError, match="ist storniert"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+            foreign_amount=Decimal("1080.00"),
+            amount=Decimal("1020.00"),
+        )
+    assert reversal.reversal_of_id == payment.id
+
+
 def test_mixed_payment_lines_serve_their_own_currency(session: Session) -> None:
     """Die Reihenfolge der Ausgleiche ändert nichts, keine Zeile belegt eine andere."""
     company, accounts = _seed(session)
@@ -1552,6 +1589,36 @@ def test_second_reassignment_moves_the_euro_amount_again(session: Session) -> No
     assert _balance(session, third) == Decimal("100.00")
 
 
+def test_second_reassignment_of_a_match_without_foreign_amount(session: Session) -> None:
+    company, accounts = _seed(session)
+    third = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1220",
+        name="Bank 3",
+        account_type="asset",
+    )
+    session.add(third)
+    session.commit()
+    entry = _book(
+        session, company, accounts["1210"], accounts["8338"], "100.00", day=date(2026, 3, 3)
+    )
+    transaction = _bank_tx(session, company, accounts["1210"], "108.00", "USD")
+    match_transaction(
+        session=session, transaction_id=transaction.id, journal_entry_id=entry.id, changed_by="t"
+    )
+    for target in (accounts["1200"], third):
+        reassign_bank_transactions(
+            session=session,
+            transaction_ids=[transaction.id],
+            bank_account_id=target.id,
+            changed_by="t",
+        )
+    assert _balance(session, accounts["1210"]) == Decimal("0.00")
+    assert _balance(session, accounts["1200"]) == Decimal("0.00")
+    assert _balance(session, third) == Decimal("100.00")
+
+
 def _reconciliation(session, company) -> dict[str, tuple[Decimal, Decimal]]:
     return {
         row.account_code: (row.book_balance, row.statement_total)
@@ -1843,6 +1910,46 @@ def test_rebooked_payment_counts_once_on_the_reporting_date(session: Session) ->
     for as_of in (date(2026, 3, 31), date(2026, 4, 30)):
         rows = fx_valuation_report(session=session, company=company, as_of=as_of)["rows"]
         assert [row.foreign_open for row in rows] == [Decimal("600.00")]
+
+
+def test_reversal_of_another_payment_keeps_the_date(session: Session) -> None:
+    company, accounts = _seed(session)
+    _rate(session, company, day=date(2026, 3, 31), rate="1.00")
+    item = _fx_item(
+        session, company, accounts["1400"], foreign="1000.00", exchange_rate=Decimal("1")
+    )
+    bank, collective = accounts["1200"], accounts["1400"]
+    first = _book(session, company, bank, collective, "300.00", day=date(2026, 3, 10))
+    second = _book(session, company, bank, collective, "200.00", day=date(2026, 3, 20))
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=first.id,
+        foreign_amount=Decimal("300.00"),
+        amount=Decimal("300.00"),
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=first.id,
+        reversal_date=date(2026, 4, 5),
+        changed_by="t",
+    )
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=second.id,
+        foreign_amount=Decimal("200.00"),
+        amount=Decimal("200.00"),
+    )
+    latest = session.execute(
+        select(OpenItemSettlement).where(OpenItemSettlement.reversed_on.is_(None))
+    ).scalar_one()
+    assert latest.settlement_date == date(2026, 3, 20)
+    # Zum 31.03. waren beide Zahlungen gebucht.
+    rows = fx_valuation_report(session=session, company=company, as_of=date(2026, 3, 31))["rows"]
+    assert [row.foreign_open for row in rows] == [Decimal("500.00")]
 
 
 def test_valuation_respects_reversed_settlements_and_cancellations(session: Session) -> None:

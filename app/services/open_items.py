@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.services.audit_log import log_audit_event
@@ -378,8 +378,8 @@ def settle_open_item(
 ) -> OpenItem:
     """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
     Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum.
-    Nach einem stornierten Ausgleich liegt es nie vor dem Storno: Sonst stünde die Zahlung
-    rückwirkend doppelt in einem schon gemeldeten Zeitraum und am Bewertungsstichtag.
+    Wird dieselbe Zahlung nach einem Storno neu zugeordnet, liegt es nie vor dem Storno: Sonst
+    stünde sie rückwirkend doppelt in einem schon gemeldeten Zeitraum und am Bewertungsstichtag.
 
     Bei einem Posten in Fremdwährung ist ``foreign_amount`` der gezahlte Fremdbetrag und ``amount``
     der gezahlte Betrag in Firmenwährung; ableiten lässt sich beides nur aus einer Zahlung in der
@@ -416,10 +416,18 @@ def settle_open_item(
             settlement_date = bank_transaction.booking_date
         else:
             settlement_date = date.today()
-    last_reversal = session.execute(
-        select(func.max(OpenItemSettlement.reversed_on)).where(
-            OpenItemSettlement.open_item_id == item.id
+    # Dieselbe Zahlung: derselbe Umsatz, auch auf einem anderen Posten, oder dasselbe Datum auf
+    # diesem Posten. Eine andere Zahlung behält ihr Datum.
+    same_payment = [
+        and_(
+            OpenItemSettlement.open_item_id == item.id,
+            OpenItemSettlement.settlement_date == settlement_date,
         )
+    ]
+    if bank_transaction is not None:
+        same_payment.append(OpenItemSettlement.bank_transaction_id == bank_transaction.id)
+    last_reversal = session.execute(
+        select(func.max(OpenItemSettlement.reversed_on)).where(or_(*same_payment))
     ).scalar()
     if last_reversal is not None and settlement_date < last_reversal:
         settlement_date = last_reversal
@@ -427,6 +435,8 @@ def settle_open_item(
     payment_entry_id = (linked_entry.id if linked_entry else None) or (
         bank_transaction.journal_entry_id if bank_transaction else None
     )
+    if payment_entry_id is not None:
+        _refuse_reversed_payment(session, session.get(JournalEntry, payment_entry_id))
     if item.foreign_currency_code and bank_transaction is not None and payment_entry_id is None:
         raise OpenItemError(
             "Der Bankumsatz ist noch nicht gebucht. Bitte ihn zuerst buchen, sonst steht die "
@@ -574,6 +584,11 @@ def _load_journal_entry(
     entry = session.get(JournalEntry, journal_entry_id)
     if entry is None or entry.company_id != item.company_id:
         raise OpenItemError("Ausgleichsbuchung nicht gefunden.")
+    return entry
+
+
+def _refuse_reversed_payment(session: Session, entry: JournalEntry) -> None:
+    """Eine stornierte Buchung oder ein Storno ist keine Zahlung."""
     if entry.reversal_of_id is not None:
         raise OpenItemError(f"Buchung {entry.posting_number} ist eine Stornobuchung.")
     reversal = session.execute(
@@ -583,7 +598,6 @@ def _load_journal_entry(
         raise OpenItemError(
             f"Buchung {entry.posting_number} ist storniert ({reversal.posting_number})."
         )
-    return entry
 
 
 def _check_settlement_partner(

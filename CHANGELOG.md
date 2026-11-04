@@ -17,8 +17,10 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   Sammelkonto steht. Eine Zahlung in Euro nennt Fremd- und Eurobetrag selbst, eine Zahlung in der Währung des
   Postens liefert beides anteilig, auch bei Sammel- und Überzahlungen.
 - Ausgleich allgemein, auch in Euro: Der Ausgleich über einen gebuchten Bankumsatz hängt jetzt an dessen Buchung, ihr
-  Storno öffnet den Posten wieder. Stornierte Buchungen und Stornobuchungen gleichen nichts mehr aus. Ein Ausgleich
-  nach einem Storno liegt nie vor dem Stornodatum, damit eine Zahlung nicht rückwirkend doppelt zählt.
+  Storno öffnet den Posten wieder. Stornierte Buchungen und Stornobuchungen gleichen nichts mehr aus, und einem
+  Umsatz lässt sich keine stornierte Buchung mehr zuordnen. Wird dieselbe Zahlung nach einem Storno neu zugeordnet,
+  liegt der Ausgleich nie vor dem Storno, damit sie nicht rückwirkend doppelt zählt. Bei Istversteuerung warnt die UStVA,
+  wenn eine Zahlung erst nach der Meldung ihres Zeitraums zugeordnet wurde.
 - Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen; vor dem Ausgleich eines
   Postens in Fremdwährung muss ein Umsatz gebucht sein.
 - Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung; ohne erfassten Kurs

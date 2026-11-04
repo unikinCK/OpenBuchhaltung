@@ -1692,7 +1692,8 @@ def _release_subledgers(
     restored_by_item: dict[int, Decimal] = {}
     restored_foreign: dict[int, Decimal] = {}
     for settlement in settlements:
-        settlement.reversed_on = reversal.entry_date
+        # Nie vor dem Ausgleich selbst: Sonst bliebe die Zahlung im Zeitraum dazwischen stehen.
+        settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
         settlement.reversal_journal_entry_id = reversal.id
         restored_by_item[settlement.open_item_id] = (
             restored_by_item.get(settlement.open_item_id, Decimal("0.00")) + settlement.amount

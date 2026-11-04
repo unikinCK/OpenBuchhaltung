@@ -37,8 +37,10 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
    mehr zuordnen, als sie dort bewegt hat. Ein nicht zugeordneter Rest bleibt sichtbar stehen; das kann auch ein zu
    niedrig angegebener Kurs sein.
 
-   **Datum:** Nach einem stornierten Ausgleich liegt der neue nie vor dem Storno, sonst stünde dieselbe Zahlung
-   rückwirkend doppelt in einem gemeldeten Zeitraum und am Stichtag. Die Differenzbuchung weicht aus einem gesperrten
+   **Datum:** Wird dieselbe Zahlung nach einem Storno neu zugeordnet, auch auf einen anderen Posten, liegt der neue
+   Ausgleich nie vor dem Storno, sonst stünde sie rückwirkend doppelt in einem gemeldeten Zeitraum und am Stichtag.
+   Eine andere Zahlung behält ihr Datum. Bei Istversteuerung warnt die UStVA, wenn eine Zahlung erst nach der Meldung
+   ihres Zeitraums zugeordnet wurde. Die Differenzbuchung weicht aus einem gesperrten
    Monat oder abgeschlossenen Jahr in den nächsten offenen Zeitraum aus, das Zahlungsdatum bleibt.
 
    **Umsatzsteuer:** § 16 Abs. 6 UStG nimmt bei der Sollversteuerung den Monat der Leistung, bei der Istversteuerung
