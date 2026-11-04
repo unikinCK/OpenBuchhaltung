@@ -26,6 +26,12 @@ from app.services.bank_statement import (
     parse_camt053,
     parse_mt940,
 )
+from app.services.exchange_rates import (
+    ExchangeRateError,
+    rate_for,
+    require_base_currency,
+    to_company_amount,
+)
 from app.services.journal_entries import (
     SOURCE_CARRYFORWARD,
     JournalEntryInput,
@@ -528,10 +534,18 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
     Buchungen ohnehin in der Summe stehen.
     """
     zero = Decimal("0.00")
+    # Fremdwährungsumsätze lassen sich nicht gegen den Buchsaldo in Firmenwährung summieren.
+    company_currency = session.get(Company, company_id).currency_code
     statement_totals = dict(
         session.execute(
             select(BankTransaction.bank_account_id, func.sum(BankTransaction.amount))
-            .where(BankTransaction.company_id == company_id)
+            .where(
+                BankTransaction.company_id == company_id,
+                or_(
+                    BankTransaction.currency_code.is_(None),
+                    BankTransaction.currency_code == company_currency,
+                ),
+            )
             .group_by(BankTransaction.bank_account_id)
         ).all()
     )
@@ -998,11 +1012,14 @@ def book_transaction(
     cost_center_id: int | None = None,
     profit_center_id: int | None = None,
     partner_id: int | None = None,
+    exchange_rate: Decimal | None = None,
 ) -> BankTransaction:
     """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto).
 
     ``partner_id`` ist der Geschäftspartner der Buchung: Er steht auf Bank- und
     Gegenkontozeile, nicht auf der Steuerzeile (``apply_entry_partner``).
+    Ein Umsatz in Fremdwährung wird zum ``exchange_rate`` oder zum Tageskurs umgerechnet; der
+    Fremdbetrag steht auf der Bankzeile (ADR-010).
     """
     transaction = session.get(BankTransaction, transaction_id)
     if transaction is None:
@@ -1015,14 +1032,28 @@ def book_transaction(
         raise BankImportError("Gegenkonto nicht gefunden.")
 
     company = session.get(Company, transaction.company_id)
-    if transaction.currency_code and transaction.currency_code != company.currency_code:
-        raise BankImportError(
-            f"Bankumsatz in {transaction.currency_code} kann nicht direkt als "
-            f"{company.currency_code}-Buchung übernommen werden — bitte manuell "
-            "mit Umrechnungskurs buchen."
-        )
-
+    foreign_fields: dict[str, object] = {}
     gross = abs(transaction.amount)
+    if transaction.currency_code and transaction.currency_code != company.currency_code:
+        try:
+            require_base_currency(company)
+            rate = exchange_rate or rate_for(
+                session=session,
+                tenant_id=company.tenant_id,
+                currency_code=transaction.currency_code,
+                on=transaction.booking_date,
+            )
+        except ExchangeRateError as exc:
+            raise BankImportError(str(exc)) from exc
+        if rate <= 0:
+            raise BankImportError("Der Kurs muss größer 0 sein.")
+        foreign_fields = {
+            "foreign_currency_code": transaction.currency_code,
+            "foreign_amount": gross,
+            "exchange_rate": rate,
+        }
+        gross = to_company_amount(gross, rate)
+
     contra_net = gross
     tax_amount = Decimal("0.00")
     tax_code = None
@@ -1044,6 +1075,7 @@ def book_transaction(
         account_id=transaction.bank_account_id,
         debit_amount=gross if incoming else zero,
         credit_amount=zero if incoming else gross,
+        **foreign_fields,
     )
     contra_line = JournalLineInput(
         account_id=contra_account.id,

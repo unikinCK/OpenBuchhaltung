@@ -43,6 +43,15 @@ from app.services.einvoice_export import (
     build_einvoice,
     compute_tax_groups,
 )
+from app.services.exchange_rates import (
+    ExchangeRateError,
+    format_rate_text,
+    normalize_currency,
+    normalize_rate,
+    rate_for,
+    require_base_currency,
+    to_company_amount,
+)
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -130,6 +139,7 @@ _FIELDS = (
     "service_period_to",
     "due_date",
     "currency_code",
+    "exchange_rate",
     "buyer_reference",
     "tax_treatment",
     "einvoice_syntax",
@@ -236,20 +246,21 @@ def compute_invoice_totals(lines: Sequence[SalesInvoiceLine]) -> InvoiceTotals:
 
 
 def invoice_currency(company: Company, requested: Any = None) -> str:
-    """Rechnungswährung: heute nur die Firmenwährung (Fremdwährung ist ein Folgepaket)."""
-    code = str(requested or company.currency_code).strip().upper()
-    if code != company.currency_code:
-        raise SalesInvoiceError(
-            f"Rechnungen laufen in der Firmenwährung {company.currency_code}; "
-            f"{code} wird noch nicht unterstützt."
-        )
+    """Rechnungswährung: die Firmenwährung oder eine Fremdwährung (ADR-010)."""
+    try:
+        code = normalize_currency(requested or company.currency_code)
+        if code != company.currency_code:
+            require_base_currency(company)
+    except ExchangeRateError as exc:
+        raise SalesInvoiceError(str(exc)) from exc
     return code
 
 
 def ledger_amount(invoice: SalesInvoice, amount: Decimal) -> Decimal:
-    """Betrag für Hauptbuch und offenen Posten; Rechnungs- ist heute gleich Firmenwährung."""
-    del invoice
-    return amount
+    """Betrag für Hauptbuch und offenen Posten: umgerechnet, wenn die Rechnung einen Kurs hat."""
+    if invoice.exchange_rate is None:
+        return amount
+    return to_company_amount(amount, invoice.exchange_rate)
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +433,17 @@ def _apply_fields(
             setattr(invoice, field, _date(fields[field], field))
     if "currency_code" in fields:
         invoice.currency_code = invoice_currency(company, fields["currency_code"])
+    if "exchange_rate" in fields:
+        try:
+            invoice.exchange_rate = (
+                normalize_rate(fields["exchange_rate"])
+                if fields["exchange_rate"] not in (None, "")
+                else None
+            )
+        except ExchangeRateError as exc:
+            raise SalesInvoiceError(str(exc)) from exc
+    if invoice.currency_code == company.currency_code:
+        invoice.exchange_rate = None
     if "buyer_reference" in fields:
         invoice.buyer_reference = _text(
             fields["buyer_reference"], "buyer_reference", BUYER_REFERENCE_LIMIT
@@ -554,6 +576,7 @@ def serialize_sales_invoice(invoice: SalesInvoice, *, with_lines: bool = True) -
         "service_period_to": _iso(invoice.service_period_to),
         "due_date": _iso(invoice.due_date),
         "currency_code": invoice.currency_code,
+        "exchange_rate": str(invoice.exchange_rate) if invoice.exchange_rate else None,
         "recipient_name": invoice.recipient_name,
         "recipient_street": invoice.recipient_street,
         "recipient_postal_code": invoice.recipient_postal_code,
@@ -856,6 +879,31 @@ def _treatment_problems(
         )
 
 
+def _invoice_rate(session: Session, invoice: SalesInvoice, company: Company) -> Decimal | None:
+    """Kurs der Rechnung: erfasst, sonst Tageskurs des Rechnungsdatums; None in Firmenwährung."""
+    if invoice.currency_code == company.currency_code:
+        return None
+    if invoice.exchange_rate is not None:
+        return invoice.exchange_rate
+    return rate_for(
+        session=session,
+        tenant_id=company.tenant_id,
+        currency_code=invoice.currency_code,
+        on=invoice.issue_date,
+    )
+
+
+def _currency_problems(
+    session: Session, invoice: SalesInvoice, company: Company, problems: list[str]
+) -> None:
+    if invoice.currency_code == company.currency_code or invoice.issue_date is None:
+        return
+    try:
+        _invoice_rate(session, invoice, company)
+    except ExchangeRateError as exc:
+        problems.append(str(exc))
+
+
 def issue_problems(*, session: Session, invoice: SalesInvoice) -> list[str]:
     """Alle Gründe, warum der Entwurf noch nicht ausgestellt werden kann."""
     company = session.get(Company, invoice.company_id)
@@ -867,11 +915,10 @@ def issue_problems(*, session: Session, invoice: SalesInvoice) -> list[str]:
     _service_problems(invoice, problems)
     _line_problems(session, invoice, problems)
     _treatment_problems(invoice, company, partner, seller, problems)
+    _currency_problems(session, invoice, company, problems)
     _resolve_receivable_account(session, invoice, problems)
     if invoice.lines and compute_invoice_totals(invoice.lines).gross <= 0:
         problems.append("Der Gesamtbetrag muss größer als 0 sein.")
-    if invoice.currency_code != company.currency_code:
-        problems.append(f"Rechnungen laufen in der Firmenwährung {company.currency_code}.")
     return problems
 
 
@@ -1056,6 +1103,10 @@ def _outgoing_invoice(
             for line in invoice.lines
         ],
         currency_code=invoice.currency_code,
+        tax_currency_code=company.currency_code if invoice.exchange_rate else "",
+        tax_total_in_tax_currency=(
+            abs(_ledger_tax_total(invoice)) if invoice.exchange_rate else None
+        ),
         buyer_reference=invoice.buyer_reference or "",
         type_code=INVOICE_TYPE_CREDIT_NOTE if original is not None else INVOICE_TYPE_COMMERCIAL,
         due_date=invoice.due_date,
@@ -1123,14 +1174,28 @@ def _payment_lines(invoice: SalesInvoice, seller: SellerData, *, is_storno: bool
     return [f"{terms} unter Angabe der Rechnungsnummer {invoice.invoice_number}."]
 
 
+def _ledger_tax_total(invoice: SalesInvoice) -> Decimal:
+    """Umsatzsteuer in Firmenwährung, wie sie gebucht wird."""
+    return sum(
+        (ledger_amount(invoice, tax) for tax in _tax_by_code(invoice.lines).values()), ZERO
+    )
+
+
 def _tax_note(invoice: SalesInvoice, company: Company) -> str:
-    """Pflichthinweis der Steuerbehandlung, ab 2028 auch der auf die Istversteuerung."""
-    note = TAX_TREATMENT_RULES[invoice.tax_treatment].note
+    """Pflichthinweise: Steuerbehandlung, Umrechnung und ab 2028 die Istversteuerung."""
+    parts = [TAX_TREATMENT_RULES[invoice.tax_treatment].note]
+    if invoice.exchange_rate is not None:
+        rate_text = format_rate_text(company, invoice.currency_code, invoice.exchange_rate)
+        parts.append(f"Umrechnungskurs: {rate_text}.")
+        tax = abs(_ledger_tax_total(invoice))
+        if tax:
+            # § 16 Abs. 6 UStG: Die Umsatzsteuer wird in Euro geschuldet.
+            parts.append(f"Umsatzsteuer: {format_amount(tax)} {company.currency_code}.")
     if invoice.issue_date >= CASH_BASIS_NOTE_FROM and company_on_cash_basis(
         company, invoice.issue_date
     ):
-        return " ".join(part for part in (note, CASH_BASIS_NOTE) if part)
-    return note
+        parts.append(CASH_BASIS_NOTE)
+    return " ".join(part for part in parts if part)
 
 
 def _pdf_invoice(
@@ -1288,26 +1353,35 @@ def _booking_lines(
         key = (line.revenue_account_id, line.tax_code_id)
         net_by_target[key] = net_by_target.get(key, ZERO) + line.net_amount
     label = f"Rechnung {invoice.invoice_number}"
-    lines = [
-        JournalLineInput(
-            account_id=receivable_account_id,
-            debit_amount=ledger_amount(invoice, compute_invoice_totals(invoice.lines).gross),
-            description=label,
-        )
-    ]
+    gross = compute_invoice_totals(invoice.lines).gross
+    foreign_fields: dict[str, Any] = {}
+    if invoice.exchange_rate is not None:
+        foreign_fields = {
+            "foreign_currency_code": invoice.currency_code,
+            "foreign_amount": gross,
+            "exchange_rate": invoice.exchange_rate,
+        }
+    receivable = JournalLineInput(
+        account_id=receivable_account_id,
+        debit_amount=ledger_amount(invoice, gross),
+        description=label,
+        **foreign_fields,
+    )
+    revenue_lines = []
     for (account_id, tax_code_id), net in net_by_target.items():
         if net == 0:
             continue
-        lines.append(
+        revenue_lines.append(
             _signed_line(
                 account_id, ledger_amount(invoice, net), description=label, tax_code_id=tax_code_id
             )
         )
+    tax_lines = []
     for tax_code_id, tax in _tax_by_code(invoice.lines).items():
         if tax == 0:
             continue
         tax_code = session.get(TaxCode, tax_code_id)
-        lines.append(
+        tax_lines.append(
             _signed_line(
                 tax_code.vat_account_id,
                 ledger_amount(invoice, tax),
@@ -1315,7 +1389,19 @@ def _booking_lines(
                 tax_code_id=tax_code_id,
             )
         )
-    return lines
+    # Einzeln umgerechnet kann die Summe um Cents vom Brutto abweichen. Die Rundung liegt auf dem
+    # größten Erlös, denn Forderung und Umsatzsteuer müssen genau dem Kurs entsprechen.
+    credits = [*revenue_lines, *tax_lines]
+    rounding = receivable.debit_amount - sum(
+        (line.credit_amount - line.debit_amount for line in credits), ZERO
+    )
+    if rounding != 0 and revenue_lines:
+        largest = max(revenue_lines, key=lambda line: line.credit_amount + line.debit_amount)
+        if largest.credit_amount > 0:
+            largest.credit_amount += rounding
+        else:
+            largest.debit_amount -= rounding
+    return [receivable, *credits]
 
 
 def _load_for_update(session: Session, invoice_id: int) -> SalesInvoice:
@@ -1413,6 +1499,10 @@ def _issue(
     receivable = _resolve_receivable_account(session, invoice, [])
     invoice.receivable_account_id = receivable.id
     _snapshot_recipient(invoice, partner)
+    try:
+        invoice.exchange_rate = _invoice_rate(session, invoice, company)
+    except ExchangeRateError as exc:
+        raise SalesInvoiceError(str(exc)) from exc
     if not invoice.buyer_reference:
         # BT-10 ist in der XRechnung Pflicht; ohne Angabe gilt die Kundennummer.
         invoice.buyer_reference = partner.debtor_number
@@ -1454,6 +1544,9 @@ def _issue(
             counterparty=partner.name,
             due_date=invoice.due_date,
             partner_id=partner.id,
+            foreign_currency_code=invoice.currency_code if invoice.exchange_rate else None,
+            foreign_amount=invoice.gross_total if invoice.exchange_rate else None,
+            exchange_rate=invoice.exchange_rate,
         ),
         commit=False,
     )
@@ -1590,6 +1683,7 @@ def _cancel(
         service_period_from=original.service_period_from,
         service_period_to=original.service_period_to,
         currency_code=original.currency_code,
+        exchange_rate=original.exchange_rate,
         recipient_name=original.recipient_name,
         recipient_street=original.recipient_street,
         recipient_postal_code=original.recipient_postal_code,

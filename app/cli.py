@@ -28,10 +28,12 @@ from app.services.demo import (
     seed_demo_activity,
     seed_demo_data,
 )
+from app.services.exchange_rates import BASE_CURRENCY, ExchangeRateError, fetch_ecb_rates
 from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.security_events import record_security_event
 from app.services.two_factor import reset_two_factor
 from domain.models import (
+    Company,
     User,
 )
 
@@ -311,6 +313,31 @@ def register_cli_commands(app: Flask) -> None:
 
         click.echo(f"API-Token für {username}: {token}")
         click.echo("Dieses Token wird nur einmal angezeigt.")
+
+    @app.cli.command("fetch-exchange-rates")
+    def fetch_exchange_rates():
+        """Übernimmt die EZB-Referenzkurse für alle Mandanten (für einen Cron-Job)."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            companies = (
+                session.execute(
+                    select(Company)
+                    .where(Company.currency_code == BASE_CURRENCY)
+                    .order_by(Company.tenant_id, Company.id)
+                )
+                .scalars()
+                .all()
+            )
+            seen_tenants: set[int] = set()
+            for company in companies:
+                if company.tenant_id in seen_tenants:
+                    continue
+                seen_tenants.add(company.tenant_id)
+                try:
+                    result = fetch_ecb_rates(session=session, company=company, changed_by="cli")
+                except ExchangeRateError as exc:
+                    raise click.ClickException(str(exc)) from exc
+                click.echo(f"Mandant {company.tenant_id}: {result['created']} neue Kurse.")
 
     @app.cli.command("push-dispatch")
     @click.option("--once", is_flag=True, help="Nur einen Durchlauf statt Dauerbetrieb.")

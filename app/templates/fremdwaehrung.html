@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Fremdwährung – OpenBuchhaltung{% endblock %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Fremdwährung</h1>
+      <p class="page-subtitle">Wechselkurse und Stichtagsbewertung offener Posten</p>
+    </div>
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card"><p class="muted">Bitte zuerst eine Gesellschaft anlegen.</p></section>
+  {% else %}
+    <section class="card">
+      <h2>Stichtagsbewertung</h2>
+      <form method="get" action="{{ url_for('main.exchange_rates_page') }}" class="filter-bar">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <input type="date" name="as_of" value="{{ as_of.isoformat() }}" aria-label="Stichtag" title="Stichtag" />
+        <button type="submit" class="secondary">Anzeigen</button>
+      </form>
+      {% if report.rows %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Referenz</th>
+                <th>Gegenseite</th>
+                <th>Typ</th>
+                <th class="num">Offen</th>
+                <th class="num">Kurs gebucht</th>
+                <th class="num">Kurs Stichtag</th>
+                <th class="num">Buchwert</th>
+                <th class="num">Wert</th>
+                <th class="num">Differenz</th>
+                <th class="num">Zu buchen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in report.rows %}
+                <tr>
+                  <td>{{ row.item.reference }}</td>
+                  <td>{{ row.item.counterparty or "–" }}</td>
+                  <td>{{ "Debitor" if row.item.item_type == "receivable" else "Kreditor" }}</td>
+                  <td class="num">{{ row.item.foreign_open_amount | betrag }} {{ row.item.foreign_currency_code }}</td>
+                  <td class="num">{{ row.item.exchange_rate }}</td>
+                  <td class="num">{{ row.rate if row.rate is not none else "fehlt" }}</td>
+                  <td class="num">{{ row.item.open_amount | betrag }}</td>
+                  <td class="num">{{ row.value | betrag if row.value is not none else "–" }}</td>
+                  <td class="num{% if row.difference < 0 %} negative{% endif %}">{{ row.difference | betrag }}</td>
+                  <td class="num">
+                    {{ row.booked_difference | betrag }}
+                    {% if row.long_term %}<br /><span class="muted small" title="Mehr als ein Jahr Restlaufzeit: nur Verluste">über 1 Jahr</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p>Kursgewinne {{ report.total_gain | betrag }} {{ company_currency }} · Kursverluste {{ report.total_loss | betrag }} {{ company_currency }}</p>
+        {% if report.missing_rates %}
+          <p class="callout">Zum Stichtag fehlen Kurse für {{ report.missing_rates | join(", ") }}. Ohne sie lässt sich nicht buchen.</p>
+        {% elif report.posted_entry_id %}
+          <p>Zu diesem Stichtag ist die Bewertung gebucht:
+            <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=report.posted_entry_id) }}">{{ report.posted_posting_number }}</a>.</p>
+        {% elif report.total_gain or report.total_loss %}
+          <form method="post" action="{{ url_for('main.post_fx_valuation_action') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="as_of" value="{{ as_of.isoformat() }}" />
+            <button type="submit" data-confirm="Bewertung zum {{ as_of | datum }} buchen? Am Folgetag wird sie automatisch aufgelöst.">Bewertung buchen</button>
+          </form>
+        {% endif %}
+        <p class="muted small">Bewertet wird nach § 256a HGB zum Stichtagskurs. Bei mehr als einem Jahr Restlaufzeit wird nur ein Verlust gebucht.
+          Die Buchung wird am Folgetag aufgelöst; die Posten behalten ihren Buchwert, und die Kursdifferenz entsteht bei der Zahlung.
+          Die EZB-Referenzkurse sind Mittelkurse, das entspricht dem Devisenkassamittelkurs nur näherungsweise.</p>
+      {% else %}
+        <p class="empty-state">Keine offenen Posten in Fremdwährung.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Wechselkurse</h2>
+        <form method="post" action="{{ url_for('main.fetch_exchange_rates_action') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <button type="submit" class="secondary">EZB-Kurse abrufen</button>
+        </form>
+      </div>
+      <p class="muted small">Einheiten der Fremdwährung je 1 {{ company_currency }}. Der Abruf übernimmt die Referenzkurse der letzten 90 Tage und lässt manuell erfasste Kurse stehen.
+        Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF; ein Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse können Sie hier manuell erfassen.</p>
+      <form method="post" action="{{ url_for('main.set_exchange_rate_action') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="rate_currency">Währung</label>
+        <input id="rate_currency" name="currency_code" maxlength="3" required placeholder="USD" style="width:5rem;" />
+        <label for="rate_date">Datum</label>
+        <input id="rate_date" name="rate_date" type="date" value="{{ today }}" required style="width:auto;" />
+        <label for="rate_value">Kurs</label>
+        <input id="rate_value" name="rate" inputmode="decimal" required placeholder="1,0812" style="width:7rem;" />
+        <button type="submit">Speichern</button>
+      </form>
+      {% if rates %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr><th>Datum</th><th>Währung</th><th class="num">Kurs</th><th>Quelle</th></tr>
+            </thead>
+            <tbody>
+              {% for rate in rates %}
+                <tr>
+                  <td class="date">{{ rate.rate_date | datum }}</td>
+                  <td>{{ rate.currency_code }}</td>
+                  <td class="num">{{ rate.rate }}</td>
+                  <td>{{ "EZB" if rate.source == "ecb" else "manuell" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">Noch keine Kurse erfasst.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

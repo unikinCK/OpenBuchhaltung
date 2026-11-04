@@ -21,6 +21,7 @@ from app.api import (  # noqa: F401
     downloads,
     einvoice,
     elster,
+    exchange_rates,
     exports,
     fints,
     fixed_assets,

@@ -74,6 +74,8 @@ _HEADER_FIELDS = (
     "service_period_from",
     "service_period_to",
     "due_date",
+    "currency_code",
+    "exchange_rate",
     "buyer_reference",
     "tax_treatment",
     "einvoice_syntax",
@@ -222,6 +224,8 @@ def _invoice_form_values(invoice: SalesInvoice) -> tuple[dict[str, object], list
             invoice.service_period_to.isoformat() if invoice.service_period_to else ""
         ),
         "due_date": invoice.due_date.isoformat() if invoice.due_date else "",
+        "currency_code": invoice.currency_code,
+        "exchange_rate": str(invoice.exchange_rate) if invoice.exchange_rate else "",
         "buyer_reference": invoice.buyer_reference or "",
         "tax_treatment": invoice.tax_treatment,
         "einvoice_syntax": invoice.einvoice_syntax,

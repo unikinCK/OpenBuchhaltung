@@ -122,8 +122,14 @@
                   </div>
                 {% elif line.cost_center_code or line.profit_center_code %}<br /><span class="muted small">{% if line.cost_center_code %}KST {{ line.cost_center_code }}{% endif %}{% if line.cost_center_code and line.profit_center_code %} · {% endif %}{% if line.profit_center_code %}PC {{ line.profit_center_code }}{% endif %}</span>{% endif %}
               </td>
-              <td class="num">{% if line.debit_amount > 0 %}{{ line.debit_amount | betrag }}{% endif %}</td>
-              <td class="num">{% if line.credit_amount > 0 %}{{ line.credit_amount | betrag }}{% endif %}</td>
+              <td class="num">
+                {% if line.debit_amount > 0 %}{{ line.debit_amount | betrag }}{% endif %}
+                {% if line.foreign_currency_code and line.debit_amount > 0 %}<br /><span class="muted small" title="Kurs {{ line.exchange_rate }} je 1 Einheit Firmenwährung">{{ line.foreign_amount | betrag }} {{ line.foreign_currency_code }}</span>{% endif %}
+              </td>
+              <td class="num">
+                {% if line.credit_amount > 0 %}{{ line.credit_amount | betrag }}{% endif %}
+                {% if line.foreign_currency_code and line.credit_amount > 0 %}<br /><span class="muted small" title="Kurs {{ line.exchange_rate }} je 1 Einheit Firmenwährung">{{ line.foreign_amount | betrag }} {{ line.foreign_currency_code }}</span>{% endif %}
+              </td>
               <td>{{ line.tax_code or "" }}</td>
               <td>
                 {% if amendable and line.partner_editable %}

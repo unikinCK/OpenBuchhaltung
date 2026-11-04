@@ -768,8 +768,8 @@ Profitcenter — der Bruttobetrag wird dann automatisch in Netto + Steuer zerleg
 (Netto = gerundet Brutto/(1+Satz), Steuer = Brutto − Netto als eigene Zeile; ein
 Rundungscent liegt auf der Steuerzeile, sodass jeder Bruttobetrag aufgeht).
 Die Dimensionen liegen auf Gegenkonto und automatisch erzeugter Steuerzeile,
-nicht auf dem Bankkonto. Umsätze in Fremdwährung werden nicht automatisch
-verbucht. Die Umsatzliste ist paginiert und nach Status, Suchbegriff
+nicht auf dem Bankkonto. Umsätze in Fremdwährung werden zum Kurs des Buchungstags oder einem
+angegebenen Kurs in Euro gebucht (siehe „Fremdwährung“). Die Umsatzliste ist paginiert und nach Status, Suchbegriff
 (Verwendungszweck, Gegenseite, Bankreferenz) und Buchungstag filterbar
 (`q`, `date_from`, `date_to` — auch in API und MCP; dieselben Filter gibt
 es auf den Buchungs-, Beleg- und OPOS-Seiten).
@@ -1223,6 +1223,47 @@ als 422 mit `problems`, Statuskonflikte als 409. MCP: `list_sales_invoices`, `ge
 `create_sales_invoice`, `update_sales_invoice`, `delete_sales_invoice`, `issue_sales_invoice`,
 `cancel_sales_invoice`, `download_sales_invoice`; im KI-Chat laufen die schreibenden nach Bestätigung.
 Details: `docs/adr/ADR-006-ausgangsrechnungen.md`.
+
+## Fremdwährung
+
+Die Buchhaltung läuft in Euro. Fremdbetrag und Kurs stehen zusätzlich an der Buchungszeile und am offenen
+Posten und sind mit festgeschrieben (Hashversion 5, ADR-010). Kurse zählen wie bei der EZB: Einheiten der
+Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
+
+- **Wechselkurse** (Bank & OPOS → Fremdwährung, `GET`/`POST /api/v1/exchange-rates`, MCP
+  `list_exchange_rates`, `set_exchange_rate`): je Mandant und Tag. **EZB-Kurse abrufen**
+  (`POST /api/v1/exchange-rates/fetch`, MCP `fetch_exchange_rates`, CLI `flask fetch-exchange-rates` für einen
+  Cron-Job) übernimmt die Referenzkurse der letzten 90 Tage und lässt manuell erfasste Kurse stehen. Ohne
+  Kurs gilt der letzte aus den zehn Tagen davor; fehlt auch der, gibt es einen Fehler statt eines stillen
+  Standardwerts.
+- **Buchung:** API und MCP nehmen je Zeile `foreign_currency_code`, `foreign_amount` und `exchange_rate`.
+  Soll und Haben bleiben in Euro; passen die Beträge nicht zum Kurs (mehr als ein Cent), wird die Buchung
+  abgewiesen. Der Storno spiegelt die Angaben. Das Formular der Buchungsmaske erfasst sie nicht, dort reichen
+  die folgenden Wege.
+- **Offene Posten** nehmen Fremdwährung, Fremdbetrag und Kurs; der Betrag in Euro ergibt sich daraus.
+  Beim **Ausgleich** ist `foreign_amount` der gezahlte Fremdbetrag und `amount` der gezahlte Eurobetrag
+  (sonst aus `exchange_rate`, der Ausgleichsbuchung oder dem Tageskurs). Ausgebucht wird der Buchwert; die
+  **Kursdifferenz** steht am Ausgleich und wird mit einer Ausgleichsbuchung gegen „Erträge“ bzw. „Aufwendungen
+  aus Kursdifferenzen“ gebucht (SKR03 2660/2150, SKR04 4840/6880). Ohne Ausgleichsbuchung wird sie nur
+  festgehalten. Fehlt das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
+  bestehende Gesellschaften legen es im Kontenplan an. Ein storniertes Ausgleichen nimmt auch die Differenz
+  zurück.
+- **Bankumsätze** in Fremdwährung werden zum Kurs des Buchungstags oder einem angegebenen Kurs in Euro
+  gebucht (`exchange_rate` in API und MCP, Feld in der Oberfläche). Der Fremdbetrag steht auf der Bankzeile.
+  Der Saldenabgleich vergleicht nur Umsätze in Euro, weil sich Fremdwährung nicht gegen den Buchsaldo summieren
+  lässt.
+- **Ausgangsrechnungen** lassen sich in Fremdwährung schreiben (`currency_code`, `exchange_rate`; ohne Kurs
+  der Tageskurs des Rechnungsdatums). Gebucht wird in Euro, der offene Posten führt den Fremdbetrag. PDF und
+  XRechnung nennen den Kurs und die Umsatzsteuer in Euro (BT-6, BT-111).
+- **Stichtagsbewertung** (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`): bewertet
+  offene Posten zum Stichtagskurs nach § 256a HGB. Bei mehr als einem Jahr Restlaufzeit wird nur ein Verlust
+  gebucht. Die Buchung wird am Folgetag aufgelöst, die Posten behalten ihren Buchwert.
+
+**Grenzen.** Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF; ein
+Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse werden nicht importiert, sie lassen sich als
+Kurs erfassen. Bewertet werden nur offene Posten, keine Bankkonten in Fremdwährung. Der DATEV-Stapel bleibt in
+Euro und überträgt Fremdbetrag und Kurs nicht. Die EZB-Referenzkurse entsprechen dem Devisenkassamittelkurs nur
+näherungsweise.
 
 ## DATEV-Export (Buchungsstapel)
 
@@ -1998,7 +2039,7 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 `reject_chat_action`).
 
 **Werkzeuge auf Anforderung.** Jede Tool-Definition belegt bei jeder Anfrage Platz im Kontext des
-Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Rechnungen, Kasse, Konsolidierung, Einrichtung) blendet
+Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Rechnungen, Fremdwährung, Kasse, Konsolidierung, Einrichtung) blendet
 Obi deshalb erst ein, wenn es sie braucht: über das Chat-Werkzeug `load_tools`, das keine Bestätigung
 braucht und in der Unterhaltung erhalten bleibt. Was im Chat gesperrt ist, bleibt auch danach gesperrt, und
 schreibende Werkzeuge bleiben bestätigungspflichtig. Für MCP-Clients ändert sich nichts.

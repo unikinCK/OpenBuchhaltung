@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from flask import jsonify, request
 
@@ -58,6 +59,14 @@ def _resolve_partner_id(session, company_id: int, payload: dict) -> int | None:
         raise _PartnerArgumentError("partner_id must be an integer.") from exc
 
 
+def _optional_decimal(value: object) -> Decimal | None:
+    return parse_decimal(str(value)) if value not in (None, "") else None
+
+
+def _optional_rate(value: object) -> Decimal | None:
+    return parse_decimal(str(value), places=None) if value not in (None, "") else None
+
+
 def _open_item_dict(item: OpenItem) -> dict[str, object]:
     return {
         "id": item.id,
@@ -85,6 +94,14 @@ def _open_item_dict(item: OpenItem) -> dict[str, object]:
         "original_amount": str(item.original_amount),
         "open_amount": str(item.open_amount),
         "currency_code": item.currency_code,
+        "foreign_currency_code": item.foreign_currency_code,
+        "foreign_original_amount": (
+            str(item.foreign_original_amount) if item.foreign_original_amount is not None else None
+        ),
+        "foreign_open_amount": (
+            str(item.foreign_open_amount) if item.foreign_open_amount is not None else None
+        ),
+        "exchange_rate": str(item.exchange_rate) if item.exchange_rate is not None else None,
         "status": item.status,
         "dunning_level": item.dunning_level,
         "last_dunning_date": (
@@ -143,7 +160,15 @@ def create_open_item_via_api():
         account_id = int(payload.get("account_id"))
         entry_date = date.fromisoformat(payload.get("entry_date") or date.today().isoformat())
         due_date_raw = payload.get("due_date")
-        amount = parse_decimal(str(payload.get("amount")))
+        foreign_currency_code = str(payload.get("foreign_currency_code") or "").strip() or None
+        foreign_amount = _optional_decimal(payload.get("foreign_amount"))
+        exchange_rate = _optional_rate(payload.get("exchange_rate"))
+        # Mit Fremdbetrag ergibt sich der Betrag in Firmenwährung aus dem Kurs.
+        amount = (
+            parse_decimal(str(payload.get("amount")))
+            if payload.get("amount") not in (None, "") or foreign_amount is None
+            else Decimal("0.00")
+        )
         journal_entry_id = (
             int(payload["journal_entry_id"])
             if payload.get("journal_entry_id") is not None
@@ -185,6 +210,9 @@ def create_open_item_via_api():
                     due_date=due_date,
                     amount=amount,
                     changed_by=_api_changed_by(),
+                    foreign_currency_code=foreign_currency_code,
+                    foreign_amount=foreign_amount,
+                    exchange_rate=exchange_rate,
                 ),
             )
         except OpenItemError as exc:
@@ -236,6 +264,13 @@ def settle_open_item_via_api(open_item_id: int):
             if payload.get("journal_entry_id") is not None
             else None
         )
+        foreign_amount = _optional_decimal(payload.get("foreign_amount"))
+        exchange_rate = _optional_rate(payload.get("exchange_rate"))
+        settlement_date = (
+            date.fromisoformat(str(payload["settlement_date"]))
+            if payload.get("settlement_date")
+            else None
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid payload format."}), 400
 
@@ -252,6 +287,9 @@ def settle_open_item_via_api(open_item_id: int):
                 bank_transaction_id=bank_transaction_id,
                 journal_entry_id=journal_entry_id,
                 changed_by=_api_changed_by(),
+                foreign_amount=foreign_amount,
+                exchange_rate=exchange_rate,
+                settlement_date=settlement_date,
             )
         except OpenItemError as exc:
             return jsonify({"error": str(exc)}), 422

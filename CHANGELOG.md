@@ -8,6 +8,21 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Fremdwährung
+- Wechselkurse je Mandant (EZB-Abruf und manuell), UI „Fremdwährung“, `GET`/`POST /api/v1/exchange-rates`,
+  `POST /api/v1/exchange-rates/fetch`, MCP und CLI `flask fetch-exchange-rates`. Migration `20261103_0064`.
+- Buchungszeilen tragen Fremdwährung, Fremdbetrag und Kurs. Sie sind mit festgeschrieben: **Hashversion 5**;
+  ältere Siegel bleiben unverändert gültig.
+- Offene Posten in Fremdwährung; der Ausgleich hält die Kursdifferenz fest und bucht sie mit einer
+  Ausgleichsbuchung. Ein storniertes Ausgleichen nimmt sie zurück.
+- Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen.
+- Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung.
+- Stichtagsbewertung offener Posten nach § 256a HGB mit automatischer Auflösung am Folgetag
+  (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`).
+- Die Kontenrahmen enthalten die Konten für Kursdifferenzen (SKR03 2150/2660, SKR04 6880/4840).
+- Der Saldenabgleich der Bank vergleicht nur noch Umsätze in Firmenwährung. Die Journal-CSV hat drei neue
+  Spalten am Ende.
+
 ### Firmenstammdaten und Ausgangsrechnungen
 - Firmenstammdaten an der Gesellschaft (Anschrift, USt-IdNr, Steuernummer, Kontakt, Register,
   Bank, Rechnungspräfix, Kleinunternehmer): Verwaltung → Firmendaten,

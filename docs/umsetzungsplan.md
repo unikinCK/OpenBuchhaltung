@@ -677,7 +677,12 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Unveränderlichkeit per Trigger; UI/API/MCP, Prüferexport. Offen: E-Mail-Versand (#6),
         Fremdwährung (#14), Abschlagsrechnungen, wiederkehrende Rechnungen, Prüfung gegen den
         KoSIT-Validator.
-- [ ] **Danach**: E-Mail-Versand (#6), Hintergrundjobs (#10), Fremdwährung (#14).
+  - [x] Fremdwährung (#14, ADR-010) *(2026-11-04)*: Wechselkurse (EZB und manuell), Fremdbetrag und Kurs an
+        Buchungszeile (Hashversion 5) und offenem Posten, Kursdifferenz beim Ausgleich, Bankbuchung, Rechnung
+        in Fremdwährung, Stichtagsbewertung; UI/API/MCP (Migration `20261103_0064`). Offen: BMF-Monatskurse,
+        Bewertung von Bankkonten in Fremdwährung, Fremdwährung im DATEV-Stapel, Eingangsrechnungen aus
+        E-Rechnung und OCR in Fremdwährung.
+- [ ] **Danach**: E-Mail-Versand (#6), Hintergrundjobs (#10).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 

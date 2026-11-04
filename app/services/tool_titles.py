@@ -8,6 +8,11 @@ Eintrag (``tests/test_tool_titles.py``).
 from __future__ import annotations
 
 TOOL_TITLES: dict[str, str] = {
+    "list_exchange_rates": "Wechselkurse auflisten",
+    "set_exchange_rate": "Wechselkurs erfassen",
+    "fetch_exchange_rates": "EZB-Kurse abrufen",
+    "get_fx_valuation": "Stichtagsbewertung Fremdwährung abrufen",
+    "post_fx_valuation": "Stichtagsbewertung Fremdwährung buchen",
     "get_company_vat_method": "Versteuerungsart abrufen",
     "set_company_vat_method": "Versteuerungsart wechseln",
     # System, Mandanten, Benutzer

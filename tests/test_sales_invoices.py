@@ -327,17 +327,22 @@ def test_line_validation_messages(session: Session) -> None:
         books.draft(lines=[books.line(tax="VSt19")])
     with pytest.raises(SalesInvoiceError, match="kein Erlöskonto"):
         books.draft(lines=[books.line(account="4200")])
-    with pytest.raises(SalesInvoiceError, match="Firmenwährung"):
-        books.draft(currency_code="USD")
+    with pytest.raises(SalesInvoiceError, match="drei Buchstaben"):
+        books.draft(currency_code="US")
+    with pytest.raises(SalesInvoiceError, match="größer 0"):
+        books.draft(currency_code="USD", exchange_rate="0")
     with pytest.raises(SalesInvoiceError, match="Datum"):
         books.draft(service_date="10.03.2026")
 
 
-def test_invoice_currency_is_company_currency(session: Session) -> None:
+def test_invoice_currency_defaults_to_company_currency(session: Session) -> None:
     books = _Books(session)
     assert invoice_currency(books.company) == "EUR"
     assert invoice_currency(books.company, "eur") == "EUR"
+    assert invoice_currency(books.company, "usd") == "USD"
     assert books.draft().currency_code == "EUR"
+    # In Firmenwährung gibt es keinen Kurs.
+    assert books.draft(exchange_rate="1.08").exchange_rate is None
 
 
 # ---------------------------------------------------------------------------
