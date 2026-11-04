@@ -168,11 +168,13 @@ def _parse_cii(root: ET.Element) -> ParsedInvoice:
     tax_total = _decimal(_text(_find(summation, "TaxTotalAmount")) or "0")
     grand_total = _decimal(_text(_find(summation, "GrandTotalAmount")) or "0")
 
-    currency = ""
-    for tax_amount in _find_all(root, "TaxTotalAmount"):
-        currency = tax_amount.get("currencyID") or currency
+    # BT-5 gilt; ein zweiter TaxTotalAmount nennt nur die Steuer in Abrechnungswährung (BT-111).
+    currency = _text(next(iter(_find_all(root, "InvoiceCurrencyCode")), None)) or ""
     if not currency:
-        currency = _text(next(iter(_find_all(root, "InvoiceCurrencyCode")), None)) or "EUR"
+        for tax_amount in _find_all(root, "TaxTotalAmount"):
+            currency = currency or tax_amount.get("currencyID") or ""
+    if not currency:
+        currency = "EUR"
 
     tax_lines: list[TaxBreakdown] = []
     for trade_tax in _find_all(root, "ApplicableTradeTax"):
@@ -383,6 +385,13 @@ def book_einvoice(
             f"(Typ {invoice.type_code}) und kann nicht als Eingangsrechnung gebucht werden. "
             "Bitte manuell buchen.",
             code="credit_note",
+        )
+    # Die Beträge der Rechnung gingen sonst 1:1 als Euro ins Hauptbuch.
+    if invoice.currency_code != company.currency_code:
+        raise IncomingInvoiceError(
+            f"{invoice.invoice_number} läuft in {invoice.currency_code}. E-Rechnungen werden nur "
+            f"in {company.currency_code} automatisch gebucht. Bitte manuell mit Kurs buchen.",
+            code="foreign_currency",
         )
     tax_splits = einvoice_tax_splits(
         session, invoice, tax_code_id=tax_code_id, assignments=assignments

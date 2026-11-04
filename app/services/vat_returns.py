@@ -414,14 +414,22 @@ def _apply_cash_basis(
     if company.vat_cash_basis_until is not None:
         filters.append(JournalEntry.entry_date <= company.vat_cash_basis_until)
     item_rows = session.execute(
-        select(OpenItem.id, OpenItem.journal_entry_id, OpenItem.original_amount)
+        select(
+            OpenItem.id,
+            OpenItem.journal_entry_id,
+            OpenItem.original_amount,
+            OpenItem.foreign_currency_code,
+        )
         .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
         .where(*filters)
     ).all()
 
     items_by_entry: dict[int, dict[int, Decimal]] = {}
-    for item_id, entry_id, original_amount in item_rows:
+    foreign_entries: set[int] = set()
+    for item_id, entry_id, original_amount, foreign_currency_code in item_rows:
         items_by_entry.setdefault(entry_id, {})[item_id] = original_amount
+        if foreign_currency_code:
+            foreign_entries.add(entry_id)
 
     invoices = (
         _collect_entries(
@@ -471,6 +479,7 @@ def _apply_cash_basis(
     }
 
     not_due = ZERO
+    foreign_paid: list[str] = []
     before = date_from - timedelta(days=1)
     for entry_id, invoice in deferred.items():
         item_amounts = items_by_entry[entry_id]
@@ -491,6 +500,8 @@ def _apply_cash_basis(
             )
         if share_after == share_before:
             continue
+        if entry_id in foreign_entries:
+            foreign_paid.append(invoice.posting_number)
         paid = _Entry(invoice.posting_number, date_to)
         for row in invoice.rows:
             values = row._asdict()
@@ -515,6 +526,14 @@ def _apply_cash_basis(
             f"Istversteuerung: {format_amount(not_due)} € Umsatzsteuer aus bis zum "
             f"{date_to.strftime('%d.%m.%Y')} gebuchten Rechnungen sind noch nicht fällig. "
             "Das Steuerkonto enthält sie bereits, deshalb weicht sein Saldo von der Zahllast ab."
+        )
+    if foreign_paid:
+        warnings.append(
+            "Istversteuerung: Diese Rechnungen in Fremdwährung wurden im Zeitraum bezahlt und "
+            "zählen hier zum Kurs der Rechnung. § 16 Abs. 6 UStG verlangt bei vereinnahmten "
+            "Entgelten den Durchschnittskurs des Zahlungsmonats; bitte die Steuer prüfen und "
+            "korrigieren: " + ", ".join(sorted(foreign_paid)[:10])
+            + (" …" if len(foreign_paid) > 10 else "")
         )
     without_item = sorted(
         entry.posting_number

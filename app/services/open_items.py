@@ -18,6 +18,7 @@ from app.services.exchange_rates import (
 )
 from app.services.journal_entries import (
     SOURCE_FX_DIFFERENCE,
+    JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
@@ -35,11 +36,9 @@ from domain.models import (
     OpenItem,
     OpenItemSettlement,
 )
+from domain.services.journal_entry_validation import JournalEntryValidationError
 
 OPEN_ITEM_TYPES = {"receivable", "payable"}
-# Weicht der aus einer Buchung abgeleitete Zahlbetrag stärker vom Buchwert ab, ist es vermutlich
-# eine Sammelzahlung und keine Kursdifferenz: Dann muss der Betrag angegeben werden.
-MAX_DERIVED_FX_DEVIATION = Decimal("0.20")
 # Sammelkontoseite und Rollenfeld des Partners je OPOS-Typ.
 ITEM_TYPE_SUBLEDGER = {"receivable": SUBLEDGER_DEBTOR, "payable": SUBLEDGER_CREDITOR}
 
@@ -379,10 +378,10 @@ def settle_open_item(
     """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
     Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum.
 
-    Bei einem Posten in Fremdwährung ist ``foreign_amount`` der gezahlte Fremdbetrag (sonst der
-    Bankumsatz oder der ganze offene Betrag) und ``amount`` der gezahlte Betrag in Firmenwährung
-    (sonst aus ``exchange_rate``, der Ausgleichsbuchung oder dem Tageskurs). Die Differenz zum
-    Buchwert ist der Kursgewinn oder -verlust; mit einer Ausgleichsbuchung wird sie gebucht.
+    Bei einem Posten in Fremdwährung ist ``foreign_amount`` der gezahlte Fremdbetrag und ``amount``
+    der gezahlte Betrag in Firmenwährung; ableiten lässt sich beides nur aus einer Zahlung in der
+    Währung des Postens (siehe ``_foreign_settlement``). Die Differenz zum Buchwert ist der
+    Kursgewinn oder -verlust; gebucht wird sie, wenn die Zahlung auf dem Sammelkonto steht.
     """
     item = session.get(OpenItem, open_item_id)
     if item is None:
@@ -409,6 +408,9 @@ def settle_open_item(
         else:
             settlement_date = date.today()
 
+    payment_entry_id = (linked_entry.id if linked_entry else None) or (
+        bank_transaction.journal_entry_id if bank_transaction else None
+    )
     settled_foreign = paid_amount = fx_difference = None
     fx_entry = None
     if item.foreign_currency_code:
@@ -419,14 +421,14 @@ def settle_open_item(
             foreign_amount=foreign_amount,
             exchange_rate=exchange_rate,
             bank_transaction=bank_transaction,
-            linked_entry=linked_entry,
+            payment_entry_id=payment_entry_id,
             settlement_date=settlement_date,
         )
         fx_difference = paid_amount - settlement_amount
-        payment_entry_id = (linked_entry.id if linked_entry else None) or (
-            bank_transaction.journal_entry_id if bank_transaction else None
-        )
-        if fx_difference != 0 and payment_entry_id is not None:
+        # Nur was die Zahlung auf das Sammelkonto gebracht hat, lässt dort eine Differenz stehen.
+        if _payment_reaches_item_account(
+            session=session, item=item, entry_id=payment_entry_id, paid=paid_amount
+        ) and fx_difference != 0:
             fx_entry = _book_fx_difference(
                 session=session,
                 item=item,
@@ -463,7 +465,8 @@ def settle_open_item(
             open_item_id=item.id,
             amount=settlement_amount,
             settlement_date=settlement_date,
-            journal_entry_id=linked_entry.id if linked_entry else None,
+            # Auch die Buchung des Bankumsatzes: Ihr Storno nimmt den Ausgleich zurück.
+            journal_entry_id=payment_entry_id,
             bank_transaction_id=bank_transaction.id if bank_transaction else None,
             created_by=changed_by,
             foreign_amount=settled_foreign,
@@ -607,6 +610,96 @@ def _paid_on_item_account(session: Session, item: OpenItem, entry_id: int) -> De
     return sum(session.execute(select(column).where(*conditions)).scalars(), Decimal("0.00"))
 
 
+def _settlements_of_payment(
+    session: Session, *, entry_id: int | None, bank_transaction_id: int | None
+) -> list[OpenItemSettlement]:
+    """Nicht stornierte Ausgleiche, die schon auf dieser Zahlung stehen."""
+    payment = []
+    if entry_id is not None:
+        payment.append(OpenItemSettlement.journal_entry_id == entry_id)
+    if bank_transaction_id is not None:
+        payment.append(OpenItemSettlement.bank_transaction_id == bank_transaction_id)
+    if not payment:
+        return []
+    return list(
+        session.execute(
+            select(OpenItemSettlement).where(
+                or_(*payment), OpenItemSettlement.reversed_on.is_(None)
+            )
+        ).scalars()
+    )
+
+
+def _payment_reaches_item_account(
+    *, session: Session, item: OpenItem, entry_id: int | None, paid: Decimal
+) -> bool:
+    """Steht die Zahlung auf dem Sammelkonto? Mehr als dort gebucht lässt sich nicht zuordnen."""
+    if entry_id is None:
+        return False
+    booked = _paid_on_item_account(session, item, entry_id)
+    if booked <= 0:
+        return False
+    assigned = sum(
+        (
+            row.paid_amount if row.paid_amount is not None else row.amount
+            for row in _settlements_of_payment(session, entry_id=entry_id, bank_transaction_id=None)
+            if row.open_item.account_id == item.account_id
+            and (item.partner_id is None or row.open_item.partner_id in (item.partner_id, None))
+        ),
+        Decimal("0.00"),
+    )
+    if paid + assigned > booked:
+        raise OpenItemError(
+            f"Die Buchung steht nur mit {booked} {item.currency_code} auf dem Sammelkonto, davon "
+            f"sind {assigned} {item.currency_code} schon zugeordnet. {paid} "
+            f"{item.currency_code} passen nicht mehr hinein."
+        )
+    return True
+
+
+def _foreign_payment_source(
+    *,
+    session: Session,
+    item: OpenItem,
+    entry_id: int | None,
+    bank_transaction: BankTransaction | None,
+) -> tuple[Decimal | None, Decimal | None]:
+    """Was die Zahlung selbst in der Währung des Postens nennt: Fremdbetrag und Eurogegenwert.
+
+    Zeilen der Buchung in dieser Währung gehen vor, zuerst auf dem Sammelkonto, sonst auf der
+    Geldseite. Ein Bankumsatz in dieser Währung nennt nur den Fremdbetrag.
+    """
+    if entry_id is not None:
+        receivable = item.item_type == "receivable"
+        collective = []
+        money = []
+        for line in session.execute(
+            select(JournalEntryLine).where(
+                JournalEntryLine.journal_entry_id == entry_id,
+                JournalEntryLine.foreign_currency_code == item.foreign_currency_code,
+            )
+        ).scalars():
+            if line.account_id != item.account_id:
+                if (line.debit_amount if receivable else line.credit_amount) > 0:
+                    money.append(line)
+            elif (line.credit_amount if receivable else line.debit_amount) > 0 and (
+                item.partner_id is None or line.partner_id in (item.partner_id, None)
+            ):
+                collective.append(line)
+        lines = collective or money
+        if lines:
+            return (
+                sum((line.foreign_amount for line in lines), Decimal("0.00")),
+                sum((line.debit_amount + line.credit_amount for line in lines), Decimal("0.00")),
+            )
+    if (
+        bank_transaction is not None
+        and bank_transaction.currency_code == item.foreign_currency_code
+    ):
+        return abs(bank_transaction.amount), None
+    return None, None
+
+
 def _foreign_settlement(
     *,
     session: Session,
@@ -615,32 +708,79 @@ def _foreign_settlement(
     foreign_amount: Decimal | None,
     exchange_rate: Decimal | None,
     bank_transaction: BankTransaction | None,
-    linked_entry: JournalEntry | None,
+    payment_entry_id: int | None,
     settlement_date: date,
 ) -> tuple[Decimal, Decimal, Decimal]:
-    """Fremdbetrag, ausgebuchter Buchwert und gezahlter Betrag in Firmenwährung."""
+    """Fremdbetrag, ausgebuchter Buchwert und gezahlter Betrag in Firmenwährung.
+
+    Eine Zahlung nur in Euro sagt nicht, wie viel Fremdwährung sie deckt und ob sie mehrere Posten
+    bezahlt. Eine Differenz wäre dann erfunden, deshalb müssen hier beide Beträge angegeben werden
+    (oder der Fremdbetrag und der Kurs). Der ganze offene Betrag gilt nur, wenn keine Zahlung
+    genannt ist. Eine Zahlung in der Währung des Postens liefert den Fremdbetrag und, wenn sie
+    gebucht ist, anteilig den Eurogegenwert; was andere Posten schon belegen, zählt nicht mehr.
+    """
+    code = item.foreign_currency_code
     if bank_transaction is not None and bank_transaction.currency_code:
-        if bank_transaction.currency_code not in {item.foreign_currency_code, item.currency_code}:
+        if bank_transaction.currency_code not in {code, item.currency_code}:
             raise OpenItemError(
-                f"Der Bankumsatz läuft in {bank_transaction.currency_code}, der Posten in "
-                f"{item.foreign_currency_code}."
+                f"Der Bankumsatz läuft in {bank_transaction.currency_code}, der Posten in {code}."
             )
+
+    source_foreign, source_paid = _foreign_payment_source(
+        session=session, item=item, entry_id=payment_entry_id, bank_transaction=bank_transaction
+    )
+    foreign_left = paid_left = None
+    if source_foreign is not None:
+        earlier = _settlements_of_payment(
+            session,
+            entry_id=payment_entry_id,
+            bank_transaction_id=bank_transaction.id if bank_transaction else None,
+        )
+        foreign_left = source_foreign - sum(
+            (
+                row.foreign_amount
+                for row in earlier
+                if row.foreign_amount is not None and row.open_item.foreign_currency_code == code
+            ),
+            Decimal("0.00"),
+        )
+        if foreign_left <= 0:
+            raise OpenItemError(f"Die Zahlung über {source_foreign} {code} ist schon zugeordnet.")
+        if source_paid is not None:
+            paid_left = source_paid - sum(
+                (
+                    row.paid_amount if row.paid_amount is not None else row.amount
+                    for row in earlier
+                ),
+                Decimal("0.00"),
+            )
+
+    payment_named = (
+        amount is not None or payment_entry_id is not None or bank_transaction is not None
+    )
     settled = foreign_amount
-    if (
-        settled is None
-        and bank_transaction is not None
-        and bank_transaction.currency_code == item.foreign_currency_code
-    ):
-        settled = min(abs(bank_transaction.amount), item.foreign_open_amount)
     if settled is None:
-        settled = item.foreign_open_amount
+        if foreign_left is not None:
+            settled = min(foreign_left, item.foreign_open_amount)
+        elif payment_named:
+            raise OpenItemError(
+                f"Eine Zahlung in {item.currency_code} sagt nicht, wie viel {code} sie deckt: "
+                f"Bitte den gezahlten Betrag in {code} angeben."
+            )
+        else:
+            settled = item.foreign_open_amount
     settled = settled.quantize(Decimal("0.01"))
     if settled <= 0:
         raise OpenItemError("Fremdbetrag muss größer 0 sein.")
     if settled > item.foreign_open_amount:
         raise OpenItemError(
             f"Der Fremdbetrag übersteigt den offenen Betrag von {item.foreign_open_amount} "
-            f"{item.foreign_currency_code}."
+            f"{code}."
+        )
+    if foreign_left is not None and settled > foreign_left:
+        raise OpenItemError(
+            f"Der Fremdbetrag übersteigt die Zahlung, von ihr sind noch {foreign_left} {code} "
+            "frei."
         )
 
     # Der Rest geht vollständig heraus, damit kein Rundungscent auf dem Posten stehen bleibt.
@@ -660,31 +800,27 @@ def _foreign_settlement(
         if exchange_rate <= 0:
             raise OpenItemError("Der Kurs muss größer 0 sein.")
         return settled, carrying, to_company_amount(settled, exchange_rate)
-
-    paid = Decimal("0.00")
-    entry_id = (linked_entry.id if linked_entry else None) or (
-        bank_transaction.journal_entry_id if bank_transaction else None
-    )
-    if entry_id is not None:
-        paid = _paid_on_item_account(session, item, entry_id)
-    if paid <= 0 and bank_transaction is not None and (
-        bank_transaction.currency_code == item.currency_code
-    ):
-        paid = abs(bank_transaction.amount)
-    if paid > 0:
-        # Eine Buchung kann mehrere Posten bezahlen; ihr Betrag wäre dann keine Kursdifferenz.
-        if abs(paid - carrying) > carrying * MAX_DERIVED_FX_DEVIATION:
+    if paid_left is not None:
+        paid = paid_left
+        if settled != foreign_left:
+            share = source_paid * settled / source_foreign
+            paid = min(share.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), paid_left)
+        if paid <= 0:
             raise OpenItemError(
-                f"Die Zahlung über {paid} {item.currency_code} weicht stark vom Buchwert "
-                f"{carrying} {item.currency_code} ab. Bitte den auf diesen Posten gezahlten "
-                "Betrag angeben."
+                f"Von der Zahlung ist nichts mehr frei. Bitte den Betrag in {item.currency_code} "
+                "angeben."
             )
         return settled, carrying, paid
+    if payment_entry_id is not None or (bank_transaction is not None and source_foreign is None):
+        raise OpenItemError(
+            "Die Zahlung nennt keinen Betrag für diesen Posten: Bitte den auf ihn "
+            f"gezahlten Betrag in {item.currency_code} oder den Kurs angeben."
+        )
     try:
         rate = rate_for(
             session=session,
             tenant_id=item.tenant_id,
-            currency_code=item.foreign_currency_code,
+            currency_code=code,
             on=settlement_date,
         )
     except ExchangeRateError as exc:
@@ -725,20 +861,23 @@ def _book_fx_difference(
         credit_amount=value if gain else zero,
         description=f"Kursdifferenz {item.reference}",
     )
-    return create_journal_entry(
-        session=session,
-        payload=JournalEntryInput(
-            company_id=item.company_id,
-            entry_date=entry_date,
-            description=f"Kursdifferenz {item.reference} ({item.foreign_currency_code})",
-            status="posted",
-            changed_by=changed_by,
-            lines=[collective_line, result_line],
-            source=SOURCE_FX_DIFFERENCE,
-            expand_tax_lines=False,
-        ),
-        commit=False,
-    )
+    try:
+        return create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=item.company_id,
+                entry_date=entry_date,
+                description=f"Kursdifferenz {item.reference} ({item.foreign_currency_code})",
+                status="posted",
+                changed_by=changed_by,
+                lines=[collective_line, result_line],
+                source=SOURCE_FX_DIFFERENCE,
+                expand_tax_lines=False,
+            ),
+            commit=False,
+        )
+    except (JournalEntryCreationError, JournalEntryValidationError) as exc:
+        raise OpenItemError(f"Kursdifferenz nicht gebucht: {exc}") from exc
 
 
 def _settlement_amount(

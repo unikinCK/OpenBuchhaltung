@@ -248,17 +248,16 @@
                             <div class="field">
                               <label for="settle-foreign-{{ item.id }}">Gezahlt in {{ item.foreign_currency_code }}</label>
                               <input id="settle-foreign-{{ item.id }}" name="foreign_amount" inputmode="decimal" placeholder="{{ item.foreign_open_amount }}" />
-                              <span class="hint">leer = voller offener Betrag</span>
                             </div>
                             <div class="field">
                               <label for="settle-amount-{{ item.id }}">Gezahlt in €</label>
                               <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" />
-                              <span class="hint">leer = aus Kurs, Buchung oder Tageskurs</span>
                             </div>
                             <div class="field">
                               <label for="settle-rate-{{ item.id }}">Kurs <span class="muted">(je 1 €, gebucht {{ item.exchange_rate | kurs }})</span></label>
                               <input id="settle-rate-{{ item.id }}" name="exchange_rate" inputmode="decimal" />
                             </div>
+                            <p class="field-full muted small">Eine Zahlung in {{ item.foreign_currency_code }} liefert die Beträge selbst. Bei einer Zahlung in € bitte {{ item.foreign_currency_code }} und € oder den Kurs angeben. Ohne Zahlung gilt der ganze offene Betrag zum Kurs oder Tageskurs.</p>
                           {% else %}
                             <div class="field">
                               <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>
@@ -271,7 +270,7 @@
                             <select id="settle-tx-{{ item.id }}" name="bank_transaction_id">
                               <option value="">Bankumsatz optional</option>
                               {% for tx in bank_transactions %}
-                                <option value="{{ tx.id }}">{{ tx.booking_date | datum }} – {{ tx.amount | betrag }} – {{ tx.purpose }}</option>
+                                <option value="{{ tx.id }}">{{ tx.booking_date | datum }} – {{ tx.amount | betrag }}{% if tx.currency_code and tx.currency_code != 'EUR' %} {{ tx.currency_code }}{% endif %} – {{ tx.purpose }}</option>
                               {% endfor %}
                             </select>
                           </div>

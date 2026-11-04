@@ -125,7 +125,12 @@ SOURCE_FX_VALUATION = "fx_valuation"
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
 # Quellen, die bestehende Partnerzuordnungen nur übernehmen (auch inaktive Partner).
-PARTNER_MIRROR_SOURCES = (SOURCE_STORNO, SOURCE_CARRYFORWARD)
+PARTNER_MIRROR_SOURCES = (
+    SOURCE_STORNO,
+    SOURCE_CARRYFORWARD,
+    SOURCE_FX_DIFFERENCE,
+    SOURCE_FX_VALUATION,
+)
 # Versuche, eine Buchung mit neuer Nummer anzulegen, wenn die gezogene Nummer
 # bereits vergeben ist (Altbestand mit gesellschaftsweitem Zähler, Wettlauf).
 POSTING_NUMBER_ATTEMPTS = 5
@@ -287,7 +292,7 @@ def create_journal_entry(
                 company_id=company.id,
                 partner_id=line.partner_id,
                 account=account,
-                # Storno und Saldovortrag spiegeln Bestehendes – auch bei
+                # Storno, Saldovortrag und Kursdifferenzen führen Bestehendes fort – auch bei
                 # inzwischen deaktivierten Partnern.
                 allow_inactive=payload.source in PARTNER_MIRROR_SOURCES,
             )
@@ -993,8 +998,9 @@ def _resolve_foreign_amounts(
 ) -> list[JournalLineInput]:
     """Prüft Fremdbeträge und ergänzt einen fehlenden Kurs aus den beiden Beträgen.
 
-    Fremdbetrag und Betrag in Firmenwährung müssen zum Kurs passen (ein Cent Rundung), sonst
-    stünde auf der festgeschriebenen Zeile ein Kurs, der nicht gerechnet wurde.
+    Fremdbetrag und Betrag in Firmenwährung müssen zum Kurs passen (ein Cent Rundung und was die
+    sechs Stellen des Kurses bei großen Beträgen ausmachen), sonst stünde auf der festgeschriebenen
+    Zeile ein Kurs, der nicht gerechnet wurde.
     """
     resolved = []
     for number, line in enumerate(lines, start=1):
@@ -1031,9 +1037,8 @@ def _resolve_foreign_amounts(
             rate = rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
         if rate <= 0:
             raise JournalEntryCreationError(f"Zeile {number}: Der Kurs muss größer 0 sein.")
-        if line.exchange_rate is not None and abs(line.foreign_amount / rate - amount) > Decimal(
-            "0.01"
-        ):
+        tolerance = Decimal("0.01") + line.foreign_amount / (rate * rate) * Decimal("0.0000005")
+        if line.exchange_rate is not None and abs(line.foreign_amount / rate - amount) > tolerance:
             raise JournalEntryCreationError(
                 f"Zeile {number}: {line.foreign_amount} {code} ergeben zum Kurs {rate} nicht "
                 f"{amount} {company.currency_code}."
@@ -1381,6 +1386,7 @@ def reverse_journal_entry(
     commit: bool = True,
     from_sales_invoice: bool = False,
     from_cash_book: bool = False,
+    from_settlement: bool = False,
 ) -> JournalEntry:
     """Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip).
 
@@ -1398,7 +1404,8 @@ def reverse_journal_entry(
     Ausgangsrechnung lässt sich nur über deren Storno zurücknehmen (``from_sales_invoice``),
     sonst liefen Rechnung und offener Posten auseinander. Die Buchung eines Kassenbuch-Eintrags
     storniert nur das Kassenbuch (``from_cash_book=True``), sonst liefen Kassenbestand und
-    Konto auseinander.
+    Konto auseinander. Die Kursdifferenz einer Zahlung fällt nur mit dem Storno der Zahlung weg
+    (``from_settlement``), sonst stünde am Ausgleich eine Differenz ohne Buchung.
     """
     original = session.get(JournalEntry, journal_entry_id)
     if original is None:
@@ -1419,6 +1426,11 @@ def reverse_journal_entry(
                 f"Buchung {original.posting_number} gehört zu Eintrag Nr. {cash_entry_number} "
                 "im Kassenbuch und kann nur dort storniert werden."
             )
+    if original.source == SOURCE_FX_DIFFERENCE and not from_settlement:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} ist die Kursdifferenz einer Zahlung und fällt "
+            "mit dem Storno dieser Zahlung weg."
+        )
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1663,6 +1675,7 @@ def _release_subledgers(
                 reversal_date=reversal.entry_date,
                 changed_by=changed_by,
                 commit=False,
+                from_settlement=True,
             )
     for item_id, restored in restored_by_item.items():
         item = session.get(OpenItem, item_id)

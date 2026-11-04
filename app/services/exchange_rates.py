@@ -298,6 +298,9 @@ def fetch_ecb_rates(
 @dataclass(slots=True)
 class FxValuationRow:
     item: OpenItem
+    # Stand zum Stichtag, nicht der heutige: Der Posten kann inzwischen bezahlt sein.
+    foreign_open: Decimal
+    carrying: Decimal
     rate: Decimal | None
     value: Decimal | None
     # Vorzeichen aus Sicht des Ergebnisses: positiv = Ertrag, negativ = Aufwand.
@@ -307,14 +310,43 @@ class FxValuationRow:
     long_term: bool
 
 
+def _open_as_of(session: Session, item: OpenItem, as_of: date) -> tuple[Decimal, Decimal]:
+    """Offener Fremdbetrag und Buchwert zum Stichtag, aus den Ausgleichen zurückgerechnet.
+
+    Ein Ausgleich zählt, wenn er bis zum Stichtag gezahlt und da noch nicht storniert war. Mit
+    einer stornierten Rechnung ist der Posten ab dem Datum des Stornos weg.
+    """
+    if item.status == "settled" and item.settlement_journal_entry_id is not None:
+        closing = session.get(JournalEntry, item.settlement_journal_entry_id)
+        if (
+            closing is not None
+            and closing.reversal_of_id is not None
+            and closing.entry_date <= as_of
+        ):
+            return ZERO, ZERO
+    foreign_open = item.foreign_original_amount
+    carrying = item.original_amount
+    for settlement in item.settlements:
+        if settlement.settlement_date > as_of:
+            continue
+        if settlement.reversed_on is not None and settlement.reversed_on <= as_of:
+            continue
+        foreign_open -= settlement.foreign_amount or ZERO
+        carrying -= settlement.amount
+    return foreign_open, carrying
+
+
 def fx_valuation_rows(*, session: Session, company: Company, as_of: date) -> list[FxValuationRow]:
-    """Offene Fremdwährungsposten mit Wert zum Stichtagskurs."""
+    """Zum Stichtag offene Fremdwährungsposten mit Wert zum Stichtagskurs."""
     items = session.execute(
         select(OpenItem)
-        .options(selectinload(OpenItem.account), selectinload(OpenItem.partner))
+        .options(
+            selectinload(OpenItem.account),
+            selectinload(OpenItem.partner),
+            selectinload(OpenItem.settlements),
+        )
         .where(
             OpenItem.company_id == company.id,
-            OpenItem.status == "open",
             OpenItem.foreign_currency_code.is_not(None),
             OpenItem.entry_date <= as_of,
         )
@@ -322,6 +354,9 @@ def fx_valuation_rows(*, session: Session, company: Company, as_of: date) -> lis
     ).scalars()
     rows = []
     for item in items:
+        foreign_open, carrying = _open_as_of(session, item, as_of)
+        if foreign_open <= 0:
+            continue
         found = find_exchange_rate(
             session=session,
             tenant_id=company.tenant_id,
@@ -330,14 +365,20 @@ def fx_valuation_rows(*, session: Session, company: Company, as_of: date) -> lis
         )
         long_term = item.due_date is not None and (item.due_date - as_of).days > LONG_TERM_DAYS
         if found is None:
-            rows.append(FxValuationRow(item, None, None, ZERO, ZERO, long_term))
+            rows.append(
+                FxValuationRow(item, foreign_open, carrying, None, None, ZERO, ZERO, long_term)
+            )
             continue
-        value = to_company_amount(item.foreign_open_amount, found.rate)
-        difference = value - item.open_amount
+        value = to_company_amount(foreign_open, found.rate)
+        difference = value - carrying
         if item.item_type == "payable":
             difference = -difference
         booked = min(difference, ZERO) if long_term else difference
-        rows.append(FxValuationRow(item, found.rate, value, difference, booked, long_term))
+        rows.append(
+            FxValuationRow(
+                item, foreign_open, carrying, found.rate, value, difference, booked, long_term
+            )
+        )
     return rows
 
 
@@ -373,9 +414,9 @@ def serialize_fx_valuation(report: dict[str, Any]) -> dict[str, Any]:
                 "item_type": row.item.item_type,
                 "counterparty": row.item.counterparty,
                 "currency_code": row.item.foreign_currency_code,
-                "foreign_open_amount": str(row.item.foreign_open_amount),
+                "foreign_open_amount": str(row.foreign_open),
                 "booked_rate": str(row.item.exchange_rate),
-                "carrying_amount": str(row.item.open_amount),
+                "carrying_amount": str(row.carrying),
                 "rate": str(row.rate) if row.rate is not None else None,
                 "value": str(row.value) if row.value is not None else None,
                 "difference": str(row.difference),
@@ -437,12 +478,13 @@ def post_fx_valuation(
         raise ExchangeRateError(
             f"Zum {as_of.strftime('%d.%m.%Y')} fehlen Kurse für {', '.join(missing)}."
         )
-    per_target: dict[tuple[int, int | None], Decimal] = {}
+    # Einzelbewertung: Gewinne und Verluste desselben Partners werden nicht verrechnet.
+    per_target: dict[tuple[int, int | None, bool], Decimal] = {}
     for row in rows:
         if row.booked_difference == 0:
             continue
         # Ein Ertrag erhöht die Forderung (Soll) bzw. mindert die Verbindlichkeit (Soll).
-        key = (row.item.account_id, row.item.partner_id)
+        key = (row.item.account_id, row.item.partner_id, row.booked_difference > 0)
         per_target[key] = per_target.get(key, ZERO) + row.booked_difference
     if not per_target:
         raise ExchangeRateError("Es gibt keine Kursdifferenz zu buchen.")
@@ -450,9 +492,7 @@ def post_fx_valuation(
     zero = Decimal("0.00")
     lines: list[JournalLineInput] = []
     gain_total = loss_total = zero
-    for (account_id, partner_id), amount in per_target.items():
-        if amount == 0:
-            continue
+    for (account_id, partner_id, _gain), amount in per_target.items():
         lines.append(
             JournalLineInput(
                 account_id=account_id,

@@ -13,10 +13,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   `POST /api/v1/exchange-rates/fetch`, MCP und CLI `flask fetch-exchange-rates`. Migration `20261103_0064`.
 - Buchungszeilen tragen Fremdwährung, Fremdbetrag und Kurs. Sie sind mit festgeschrieben: **Hashversion 5**;
   ältere Siegel bleiben unverändert gültig.
-- Offene Posten in Fremdwährung; der Ausgleich hält die Kursdifferenz fest und bucht sie mit einer
-  Ausgleichsbuchung. Ein storniertes Ausgleichen nimmt sie zurück.
+- Offene Posten in Fremdwährung; der Ausgleich hält die Kursdifferenz fest und bucht sie, wenn die Zahlung auf dem
+  Sammelkonto steht. Eine Zahlung in Euro nennt Fremd- und Eurobetrag selbst, eine Zahlung in der Währung des
+  Postens liefert beides anteilig, auch bei Sammel- und Überzahlungen.
 - Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen.
-- Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung.
+- Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung; ohne erfassten Kurs
+  gilt der Kurs am Leistungsdatum. Bei Istversteuerung warnt die UStVA, weil § 16 Abs. 6 UStG dort den Kurs des
+  Zahlungsmonats verlangt. E-Rechnungen in Fremdwährung werden nicht mehr als Euro gebucht.
 - Stichtagsbewertung offener Posten nach § 256a HGB mit automatischer Auflösung am Folgetag
   (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`).
 - Die Kontenrahmen enthalten die Konten für Kursdifferenzen (SKR03 2150/2660, SKR04 6880/4840).

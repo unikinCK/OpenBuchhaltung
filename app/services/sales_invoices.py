@@ -6,9 +6,8 @@ erzeugen und als Belege ablegen. Scheitert ein Schritt, fällt alles zurück; au
 der Nummernkreis bleibt lückenlos. Ausgestellte Rechnungen sind unveränderlich, korrigiert wird
 per Stornorechnung.
 
-Beträge laufen in der Rechnungswährung ``currency_code``. Heute ist das immer die Firmenwährung
-(``invoice_currency``); ``ledger_amount`` ist die eine Stelle, an der ein Betrag für das Hauptbuch
-umzurechnen wäre.
+Beträge laufen in der Rechnungswährung ``currency_code``, auch in Fremdwährung (ADR-010);
+``ledger_amount`` ist die eine Stelle, an der ein Betrag für das Hauptbuch umgerechnet wird.
 """
 
 from __future__ import annotations
@@ -431,6 +430,7 @@ def _apply_fields(
                   "due_date"):
         if field in fields:
             setattr(invoice, field, _date(fields[field], field))
+    previous_currency, previous_rate = invoice.currency_code, invoice.exchange_rate
     if "currency_code" in fields:
         invoice.currency_code = invoice_currency(company, fields["currency_code"])
     if "exchange_rate" in fields:
@@ -442,7 +442,10 @@ def _apply_fields(
             )
         except ExchangeRateError as exc:
             raise SalesInvoiceError(str(exc)) from exc
-    if invoice.currency_code == company.currency_code:
+    # Ein Kurs gehört zu seiner Währung: Beim Wechsel ohne neuen Kurs gilt wieder der Tageskurs.
+    if invoice.currency_code == company.currency_code or (
+        invoice.currency_code != previous_currency and invoice.exchange_rate == previous_rate
+    ):
         invoice.exchange_rate = None
     if "buyer_reference" in fields:
         invoice.buyer_reference = _text(
@@ -595,6 +598,11 @@ def serialize_sales_invoice(invoice: SalesInvoice, *, with_lines: bool = True) -
         "journal_entry_id": invoice.journal_entry_id,
         "open_item_id": invoice.open_item_id,
         "open_amount": str(item.open_amount) if item is not None else None,
+        "foreign_open_amount": (
+            str(item.foreign_open_amount)
+            if item is not None and item.foreign_open_amount is not None
+            else None
+        ),
         "payment_status": payment_status(invoice),
         "pdf_document_id": invoice.pdf_document_id,
         "xml_document_id": invoice.xml_document_id,
@@ -880,16 +888,21 @@ def _treatment_problems(
 
 
 def _invoice_rate(session: Session, invoice: SalesInvoice, company: Company) -> Decimal | None:
-    """Kurs der Rechnung: erfasst, sonst Tageskurs des Rechnungsdatums; None in Firmenwährung."""
+    """Kurs der Rechnung: erfasst, sonst der Kurs am Leistungsdatum; None in Firmenwährung.
+
+    § 16 Abs. 6 UStG knüpft an den Monat der Leistung an. Liegt sie noch in der Zukunft, ist ihr
+    Kurs unbekannt; dann gilt das Rechnungsdatum.
+    """
     if invoice.currency_code == company.currency_code:
         return None
     if invoice.exchange_rate is not None:
         return invoice.exchange_rate
+    performed_on = invoice.service_date or invoice.service_period_to or invoice.issue_date
     return rate_for(
         session=session,
         tenant_id=company.tenant_id,
         currency_code=invoice.currency_code,
-        on=invoice.issue_date,
+        on=min(performed_on, invoice.issue_date),
     )
 
 
@@ -1657,9 +1670,11 @@ def _cancel(
     item = original.open_item
     if item is None or item.status != "open" or item.open_amount != item.original_amount:
         paid = (item.original_amount - item.open_amount) if item is not None else ZERO
+        # Der Posten führt Firmenwährung, auch bei einer Rechnung in Fremdwährung.
+        paid_currency = item.currency_code if item is not None else original.currency_code
         raise SalesInvoiceStateError(
             f"Rechnung {original.invoice_number} ist bereits (teil-)bezahlt "
-            f"({format_amount(paid)} {original.currency_code}). Eine Stornierung ist nur bei "
+            f"({format_amount(paid)} {paid_currency}). Eine Stornierung ist nur bei "
             "unbezahlten Rechnungen möglich; die Zahlung muss zuerst zurückgenommen werden."
         )
     if cancellation_date < original.issue_date:

@@ -43,10 +43,10 @@
                   <td>{{ row.item.reference }}</td>
                   <td>{{ row.item.counterparty or "–" }}</td>
                   <td>{{ "Debitor" if row.item.item_type == "receivable" else "Kreditor" }}</td>
-                  <td class="num">{{ row.item.foreign_open_amount | betrag }} {{ row.item.foreign_currency_code }}</td>
+                  <td class="num">{{ row.foreign_open | betrag }} {{ row.item.foreign_currency_code }}</td>
                   <td class="num">{{ row.item.exchange_rate | kurs }}</td>
                   <td class="num">{{ row.rate | kurs if row.rate is not none else "fehlt" }}</td>
-                  <td class="num">{{ row.item.open_amount | betrag }}</td>
+                  <td class="num">{{ row.carrying | betrag }}</td>
                   <td class="num">{{ row.value | betrag if row.value is not none else "–" }}</td>
                   <td class="num{% if row.difference < 0 %} negative{% endif %}">{{ row.difference | betrag }}</td>
                   <td class="num">
@@ -90,7 +90,7 @@
         </form>
       </div>
       <p class="muted small">Einheiten der Fremdwährung je 1 {{ company_currency }}. Der Abruf übernimmt die Referenzkurse der letzten 90 Tage und lässt manuell erfasste Kurse stehen.
-        Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF; ein Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse können Sie hier manuell erfassen.</p>
+        Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF (Soll: Monat der Leistung, Ist: Monat der Zahlung); ein Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse können Sie hier manuell erfassen.</p>
       <form method="post" action="{{ url_for('main.set_exchange_rate_action') }}" class="inline-form">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />

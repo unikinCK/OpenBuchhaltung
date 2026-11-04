@@ -117,7 +117,7 @@
                       </div>
                     {% endif %}
                   </td>
-                  <td class="num{% if tx.amount < 0 %} negative{% endif %}">{{ tx.amount | betrag }}</td>
+                  <td class="num{% if tx.amount < 0 %} negative{% endif %}">{{ tx.amount | betrag }}{% if tx.currency_code and tx.currency_code != 'EUR' %} {{ tx.currency_code }}{% endif %}</td>
                   <td class="nowrap">
                     {% if tx.status == 'open' %}
                       <span class="badge badge-warning">offen</span>

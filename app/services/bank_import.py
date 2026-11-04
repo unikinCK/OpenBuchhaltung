@@ -445,6 +445,26 @@ def _finom_items(reader: csv.DictReader) -> Iterable[StatementItem]:
         )
 
 
+def _company_currencies(
+    session: Session, transactions: Sequence[BankTransaction]
+) -> dict[int, str]:
+    return dict(
+        session.execute(
+            select(Company.id, Company.currency_code).where(
+                Company.id.in_({t.company_id for t in transactions})
+            )
+        ).all()
+    )
+
+
+def _is_foreign(transaction: BankTransaction, currencies: dict[int, str]) -> bool:
+    """Läuft der Umsatz in einer anderen Währung als die Gesellschaft? Ohne Angabe: nein."""
+    return bool(
+        transaction.currency_code
+        and transaction.currency_code != currencies[transaction.company_id]
+    )
+
+
 def suggest_matches(
     *, session: Session, transaction: BankTransaction, limit: int = 5
 ) -> list[JournalEntry]:
@@ -461,6 +481,15 @@ def suggest_matches_for(
     open_transactions = [t for t in transactions if t.status == "open"]
     if not open_transactions:
         return {}
+
+    # Der Betrag eines Umsatzes in Fremdwährung sagt nichts über den Eurobetrag einer Buchung.
+    currencies = _company_currencies(session, open_transactions)
+    suggestions: dict[int, list[JournalEntry]] = {
+        t.id: [] for t in open_transactions if _is_foreign(t, currencies)
+    }
+    open_transactions = [t for t in open_transactions if t.id not in suggestions]
+    if not open_transactions:
+        return suggestions
 
     debit_amounts = {t.amount for t in open_transactions if t.amount > 0}
     credit_amounts = {-t.amount for t in open_transactions if t.amount < 0}
@@ -485,7 +514,6 @@ def suggest_matches_for(
         .order_by(JournalEntry.entry_date.desc())
     ).all()
 
-    suggestions: dict[int, list[JournalEntry]] = {}
     for transaction in open_transactions:
         matches: list[JournalEntry] = []
         seen: set[int] = set()
@@ -563,6 +591,8 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
             JournalEntry.company_id == company_id,
             JournalEntry.source != SOURCE_CARRYFORWARD,
             JournalEntryLine.account_id.in_(statement_totals),
+            # Sonst stünde der Gegenwert links, der Fremdbetrag aber nicht rechts.
+            JournalEntryLine.foreign_currency_code.is_(None),
         )
         .group_by(JournalEntryLine.account_id)
     ).all()
@@ -633,6 +663,7 @@ def detect_transfer_counterparts(
         .all()
     )
 
+    currencies = _company_currencies(session, candidates)
     matches: dict[int, BankTransaction] = {}
     used_counterparts: set[int] = set()
     for transaction in sorted(candidates, key=lambda t: (t.booking_date, t.id)):
@@ -644,6 +675,8 @@ def detect_transfer_counterparts(
                 or row.company_id != transaction.company_id
                 or row.bank_account_id == transaction.bank_account_id
                 or row.amount != -transaction.amount
+                or (row.currency_code or currencies[row.company_id])
+                != (transaction.currency_code or currencies[transaction.company_id])
                 or abs(row.booking_date - transaction.booking_date) > tolerance
             ):
                 continue
@@ -860,10 +893,9 @@ def _reassign(
         if transaction.journal_entry_id is not None:
             # Nur bereits verbuchte/zugeordnete Umsätze haben den Buchsaldo
             # des alten Kontos beeinflusst.
-            booked_net_by_source[previous_bank_account_id] = (
-                booked_net_by_source.get(previous_bank_account_id, Decimal("0.00"))
-                + transaction.amount
-            )
+            booked_net_by_source[previous_bank_account_id] = booked_net_by_source.get(
+                previous_bank_account_id, Decimal("0.00")
+            ) + _booked_net(session, transaction, previous_bank_account_id)
 
         log_audit_event(
             session=session,
@@ -899,6 +931,19 @@ def _reassign(
     return ReassignResult(
         transactions=list(pending), reclassification_entry=reclassification_entry
     )
+
+
+def _booked_net(session: Session, transaction: BankTransaction, account_id: int) -> Decimal:
+    """Was der Umsatz auf dem Konto bewegt hat; in Fremdwährung steht der Euro in der Buchung."""
+    if not _is_foreign(transaction, _company_currencies(session, [transaction])):
+        return transaction.amount
+    rows = session.execute(
+        select(JournalEntryLine.debit_amount, JournalEntryLine.credit_amount).where(
+            JournalEntryLine.journal_entry_id == transaction.journal_entry_id,
+            JournalEntryLine.account_id == account_id,
+        )
+    ).all()
+    return sum((debit - credit for debit, credit in rows), Decimal("0.00"))
 
 
 def _create_reclassification_entry(
@@ -1037,12 +1082,14 @@ def book_transaction(
     if transaction.currency_code and transaction.currency_code != company.currency_code:
         try:
             require_base_currency(company)
-            rate = exchange_rate or rate_for(
-                session=session,
-                tenant_id=company.tenant_id,
-                currency_code=transaction.currency_code,
-                on=transaction.booking_date,
-            )
+            rate = exchange_rate
+            if rate is None:
+                rate = rate_for(
+                    session=session,
+                    tenant_id=company.tenant_id,
+                    currency_code=transaction.currency_code,
+                    on=transaction.booking_date,
+                )
         except ExchangeRateError as exc:
             raise BankImportError(str(exc)) from exc
         if rate <= 0:

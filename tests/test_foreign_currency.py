@@ -16,12 +16,21 @@ from app import create_app
 from app.auth import hash_api_token, hash_password
 from app.db import _alembic_config, create_session_factory
 from app.services.audit_export import EXPORT_TABLE_MODELS
-from app.services.bank_import import BankImportError, book_transaction
+from app.services.bank_import import (
+    BankImportError,
+    bank_reconciliation,
+    book_transaction,
+    detect_transfer_counterparts,
+    reassign_bank_transactions,
+    suggest_matches,
+)
 from app.services.compliance_integrity import (
     JOURNAL_CONTENT_HASH_VERSION,
     verify_compliance_integrity,
 )
+from app.services.dashboard import bank_account_rows
 from app.services.dunning import dunning_proposals, serialize_proposal
+from app.services.einvoice_import import book_einvoice, parse_einvoice
 from app.services.exchange_rates import (
     ExchangeRateError,
     fetch_ecb_rates,
@@ -34,6 +43,7 @@ from app.services.exchange_rates import (
     set_exchange_rate,
     to_company_amount,
 )
+from app.services.incoming_invoice import IncomingInvoiceError
 from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
@@ -52,12 +62,16 @@ from app.services.partners import create_partner
 from app.services.sales_invoice_pdf import pdf_text
 from app.services.sales_invoices import (
     SalesInvoiceError,
+    SalesInvoiceStateError,
     cancel_sales_invoice,
     create_sales_invoice,
     issue_sales_invoice,
+    serialize_sales_invoice,
+    update_sales_invoice,
 )
 from app.services.sepa_export import SepaExportError, create_payment_run, payable_items_for_run
 from app.services.tax_codes import ensure_default_tax_codes
+from app.services.vat_returns import compute_vat_return_details, set_company_vat_method
 from domain.models import (
     Account,
     AuditLog,
@@ -66,6 +80,7 @@ from domain.models import (
     Company,
     Document,
     ExchangeRate,
+    FiscalYear,
     JournalEntry,
     JournalEntryLine,
     OpenItem,
@@ -445,7 +460,12 @@ def test_receivable_gain_is_booked_and_clears_the_collective_account(session: Se
     # 1.080 USD bringen zum schwächeren Euro 1.028,57 EUR statt 1.000 EUR.
     payment = _book(session, company, accounts["1200"], accounts["1400"], "1028.57")
     settled = settle_open_item(
-        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1028.57"),
     )
     assert settled.status == "settled"
     assert settled.open_amount == Decimal("0.00")
@@ -467,7 +487,12 @@ def test_receivable_loss_is_booked(session: Session) -> None:
     item = _fx_item(session, company, accounts["1400"])
     payment = _book(session, company, accounts["1200"], accounts["1400"], "950.00")
     settle_open_item(
-        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("950.00"),
     )
     assert _balance(session, accounts["1400"]) == Decimal("0.00")
     assert _balance(session, accounts["2150"]) == Decimal("50.00")
@@ -486,7 +511,12 @@ def test_payable_differences_have_the_opposite_direction(
     item = _fx_item(session, company, accounts["1600"], item_type="payable")
     payment = _book(session, company, accounts["1600"], accounts["1200"], paid)
     settle_open_item(
-        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal(paid),
     )
     assert _balance(session, accounts["1600"]) == Decimal("0.00")
     assert _balance(session, accounts["2150"]) == Decimal(loss)
@@ -532,7 +562,13 @@ def test_settlement_without_booking_records_but_does_not_book_the_difference(
 ) -> None:
     company, accounts = _seed(session)
     item = _fx_item(session, company, accounts["1400"])
-    settle_open_item(session=session, open_item_id=item.id, changed_by="t", amount=Decimal("990"))
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        foreign_amount=Decimal("1080"),
+        amount=Decimal("990"),
+    )
     row = session.execute(select(OpenItemSettlement)).scalar_one()
     assert row.fx_difference == Decimal("-10.00")
     assert row.fx_journal_entry_id is None
@@ -548,7 +584,12 @@ def test_missing_fx_account_blocks_booking(session: Session) -> None:
     payment = _book(session, company, accounts["1200"], accounts["1400"], "1010.00")
     with pytest.raises(OpenItemError, match="Erträge aus Kursdifferenzen"):
         settle_open_item(
-            session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            journal_entry_id=payment.id,
+            foreign_amount=Decimal("1080.00"),
+            amount=Decimal("1010.00"),
         )
 
 
@@ -558,7 +599,12 @@ def test_reversing_the_payment_restores_item_and_difference(session: Session) ->
     item = _fx_item(session, company, accounts["1400"])
     payment = _book(session, company, accounts["1200"], accounts["1400"], "1028.57")
     settle_open_item(
-        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1028.57"),
     )
     reverse_journal_entry(
         session=session,
@@ -598,7 +644,7 @@ def test_euro_item_rejects_foreign_bank_transaction(session: Session) -> None:
         )
 
 
-def test_euro_bank_payment_of_foreign_item_uses_the_euro_amount(session: Session) -> None:
+def test_euro_bank_payment_of_foreign_item_needs_both_amounts(session: Session) -> None:
     company, accounts = _seed(session)
     item = _fx_item(session, company, accounts["1400"])
     transaction = _bank_tx(session, company, accounts["1200"], "1010.00", "EUR")
@@ -607,6 +653,8 @@ def test_euro_bank_payment_of_foreign_item_uses_the_euro_amount(session: Session
         open_item_id=item.id,
         changed_by="t",
         bank_transaction_id=transaction.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1010.00"),
     )
     assert settled.status == "settled"
     row = session.execute(select(OpenItemSettlement)).scalar_one()
@@ -614,6 +662,137 @@ def test_euro_bank_payment_of_foreign_item_uses_the_euro_amount(session: Session
     assert row.fx_difference == Decimal("10.00")
     # Noch keine Buchung zum Umsatz: festgehalten, aber nicht gebucht.
     assert row.fx_journal_entry_id is None
+
+
+def test_euro_part_payment_does_not_close_the_item(session: Session) -> None:
+    """850 EUR auf einen Buchwert von 1.000 EUR sind eine Teilzahlung, kein Kursverlust."""
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _bank_tx(session, company, accounts["1200"], "850.00", "EUR")
+    with pytest.raises(OpenItemError, match="wie viel USD"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+    with pytest.raises(OpenItemError, match="wie viel USD"):
+        settle_open_item(
+            session=session, open_item_id=item.id, changed_by="t", amount=Decimal("850.00")
+        )
+    with pytest.raises(OpenItemError, match="gezahlten Betrag in EUR"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+            foreign_amount=Decimal("918.00"),
+        )
+    session.refresh(item)
+    assert item.status == "open"
+    assert item.foreign_open_amount == Decimal("1080.00")
+
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+        foreign_amount=Decimal("918.00"),
+        amount=Decimal("850.00"),
+    )
+    assert settled.status == "open"
+    assert settled.foreign_open_amount == Decimal("162.00")
+    assert settled.open_amount == Decimal("150.00")
+    assert session.execute(select(OpenItemSettlement)).scalar_one().fx_difference == Decimal("0.00")
+
+
+def test_full_settlement_without_a_named_payment_uses_the_rate(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    settled = settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", exchange_rate=Decimal("1.20")
+    )
+    assert settled.status == "settled"
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.paid_amount == Decimal("900.00")
+    assert row.fx_difference == Decimal("-100.00")
+
+
+def _booked_usd_payment(session, company, accounts, amount, *, rate="1.00"):
+    transaction = _bank_tx(session, company, accounts["1210"], amount, "USD")
+    return book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+        exchange_rate=Decimal(rate),
+    )
+
+
+def test_overpayment_in_foreign_currency_invents_no_gain(session: Session) -> None:
+    """2.000 USD auf einen Posten über 1.080 USD: Nur der Anteil zählt als Zahlung des Postens."""
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _booked_usd_payment(session, company, accounts, "2000.00")
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+    )
+    assert settled.status == "settled"
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.foreign_amount == Decimal("1080.00")
+    assert row.paid_amount == Decimal("1080.00")
+    assert row.fx_difference == Decimal("80.00")
+    assert _balance(session, accounts["2660"]) == Decimal("-80.00")
+    # Die Überzahlung von 920 USD bleibt als Guthaben des Kunden auf dem Sammelkonto.
+    assert _balance(session, accounts["1400"]) == Decimal("-920.00")
+
+
+def test_foreign_collective_payment_is_shared_without_rest(session: Session) -> None:
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    first = _fx_item(session, company, accounts["1400"], foreign="648.00")
+    second = _fx_item(session, company, accounts["1400"], foreign="432.00", reference="FX-2")
+    third = _fx_item(session, company, accounts["1400"], foreign="108.00", reference="FX-3")
+    transaction = _booked_usd_payment(session, company, accounts, "1080.00", rate="1.05")
+    for item in (first, second):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+    rows = session.execute(select(OpenItemSettlement)).scalars().all()
+    assert sum(row.foreign_amount for row in rows) == Decimal("1080.00")
+    assert sum(row.paid_amount for row in rows) == Decimal("1028.57")
+    with pytest.raises(OpenItemError, match="schon zugeordnet"):
+        settle_open_item(
+            session=session,
+            open_item_id=third.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+    # 1.000 EUR Forderung für die ersten beiden, gezahlt 1.028,57 EUR, Differenz als Ertrag.
+    assert _balance(session, accounts["1400"]) == Decimal("0.00")
+    assert _balance(session, accounts["2660"]) == Decimal("-28.57")
+
+
+def test_foreign_amount_above_the_payment_is_refused(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _bank_tx(session, company, accounts["1210"], "500.00", "USD")
+    with pytest.raises(OpenItemError, match="übersteigt die Zahlung"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+            foreign_amount=Decimal("600.00"),
+            exchange_rate=Decimal("1.08"),
+        )
 
 
 def test_payment_line_without_partner_counts_for_item_with_partner(session: Session) -> None:
@@ -624,18 +803,26 @@ def test_payment_line_without_partner_counts_for_item_with_partner(session: Sess
     session.commit()
     item = _fx_item(session, company, accounts["1400"], partner_id=customer.id)
     payment = _book(session, company, accounts["1200"], accounts["1400"], "1020.00")
-    settle_open_item(
-        session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1020.00"),
     )
+    assert settled.status == "settled"
     row = session.execute(select(OpenItemSettlement)).scalar_one()
-    assert row.paid_amount == Decimal("1020.00")
+    assert row.fx_journal_entry_id is not None
 
 
-def test_collective_payment_needs_the_amount_of_the_item(session: Session) -> None:
+def test_collective_euro_payment_needs_the_amounts_of_the_item(session: Session) -> None:
     company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "2000.00", day=date(2026, 3, 3))
     item = _fx_item(session, company, accounts["1400"])
-    payment = _book(session, company, accounts["1200"], accounts["1400"], "5000.00")
-    with pytest.raises(OpenItemError, match="weicht stark"):
+    other = _fx_item(session, company, accounts["1400"], reference="FX-2")
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "2030.00")
+    with pytest.raises(OpenItemError, match="wie viel USD"):
         settle_open_item(
             session=session, open_item_id=item.id, changed_by="t", journal_entry_id=payment.id
         )
@@ -644,9 +831,176 @@ def test_collective_payment_needs_the_amount_of_the_item(session: Session) -> No
         open_item_id=item.id,
         changed_by="t",
         journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
         amount=Decimal("1010.00"),
     )
     assert settled.status == "settled"
+    # Mehr als die Buchung hergibt, lässt sich nicht zuordnen.
+    with pytest.raises(OpenItemError, match="schon zugeordnet"):
+        settle_open_item(
+            session=session,
+            open_item_id=other.id,
+            changed_by="t",
+            journal_entry_id=payment.id,
+            foreign_amount=Decimal("1080.00"),
+            amount=Decimal("1020.01"),
+        )
+    settle_open_item(
+        session=session,
+        open_item_id=other.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1020.00"),
+    )
+    assert _balance(session, accounts["1400"]) == Decimal("0.00")
+    assert _balance(session, accounts["2660"]) == Decimal("-30.00")
+
+
+def test_payment_without_collective_line_books_no_difference(session: Session) -> None:
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["8338"], "1050.00")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1050.00"),
+    )
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.fx_difference == Decimal("50.00")
+    assert row.fx_journal_entry_id is None
+    assert _balance(session, accounts["1400"]) == Decimal("1000.00")
+
+
+def test_reversing_a_payment_linked_only_by_bank_transaction_restores_all(
+    session: Session,
+) -> None:
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _booked_usd_payment(session, company, accounts, "1080.00", rate="1.05")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+    )
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert row.journal_entry_id == transaction.journal_entry_id
+    assert _balance(session, accounts["2660"]) == Decimal("-28.57")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2026, 3, 25),
+        changed_by="t",
+    )
+    session.refresh(item)
+    assert item.status == "open"
+    assert item.foreign_open_amount == Decimal("1080.00")
+    assert _balance(session, accounts["2660"]) == Decimal("0.00")
+    assert _balance(session, accounts["1400"]) == Decimal("1000.00")
+
+
+def test_fx_difference_cannot_be_reversed_alone(session: Session) -> None:
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1010.00")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1010.00"),
+    )
+    row = session.execute(select(OpenItemSettlement)).scalar_one()
+    with pytest.raises(JournalEntryCreationError, match="mit dem Storno dieser Zahlung"):
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=row.fx_journal_entry_id,
+            reversal_date=date(2026, 3, 25),
+            changed_by="t",
+        )
+
+
+def test_difference_in_a_closed_year_is_a_clean_error(session: Session) -> None:
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1010.00")
+    session.execute(select(FiscalYear).where(FiscalYear.company_id == company.id)).scalar_one(
+    ).is_closed = True
+    session.commit()
+    with pytest.raises(OpenItemError, match="Kursdifferenz nicht gebucht"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            journal_entry_id=payment.id,
+            foreign_amount=Decimal("1080.00"),
+            amount=Decimal("1010.00"),
+        )
+
+
+def test_inactive_partner_does_not_block_the_difference(session: Session) -> None:
+    company, accounts = _seed(session)
+    customer = create_partner(
+        session=session, company=company, changed_by="t", name="Kunde", is_customer=True
+    )
+    session.commit()
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"], partner_id=customer.id)
+    customer.is_active = False
+    session.commit()
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1010.00")
+    settled = settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1010.00"),
+    )
+    assert settled.status == "settled"
+    assert _balance(session, accounts["2660"]) == Decimal("-10.00")
+
+
+def test_reversal_of_large_foreign_line_with_derived_rate_works(session: Session) -> None:
+    """Der abgeleitete Kurs hat sechs Stellen: Große Beträge liegen mehr als einen Cent daneben."""
+    company, accounts = _seed(session)
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 3, 3),
+            description="Großer Betrag",
+            status="posted",
+            changed_by="t",
+            lines=[
+                JournalLineInput(
+                    account_id=accounts["1210"].id,
+                    debit_amount=Decimal("9259000.00"),
+                    foreign_currency_code="USD",
+                    foreign_amount=Decimal("10000000.00"),
+                ),
+                JournalLineInput(
+                    account_id=accounts["8338"].id, credit_amount=Decimal("9259000.00")
+                ),
+            ],
+        ),
+    )
+    reversal = reverse_journal_entry(
+        session=session,
+        journal_entry_id=entry.id,
+        reversal_date=date(2026, 3, 4),
+        changed_by="t",
+    )
+    assert reversal.reversal_of_id == entry.id
 
 
 def test_payment_run_refuses_foreign_items(session: Session) -> None:
@@ -757,6 +1111,74 @@ def test_foreign_bank_transaction_uses_daily_rate_and_tax_in_euro(session: Sessi
     assert amounts[tax_code.vat_account_id].credit_amount == Decimal("190.00")
 
 
+def test_zero_rate_is_refused_instead_of_replaced_by_the_daily_rate(session: Session) -> None:
+    company, accounts = _seed(session)
+    _rate(session, company)
+    transaction = _bank_tx(session, company, accounts["1210"], "108.00", "USD")
+    with pytest.raises(BankImportError, match="größer 0"):
+        book_transaction(
+            session=session,
+            transaction_id=transaction.id,
+            contra_account_id=accounts["8338"].id,
+            changed_by="t",
+            exchange_rate=Decimal("0"),
+        )
+
+
+def test_reassigning_a_booked_foreign_transaction_moves_the_euro_amount(session: Session) -> None:
+    company, accounts = _seed(session)
+    transaction = _bank_tx(session, company, accounts["1210"], "108.00", "USD")
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["8338"].id,
+        changed_by="t",
+        exchange_rate=Decimal("1.08"),
+    )
+    reassign_bank_transactions(
+        session=session,
+        transaction_ids=[transaction.id],
+        bank_account_id=accounts["1200"].id,
+        changed_by="t",
+    )
+    assert _balance(session, accounts["1210"]) == Decimal("0.00")
+    assert _balance(session, accounts["1200"]) == Decimal("100.00")
+
+
+def test_foreign_transactions_stay_out_of_euro_comparisons(session: Session) -> None:
+    company, accounts = _seed(session)
+    # Eine Buchung über 108 EUR passt nicht zu einem Umsatz über 108 USD.
+    _book(session, company, accounts["1210"], accounts["8338"], "108.00", day=date(2026, 3, 3))
+    usd = _bank_tx(session, company, accounts["1210"], "108.00", "USD")
+    assert suggest_matches(session=session, transaction=usd) == []
+
+    # Gleiche Zahl, andere Währung: kein Eigenübertrag.
+    euro_out = _bank_tx(session, company, accounts["1200"], "-108.00", "EUR")
+    assert detect_transfer_counterparts(session=session, transactions=[usd, euro_out]) == {}
+    usd_out = _bank_tx(session, company, accounts["1200"], "-108.00", "USD")
+    found = detect_transfer_counterparts(session=session, transactions=[usd, usd_out])
+    assert found[usd.id].id == usd_out.id
+
+    # Saldenabgleich: Weder die Zeile noch der Umsatz in USD zählen.
+    book_transaction(
+        session=session,
+        transaction_id=usd.id,
+        contra_account_id=accounts["8338"].id,
+        changed_by="t",
+        exchange_rate=Decimal("1.08"),
+    )
+    row = next(
+        row
+        for row in bank_reconciliation(session=session, company_id=company.id)
+        if row.account_id == accounts["1200"].id
+    )
+    assert row.statement_total == Decimal("-108.00")
+    assert row.book_balance == Decimal("0.00")
+    rows = {row["account_id"]: row for row in bank_account_rows(session, company.id)}
+    assert rows[accounts["1210"].id]["statement_total"] == Decimal("0.00")
+    assert rows[accounts["1200"].id]["statement_total"] == Decimal("-108.00")
+
+
 def test_payment_on_foreign_bank_transaction_settles_foreign_item(session: Session) -> None:
     company, accounts = _seed(session)
     _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
@@ -861,6 +1283,132 @@ def test_valuation_books_only_losses_for_long_term_items(session: Session) -> No
     assert report["rows"][0].booked_difference == Decimal("-100.00")
 
 
+def test_valuation_takes_the_state_on_the_reporting_date(session: Session) -> None:
+    company, accounts = _seed(session)
+    as_of = date(2026, 12, 31)
+    _rate(session, company, day=as_of, rate="1.20")
+    paid_later = _fx_item(session, company, accounts["1400"], reference="SPAETER")
+    paid_before = _fx_item(session, company, accounts["1400"], reference="VORHER")
+    partly_paid = _fx_item(session, company, accounts["1400"], reference="TEIL")
+    settle_open_item(
+        session=session,
+        open_item_id=paid_later.id,
+        changed_by="t",
+        exchange_rate=Decimal("1.10"),
+        settlement_date=date(2027, 1, 20),
+    )
+    settle_open_item(
+        session=session,
+        open_item_id=paid_before.id,
+        changed_by="t",
+        exchange_rate=Decimal("1.10"),
+        settlement_date=date(2026, 12, 20),
+    )
+    settle_open_item(
+        session=session,
+        open_item_id=partly_paid.id,
+        changed_by="t",
+        foreign_amount=Decimal("540.00"),
+        exchange_rate=Decimal("1.10"),
+        settlement_date=date(2026, 12, 20),
+    )
+    report = fx_valuation_report(session=session, company=company, as_of=as_of)
+    rows = {row.item.reference: row for row in report["rows"]}
+    assert set(rows) == {"SPAETER", "TEIL"}
+    assert rows["SPAETER"].foreign_open == Decimal("1080.00")
+    assert rows["SPAETER"].carrying == Decimal("1000.00")
+    assert rows["SPAETER"].difference == Decimal("-100.00")
+    assert rows["TEIL"].foreign_open == Decimal("540.00")
+    assert rows["TEIL"].carrying == Decimal("500.00")
+    assert rows["TEIL"].difference == Decimal("-50.00")
+    # Vor dem Zahlungsdatum auch der früher bezahlte Posten.
+    _rate(session, company, day=date(2026, 12, 10), rate="1.20")
+    earlier = fx_valuation_report(session=session, company=company, as_of=date(2026, 12, 10))
+    assert {row.item.reference for row in earlier["rows"]} == {"SPAETER", "VORHER", "TEIL"}
+
+
+def test_valuation_respects_reversed_settlements_and_cancellations(session: Session) -> None:
+    company, accounts = _seed(session)
+    as_of = date(2026, 3, 31)
+    _rate(session, company, day=as_of, rate="1.20")
+    _book(session, company, accounts["1400"], accounts["8338"], "1000.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    payment = _book(session, company, accounts["1200"], accounts["1400"], "1000.00")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        journal_entry_id=payment.id,
+        foreign_amount=Decimal("1080.00"),
+        amount=Decimal("1000.00"),
+    )
+    assert fx_valuation_report(session=session, company=company, as_of=as_of)["rows"] == []
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=payment.id,
+        reversal_date=date(2026, 3, 25),
+        changed_by="t",
+    )
+    rows = fx_valuation_report(session=session, company=company, as_of=as_of)["rows"]
+    assert [row.foreign_open for row in rows] == [Decimal("1080.00")]
+    # Vor dem Storno galt der Posten als bezahlt.
+    _rate(session, company, day=date(2026, 3, 22), rate="1.20")
+    assert (
+        fx_valuation_report(session=session, company=company, as_of=date(2026, 3, 22))["rows"]
+        == []
+    )
+
+
+def test_valuation_does_not_net_gains_and_losses_of_one_partner(session: Session) -> None:
+    company, accounts = _seed(session)
+    customer = create_partner(
+        session=session, company=company, changed_by="t", name="Kunde", is_customer=True
+    )
+    session.commit()
+    as_of = date(2026, 12, 31)
+    _rate(session, company, day=as_of, rate="1.20")
+    _rate(session, company, day=as_of, rate="0.80", currency="CHF")
+    _fx_item(session, company, accounts["1400"], partner_id=customer.id)
+    _fx_item(
+        session,
+        company,
+        accounts["1400"],
+        reference="FX-CHF",
+        partner_id=customer.id,
+        foreign_currency_code="CHF",
+        foreign="1000.00",
+        exchange_rate=Decimal("1.00"),
+    )
+    result = post_fx_valuation(session=session, company=company, as_of=as_of, changed_by="t")
+    assert result["gain"] == Decimal("250.00")
+    assert result["loss"] == Decimal("100.00")
+    entry = session.get(JournalEntry, result["journal_entry_id"])
+    collective = sorted(
+        (line.debit_amount, line.credit_amount)
+        for line in entry.lines
+        if line.account_id == accounts["1400"].id
+    )
+    assert collective == [
+        (Decimal("0.00"), Decimal("100.00")),
+        (Decimal("250.00"), Decimal("0.00")),
+    ]
+
+
+def test_valuation_books_for_an_inactive_partner(session: Session) -> None:
+    company, accounts = _seed(session)
+    customer = create_partner(
+        session=session, company=company, changed_by="t", name="Kunde", is_customer=True
+    )
+    session.commit()
+    as_of = date(2026, 12, 31)
+    _rate(session, company, day=as_of, rate="1.20")
+    _fx_item(session, company, accounts["1400"], partner_id=customer.id)
+    customer.is_active = False
+    session.commit()
+    result = post_fx_valuation(session=session, company=company, as_of=as_of, changed_by="t")
+    assert result["loss"] == Decimal("100.00")
+
+
 # ---------------------------------------------------------------------------
 # Rechnung
 # ---------------------------------------------------------------------------
@@ -883,6 +1431,7 @@ def _customer(session, company):
 
 
 def _usd_invoice(session, company, accounts, upload_dir, **fields):
+    fields.setdefault("service_date", date(2026, 3, 3))
     tax_code = session.execute(
         select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
     ).scalar_one()
@@ -892,7 +1441,6 @@ def _usd_invoice(session, company, accounts, upload_dir, **fields):
         changed_by="t",
         partner_id=_customer(session, company).id,
         issue_date=date(2026, 3, 3),
-        service_date=date(2026, 3, 3),
         currency_code="USD",
         lines=[
             {
@@ -955,6 +1503,121 @@ def test_invoice_without_rate_uses_daily_rate_or_lists_the_problem(
     _rate(session, company)
     issued = _usd_invoice(session, company, accounts, tmp_path)
     assert issued.exchange_rate == Decimal("1.080000")
+
+
+def test_invoice_rate_follows_the_service_date(session: Session, tmp_path: Path) -> None:
+    company, accounts = _seed(session)
+    _rate(session, company, day=date(2026, 3, 3), rate="1.0800")
+    _rate(session, company, day=date(2026, 2, 20), rate="1.1000")
+    # Die Leistung lag im Februar: Ihr Kurs gilt, nicht der des Rechnungsdatums.
+    issued = _usd_invoice(session, company, accounts, tmp_path, service_date=date(2026, 2, 20))
+    assert issued.exchange_rate == Decimal("1.100000")
+    # Eine Leistung nach dem Rechnungsdatum hat noch keinen Kurs.
+    later = _usd_invoice(session, company, accounts, tmp_path, service_date=date(2026, 3, 25))
+    assert later.exchange_rate == Decimal("1.080000")
+
+
+def test_currency_change_drops_the_rate_of_the_old_currency(session: Session) -> None:
+    company, accounts = _seed(session)
+    draft = create_sales_invoice(
+        session=session,
+        company=company,
+        changed_by="t",
+        partner_id=_customer(session, company).id,
+        currency_code="USD",
+        exchange_rate="1.08",
+    )
+    update_sales_invoice(session=session, invoice=draft, changed_by="t", currency_code="CHF")
+    assert draft.exchange_rate is None
+    update_sales_invoice(
+        session=session, invoice=draft, changed_by="t", currency_code="USD", exchange_rate="1.10"
+    )
+    assert draft.exchange_rate == Decimal("1.10")
+    update_sales_invoice(session=session, invoice=draft, changed_by="t", due_date="2026-04-30")
+    assert draft.exchange_rate == Decimal("1.10")
+
+
+def test_paid_foreign_invoice_names_euro_and_foreign_rest(session: Session, tmp_path: Path) -> None:
+    company, accounts = _seed(session)
+    _rate(session, company)
+    issued = _usd_invoice(session, company, accounts, tmp_path)
+    settle_open_item(
+        session=session,
+        open_item_id=issued.open_item_id,
+        changed_by="t",
+        foreign_amount=Decimal("100.00"),
+        exchange_rate=Decimal("1.08"),
+    )
+    session.refresh(issued)
+    payload = serialize_sales_invoice(issued)
+    assert payload["foreign_open_amount"] == str(issued.open_item.foreign_open_amount)
+    with pytest.raises(SalesInvoiceStateError, match=r"92,59 EUR"):
+        cancel_sales_invoice(
+            session=session,
+            invoice_id=issued.id,
+            changed_by="t",
+            cancellation_date=date(2026, 3, 10),
+            reason="Falsch",
+            upload_dir=tmp_path,
+        )
+
+
+def test_cash_basis_warns_about_the_rate_of_the_payment_month(
+    session: Session, tmp_path: Path
+) -> None:
+    company, accounts = _seed(session)
+    set_company_vat_method(
+        session=session,
+        company=company,
+        method="ist",
+        valid_from=date(2026, 1, 1),
+        changed_by="t",
+    )
+    _rate(session, company)
+    issued = _usd_invoice(session, company, accounts, tmp_path)
+    settle_open_item(
+        session=session,
+        open_item_id=issued.open_item_id,
+        changed_by="t",
+        exchange_rate=Decimal("1.08"),
+        settlement_date=date(2026, 4, 10),
+    )
+    march = compute_vat_return_details(
+        session=session,
+        company_id=company.id,
+        date_from=date(2026, 3, 1),
+        date_to=date(2026, 3, 31),
+    )
+    assert not any("Zahlungsmonats" in warning for warning in march.warnings)
+    april = compute_vat_return_details(
+        session=session,
+        company_id=company.id,
+        date_from=date(2026, 4, 1),
+        date_to=date(2026, 4, 30),
+    )
+    assert any("Zahlungsmonats" in warning for warning in april.warnings)
+
+
+def test_foreign_einvoice_is_read_correctly_and_not_booked_as_euro(
+    session: Session, tmp_path: Path
+) -> None:
+    company, accounts = _seed(session)
+    _rate(session, company)
+    for syntax in ("cii", "ubl"):
+        issued = _usd_invoice(session, company, accounts, tmp_path, einvoice_syntax=syntax)
+        parsed = parse_einvoice(_einvoice_xml(session, issued))
+        # Auch wenn in CII zuletzt die Steuer in Euro steht (BT-111).
+        assert parsed.currency_code == "USD"
+        with pytest.raises(IncomingInvoiceError, match="läuft in USD") as raised:
+            book_einvoice(
+                session=session,
+                company=company,
+                invoice=parsed,
+                expense_account_id=accounts["4210"].id,
+                creditor_account_id=accounts["1600"].id,
+                changed_by="t",
+            )
+        assert raised.value.code == "foreign_currency"
 
 
 def _einvoice_xml(session, invoice) -> bytes:

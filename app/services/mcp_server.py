@@ -526,6 +526,8 @@ _SALES_INVOICE_FIELD_SCHEMA: dict[str, Any] = {
             "service_period_from",
             "service_period_to",
             "due_date",
+            "currency_code",
+            "exchange_rate",
             "buyer_reference",
             "header_text",
             "footer_text",
@@ -4586,7 +4588,8 @@ TOOLS: list[ToolSpec] = [
         name="settle_open_item",
         description=(
             "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
-            "volle offene Betrag verwendet."
+            "volle offene Betrag verwendet. Bei einem Posten in Fremdwährung gilt das nur ohne "
+            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount'."
         ),
         input_schema={
             "type": "object",
@@ -4607,9 +4610,10 @@ TOOLS: list[ToolSpec] = [
                 "foreign_amount": {
                     "type": "string",
                     "description": (
-                        "Posten in Fremdwährung: gezahlter Fremdbetrag. 'amount' ist dann der "
-                        "gezahlte Betrag in Firmenwährung; die Differenz zum Buchwert wird mit "
-                        "einer Ausgleichsbuchung als Kursdifferenz gebucht."
+                        "Posten in Fremdwährung: gezahlter Fremdbetrag, sonst aus einer Zahlung "
+                        "in dieser Währung. 'amount' ist dann der gezahlte Betrag in "
+                        "Firmenwährung; steht die Zahlung auf dem Sammelkonto, wird die "
+                        "Differenz zum Buchwert als Kursdifferenz gebucht."
                     ),
                 },
                 "exchange_rate": {

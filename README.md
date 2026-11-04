@@ -1239,20 +1239,23 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   Kurs gilt der letzte aus den zehn Tagen davor; fehlt auch der, gibt es einen Fehler statt eines stillen
   Standardwerts.
 - **Buchung:** API und MCP nehmen je Zeile `foreign_currency_code`, `foreign_amount` und `exchange_rate`.
-  Soll und Haben bleiben in Euro; passen die Beträge nicht zum Kurs (mehr als ein Cent), wird die Buchung
-  abgewiesen. Der Storno spiegelt die Angaben. Das Formular der Buchungsmaske erfasst sie nicht, dort reichen
+  Soll und Haben bleiben in Euro; passen die Beträge nicht zum Kurs (mehr als ein Cent und die Rundung des
+  sechsstelligen Kurses), wird die Buchung abgewiesen. Der Storno spiegelt die Angaben. Das Formular der Buchungsmaske erfasst sie nicht, dort reichen
   die folgenden Wege.
 - **Offene Posten** nehmen Fremdwährung, Fremdbetrag und Kurs; der Betrag in Euro ergibt sich daraus.
-  Beim **Ausgleich** ist `foreign_amount` der gezahlte Fremdbetrag und `amount` der gezahlte Eurobetrag
-  (sonst aus `exchange_rate`, der Ausgleichsbuchung oder dem Tageskurs). Ausgebucht wird der Buchwert; die
+  Beim **Ausgleich** ist `foreign_amount` der gezahlte Fremdbetrag und `amount` der gezahlte Eurobetrag.
+  Eine Zahlung in der Währung des Postens liefert beides selbst, anteilig bei Sammelzahlungen und
+  Überzahlungen. Eine Zahlung nur in Euro sagt nicht, wie viel Fremdwährung sie deckt: Dort sind beide Beträge
+  anzugeben, oder Fremdbetrag und `exchange_rate`. Ohne genannte Zahlung gilt der ganze offene Betrag zu
+  `exchange_rate` oder zum Tageskurs. Ausgebucht wird der Buchwert; die
   **Kursdifferenz** steht am Ausgleich und wird mit einer Ausgleichsbuchung gegen „Erträge“ bzw. „Aufwendungen
-  aus Kursdifferenzen“ gebucht (SKR03 2660/2150, SKR04 4840/6880). Ohne Ausgleichsbuchung wird sie nur
-  festgehalten. Fehlt das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
+  aus Kursdifferenzen“ gebucht (SKR03 2660/2150, SKR04 4840/6880). Das setzt voraus, dass die Zahlung auf dem
+  Sammelkonto steht; sonst wird sie nur festgehalten. Einer Buchung lässt sich nicht mehr zuordnen, als sie auf
+  dem Sammelkonto bewegt hat; ein nicht zugeordneter Rest bleibt dort stehen. Fehlt das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
   bestehende Gesellschaften legen es im Kontenplan an. Ein storniertes Ausgleichen nimmt auch die Differenz
-  zurück.
+  zurück; die Differenzbuchung allein lässt sich nicht stornieren.
 - **Zahllauf und Mahnwesen:** SEPA-Überweisungen gehen nur in Euro, Posten in Fremdwährung erscheinen nicht im
-  Zahllauf. Das Mahnschreiben nennt den offenen Fremdbetrag. Eine Zahlungsbuchung, die mehr als 20 % vom Buchwert
-  abweicht, gilt nicht als Zahlbetrag des Postens (vermutlich eine Sammelzahlung); dann ist er anzugeben.
+  Zahllauf. Das Mahnschreiben nennt den offenen Fremdbetrag.
 - **Bankumsätze** in Fremdwährung werden zum Kurs des Buchungstags oder einem angegebenen Kurs in Euro
   gebucht (`exchange_rate` in API und MCP, Feld in der Oberfläche). Der Fremdbetrag steht auf der Bankzeile.
   Der Saldenabgleich vergleicht nur Umsätze in Euro, weil sich Fremdwährung nicht gegen den Buchsaldo summieren
@@ -1261,12 +1264,20 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   der Tageskurs des Rechnungsdatums). Gebucht wird in Euro, der offene Posten führt den Fremdbetrag. PDF und
   XRechnung nennen den Kurs und die Umsatzsteuer in Euro (BT-6, BT-111).
 - **Stichtagsbewertung** (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`): bewertet
-  offene Posten zum Stichtagskurs nach § 256a HGB. Bei mehr als einem Jahr Restlaufzeit wird nur ein Verlust
-  gebucht. Die Buchung wird am Folgetag aufgelöst, die Posten behalten ihren Buchwert.
+  die zum Stichtag offenen Posten nach § 256a HGB, auch wenn sie inzwischen bezahlt sind. Teilzahlungen und Stornos
+  zählen mit ihrem Datum. Gewinne und Verluste werden je Posten bewertet und nicht verrechnet. Bei mehr als einem
+  Jahr Restlaufzeit wird nur ein Verlust gebucht. Die Buchung wird am Folgetag aufgelöst, die Posten behalten
+  ihren Buchwert.
 
-**Grenzen.** Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF; ein
-Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse werden nicht importiert, sie lassen sich als
-Kurs erfassen. Bewertet werden nur offene Posten, keine Bankkonten in Fremdwährung. Der DATEV-Stapel bleibt in
+**Grenzen.** Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF, bei
+der Sollversteuerung des Monats der Leistung, bei der Istversteuerung des Monats der Zahlung; ein Tageskurs
+braucht die Gestattung des Finanzamts. Die BMF-Kurse werden nicht importiert, sie lassen sich als Kurs erfassen.
+Eine Rechnung hat genau einen Kurs: ohne Angabe den des Leistungsdatums, bei einer Leistung nach dem Rechnungsdatum
+den des Rechnungsdatums. Die Istversteuerung rechnet deshalb mit dem Kurs der Rechnung; die UStVA nennt bezahlte
+Rechnungen in Fremdwährung als Warnung, die Steuer ist dort zu prüfen und zu korrigieren. E-Rechnungen in
+Fremdwährung werden erkannt, aber nicht automatisch gebucht. Eine gebuchte Stichtagsbewertung lässt sich nicht
+ein zweites Mal buchen; eine Korrektur geht per manueller Buchung. Bewertet werden nur offene Posten, keine
+Bankkonten in Fremdwährung. Der DATEV-Stapel bleibt in
 Euro und überträgt Fremdbetrag und Kurs nicht. Die EZB-Referenzkurse entsprechen dem Devisenkassamittelkurs nur
 näherungsweise.
 
