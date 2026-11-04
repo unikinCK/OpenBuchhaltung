@@ -679,9 +679,14 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         KoSIT-Validator.
   - [x] Fremdwährung (#14, ADR-010) *(2026-11-04)*: Wechselkurse (EZB und manuell), Fremdbetrag und Kurs an
         Buchungszeile (Hashversion 5) und offenem Posten, Kursdifferenz beim Ausgleich, Bankbuchung, Rechnung
-        in Fremdwährung, Stichtagsbewertung; UI/API/MCP (Migration `20261103_0064`). Offen: BMF-Monatskurse,
-        Bewertung von Bankkonten in Fremdwährung, Fremdwährung im DATEV-Stapel, Eingangsrechnungen aus
-        E-Rechnung und OCR in Fremdwährung.
+        in Fremdwährung, Stichtagsbewertung; UI/API/MCP (Migration `20261103_0064`). Offen: Bewertung von
+        Bankkonten in Fremdwährung, Fremdwährung im DATEV-Stapel, Eingangsrechnungen aus E-Rechnung und OCR in
+        Fremdwährung.
+  - [x] BMF-Monatskurse und Umsatzsteuer zum Monatskurs des Geldeingangs bei Istversteuerung *(2026-11-04, ADR-010,
+        Migration `20261104_0065`)*: Abruf aus dem Datenportal und Erfassung von Hand in UI/API/MCP/CLI, UStVA je
+        Zahlung, Differenzbuchung und Kurs beim Festhalten, Prüferexport. **Vor dem Produktiveinsatz von einem
+        Steuerberater zu bestätigen.** Offen: Monatskurs bei der Sollversteuerung und für die Vorsteuer,
+        Tageskurs mit Gestattung des Finanzamts.
 - [ ] **Danach**: E-Mail-Versand (#6), Hintergrundjobs (#10).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)

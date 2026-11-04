@@ -121,6 +121,8 @@ SOURCE_CASH_BOOK = "cash_book"
 # Kursdifferenz beim Ausgleich und Stichtagsbewertung offener Posten (ADR-010).
 SOURCE_FX_DIFFERENCE = "fx_difference"
 SOURCE_FX_VALUATION = "fx_valuation"
+# Steuer zum Monatskurs statt zum Rechnungskurs bei Istversteuerung; kein Umsatz (ADR-010).
+SOURCE_VAT_FX_DIFFERENCE = "vat_fx_difference"
 # Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
@@ -1269,6 +1271,11 @@ def amend_journal_entry(
             f"Buchung {entry.posting_number} ist eine Vortragsbuchung des Jahresabschlusses "
             "und kann nicht ergänzt werden."
         )
+    if entry.source == SOURCE_VAT_FX_DIFFERENCE:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} gleicht die gemeldete Umsatzsteuer an und kann nicht "
+            "ergänzt werden."
+        )
     reversal_number = session.execute(
         select(JournalEntry.posting_number).where(JournalEntry.reversal_of_id == entry.id)
     ).scalar_one_or_none()
@@ -1456,6 +1463,11 @@ def reverse_journal_entry(
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist die Kursdifferenz einer Zahlung und fällt "
             "mit dem Storno dieser Zahlung weg."
+        )
+    if original.source == SOURCE_VAT_FX_DIFFERENCE:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} gleicht die gemeldete Umsatzsteuer an. Wird eine "
+            "Zahlung storniert, bucht der Zeitraum des Stornos die Differenz zurück."
         )
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(

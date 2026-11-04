@@ -1297,6 +1297,18 @@ class OpenItemSettlement(Base):
     fx_journal_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("journal_entry.id", ondelete="SET NULL")
     )
+    # Umsatzsteuer bei Istversteuerung (ADR-010): Tag, an dem das Geld einging. ``settlement_date``
+    # kann nach einem Storno später liegen, der Monatskurs folgt aber dem Geldeingang.
+    received_on: Mapped[date | None] = mapped_column(Date)
+    # Monatskurs, zu dem die Zahlung gemeldet wurde; danach ändert ihn kein neuer Kurs mehr.
+    vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    # Buchung der Steuerdifferenz zum Rechnungskurs, je für die Zahlung und für ihr Storno.
+    vat_fx_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    vat_fx_reversal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
 
     open_item: Mapped[OpenItem] = relationship(back_populates="settlements")
 
@@ -1320,6 +1332,40 @@ class ExchangeRate(Base):
     rate_date: Mapped[date] = mapped_column(Date, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
     # ``ecb`` oder ``manual``; ein manueller Kurs bleibt beim Abruf der EZB-Kurse erhalten.
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class VatExchangeRate(Base):
+    """Umsatzsteuer-Umrechnungskurs je Mandant und Monat (§ 16 Abs. 6 UStG), Notierung wie die EZB.
+
+    Eigene Tabelle, weil der Monatskurs nur für die Umsatzsteuer gilt: In ``exchange_rate`` träfe er
+    am Monatsersten auf den Tageskurs, und Rechnungen und Bewertung läsen ihn als Tageskurs.
+    """
+
+    __tablename__ = "vat_exchange_rate"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "currency_code",
+            "rate_month",
+            name="uq_vat_exchange_rate_tenant_currency_month",
+        ),
+        CheckConstraint("rate > 0", name="ck_vat_exchange_rate_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    # Immer der Monatserste.
+    rate_month: Mapped[date] = mapped_column(Date, nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    # ``bmf`` oder ``manual``; ein manueller Kurs bleibt beim Abruf der BMF-Kurse erhalten.
     source: Mapped[str] = mapped_column(String(20), nullable=False)
     created_by: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -1474,6 +1520,10 @@ class VatReturn(Base):
     # Kennziffern-Snapshot: Liste von {kennziffer, label, amount} zum Zeitpunkt des Festhaltens.
     kennzahlen: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    # Buchung der Steuerdifferenz zum Rechnungskurs, die beim Festhalten entstand (ADR-010).
+    fx_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

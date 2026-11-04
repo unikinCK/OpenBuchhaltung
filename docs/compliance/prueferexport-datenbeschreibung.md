@@ -28,8 +28,9 @@ einen reproduzierbaren Gesamtnachweis über den exportierten Datenbestand.
 | `data/consolidation_adjustments.json` | Manuelle Konsolidierungsbuchungen dieser Gruppen |
 | `data/consolidation_adjustment_lines.json` | Zeilen der manuellen Konsolidierungsbuchungen |
 | `data/consolidation_history.json` | Verkettete Vorher-/Nachher-Historie der Gruppen und Buchungen einschließlich gelöschter Buchungen |
-| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Buchung, Kursdifferenz und Storno |
+| `data/open_item_settlements.json` | Ausgleiche offener Posten mit Zahlungsdatum, Geldeingang, Buchung, Kursdifferenz, gemeldetem Monatskurs und Storno |
 | `data/exchange_rates.json` | Wechselkurse des Mandanten (Fremdwährung je 1 Euro, Quelle, Datum) |
+| `data/vat_exchange_rates.json` | Umsatzsteuer-Umrechnungskurse des Mandanten je Monat (Fremdwährung je 1 Euro, Quelle BMF oder manuell) |
 | `data/sales_invoices.json` | Ausgestellte und stornierte Ausgangsrechnungen sowie Stornorechnungen (ohne Entwürfe) mit Empfänger-Snapshot, Summen und Verweisen auf Buchung, offenen Posten und Belege |
 | `data/sales_invoice_lines.json` | Positionen dieser Rechnungen mit Menge und Einzelpreis (vier Nachkommastellen) und Steuersatz |
 | `documents/*` | Optional eingebettete Originalbelege |

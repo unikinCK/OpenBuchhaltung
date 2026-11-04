@@ -28,6 +28,7 @@ from app.services.vat_returns import (
     list_vat_returns,
     period_bounds,
     save_vat_return,
+    serialize_foreign_payment,
     set_company_vat_method,
     vat_return_kind_from_label,
 )
@@ -50,6 +51,7 @@ def _vat_return_payload(vat_return) -> dict[str, object]:
         "date_to": vat_return.date_to.isoformat(),
         "status": vat_return.status,
         "kennzahlen": vat_return.kennzahlen,
+        "fx_journal_entry_id": vat_return.fx_journal_entry_id,
     }
 
 
@@ -116,6 +118,9 @@ def get_vat_return():
                 "kennzahlen": _rows_payload(result.rows),
                 "warnings": result.warnings,
                 "unassigned": result.unassigned,
+                "foreign_payments": [
+                    serialize_foreign_payment(event) for event in result.foreign_payments
+                ],
             }
         ),
         200,

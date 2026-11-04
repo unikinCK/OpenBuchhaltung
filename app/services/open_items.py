@@ -416,6 +416,8 @@ def settle_open_item(
             settlement_date = bank_transaction.booking_date
         else:
             settlement_date = date.today()
+    # Der Monatskurs der Umsatzsteuer folgt dem Geldeingang, auch wenn das Datum gleich rückt.
+    received_on = settlement_date
     # Dieselbe Zahlung: derselbe Umsatz, auch auf einem anderen Posten, oder dasselbe Datum auf
     # diesem Posten. Eine andere Zahlung behält ihr Datum.
     same_payment = [
@@ -498,6 +500,7 @@ def settle_open_item(
             open_item_id=item.id,
             amount=settlement_amount,
             settlement_date=settlement_date,
+            received_on=received_on,
             # Auch die Buchung des Bankumsatzes: Ihr Storno nimmt den Ausgleich zurück.
             journal_entry_id=payment_entry_id,
             bank_transaction_id=bank_transaction.id if bank_transaction else None,

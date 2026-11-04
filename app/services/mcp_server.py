@@ -4861,6 +4861,68 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_vat_exchange_rates",
+        description=(
+            "Umsatzsteuer-Umrechnungskurse des Mandanten je Monat (§ 16 Abs. 6 UStG): Einheiten "
+            "der Fremdwährung je 1 Euro, neueste zuerst, Quelle 'bmf' oder 'manual'."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "currency_code": {"type": "string", "description": "Währung, z. B. USD."},
+                "month_from": {"type": "string", "description": "Von (JJJJ-MM)."},
+                "month_to": {"type": "string", "description": "Bis (JJJJ-MM)."},
+                "limit": {"type": "integer", "description": "Höchstens (Standard 200)."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/vat-exchange-rates",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="set_vat_exchange_rate",
+        description=(
+            "Erfasst oder ändert einen Umsatzsteuer-Umrechnungskurs für einen Monat, z. B. für "
+            "eine Währung ohne BMF-Kurs. Festgehaltene Zeiträume behalten ihren Kurs."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "currency_code": {"type": "string", "description": "Währung, z. B. USD."},
+                "month": {"type": "string", "description": "Monat (JJJJ-MM)."},
+                "rate": {"type": "string", "description": "Kurs je 1 Euro, z. B. '1.1202'."},
+            },
+            "required": ["company_id", "currency_code", "month", "rate"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/vat-exchange-rates",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="fetch_vat_exchange_rates",
+        description=(
+            "Übernimmt die Umsatzsteuer-Umrechnungskurse aus dem Datenportal des BMF, ohne 'year' "
+            "die des laufenden und des Vorjahres. Manuell erfasste Kurse bleiben unangetastet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "year": {"type": "integer", "description": "Optional: Jahr ab 2010."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/vat-exchange-rates/fetch",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="get_fx_valuation",
         description=(
             "Stichtagsbewertung offener Fremdwährungsposten (§ 256a HGB): Buchwert, Wert zum "
@@ -4956,7 +5018,8 @@ TOOLS: list[ToolSpec] = [
             "Erträge ohne Umsatzsteuer ordnet die DATEV-Kontenfunktion zu (z. B. 8125 → 41, "
             "8336 → 21); 'warnings' und 'unassigned' nennen, was keiner Kennzahl zugeordnet ist. "
             "Bei Istversteuerung (get_company_vat_method) zählen Rechnungen auf offene Posten "
-            "anteilig mit der Zahlung."
+            "anteilig mit der Zahlung, in Fremdwährung zum Monatskurs des Geldeingangs "
+            "('foreign_payments' nennt je Zahlung Kurs und Steuer)."
         ),
         input_schema={
             "type": "object",
@@ -5038,7 +5101,8 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Hält die Umsatzsteuer-Voranmeldung für einen Meldezeitraum als "
             "unveränderlichen Kennziffern-Snapshot fest (einmalig je Gesellschaft und "
-            "Zeitraum)."
+            "Zeitraum). Bei Istversteuerung in Fremdwährung braucht das den Monatskurs des "
+            "Geldeingangs und bucht die Differenz zur gebuchten Steuer auf dem Steuerkonto."
         ),
         input_schema={
             "type": "object",
@@ -5084,7 +5148,8 @@ TOOLS: list[ToolSpec] = [
         name="create_vat_annual_return",
         description=(
             "Hält die USt-Jahreserklärung für ein Kalenderjahr als unveränderlichen "
-            "Kennziffern-Snapshot fest."
+            "Kennziffern-Snapshot fest. Bei Istversteuerung in Fremdwährung wie "
+            "create_vat_return; gebucht wird nur noch nicht gebuchte Steuerdifferenz."
         ),
         input_schema={
             "type": "object",

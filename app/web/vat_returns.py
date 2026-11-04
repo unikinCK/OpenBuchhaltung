@@ -81,6 +81,7 @@ def vat_returns_page():
         rows = []
         vat_warnings: list[str] = []
         unassigned: list[dict] = []
+        foreign_payments = []
         zm = None
         saved_returns = []
         period_label = _selected_period_label()
@@ -109,6 +110,7 @@ def vat_returns_page():
                 )
                 rows = details.rows
                 vat_warnings = details.warnings
+                foreign_payments = details.foreign_payments
                 unassigned = details.unassigned
                 zm = compute_zm(
                     session=session,
@@ -175,6 +177,7 @@ def vat_returns_page():
         rows=rows,
         vat_warnings=vat_warnings,
         unassigned=unassigned,
+        foreign_payments=foreign_payments,
         zm=zm,
         saved_returns=saved_views,
         current_year=date.today().year,
@@ -213,6 +216,12 @@ def save_vat_return_action():
 
     display_name = vat_return_display_name(vat_return.period_label)
     flash(f"{display_name} {vat_return.period_label} wurde festgehalten.", "success")
+    if vat_return.fx_journal_entry_id is not None:
+        flash(
+            "Die Differenz der Umsatzsteuer zum Kurs der Rechnung wurde auf dem Steuerkonto "
+            "gebucht.",
+            "success",
+        )
     return redirect(
         url_for("main.vat_returns_page", company_id=company_id, period=vat_return.period_label)
     )

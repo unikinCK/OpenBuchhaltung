@@ -106,6 +106,42 @@
             {% endfor %}
           </ul>
         {% endif %}
+        {% if foreign_payments %}
+          <details>
+            <summary>Zahlungen auf Rechnungen in Fremdwährung ({{ foreign_payments|length }})</summary>
+            <table>
+              <thead>
+                <tr>
+                  <th>Posten</th>
+                  <th>Vorgang</th>
+                  <th>Monat des Geldeingangs</th>
+                  <th class="num">Fremdbetrag</th>
+                  <th class="num">Kurs</th>
+                  <th class="num">USt zum Kurs</th>
+                  <th class="num">USt gebucht</th>
+                  <th class="num">Differenz</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for payment in foreign_payments %}
+                  <tr>
+                    <td>{{ payment.reference }}</td>
+                    <td>{{ "Storno" if payment.is_reversal else "Zahlung" }}</td>
+                    <td>{{ payment.rate_month.strftime("%m/%Y") }}</td>
+                    <td class="num">{{ payment.foreign_amount | betrag }} {{ payment.currency_code }}</td>
+                    <td class="num">{{ payment.rate | kurs }}{% if payment.rate_missing %}<br /><span class="muted small">Kurs der Rechnung, Monatskurs fehlt</span>{% endif %}</td>
+                    <td class="num">{{ payment.tax | betrag }}</td>
+                    <td class="num">{{ payment.booked_tax | betrag }}</td>
+                    <td class="num">
+                      {{ (payment.booked_tax - payment.tax) | betrag }}
+                      {% if payment.is_posted %}<br /><span class="muted small">gebucht</span>{% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        {% endif %}
         {% if unassigned %}
           <details>
             <summary>Nicht in der UStVA: Erträge ohne Umsatzsteuer und ohne UStVA-Funktion ({{ unassigned|length }})</summary>

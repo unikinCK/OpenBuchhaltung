@@ -8,9 +8,13 @@ veröffentlicht, setzt Fremdwährung den Euro als Firmenwährung voraus.
 
 from __future__ import annotations
 
+import csv
+import io
+import re
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -33,7 +37,14 @@ from app.services.standard_accounts import (
     KURSERTRAG,
     find_standard_account,
 )
-from domain.models import Account, Company, ExchangeRate, JournalEntry, OpenItem
+from domain.models import (
+    Account,
+    Company,
+    ExchangeRate,
+    JournalEntry,
+    OpenItem,
+    VatExchangeRate,
+)
 
 CENT = Decimal("0.01")
 RATE_PLACES = Decimal("0.000001")
@@ -44,10 +55,36 @@ BASE_CURRENCY = "EUR"
 MAX_RATE_AGE_DAYS = 10
 SOURCE_ECB = "ecb"
 SOURCE_MANUAL = "manual"
+SOURCE_BMF = "bmf"
 ECB_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml"
 ECB_TIMEOUT_SECONDS = 20
 ECB_NAMESPACE = {"e": "http://www.ecb.int/vocabulary/2002-08-01/eurofxref"}
 LONG_TERM_DAYS = 365
+# Datenportal des BMF: eine CSV-Datei je Jahr, die laufende wird monatlich fortgeschrieben.
+BMF_RATES_URL = (
+    "https://www.bundesfinanzministerium.de/Datenportal/Daten/offene-daten/steuern-zoelle/"
+    "umsatzsteuer-umrechnungskurse/datensaetze/uu-kurse-{year}-csv.csv?__blob=publicationFile"
+)
+BMF_TIMEOUT_SECONDS = 30
+BMF_FIRST_YEAR = 2010
+# Spaltenköpfe wechseln je Jahr („Januar[1]“, „Januar1“, „Jan 01“, „Mrz 03“).
+BMF_MONTH_PREFIXES = {
+    "jan": 1,
+    "feb": 2,
+    "mär": 3,
+    "mrz": 3,
+    "apr": 4,
+    "mai": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "okt": 10,
+    "nov": 11,
+    "dez": 12,
+}
+# Deutsche Schreibweise: „1,1738 USD“, „19.757,02 IDR“. In einzelnen Jahren fehlt ein Buchstabe.
+BMF_RATE_CELL = re.compile(r"^(\d{1,3}(?:\.\d{3})+|\d+),(\d+)\s*([A-Z]{2,3})$")
 
 
 class ExchangeRateError(ValueError):
@@ -288,6 +325,312 @@ def fetch_ecb_rates(
     )
     session.commit()
     return {"created": created, "skipped": len(rates) - created, "latest_rate_date": latest}
+
+
+# ---------------------------------------------------------------------------
+# Umsatzsteuer-Umrechnungskurse des BMF (§ 16 Abs. 6 UStG), je Monat
+# ---------------------------------------------------------------------------
+
+
+def normalize_rate_month(value: Any) -> date:
+    """Monatserster zu ``JJJJ-MM``, einem Datum oder einem Tag dieses Monats."""
+    if isinstance(value, date):
+        return value.replace(day=1)
+    raw = str(value or "").strip()
+    try:
+        return date.fromisoformat(f"{raw}-01" if len(raw) == 7 else raw).replace(day=1)
+    except ValueError as exc:
+        raise ExchangeRateError(f"Ungültiger Monat: {value!r} (erwartet JJJJ-MM).") from exc
+
+
+def format_rate_month(month: date) -> str:
+    return month.strftime("%Y-%m")
+
+
+def find_vat_rate(
+    *, session: Session, tenant_id: int, currency_code: str, month: date
+) -> VatExchangeRate | None:
+    return session.execute(
+        select(VatExchangeRate).where(
+            VatExchangeRate.tenant_id == tenant_id,
+            VatExchangeRate.currency_code == currency_code,
+            VatExchangeRate.rate_month == month.replace(day=1),
+        )
+    ).scalar_one_or_none()
+
+
+def serialize_vat_exchange_rate(row: VatExchangeRate) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "currency_code": row.currency_code,
+        "month": format_rate_month(row.rate_month),
+        "rate": str(row.rate),
+        "source": row.source,
+        "created_by": row.created_by,
+    }
+
+
+def list_vat_exchange_rates(
+    *,
+    session: Session,
+    tenant_id: int,
+    currency_code: str | None = None,
+    month_from: Any = None,
+    month_to: Any = None,
+    limit: int = 200,
+) -> list[VatExchangeRate]:
+    stmt = (
+        select(VatExchangeRate)
+        .where(VatExchangeRate.tenant_id == tenant_id)
+        .order_by(VatExchangeRate.rate_month.desc(), VatExchangeRate.currency_code)
+        .limit(max(1, min(int(limit), 1000)))
+    )
+    if currency_code:
+        stmt = stmt.where(VatExchangeRate.currency_code == normalize_currency(currency_code))
+    if month_from:
+        stmt = stmt.where(VatExchangeRate.rate_month >= normalize_rate_month(month_from))
+    if month_to:
+        stmt = stmt.where(VatExchangeRate.rate_month <= normalize_rate_month(month_to))
+    return list(session.execute(stmt).scalars())
+
+
+def set_vat_exchange_rate(
+    *,
+    session: Session,
+    company: Company,
+    currency_code: Any,
+    month: Any,
+    rate: Any,
+    changed_by: str,
+) -> VatExchangeRate:
+    """Erfasst einen Monatskurs von Hand; schon gemeldete Zahlungen behalten ihren Kurs."""
+    require_base_currency(company)
+    code = normalize_currency(currency_code)
+    if code == company.currency_code:
+        raise ExchangeRateError("Für die Firmenwährung gibt es keinen Kurs.")
+    rate_month = normalize_rate_month(month)
+    value = normalize_rate(rate)
+    row = find_vat_rate(
+        session=session, tenant_id=company.tenant_id, currency_code=code, month=rate_month
+    )
+    before = str(row.rate) if row is not None else None
+    if row is None:
+        row = VatExchangeRate(
+            tenant_id=company.tenant_id,
+            currency_code=code,
+            rate_month=rate_month,
+            rate=value,
+            source=SOURCE_MANUAL,
+            created_by=changed_by,
+        )
+        session.add(row)
+    else:
+        row.rate = value
+        row.source = SOURCE_MANUAL
+        row.created_by = changed_by
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="vat_exchange_rate",
+        entity_id=f"{code}:{format_rate_month(rate_month)}",
+        action="set",
+        changed_by=changed_by,
+        payload={"before": before, "after": str(value)},
+    )
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+def _bmf_rows(content: bytes) -> list[list[str]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("cp1252", errors="replace")
+    try:
+        return list(csv.reader(io.StringIO(text, newline=""), delimiter=";"))
+    except csv.Error as exc:
+        raise ExchangeRateError("Die Kursdatei des BMF ist nicht lesbar.") from exc
+
+
+def _bmf_month_columns(header: Iterable[str]) -> dict[int, int]:
+    columns = {}
+    for index, cell in enumerate(header):
+        month = BMF_MONTH_PREFIXES.get(cell.strip().lower()[:3])
+        if month is not None:
+            columns[index] = month
+    return columns
+
+
+def parse_bmf_rates(content: bytes, *, year: int) -> tuple[list[tuple[date, str, Decimal]], int]:
+    """Liest die Jahresdatei des BMF: Monat, Währung und Kurs je 1 Euro, dazu die unlesbaren Zellen.
+
+    Die Datei hat eine Zeile je Land und eine Spalte je Monat; noch nicht bekannte Monate sind leer.
+    Den Währungscode nennt jede Zelle. Eine Zelle mit einem anderen Code als der Rest ihrer Zeile
+    (die Dateien 2021 und 2022 enthalten „RW“ statt „KRW“) wird nicht geraten, sondern gezählt.
+    """
+    rows = _bmf_rows(content)
+    header_index = next(
+        (index for index, row in enumerate(rows) if row and row[0].strip().lower() == "land"), None
+    )
+    if header_index is None:
+        raise ExchangeRateError("Die Kursdatei des BMF ist nicht lesbar.")
+    columns = _bmf_month_columns(rows[header_index])
+    if sorted(columns.values()) != list(range(1, 13)):
+        raise ExchangeRateError("Die Kursdatei des BMF nennt nicht alle zwölf Monate.")
+    title = " ".join(cell for row in rows[:header_index] for cell in row)
+    years = re.findall(r"\b(20\d\d)\b", title)
+    if not years or int(years[0]) != year:
+        raise ExchangeRateError(f"Die Kursdatei des BMF gehört nicht zum Jahr {year}.")
+
+    rates: list[tuple[date, str, Decimal]] = []
+    ignored = 0
+    for row in rows[header_index + 1 :]:
+        if len(row) < 3 or not row[0].strip():
+            continue
+        parsed = []
+        for index, month in columns.items():
+            cell = " ".join(row[index].split()) if index < len(row) else ""
+            if not cell:
+                continue
+            match = BMF_RATE_CELL.match(cell)
+            if match is None:
+                ignored += 1
+                continue
+            whole, fraction, code = match.groups()
+            parsed.append((month, code, f"{whole.replace('.', '')}.{fraction}"))
+        codes = Counter(code for _, code, _ in parsed if len(code) == 3)
+        if not codes:
+            ignored += len(parsed)
+            continue
+        currency = codes.most_common(1)[0][0]
+        for month, code, value in parsed:
+            if code != currency:
+                ignored += 1
+                continue
+            try:
+                rates.append(
+                    (date(year, month, 1), normalize_currency(code), normalize_rate(value))
+                )
+            except ExchangeRateError:
+                ignored += 1
+    return rates, ignored
+
+
+def _download_bmf_rates(year: int) -> bytes | None:
+    """Jahresdatei des BMF; None, wenn es sie noch nicht gibt (Anfang Januar)."""
+    request = urllib.request.Request(
+        BMF_RATES_URL.format(year=year), headers={"User-Agent": "OpenBuchhaltung"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=BMF_TIMEOUT_SECONDS) as response:  # noqa: S310
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise ExchangeRateError(
+            f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ExchangeRateError(
+            f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
+        ) from exc
+
+
+def fetch_bmf_rates(
+    *,
+    session: Session,
+    company: Company,
+    changed_by: str,
+    year: int | None = None,
+    download: Callable[[int], bytes | None] = _download_bmf_rates,
+) -> dict[str, Any]:
+    """Übernimmt die Monatskurse eines Jahres, ohne Angabe die des laufenden und des Vorjahres.
+
+    Der Dezemberkurs erscheint erst im Januar, deshalb auch das Vorjahr. Manuelle Kurse bleiben
+    unangetastet, eine Korrektur des BMF wird übernommen. Schon gemeldete Zahlungen behalten ihren
+    Kurs, er steht am Ausgleich.
+    """
+    require_base_currency(company)
+    current_year = date.today().year
+    if year is not None and not BMF_FIRST_YEAR <= year <= current_year:
+        raise ExchangeRateError(
+            f"Das BMF stellt Kurse von {BMF_FIRST_YEAR} bis {current_year} bereit."
+        )
+    years = [year] if year is not None else [current_year - 1, current_year]
+
+    rates: list[tuple[date, str, Decimal]] = []
+    ignored = 0
+    fetched_years = []
+    for candidate in years:
+        content = download(candidate)
+        if content is None:
+            continue
+        parsed, not_readable = parse_bmf_rates(content, year=candidate)
+        rates.extend(parsed)
+        ignored += not_readable
+        fetched_years.append(candidate)
+    if not fetched_years:
+        raise ExchangeRateError(
+            f"Beim BMF liegt keine Kursdatei für {', '.join(str(item) for item in years)} vor."
+        )
+
+    existing = {
+        (row.currency_code, row.rate_month): row
+        for row in session.execute(
+            select(VatExchangeRate).where(
+                VatExchangeRate.tenant_id == company.tenant_id,
+                VatExchangeRate.rate_month >= date(min(fetched_years), 1, 1),
+                VatExchangeRate.rate_month <= date(max(fetched_years), 12, 1),
+            )
+        ).scalars()
+    }
+    created = updated = 0
+    for rate_month, currency_code, rate in rates:
+        row = existing.get((currency_code, rate_month))
+        if row is None:
+            session.add(
+                VatExchangeRate(
+                    tenant_id=company.tenant_id,
+                    currency_code=currency_code,
+                    rate_month=rate_month,
+                    rate=rate,
+                    source=SOURCE_BMF,
+                    created_by=changed_by,
+                )
+            )
+            created += 1
+        elif row.source == SOURCE_BMF and row.rate != rate:
+            row.rate = rate
+            row.created_by = changed_by
+            updated += 1
+    latest = max((rate_month for rate_month, _, _ in rates), default=None)
+    log_audit_event(
+        session=session,
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        entity_type="vat_exchange_rate",
+        entity_id="bmf",
+        action="fetched",
+        changed_by=changed_by,
+        payload={
+            "years": fetched_years,
+            "created": created,
+            "updated": updated,
+            "ignored": ignored,
+            "latest_month": format_rate_month(latest) if latest else None,
+        },
+    )
+    session.commit()
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped": len(rates) - created - updated,
+        "ignored": ignored,
+        "years": fetched_years,
+        "latest_month": latest,
+    }
 
 
 # ---------------------------------------------------------------------------

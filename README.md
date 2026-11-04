@@ -49,6 +49,7 @@ können, was gebucht, exportiert und protokolliert wird.
   offene Posten und Zahlungsausgleich.
 - **Fremdwährung:** Wechselkurse von der EZB oder von Hand, offene Posten, Bankumsätze und Rechnungen in
   Fremdwährung, Kursdifferenz beim Ausgleich, Stichtagsbewertung nach § 256a HGB; das Hauptbuch bleibt in Euro.
+  Monatskurse des BMF für die Umsatzsteuer; bei Istversteuerung zählt der Monat des Geldeingangs.
 - **Kassenbuch:** fortlaufende, verkettete und unveränderbare Einträge mit Tagessaldo,
   Kassensturz, Kassenbericht und automatischer Buchung; manuell geführt, ersetzt keine TSE.
 - **Arbeitskomfort:** Dashboard mit offenen Aufgaben (unverbuchte Umsätze,
@@ -1271,13 +1272,20 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   zählen mit ihrem Datum. Gewinne und Verluste werden je Posten bewertet und nicht verrechnet. Bei mehr als einem
   Jahr Restlaufzeit wird nur ein Verlust gebucht. Die Buchung wird am Folgetag aufgelöst, die Posten behalten
   ihren Buchwert.
+- **Umsatzsteuer-Umrechnungskurse** (Bank & OPOS → Fremdwährung, `GET`/`POST /api/v1/vat-exchange-rates`, MCP
+  `list_vat_exchange_rates`, `set_vat_exchange_rate`): die monatlichen Durchschnittskurse nach § 16 Abs. 6 UStG, je
+  Mandant und Monat und getrennt von den Tageskursen. **BMF-Kurse abrufen** (`POST /api/v1/vat-exchange-rates/fetch`,
+  MCP `fetch_vat_exchange_rates`, CLI `flask fetch-vat-exchange-rates [--year JJJJ]` für einen Cron-Job, ab Anfang des
+  Monats sinnvoll) lädt die Jahresdatei aus dem Datenportal des BMF, ohne Jahr die des laufenden und des Vorjahres.
+  Manuelle Kurse bleiben stehen, eine Korrektur des BMF wird übernommen. Quelle: Bundesministerium der Finanzen,
+  Datenlizenz Deutschland – Namensnennung – Version 2.0.
+- **Umsatzsteuer bei Istversteuerung** (§ 16 Abs. 6 Satz 2 UStG): Rechnungen zählen je Zahlung zum Monatskurs des
+  Monats, in dem das Geld einging; siehe „Istversteuerung“ und ADR-010.
 
-**Grenzen.** Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF, bei
-der Sollversteuerung des Monats der Leistung, bei der Istversteuerung des Monats der Zahlung; ein Tageskurs
-braucht die Gestattung des Finanzamts. Die BMF-Kurse werden nicht importiert, sie lassen sich als Kurs erfassen.
-Eine Rechnung hat genau einen Kurs: ohne Angabe den des Leistungsdatums, bei einer Leistung nach dem Rechnungsdatum
-den des Rechnungsdatums. Die Istversteuerung rechnet deshalb mit dem Kurs der Rechnung; die UStVA nennt bezahlte
-Rechnungen in Fremdwährung als Warnung, die Steuer ist dort zu prüfen und zu korrigieren. E-Rechnungen in
+**Grenzen.** Bei der Sollversteuerung und für die Vorsteuer rechnet die UStVA weiter zum Kurs der Buchung; § 16 Abs. 6
+Satz 1 UStG nennt dort den Monatskurs des Monats der Leistung. Ein Tageskurs braucht die Gestattung des Finanzamts und
+ist nicht abgebildet. Eine Rechnung hat genau einen Kurs: ohne Angabe den des Leistungsdatums, bei einer Leistung nach
+dem Rechnungsdatum den des Rechnungsdatums. E-Rechnungen in
 Fremdwährung werden erkannt, aber nicht automatisch gebucht. Eine gebuchte Stichtagsbewertung lässt sich nicht
 ein zweites Mal buchen; eine Korrektur geht per manueller Buchung. Bewertet werden nur offene Posten, keine
 Bankkonten in Fremdwährung. Der DATEV-Stapel bleibt in
@@ -1513,6 +1521,14 @@ Gestattung durch das Finanzamt, das prüft die App nicht. Im Zeitraum der Istver
   UStVA nennt sie als Warnung. Sie zeigt auch, wie viel Umsatzsteuer noch nicht fällig ist: Das
   Steuerkonto enthält sie bereits, weil gebucht wird wie bei der Sollversteuerung. Eine Umgliederung auf
   „Umsatzsteuer nicht fällig“ bucht die App nicht.
+- Eine Rechnung in **Fremdwährung** zählt je Zahlung zum Monatskurs des Monats, in dem das Geld einging (ADR-010). Ein
+  Storno nimmt im Zeitraum des Stornos genau den gemeldeten Betrag zurück; ein neu zugeordneter Umsatz behält den
+  Kurs seines Geldeingangs. `GET /api/v1/vat-return` und die Seite nennen je Zahlung Kurs, Steuer und gebuchte Steuer.
+  Fehlt der Monatskurs, rechnet die Vorschau vorläufig zum Rechnungskurs, festhalten lässt sich der Zeitraum dann
+  nicht. **Beim Festhalten** bleibt der Kurs an der Zahlung stehen, ein späterer Kurs ändert den Zeitraum nicht
+  mehr, und die Differenz zur gebuchten Steuer wird auf dem Steuerkonto gegen die Kursdifferenz-Konten gebucht, auf das
+  Ende des Zeitraums oder in den nächsten offenen. Die Erlöse bleiben zum Rechnungskurs, die Bemessungsgrundlage weicht
+  also von den Erlöskonten ab. **Diese Behandlung ist vor dem Produktiveinsatz von einem Steuerberater zu bestätigen.**
 
 Rechnungen von vor dem Wechsel zur Istversteuerung bleiben nach dem Buchungsdatum versteuert. Abgebildet
 wird ein zusammenhängender Zeitraum; ein erneuter Wechsel danach geht nicht. Im DATEV-Mandat ist die

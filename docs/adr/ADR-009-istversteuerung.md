@@ -36,6 +36,8 @@ Zahlung fehlte.
   rückwirkend auf noch nicht gemeldete Zeiträume; gespeicherte Voranmeldungen bleiben wie festgehalten.
   Die Zahlungstabelle ist zugleich die Grundlage für Kursdifferenzen. Der Storno stellt jetzt alle
   Ausgleiche einer Buchung wieder her, nicht nur den letzten.
+- Ausnahme: Bei Rechnungen in Fremdwährung gleicht das Festhalten das Steuerkonto an die zum Monatskurs gemeldete Steuer
+  an (ADR-010, Entscheidung 8).
 - Negativ: Das Steuerkonto enthält auch noch nicht fällige Umsatzsteuer. Sein Saldo weicht deshalb von der
   Zahllast ab; die UStVA nennt den Betrag als Warnung. Wer „Umsatzsteuer nicht fällig“ ausweisen möchte, bucht
   zum Abschluss um.

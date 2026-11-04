@@ -54,6 +54,7 @@ from domain.models import (
     TaxCode,
     Tenant,
     User,
+    VatExchangeRate,
     VatReturn,
 )
 
@@ -113,6 +114,7 @@ EXPORT_TABLE_MODELS = {
     "open_items": OpenItem,
     "open_item_settlements": OpenItemSettlement,
     "exchange_rates": ExchangeRate,
+    "vat_exchange_rates": VatExchangeRate,
     "sales_invoices": SalesInvoice,
     "sales_invoice_lines": SalesInvoiceLine,
     "fixed_assets": FixedAsset,
@@ -163,8 +165,15 @@ TABLE_DESCRIPTIONS = {
         "und Differenz."
     ),
     "open_items": "Offene und ausgeglichene Forderungen und Verbindlichkeiten.",
-    "open_item_settlements": "Ausgleiche offener Posten mit Datum, Kursdifferenz und Storno.",
+    "open_item_settlements": (
+        "Ausgleiche offener Posten mit Datum, Geldeingang, Kursdifferenz, gemeldetem Monatskurs "
+        "und Storno."
+    ),
     "exchange_rates": "Wechselkurse des Mandanten: Fremdwährung je 1 Euro, Quelle und Datum.",
+    "vat_exchange_rates": (
+        "Umsatzsteuer-Umrechnungskurse des Mandanten je Monat: Fremdwährung je 1 Euro, Quelle BMF "
+        "oder manuell."
+    ),
     "sales_invoices": (
         "Ausgangsrechnungen und Stornorechnungen mit Nummer, Empfänger-Snapshot, Summen und "
         "Verweisen auf Buchung, offenen Posten und Belege."
@@ -509,6 +518,16 @@ def build_audit_export_package(
                 ExchangeRate.tenant_id == company.tenant_id,
                 _date_range(ExchangeRate.rate_date, date_from, date_to),
                 order_by=(ExchangeRate.rate_date, ExchangeRate.currency_code),
+            )
+        ],
+        "vat_exchange_rates": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                VatExchangeRate,
+                VatExchangeRate.tenant_id == company.tenant_id,
+                _date_range(VatExchangeRate.rate_month, date_from, date_to),
+                order_by=(VatExchangeRate.rate_month, VatExchangeRate.currency_code),
             )
         ],
         "open_item_settlements": [

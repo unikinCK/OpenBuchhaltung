@@ -28,7 +28,12 @@ from app.services.demo import (
     seed_demo_activity,
     seed_demo_data,
 )
-from app.services.exchange_rates import BASE_CURRENCY, ExchangeRateError, fetch_ecb_rates
+from app.services.exchange_rates import (
+    BASE_CURRENCY,
+    ExchangeRateError,
+    fetch_bmf_rates,
+    fetch_ecb_rates,
+)
 from app.services.fints_institutes import FinTSInstituteError, import_fints_institutes
 from app.services.security_events import record_security_event
 from app.services.two_factor import reset_two_factor
@@ -338,6 +343,37 @@ def register_cli_commands(app: Flask) -> None:
                 except ExchangeRateError as exc:
                     raise click.ClickException(str(exc)) from exc
                 click.echo(f"Mandant {company.tenant_id}: {result['created']} neue Kurse.")
+
+    @app.cli.command("fetch-vat-exchange-rates")
+    @click.option("--year", type=int, help="Jahr ab 2010; ohne Angabe laufendes Jahr und Vorjahr.")
+    def fetch_vat_exchange_rates(year: int | None):
+        """Übernimmt die Monatskurse des BMF für alle Mandanten (für einen Cron-Job)."""
+        session_factory = app.extensions["db_session_factory"]
+        with session_factory() as session:
+            companies = (
+                session.execute(
+                    select(Company)
+                    .where(Company.currency_code == BASE_CURRENCY)
+                    .order_by(Company.tenant_id, Company.id)
+                )
+                .scalars()
+                .all()
+            )
+            seen_tenants: set[int] = set()
+            for company in companies:
+                if company.tenant_id in seen_tenants:
+                    continue
+                seen_tenants.add(company.tenant_id)
+                try:
+                    result = fetch_bmf_rates(
+                        session=session, company=company, changed_by="cli", year=year
+                    )
+                except ExchangeRateError as exc:
+                    raise click.ClickException(str(exc)) from exc
+                click.echo(
+                    f"Mandant {company.tenant_id}: {result['created']} neue und "
+                    f"{result['updated']} geänderte Monatskurse."
+                )
 
     @app.cli.command("push-dispatch")
     @click.option("--once", is_flag=True, help="Nur einen Durchlauf statt Dauerbetrieb.")
