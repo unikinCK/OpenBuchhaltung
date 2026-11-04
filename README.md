@@ -1244,14 +1244,17 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   die folgenden Wege.
 - **Offene Posten** nehmen Fremdwährung, Fremdbetrag und Kurs; der Betrag in Euro ergibt sich daraus.
   Beim **Ausgleich** ist `foreign_amount` der gezahlte Fremdbetrag und `amount` der gezahlte Eurobetrag.
-  Eine Zahlung in der Währung des Postens liefert beides selbst, anteilig bei Sammelzahlungen und
-  Überzahlungen. Eine Zahlung nur in Euro sagt nicht, wie viel Fremdwährung sie deckt: Dort sind beide Beträge
-  anzugeben, oder Fremdbetrag und `exchange_rate`. Ohne genannte Zahlung gilt der ganze offene Betrag zu
-  `exchange_rate` oder zum Tageskurs. Ausgebucht wird der Buchwert; die
+  Eine Buchung mit Zeilen in der Währung des Postens liefert beides selbst, anteilig bei Sammelzahlungen und
+  Überzahlungen; das gilt auch für einen gebuchten Bankumsatz in dieser Währung. Eine Zahlung nur in Euro sagt
+  nicht, wie viel Fremdwährung sie deckt: Dort sind beide Beträge anzugeben, oder Fremdbetrag und `exchange_rate`.
+  Ein Bankumsatz muss zuerst gebucht sein. Ohne genannte Zahlung gilt der ganze offene Betrag zu `exchange_rate`
+  oder zum Tageskurs. Ausgebucht wird der Buchwert; die
   **Kursdifferenz** steht am Ausgleich und wird mit einer Ausgleichsbuchung gegen „Erträge“ bzw. „Aufwendungen
   aus Kursdifferenzen“ gebucht (SKR03 2660/2150, SKR04 4840/6880). Das setzt voraus, dass die Zahlung auf dem
-  Sammelkonto steht; sonst wird sie nur festgehalten. Einer Buchung lässt sich nicht mehr zuordnen, als sie auf
-  dem Sammelkonto bewegt hat; ein nicht zugeordneter Rest bleibt dort stehen. Fehlt das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
+  Sammelkonto steht; sonst wird sie nur festgehalten. Steht sie dort, lässt sich einem Posten in Fremdwährung
+  nicht mehr zuordnen, als sie bewegt hat; ein nicht zugeordneter Rest bleibt dort stehen. Liegt das Zahlungsdatum
+  in einem gesperrten Monat oder abgeschlossenen Jahr, geht die Differenz in den nächsten offenen Zeitraum. Fehlt
+  das Konto, wird der Ausgleich abgewiesen; die mitgelieferten Kontenrahmen enthalten es,
   bestehende Gesellschaften legen es im Kontenplan an. Ein storniertes Ausgleichen nimmt auch die Differenz
   zurück; die Differenzbuchung allein lässt sich nicht stornieren.
 - **Zahllauf und Mahnwesen:** SEPA-Überweisungen gehen nur in Euro, Posten in Fremdwährung erscheinen nicht im
@@ -1261,7 +1264,7 @@ Fremdwährung je 1 Euro. Fremdwährung setzt den Euro als Firmenwährung voraus.
   Der Saldenabgleich vergleicht nur Umsätze in Euro, weil sich Fremdwährung nicht gegen den Buchsaldo summieren
   lässt.
 - **Ausgangsrechnungen** lassen sich in Fremdwährung schreiben (`currency_code`, `exchange_rate`; ohne Kurs
-  der Tageskurs des Rechnungsdatums). Gebucht wird in Euro, der offene Posten führt den Fremdbetrag. PDF und
+  der Kurs am Leistungsdatum). Gebucht wird in Euro, der offene Posten führt den Fremdbetrag. PDF und
   XRechnung nennen den Kurs und die Umsatzsteuer in Euro (BT-6, BT-111).
 - **Stichtagsbewertung** (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`): bewertet
   die zum Stichtag offenen Posten nach § 256a HGB, auch wenn sie inzwischen bezahlt sind. Teilzahlungen und Stornos

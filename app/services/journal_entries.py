@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -1094,6 +1094,32 @@ def _is_posting_number_conflict(exc: IntegrityError) -> bool:
     return "posting_number" in message or "uq_journal_entry_company_no" in message
 
 
+def first_open_posting_date(*, session: Session, company_id: int, on: date) -> date:
+    """``on`` oder der erste Tag danach außerhalb gesperrter Perioden und abgeschlossener Jahre."""
+    locked_periods = session.execute(
+        select(Period.start_date, Period.end_date)
+        .join(FiscalYear, FiscalYear.id == Period.fiscal_year_id)
+        .join(PeriodLock, PeriodLock.period_id == Period.id)
+        .where(
+            FiscalYear.company_id == company_id,
+            Period.is_closing.is_(False),
+            Period.end_date >= on,
+        )
+    ).all()
+    closed_years = session.execute(
+        select(FiscalYear.start_date, FiscalYear.end_date).where(
+            FiscalYear.company_id == company_id,
+            FiscalYear.is_closed.is_(True),
+            FiscalYear.end_date >= on,
+        )
+    ).all()
+    day = on
+    for start, end in sorted((*locked_periods, *closed_years)):
+        if start <= day <= end:
+            day = end + timedelta(days=1)
+    return day
+
+
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
     locked = session.execute(select(PeriodLock.id).where(PeriodLock.period_id == period_id)).first()
     if locked:
@@ -1644,10 +1670,19 @@ def _release_subledgers(
 
     # OPOS: mit dieser Buchung ausgeglichene Posten leben wieder auf. Die Zeile der Zahlung bleibt
     # mit Stornodatum stehen: Bei Istversteuerung korrigiert das den Zeitraum des Stornos.
+    # Ältere Zeilen kennen nur den Bankumsatz, nicht dessen Buchung.
     settlements = (
         session.execute(
             select(OpenItemSettlement).where(
-                OpenItemSettlement.journal_entry_id == original.id,
+                or_(
+                    OpenItemSettlement.journal_entry_id == original.id,
+                    and_(
+                        OpenItemSettlement.journal_entry_id.is_(None),
+                        OpenItemSettlement.bank_transaction_id.in_(
+                            [transaction.id for transaction in transactions]
+                        ),
+                    ),
+                ),
                 OpenItemSettlement.reversed_on.is_(None),
             )
         )
@@ -1669,10 +1704,12 @@ def _release_subledgers(
             )
         # Die Kursdifferenz dieser Zahlung fällt mit ihr weg.
         if settlement.fx_journal_entry_id is not None:
+            # Die Differenz kann später gebucht sein als die Zahlung (gesperrter Monat).
+            difference_date = session.get(JournalEntry, settlement.fx_journal_entry_id).entry_date
             reverse_journal_entry(
                 session=session,
                 journal_entry_id=settlement.fx_journal_entry_id,
-                reversal_date=reversal.entry_date,
+                reversal_date=max(reversal.entry_date, difference_date),
                 changed_by=changed_by,
                 commit=False,
                 from_settlement=True,

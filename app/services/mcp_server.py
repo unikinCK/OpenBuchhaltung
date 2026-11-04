@@ -4589,7 +4589,8 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
             "volle offene Betrag verwendet. Bei einem Posten in Fremdwährung gilt das nur ohne "
-            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount'."
+            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
+            "Bankumsatz muss zuerst gebucht sein."
         ),
         input_schema={
             "type": "object",

@@ -16,7 +16,11 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Offene Posten in Fremdwährung; der Ausgleich hält die Kursdifferenz fest und bucht sie, wenn die Zahlung auf dem
   Sammelkonto steht. Eine Zahlung in Euro nennt Fremd- und Eurobetrag selbst, eine Zahlung in der Währung des
   Postens liefert beides anteilig, auch bei Sammel- und Überzahlungen.
-- Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen.
+- Ausgleich allgemein, auch in Euro: Der Ausgleich über einen gebuchten Bankumsatz hängt jetzt an dessen Buchung, ihr
+  Storno öffnet den Posten wieder. Stornierte Buchungen und Stornobuchungen gleichen nichts mehr aus. Ein Ausgleich
+  nach einem Storno liegt nie vor dem Stornodatum, damit eine Zahlung nicht rückwirkend doppelt zählt.
+- Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen; vor dem Ausgleich eines
+  Postens in Fremdwährung muss ein Umsatz gebucht sein.
 - Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung; ohne erfassten Kurs
   gilt der Kurs am Leistungsdatum. Bei Istversteuerung warnt die UStVA, weil § 16 Abs. 6 UStG dort den Kurs des
   Zahlungsmonats verlangt. E-Rechnungen in Fremdwährung werden nicht mehr als Euro gebucht.

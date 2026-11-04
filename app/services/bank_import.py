@@ -591,8 +591,21 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
             JournalEntry.company_id == company_id,
             JournalEntry.source != SOURCE_CARRYFORWARD,
             JournalEntryLine.account_id.in_(statement_totals),
-            # Sonst stünde der Gegenwert links, der Fremdbetrag aber nicht rechts.
-            JournalEntryLine.foreign_currency_code.is_(None),
+            # Fremdwährung fehlt auf der Auszugsseite, also auch hier. Eine Zeile, die nur den
+            # Fremdbetrag nennt, aber zu einem Umsatz in Firmenwährung gehört, zählt.
+            or_(
+                JournalEntryLine.foreign_currency_code.is_(None),
+                JournalEntryLine.journal_entry_id.in_(
+                    select(BankTransaction.journal_entry_id).where(
+                        BankTransaction.company_id == company_id,
+                        BankTransaction.journal_entry_id.is_not(None),
+                        or_(
+                            BankTransaction.currency_code.is_(None),
+                            BankTransaction.currency_code == company_currency,
+                        ),
+                    )
+                ),
+            ),
         )
         .group_by(JournalEntryLine.account_id)
     ).all()
@@ -865,6 +878,9 @@ def _reassign(
 
     occurrence_in_batch: dict[str, int] = {}
     booked_net_by_source: dict[int, Decimal] = {}
+    # Fremdwährung je Quellkonto und Währung: Betrag in Firmenwährung und Fremdbetrag.
+    foreign_net_by_source: dict[tuple[int, str], tuple[Decimal, Decimal]] = {}
+    currencies = _company_currencies(session, pending)
     for transaction in pending:
         hash_fields = dict(
             bank_account_id=target.id,
@@ -893,9 +909,18 @@ def _reassign(
         if transaction.journal_entry_id is not None:
             # Nur bereits verbuchte/zugeordnete Umsätze haben den Buchsaldo
             # des alten Kontos beeinflusst.
-            booked_net_by_source[previous_bank_account_id] = booked_net_by_source.get(
-                previous_bank_account_id, Decimal("0.00")
-            ) + _booked_net(session, transaction, previous_bank_account_id)
+            if _is_foreign(transaction, currencies):
+                key = (previous_bank_account_id, transaction.currency_code)
+                net, foreign = foreign_net_by_source.get(key, (Decimal("0.00"), Decimal("0.00")))
+                foreign_net_by_source[key] = (
+                    net + _booked_net(session, transaction, previous_bank_account_id),
+                    foreign + transaction.amount,
+                )
+            else:
+                booked_net_by_source[previous_bank_account_id] = (
+                    booked_net_by_source.get(previous_bank_account_id, Decimal("0.00"))
+                    + transaction.amount
+                )
 
         log_audit_event(
             session=session,
@@ -922,6 +947,7 @@ def _reassign(
             company_id=company_id,
             target=target,
             booked_net_by_source=booked_net_by_source,
+            foreign_net_by_source=foreign_net_by_source,
             changed_by=changed_by,
         )
 
@@ -934,9 +960,24 @@ def _reassign(
 
 
 def _booked_net(session: Session, transaction: BankTransaction, account_id: int) -> Decimal:
-    """Was der Umsatz auf dem Konto bewegt hat; in Fremdwährung steht der Euro in der Buchung."""
-    if not _is_foreign(transaction, _company_currencies(session, [transaction])):
-        return transaction.amount
+    """Eurobetrag eines Umsatzes in Fremdwährung: aus der Bankzeile seiner Buchung.
+
+    Die steht nach dem ersten Umhängen auf einem anderen Konto als der Umsatz. Nennt die Buchung
+    den Fremdbetrag nicht, zählt, was sie auf dem bisherigen Konto bewegt hat.
+    """
+    side = (
+        JournalEntryLine.debit_amount if transaction.amount > 0 else JournalEntryLine.credit_amount
+    )
+    bank_line = session.execute(
+        select(JournalEntryLine.debit_amount, JournalEntryLine.credit_amount).where(
+            JournalEntryLine.journal_entry_id == transaction.journal_entry_id,
+            JournalEntryLine.foreign_currency_code == transaction.currency_code,
+            JournalEntryLine.foreign_amount == abs(transaction.amount),
+            side > 0,
+        )
+    ).first()
+    if bank_line is not None:
+        return bank_line.debit_amount - bank_line.credit_amount
     rows = session.execute(
         select(JournalEntryLine.debit_amount, JournalEntryLine.credit_amount).where(
             JournalEntryLine.journal_entry_id == transaction.journal_entry_id,
@@ -952,26 +993,33 @@ def _create_reclassification_entry(
     company_id: int,
     target: Account,
     booked_net_by_source: dict[int, Decimal],
+    foreign_net_by_source: dict[tuple[int, str], tuple[Decimal, Decimal]],
     changed_by: str,
 ) -> JournalEntry | None:
     """Umgliederungsbuchung für umgehängte, bereits verbuchte Umsätze.
 
     Je Quellkonto eine Zeile über den Netto-Saldo der bewegten verbuchten
     Umsätze, gegengebucht auf dem Zielkonto — damit zeigen altes wie neues
-    Bankkonto nach dem Umzug wieder den echten Banksaldo. Kein eigener
-    Commit: läuft atomar mit dem Umzug.
+    Bankkonto nach dem Umzug wieder den echten Banksaldo. Fremdwährung läuft in
+    eigenen Zeilen mit Fremdbetrag, damit der Saldenabgleich sie weiter auslässt.
+    Kein eigener Commit: läuft atomar mit dem Umzug.
     """
     zero = Decimal("0.00")
     sources = {
         account_id: net for account_id, net in booked_net_by_source.items() if net != zero
     }
-    if not sources:
+    foreign_moves = {
+        key: values for key, values in sorted(foreign_net_by_source.items()) if values[0] != zero
+    }
+    if not sources and not foreign_moves:
         return None
 
     source_codes = sorted(
         code
         for (code,) in session.execute(
-            select(Account.code).where(Account.id.in_(sources))
+            select(Account.code).where(
+                Account.id.in_({*sources, *(account_id for account_id, _ in foreign_moves)})
+            )
         ).all()
     )
     lines = []
@@ -992,6 +1040,29 @@ def _create_reclassification_entry(
                 account_id=target.id,
                 debit_amount=total if total > zero else zero,
                 credit_amount=-total if total < zero else zero,
+            )
+        )
+    for (source_account_id, currency), (net, foreign) in foreign_moves.items():
+        # Passt das Vorzeichen nicht (Mischung mehrerer Umsätze), bleibt nur der Eurobetrag.
+        annotation = (
+            {"foreign_currency_code": currency, "foreign_amount": abs(foreign)}
+            if foreign != zero and (foreign > zero) == (net > zero)
+            else {}
+        )
+        lines.append(
+            JournalLineInput(
+                account_id=source_account_id,
+                debit_amount=-net if net < zero else zero,
+                credit_amount=net if net > zero else zero,
+                **annotation,
+            )
+        )
+        lines.append(
+            JournalLineInput(
+                account_id=target.id,
+                debit_amount=net if net > zero else zero,
+                credit_amount=-net if net < zero else zero,
+                **annotation,
             )
         )
     if len(lines) < 2:

@@ -15,6 +15,7 @@ from app import create_app
 from app.auth import hash_api_token, hash_password
 from app.db import _alembic_config, create_session_factory
 from app.services.audit_export import EXPORT_TABLE_MODELS
+from app.services.bank_import import book_transaction
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -33,6 +34,7 @@ from app.services.vat_returns import (
 from domain.models import (
     Account,
     AuditLog,
+    BankTransaction,
     Base,
     Company,
     OpenItem,
@@ -163,6 +165,60 @@ def _set_cash_basis(session, company, day=date(2027, 1, 1)):
     set_company_vat_method(
         session=session, company=company, method="ist", valid_from=day, changed_by="t"
     )
+
+
+def test_rebooked_payment_does_not_count_twice(session: Session) -> None:
+    """Storno und Neubuchung desselben Umsatzes ändern den gemeldeten Februar nicht."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=accounts["1200"].id,
+        booking_date=date(2027, 2, 10),
+        amount=Decimal("59.50"),
+        currency_code="EUR",
+        purpose="Teilzahlung",
+        status="open",
+        dedup_hash="teilzahlung",
+    )
+    session.add(transaction)
+    session.commit()
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    february = (date(2027, 2, 1), date(2027, 2, 28))
+    march = (date(2027, 3, 1), date(2027, 3, 31))
+    assert _kennzahlen(session, company, *february)["83"] == Decimal("9.50")
+
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2027, 3, 5),
+        changed_by="t",
+    )
+    session.refresh(item)
+    assert item.status == "open"
+    assert _kennzahlen(session, company, *march)["83"] == Decimal("-9.50")
+
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    assert _kennzahlen(session, company, *february)["83"] == Decimal("9.50")
+    assert _kennzahlen(session, company, *march).get("83", Decimal("0.00")) == Decimal("0.00")
 
 
 def test_accrual_method_stays_unchanged(session: Session) -> None:

@@ -30,9 +30,16 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
 
    **Nichts wird geraten:** Eine Zahlung nur in Euro sagt nicht, wie viel Fremdwährung sie deckt und ob sie mehrere
    Posten bezahlt; eine abgeleitete Differenz wäre erfunden. Deshalb nennt man dort Fremdbetrag und Eurobetrag selbst.
-   Eine Zahlung in der Währung des Postens liefert beides, anteilig und ohne Rundungsrest, und was andere Posten schon
-   belegen, zählt nicht mehr. Einer Buchung lässt sich nie mehr zuordnen, als sie auf dem Sammelkonto bewegt hat. Ein
-   nicht zugeordneter Rest bleibt dort sichtbar stehen; das kann auch ein zu niedrig angegebener Kurs sein.
+   Eine Buchung mit Zeilen in der Währung des Postens liefert beides, anteilig und ohne Rundungsrest. Zeilen auf dem
+   Sammelkonto belegen nur Posten gleicher Währung und gleichen Partners; auf der Geldseite belegen alle Posten
+   dasselbe Geld, andere Währungen anteilig. Ein Bankumsatz muss vor dem Ausgleich gebucht sein, sonst stünde die
+   Zahlung nicht im Hauptbuch. Steht die Zahlung auf dem Sammelkonto, lässt sich einem Posten in Fremdwährung nicht
+   mehr zuordnen, als sie dort bewegt hat. Ein nicht zugeordneter Rest bleibt sichtbar stehen; das kann auch ein zu
+   niedrig angegebener Kurs sein.
+
+   **Datum:** Nach einem stornierten Ausgleich liegt der neue nie vor dem Storno, sonst stünde dieselbe Zahlung
+   rückwirkend doppelt in einem gemeldeten Zeitraum und am Stichtag. Die Differenzbuchung weicht aus einem gesperrten
+   Monat oder abgeschlossenen Jahr in den nächsten offenen Zeitraum aus, das Zahlungsdatum bleibt.
 
    **Umsatzsteuer:** § 16 Abs. 6 UStG nimmt bei der Sollversteuerung den Monat der Leistung, bei der Istversteuerung
    den Monat der Zahlung. Der Rechnungskurs folgt dem Leistungsdatum. Die Istversteuerung rechnet weiter über den

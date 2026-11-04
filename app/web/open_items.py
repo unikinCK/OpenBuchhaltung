@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from flask import abort, flash, redirect, render_template, request, url_for
+from sqlalchemy import select
 
 from app.services.journal_entries import parse_decimal
 from app.services.open_items import (
@@ -114,6 +115,15 @@ def open_items_page():
             journal_entries = (
                 session.execute(
                     scoped_select(JournalEntry, company_id=selected_company_id)
+                    # Stornierte Buchungen und Stornos gleichen nichts aus.
+                    .where(
+                        JournalEntry.reversal_of_id.is_(None),
+                        JournalEntry.id.not_in(
+                            select(JournalEntry.reversal_of_id).where(
+                                JournalEntry.reversal_of_id.is_not(None)
+                            )
+                        ),
+                    )
                     .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
                     .limit(LINK_SELECT_LIMIT)
                 )
