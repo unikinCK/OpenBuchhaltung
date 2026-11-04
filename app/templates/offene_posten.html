@@ -256,7 +256,7 @@
                               <span class="hint">leer = aus Kurs, Buchung oder Tageskurs</span>
                             </div>
                             <div class="field">
-                              <label for="settle-rate-{{ item.id }}">Kurs <span class="muted">(je 1 €, gebucht {{ item.exchange_rate }})</span></label>
+                              <label for="settle-rate-{{ item.id }}">Kurs <span class="muted">(je 1 €, gebucht {{ item.exchange_rate | kurs }})</span></label>
                               <input id="settle-rate-{{ item.id }}" name="exchange_rate" inputmode="decimal" />
                             </div>
                           {% else %}

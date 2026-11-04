@@ -42,6 +42,17 @@ def to_local_time(value: datetime) -> datetime:
     return value.astimezone(DISPLAY_TIMEZONE)
 
 
+@main_bp.app_template_filter("kurs")
+def format_exchange_rate(value: object) -> str:
+    """Wechselkurs ohne überflüssige Nullen: ``1.080000`` → ``1,08``."""
+    if value is None or value == "":
+        return "–"
+    text = f"{value:.6f}" if not isinstance(value, str) else value
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
 @main_bp.app_template_filter("datum")
 def format_date(value: object) -> str:
     """``2026-09-30`` (auch als Datum/Zeitpunkt) → ``30.09.2026``.

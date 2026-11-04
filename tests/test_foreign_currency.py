@@ -1169,7 +1169,8 @@ def test_ui_pages_show_foreign_currency(tmp_path: Path) -> None:
         "/fremdwaehrung", query_string={"company_id": company_id, "as_of": "2026-03-03"}
     ).get_data(as_text=True)
     assert "FX-UI" in page
-    assert "1.080000" in page
+    assert "1,08" in page
+    assert "1.080000" not in page
 
 
 def test_migration_round_trip_keeps_seals_valid(tmp_path: Path) -> None:
