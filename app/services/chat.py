@@ -196,6 +196,19 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "export_audit_package",
         ),
     ),
+    "rechnungen": (
+        "Ausgangsrechnungen schreiben, ausstellen und stornieren",
+        (
+            "list_sales_invoices",
+            "get_sales_invoice",
+            "create_sales_invoice",
+            "update_sales_invoice",
+            "delete_sales_invoice",
+            "issue_sales_invoice",
+            "cancel_sales_invoice",
+            "download_sales_invoice",
+        ),
+    ),
     "kasse": (
         "Kassenbuch",
         (
@@ -231,6 +244,8 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "import_account_chart",
             "check_account_chart",
             "get_account_history",
+            "get_company_master_data",
+            "update_company_master_data",
             "create_tax_code",
             "ensure_default_tax_codes",
             "create_bank_account",

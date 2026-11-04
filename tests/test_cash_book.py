@@ -77,7 +77,8 @@ TOMORROW = TODAY + timedelta(days=1)
 def migrated_template(tmp_path_factory) -> Path:
     """Einmal migrierte Datenbank; jeder Test arbeitet auf einer Kopie (mit Triggern)."""
     path = tmp_path_factory.mktemp("cash-book-template") / "template.db"
-    create_session_factory(f"sqlite+pysqlite:///{path}")
+    # Verbindungen schließen: Im WAL-Modus landet der Stand erst dann in der kopierten Datei.
+    create_session_factory(f"sqlite+pysqlite:///{path}").kw["bind"].dispose()
     return path
 
 
@@ -1297,7 +1298,8 @@ def test_migration_roundtrip(tmp_path: Path, migrated_template: Path) -> None:
     engine = create_engine(url)
     config = _alembic_config(engine)
 
-    command.downgrade(config, "-1")
+    # Bis vor das Kassenbuch: Spätere Migrationen laufen dabei mit zurück.
+    command.downgrade(config, "20261103_0061")
     tables = set(inspect(engine).get_table_names())
     assert not {"cash_book", "cash_entry", "cash_closing"} & tables
     with engine.connect() as connection:

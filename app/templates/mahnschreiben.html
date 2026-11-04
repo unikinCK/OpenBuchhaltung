@@ -34,7 +34,7 @@
       Geschäftspartner am Posten steht sie hier automatisch.{% endif %}</p>
 
     <header>
-      <div class="sender">{{ company_name }}</div>
+      <div class="sender">{{ seller.sender_line }}</div>
       <div class="recipient">{% if recipient_lines %}{{ recipient_lines | join("\n") }}{% else %}(Empfänger eintragen){% endif %}{% if not has_partner %}
 &nbsp;
 &nbsp;{% endif %}</div>
@@ -82,6 +82,9 @@
 
     <footer>
       <p>Mit freundlichen Grüßen<br /><br />{{ company_name }}</p>
+      {% if seller.phone or seller.email %}
+        <p class="contact">{{ [seller.phone, seller.email] | select | join(" · ") }}</p>
+      {% endif %}
     </footer>
   </body>
 </html>

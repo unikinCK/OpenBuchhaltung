@@ -56,16 +56,24 @@ class DocumentFileMetadata:
 
 
 # Erfassungswege eines Belegs (``Document.capture_source``). Über die API wählbar sind
-# nur ``API_CAPTURE_SOURCES``; ``web`` und ``einvoice`` setzt die Weboberfläche selbst.
+# nur ``API_CAPTURE_SOURCES``; ``web`` und ``einvoice`` setzt die Weboberfläche selbst,
+# ``sales_invoice`` das Ausstellen einer Ausgangsrechnung.
+CAPTURE_SOURCE_SALES_INVOICE = "sales_invoice"
 CAPTURE_SOURCE_LABELS = {
     "web": "Weboberfläche",
     "api": "API",
     "einvoice": "E-Rechnung",
     "mobile_scan": "iOS-Scan",
     "mobile_share": "iOS-Teilen",
+    CAPTURE_SOURCE_SALES_INVOICE: "Ausgangsrechnung",
 }
 API_CAPTURE_SOURCES = ("api", "mobile_scan", "mobile_share")
 MOBILE_CAPTURE_SOURCES = ("mobile_scan", "mobile_share")
+# Meldung, wenn das PDF oder XML einer ausgestellten Rechnung geändert werden soll.
+SALES_INVOICE_DOCUMENT_LOCKED = (
+    "Dieser Beleg gehört zu einer ausgestellten Ausgangsrechnung und ist unveränderlich; "
+    "korrigiert wird per Storno."
+)
 # Toleranz für Uhrabweichungen des Geräts beim Aufnahmezeitpunkt.
 CAPTURED_AT_FUTURE_TOLERANCE = timedelta(minutes=10)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")

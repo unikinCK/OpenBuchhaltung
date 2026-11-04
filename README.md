@@ -41,6 +41,8 @@ können, was gebucht, exportiert und protokolliert wird.
 - **Belege & E-Rechnung:** getrenntes Beleg-/Erfassungsdatum, Uploads mit SHA-256-Hash und Versionierung,
   optionale OCR-/LLM-Unterstützung, XRechnung/ZUGFeRD-Import und
   E-Rechnungs-Export.
+- **Ausgangsrechnungen:** Rechnungen mit lückenlosem Nummernkreis schreiben, ausstellen und stornieren;
+  Buchung, offener Posten, XRechnung und PDF entstehen in einem Schritt.
 - **Bank & OPOS:** Kontoauszugs-Import (CSV, CAMT.053, MT940) und
   FinTS/HBCI-Direktabruf mit TAN-Flow, mehrere Bankkonten je Gesellschaft,
   Deduplizierung über Bankreferenzen, Matching, Saldenabgleich je Bankkonto,
@@ -399,7 +401,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `ENABLE_BANKING_REDIRECT_URL` | Callback der Instanz | Rücksprung-URL nach der Bank-Zustimmung (in der Enable-Banking-Anwendung hinterlegen, https). |
 | `ENABLE_BANKING_API_URL` | `https://api.enablebanking.com` | API-Basis-URL von Enable Banking. |
 | `DATEV_CONSULTANT_NUMBER`, `DATEV_CLIENT_NUMBER` | `1000`, – | Berater-/Mandantennummer im DATEV-Export. |
-| `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rechnungssteller im E-Rechnungs-Export. |
+| `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rückfallwerte für leere Felder der Firmendaten (Rechnungen, E-Rechnungs-Export, Mahnschreiben). |
 | `ELSTER_ENVIRONMENT` | `test` | `test` oder `production`. |
 | `ELSTER_ERIC_LIBRARY_PATH`, `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_ALIAS`, `ELSTER_ERIC_COMMAND` | – | Lokaler ERiC-Runner für die ELSTER-Übermittlung. |
 | `ELSTER_ERIC_TIMEOUT_SECONDS` | `60` | Timeout des ERiC-Runners. |
@@ -1141,12 +1143,86 @@ lässt sich je Satz ein Steuercode wählen (API/MCP: `tax_lines` mit `rate`,
 `tax_code_id`, optional `expense_account_id`).
 Beispieldateien: `data/demo/erechnung_ubl.xml`, `data/demo/erechnung_cii.xml`.
 
-Umgekehrt lässt sich auf derselben Seite eine **Ausgangsrechnung als E-Rechnung
+Umgekehrt lässt sich auf derselben Seite eine **E-Rechnung als reines XML
 erzeugen** (Käufer + Positionen erfassen, Format wählen) und als XRechnung (UBL)
-oder ZUGFeRD/CII herunterladen. Die Verkäuferstammdaten stammen aus der Gesellschaft
-und den `SELLER_*`-Umgebungsvariablen (`SELLER_STREET`, `SELLER_POSTAL_CODE`,
-`SELLER_CITY`, `SELLER_VAT_ID`, …). Beträge und Steueraufteilung werden aus den
-Positionen berechnet.
+oder ZUGFeRD/CII herunterladen. Die Verkäuferdaten stammen aus den Firmendaten, leere
+Felder aus den `SELLER_*`-Umgebungsvariablen. Beträge und Steueraufteilung werden aus
+den Positionen berechnet. Dieses Formular speichert und bucht nichts; Rechnungen mit
+Nummer, Buchung und PDF schreiben Sie unter [Ausgangsrechnungen](#ausgangsrechnungen).
+Gutschriften (Typ 381, UBL `CreditNote`) werden beim Import gelesen, aber nicht als
+Eingangsrechnung gebucht.
+
+## Firmendaten
+
+Unter **Verwaltung → Firmendaten** pflegen Sie je Gesellschaft Anschrift, USt-IdNr,
+Steuernummer, Kontakt, Handelsregister, Geschäftsführung, Bank, das Präfix der
+Rechnungsnummer und das Kennzeichen Kleinunternehmer (§ 19 UStG). Änderungen stehen mit
+Vorher/Nachher im Audit-Log. Die IBAN wird dort nur angezeigt und über die Bankverbindung
+des Zahllaufs geändert (`set_company_bank_details`, im KI-Chat gesperrt). Leere Felder
+fallen auf die `SELLER_*`-Variablen zurück.
+
+API: `GET`/`PATCH /api/v1/companies/<id>/master-data`. MCP: `get_company_master_data`,
+`update_company_master_data`.
+
+## Ausgangsrechnungen
+
+Unter **Belege → Rechnungen** (`/rechnungen`, auch über die Partnerseite erreichbar)
+entstehen Rechnungen in zwei Schritten:
+
+1. **Entwurf:** Kunde, Daten, Steuerbehandlung und Positionen erfassen. Ein Entwurf hat keine
+   Nummer und lässt sich ändern oder löschen. Die Seite nennt, was zum Ausstellen noch fehlt.
+2. **Ausstellen:** Pflichtangaben prüfen (Name und Anschrift beider Seiten, Steuernummer oder
+   USt-IdNr, Leistungsdatum oder -zeitraum), lückenlose Nummer `RE-2026-0001` ziehen, buchen
+   (Soll Debitoren-Sammelkonto brutto mit Partner, Haben Erlöse netto mit Steuercode und Steuer),
+   Leistungsdatum setzen, offenen Posten anlegen, XML und PDF mit SHA-256 als Belege ablegen. Alles
+   oder nichts: Scheitert ein Schritt, bleibt der Entwurf unverändert und die Nummer frei. Die
+   Fälligkeit kommt aus der Rechnung, sonst aus dem Zahlungsziel des Partners. Das Sammelkonto wählt
+   der Benutzer, sonst gilt das einzige Debitoren-Sammelkonto.
+
+Ausgestellte Rechnungen sind unveränderlich (Service und Datenbank-Trigger). Auch die Buchung lässt
+sich nicht direkt stornieren, und die Belege lassen sich nicht ersetzen.
+
+**Steuerbehandlung:**
+
+| `tax_treatment` | Kategorie | Hinweis auf der Rechnung | Prüfung |
+|---|---|---|---|
+| `standard` | S | Steuer je Satz aus dem Steuercode | Steuercode mit Satz > 0 |
+| `reverse_charge` | AE | Steuerschuldnerschaft des Leistungsempfängers (§ 13b UStG) | USt-IdNr des Kunden |
+| `intra_community` | K | steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b UStG) | USt-IdNr beider Seiten, Kunde in anderem EU-Staat |
+| `export` | G | steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a UStG) | Kunde außerhalb der EU |
+| `exempt` | E | steuerfreier Umsatz (§ 4 UStG); konkrete Norm in den Fußtext | |
+| `small_business` | E | Steuerbefreiung nach § 19 UStG | Kennzeichen in den Firmendaten; dort Pflicht |
+
+Ohne Regelsteuer wird keine Steuer ausgewiesen, ein Steuercode mit Satz ist dann ein Fehler. Die
+UStVA ordnet steuerfreie Umsätze über das Erlöskonto zu (z. B. 8125 → Kz 41); passt das Konto nicht,
+zeigt der Entwurf einen Hinweis. Die Steuer wird je Satz aus der Summe gerundet. Nachlässe sind
+Positionen mit negativer Menge.
+
+**Storno:** Möglich, solange der offene Posten unbezahlt ist. Es entsteht eine Stornorechnung mit
+eigener Nummer und negativen Beträgen, die Buchung wird über `reverse_journal_entry` storniert, der
+Posten ausgeglichen und das Original auf `cancelled` gesetzt. Nach einer Teilzahlung wird der Storno
+abgewiesen.
+
+**E-Rechnung und PDF:** Das XML ist eine XRechnung 3.0 in UBL (Standard) oder CII, Stornorechnungen
+sind Typ 381 mit positiven Beträgen und Rechnungsbezug. Es ist die rechtlich maßgebliche E-Rechnung.
+Das PDF enthält die Pflichtangaben nach § 14 Abs. 4 UStG und das XML als Dateianhang, ist aber **kein
+zertifiziertes ZUGFeRD/Factur-X-PDF/A-3**. Das XML wurde **nicht gegen den KoSIT-Validator geprüft**,
+nur im Rundlauf mit dem eigenen Import; vor dem Einsatz gegenüber öffentlichen Auftraggebern bitte
+einmal validieren. Telefon, E-Mail und IBAN verlangt die XRechnung zusätzlich: Fehlen sie, zeigt der
+Entwurf einen Hinweis. Die Rechtslage ist nach bestem Wissen abgebildet, ersetzt aber keine
+Steuerberatung.
+
+**Bewusst nicht enthalten:** E-Mail-Versand, Fremdwährung (nur Firmenwährung), Abschlagsrechnungen,
+Skonto-Automatik, wiederkehrende Rechnungen, Gutschriften auf eine Teilmenge. Im PDF erscheinen
+Zeichen außerhalb von Windows-1252 in ihrer Grundform (Ł → L), im XML unverändert.
+
+API: `GET`/`POST /api/v1/sales-invoices` (Filter `status`, `partner_id`), `GET`/`PATCH`/`DELETE
+/api/v1/sales-invoices/<id>`, `POST …/issue`, `POST …/cancel`, Downloads `GET …/pdf`, `GET …/xml`
+(mit `?download_link=1`) und `GET …/content?format=pdf|xml`. Fehlende Pflichtangaben liefert `issue`
+als 422 mit `problems`, Statuskonflikte als 409. MCP: `list_sales_invoices`, `get_sales_invoice`,
+`create_sales_invoice`, `update_sales_invoice`, `delete_sales_invoice`, `issue_sales_invoice`,
+`cancel_sales_invoice`, `download_sales_invoice`; im KI-Chat laufen die schreibenden nach Bestätigung.
+Details: `docs/adr/ADR-006-ausgangsrechnungen.md`.
 
 ## DATEV-Export (Buchungsstapel)
 
@@ -1922,7 +1998,7 @@ Die Funktion ist in allen drei Schichten verfügbar: UI (**KI-Chat**), REST-API
 `reject_chat_action`).
 
 **Werkzeuge auf Anforderung.** Jede Tool-Definition belegt bei jeder Anfrage Platz im Kontext des
-Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Kasse, Konsolidierung, Einrichtung) blendet
+Modells. Seltene Fachgebiete (Lohn, Anlagen, Ertragsteuern, Controlling, Abschluss, Rechnungen, Kasse, Konsolidierung, Einrichtung) blendet
 Obi deshalb erst ein, wenn es sie braucht: über das Chat-Werkzeug `load_tools`, das keine Bestätigung
 braucht und in der Unterhaltung erhalten bleibt. Was im Chat gesperrt ist, bleibt auch danach gesperrt, und
 schreibende Werkzeuge bleiben bestätigungspflichtig. Für MCP-Clients ändert sich nichts.

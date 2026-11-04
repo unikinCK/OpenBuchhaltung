@@ -39,8 +39,8 @@ Zahlung fehlte.
 - Negativ: Das Steuerkonto enthält auch noch nicht fällige Umsatzsteuer. Sein Saldo weicht deshalb von der
   Zahllast ab; die UStVA nennt den Betrag als Warnung. Wer „Umsatzsteuer nicht fällig“ ausweisen möchte, bucht
   zum Abschluss um.
-- Offene Punkte: Umgliederung auf „Umsatzsteuer nicht fällig“, Hinweis auf der Rechnung ab 2028 (§ 14 Abs. 4
-  Nr. 6a UStG), mehrere Ist-Zeiträume je Gesellschaft, Kennzeichnung im DATEV-Export.
+- Offene Punkte: Umgliederung auf „Umsatzsteuer nicht fällig“, mehrere Ist-Zeiträume je Gesellschaft,
+  Kennzeichnung im DATEV-Export.
 
 ## Alternativen
 - **Umgliederungsbuchung bei jeder Zahlung** (Konto „Umsatzsteuer nicht fällig“ an „Umsatzsteuer“): im

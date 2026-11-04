@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 from flask import abort, flash, redirect, render_template, url_for
 
+from app.services.company_master_data import resolve_seller
 from app.services.dunning import (
     DUNNING_LEVEL_LABELS,
     DunningError,
@@ -90,6 +91,7 @@ def dunning_letter_page(open_item_id: int):
             recipient_lines=dunning_recipient_lines(item),
             has_partner=item.partner is not None,
             company_name=company_name,
+            seller=resolve_seller(company),
             level=level,
             level_label=DUNNING_LEVEL_LABELS[level],
             today=date.today(),

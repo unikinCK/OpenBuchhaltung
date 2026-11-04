@@ -30,7 +30,12 @@ from app.services.document_categories import (
     set_document_category_active,
 )
 from app.services.document_llm import DocumentLLMError, send_document_update
-from app.services.documents import CAPTURE_SOURCE_LABELS, document_file_metadata
+from app.services.documents import (
+    CAPTURE_SOURCE_LABELS,
+    CAPTURE_SOURCE_SALES_INVOICE,
+    SALES_INVOICE_DOCUMENT_LOCKED,
+    document_file_metadata,
+)
 from app.services.llm_settings import PURPOSE_DOCUMENT, resolve_llm_endpoint
 from app.services.scoping import scoped_select
 from app.web.blueprint import main_bp
@@ -361,6 +366,11 @@ def link_document(document_id: int):
         if document is None:
             abort(404)
         require_company_access(session, document.company_id)
+        if document.capture_source == CAPTURE_SOURCE_SALES_INVOICE:
+            flash(SALES_INVOICE_DOCUMENT_LOCKED, "error")
+            return redirect(
+                url_for("main.documents_page", company_id=company_id or document.company_id)
+            )
 
         linked_entry = None
         if journal_entry_id is not None:
@@ -495,6 +505,9 @@ def replace_document(document_id: int):
         require_company_access(session, previous.company_id)
         if not previous.is_current:
             flash("Nur die aktuelle Belegversion kann ersetzt werden.", "error")
+            return redirect(url_for("main.documents_page", company_id=previous.company_id))
+        if previous.capture_source == CAPTURE_SOURCE_SALES_INVOICE:
+            flash(SALES_INVOICE_DOCUMENT_LOCKED, "error")
             return redirect(url_for("main.documents_page", company_id=previous.company_id))
 
         unique_name = f"{uuid4().hex}_{original_file_name}"

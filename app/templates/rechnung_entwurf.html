@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}{% if invoice %}Rechnungsentwurf{% else %}Neue Rechnung{% endif %} – OpenBuchhaltung{% endblock %}
+
+{% macro line_row(line) %}
+  <tr class="invoice-line">
+    <td class="col-description"><textarea name="line_description" rows="1" maxlength="2000" aria-label="Beschreibung">{{ line.description }}</textarea></td>
+    <td class="col-quantity"><input name="line_quantity" inputmode="decimal" value="{{ line.quantity }}" aria-label="Menge" /></td>
+    <td class="col-unit">
+      <select name="line_unit_code" aria-label="Einheit">
+        {% for code, label in units.items() %}
+          <option value="{{ code }}"{% if line.unit_code == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+        {% if line.unit_code and line.unit_code not in units %}
+          <option value="{{ line.unit_code }}" selected>{{ line.unit_code }}</option>
+        {% endif %}
+      </select>
+    </td>
+    <td class="col-price"><input name="line_unit_price" inputmode="decimal" value="{{ line.unit_price }}" aria-label="Einzelpreis netto" /></td>
+    <td class="col-tax">
+      <select name="line_tax_code_id" aria-label="Steuercode">
+        <option value="" data-rate="0">ohne</option>
+        {% for tax_code in tax_codes %}
+          <option value="{{ tax_code.id }}" data-rate="{{ tax_code.rate }}"{% if line.tax_code_id == tax_code.id %} selected{% endif %}>{{ tax_code.code }} ({{ tax_code.rate | satz }} %)</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td class="col-account">
+      <select name="line_revenue_account_id" aria-label="Erlöskonto">
+        <option value="">Bitte wählen</option>
+        {% for account in revenue_accounts %}
+          <option value="{{ account.id }}"{% if line.revenue_account_id == account.id %} selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td class="num nowrap" data-line-net>0,00</td>
+    <td><button type="button" class="link" data-remove-invoice-line title="Position entfernen" aria-label="Position entfernen">✕</button></td>
+  </tr>
+{% endmacro %}
+
+{% block content %}
+  <a class="back-link" href="{{ url_for('main.sales_invoices_page', company_id=company.id) }}">‹ Alle Rechnungen</a>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">{% if invoice %}Rechnungsentwurf{% else %}Neue Rechnung{% endif %}</h1>
+      <p class="page-subtitle">{% if invoice %}<span class="badge">Entwurf</span> Die Nummer wird erst beim Ausstellen vergeben.{% else %}{{ company.name }}{% endif %}</p>
+    </div>
+  </div>
+
+  {% if invoice and problems %}
+    <section class="callout callout-warning">
+      <strong>Noch nicht ausstellbar:</strong>
+      <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+  {% if invoice and hints %}
+    <section class="callout">
+      <strong>Hinweise:</strong>
+      <ul>{% for hint in hints %}<li>{{ hint }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('main.update_sales_invoice_action', invoice_id=invoice.id) if invoice else url_for('main.create_sales_invoice_action') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="company_id" value="{{ company.id }}" />
+
+    <section class="card">
+      <h2>Rechnungskopf</h2>
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="partner_id">Kunde</label>
+          <select id="partner_id" name="partner_id" required>
+            <option value="">Bitte wählen</option>
+            {% for customer in customers %}
+              <option value="{{ customer.id }}"{% if values.partner_id == customer.id %} selected{% endif %}>{{ customer.name }} ({{ customer.debtor_number }})</option>
+            {% endfor %}
+          </select>
+          {% if not customers %}<p class="hint">Noch keine aktiven Kunden. <a href="{{ url_for('main.partners_page', company_id=company.id) }}">Partner anlegen</a></p>{% endif %}
+        </div>
+        <div class="field">
+          <label for="issue_date">Rechnungsdatum</label>
+          <input id="issue_date" name="issue_date" type="date" value="{{ values.issue_date }}" />
+        </div>
+        <div class="field">
+          <label for="due_date">Fällig am</label>
+          <input id="due_date" name="due_date" type="date" value="{{ values.due_date }}" />
+          <p class="hint">Leer: Zahlungsziel des Kunden.</p>
+        </div>
+        <div class="field">
+          <label for="service_date">Leistungsdatum</label>
+          <input id="service_date" name="service_date" type="date" value="{{ values.service_date }}" />
+        </div>
+        <div class="field">
+          <label for="service_period_from">oder Leistungszeitraum von</label>
+          <input id="service_period_from" name="service_period_from" type="date" value="{{ values.service_period_from }}" />
+        </div>
+        <div class="field">
+          <label for="service_period_to">bis</label>
+          <input id="service_period_to" name="service_period_to" type="date" value="{{ values.service_period_to }}" />
+        </div>
+        <div class="field field-wide">
+          <label for="tax_treatment">Steuerbehandlung</label>
+          <select id="tax_treatment" name="tax_treatment">
+            {% for value, rule in treatments.items() %}
+              <option value="{{ value }}"{% if values.tax_treatment == value %} selected{% endif %}>{{ rule.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="buyer_reference">Leitweg-ID / Käuferreferenz</label>
+          <input id="buyer_reference" name="buyer_reference" maxlength="100" value="{{ values.buyer_reference }}" />
+        </div>
+        <div class="field">
+          <label for="einvoice_syntax">E-Rechnung</label>
+          <select id="einvoice_syntax" name="einvoice_syntax">
+            <option value="ubl"{% if values.einvoice_syntax != "cii" %} selected{% endif %}>XRechnung (UBL)</option>
+            <option value="cii"{% if values.einvoice_syntax == "cii" %} selected{% endif %}>XRechnung (CII)</option>
+          </select>
+        </div>
+        {% if receivable_accounts | length > 1 %}
+          <div class="field">
+            <label for="receivable_account_id">Debitoren-Sammelkonto</label>
+            <select id="receivable_account_id" name="receivable_account_id">
+              <option value="">Bitte wählen</option>
+              {% for account in receivable_accounts %}
+                <option value="{{ account.id }}"{% if values.receivable_account_id == account.id %} selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endif %}
+        <div class="field field-wide">
+          <label for="header_text">Kopftext</label>
+          <textarea id="header_text" name="header_text" rows="2" maxlength="4000">{{ values.header_text }}</textarea>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Positionen</h2>
+      <div class="table-scroll">
+        <table class="journal-lines-table invoice-lines-table" data-no-sort>
+          <thead>
+            <tr>
+              <th>Beschreibung</th>
+              <th>Menge</th>
+              <th>Einheit</th>
+              <th>Einzelpreis netto</th>
+              <th>Steuercode</th>
+              <th>Erlöskonto</th>
+              <th class="num">Netto</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="invoice-lines">
+            {% for line in lines %}{{ line_row(line) }}{% else %}{{ line_row(default_line) }}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <template id="invoice-line-template">{{ line_row(default_line) }}</template>
+      <button type="button" class="secondary btn-sm" data-add-row="#invoice-lines" data-template="#invoice-line-template">+ Weitere Position</button>
+      <p class="hint">Nachlässe als negative Menge erfassen. Die Steuer wird je Steuersatz aus der Summe berechnet.</p>
+      <p class="invoice-totals" data-invoice-totals aria-live="polite"></p>
+      <div class="field field-wide" style="margin-top:0.75rem;">
+        <label for="footer_text">Fußtext</label>
+        <textarea id="footer_text" name="footer_text" rows="2" maxlength="4000">{{ values.footer_text }}</textarea>
+      </div>
+    </section>
+
+    <div class="page-actions">
+      <button type="submit">Entwurf speichern</button>
+    </div>
+  </form>
+
+  {% if invoice %}
+    <section class="card">
+      <h2>Ausstellen</h2>
+      <p class="hint">Beim Ausstellen werden die Nummer vergeben, die Rechnung gebucht, der offene Posten angelegt
+        und PDF und XML als Belege abgelegt. Danach ist die Rechnung unveränderlich. Bitte Änderungen vorher speichern.</p>
+      <div class="page-actions">
+        <form method="post" action="{{ url_for('main.issue_sales_invoice_action', invoice_id=invoice.id) }}" data-confirm="Rechnung jetzt verbindlich ausstellen? Das lässt sich nur per Storno korrigieren.">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit"{% if problems %} disabled{% endif %}>Ausstellen</button>
+        </form>
+        <form method="post" action="{{ url_for('main.delete_sales_invoice_action', invoice_id=invoice.id) }}" data-confirm="Entwurf löschen?">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="danger">Entwurf löschen</button>
+        </form>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

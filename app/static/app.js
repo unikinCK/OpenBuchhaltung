@@ -17,7 +17,7 @@
         added.forEach(function (element) {
           element.querySelectorAll("[data-subledger-account]").forEach(syncPartnerSelect);
         });
-        var first = added.length && added[0].querySelector("select, input");
+        var first = added.length && added[0].querySelector("select, input, textarea");
         if (first) first.focus();
       });
     });
@@ -36,6 +36,7 @@
     setupPartnerPanel();
     setupPartnerFill();
     setupLineTotals();
+    setupInvoiceLines();
     setupMatchJobs();
 
     // Auswahlfelder mit data-autosubmit senden ihr Formular bei Änderung ab.
@@ -421,6 +422,52 @@
     });
     var addButton = document.querySelector('[data-add-row="#journal-lines"]');
     if (addButton) addButton.addEventListener("click", update);
+    update();
+  }
+
+  // Rechnungsentwurf: Positionen entfernen und Summen live anzeigen. Die Steuer wird wie auf dem
+  // Server je Steuersatz aus der Summe gerundet; ohne Regelbesteuerung gibt es keine Steuer.
+  function setupInvoiceLines() {
+    var body = document.querySelector("#invoice-lines");
+    var output = document.querySelector("[data-invoice-totals]");
+    if (!body || !output) return;
+    var treatment = document.querySelector("[name=tax_treatment]");
+
+    function update() {
+      var netByRate = {};
+      var net = 0;
+      body.querySelectorAll("tr.invoice-line").forEach(function (row) {
+        var quantity = parseAmount(row.querySelector("[name=line_quantity]").value);
+        var price = parseAmount(row.querySelector("[name=line_unit_price]").value);
+        var amount = Math.round(quantity * price * 100) / 100;
+        var tax = row.querySelector("[name=line_tax_code_id]");
+        var option = tax.options[tax.selectedIndex];
+        var rate = option && option.dataset.rate ? option.dataset.rate : "0";
+        row.querySelector("[data-line-net]").textContent = formatAmount(amount);
+        net += amount;
+        netByRate[rate] = (netByRate[rate] || 0) + amount;
+      });
+      var tax = 0;
+      if (!treatment || treatment.value === "standard") {
+        Object.keys(netByRate).forEach(function (rate) {
+          tax += Math.round(netByRate[rate] * parseFloat(rate)) / 100;
+        });
+      }
+      output.textContent = "Netto " + formatAmount(net) + " · Umsatzsteuer " + formatAmount(tax) +
+        " · Gesamt " + formatAmount(net + tax);
+    }
+
+    body.addEventListener("input", update);
+    body.addEventListener("change", update);
+    body.addEventListener("click", function (event) {
+      var button = event.target.closest && event.target.closest("[data-remove-invoice-line]");
+      if (!button || body.querySelectorAll("tr.invoice-line").length < 2) return;
+      button.closest("tr.invoice-line").remove();
+      update();
+    });
+    var addButton = document.querySelector('[data-add-row="#invoice-lines"]');
+    if (addButton) addButton.addEventListener("click", update);
+    if (treatment) treatment.addEventListener("change", update);
     update();
   }
 

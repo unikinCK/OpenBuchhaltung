@@ -661,8 +661,7 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
         Listen-Endpunkte in REST/MCP.
   - [x] Ist-Versteuerung (#15, ADR-009) *(2026-11-03)*: Versteuerungsart je Gesellschaft, Zahlungen je
         offenem Posten (`open_item_settlement`, Migration `20261103_0062`), UStVA und Jahreserklärung
-        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“, Hinweis
-        auf der Rechnung ab 2028 (§ 14 Abs. 4 Nr. 6a UStG).
+        anteilig mit der Zahlung; UI/API/MCP. Offen: Umgliederung auf „Umsatzsteuer nicht fällig“.
   - [x] Zwei-Faktor-Anmeldung (TOTP) *(2026-11-03, Review #13)*: Einrichtung mit QR-Code und
         Wiederherstellungscodes, zweiter Login-Schritt, Rollenpflicht
         `TWO_FACTOR_REQUIRED_ROLES`, Admin-Reset über UI, REST, MCP und CLI. API-Tokens bleiben
@@ -672,7 +671,13 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
       Transaktion, Storno-Einträge, Kassensturz mit Tagessperre, Kassenbericht (druckbar, CSV),
       Prüfung inklusive Kontensaldo; UI `/kassenbuch`, REST `/api/v1/cash-books…`, MCP und
       Prüferexport. Manuell geführt, ersetzt keine TSE und keinen DSFinV-K-Export.
-- [ ] **Danach**: Ausgangsrechnungsmodul (#2, #6, #7), Hintergrundjobs (#10), Fremdwährung (#14).
+  - [x] Firmenstammdaten (#3) und Ausgangsrechnungen (#2), Storno per Stornorechnung (#7)
+        *(2026-11-03, ADR-006, Migration `20261103_0063`)*: Rechnung mit lückenlosem Nummernkreis,
+        atomarem Ausstellen (Buchung, OPOS, XRechnung, PDF als Belege), Steuerbehandlung und
+        Unveränderlichkeit per Trigger; UI/API/MCP, Prüferexport. Offen: E-Mail-Versand (#6),
+        Fremdwährung (#14), Abschlagsrechnungen, wiederkehrende Rechnungen, Prüfung gegen den
+        KoSIT-Validator.
+- [ ] **Danach**: E-Mail-Versand (#6), Hintergrundjobs (#10), Fremdwährung (#14).
 
 ## Phase 6 – iOS-Begleit-App (Stand 2026-10-13)
 

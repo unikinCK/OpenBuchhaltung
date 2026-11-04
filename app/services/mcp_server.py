@@ -516,6 +516,52 @@ _MCP_CREDENTIAL_SCOPE_PROPERTY: dict[str, Any] = {
 }
 
 # Gemeinsame Stammdatenfelder für create_partner/update_partner.
+# Bewusst knapp: Die Tool-Definitionen zählen gegen das Prompt-Budget des Chats.
+_SALES_INVOICE_FIELD_SCHEMA: dict[str, Any] = {
+    **{
+        field: {"type": ["string", "null"]}
+        for field in (
+            "issue_date",
+            "service_date",
+            "service_period_from",
+            "service_period_to",
+            "due_date",
+            "buyer_reference",
+            "header_text",
+            "footer_text",
+        )
+    },
+    "tax_treatment": {
+        "type": "string",
+        "enum": [
+            "standard",
+            "reverse_charge",
+            "intra_community",
+            "export",
+            "exempt",
+            "small_business",
+        ],
+    },
+    "einvoice_syntax": {"type": "string", "enum": ["ubl", "cii"]},
+    "receivable_account_id": {"type": ["integer", "null"]},
+    "lines": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string"},
+                "quantity": {"type": "string"},
+                "unit_code": {"type": "string"},
+                "unit_price": {"type": "string"},
+                "tax_code_id": {"type": ["integer", "null"]},
+                "revenue_account_id": {"type": ["integer", "null"]},
+            },
+            "required": ["description", "quantity", "unit_price"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 _PARTNER_FIELD_SCHEMA: dict[str, Any] = {
     "partner_kind": {
         "type": "string",
@@ -3155,6 +3201,202 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/einvoices/export",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_sales_invoices",
+        description="Listet Ausgangsrechnungen einer Gesellschaft ohne Positionen.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "status": {"type": "string", "enum": ["draft", "issued", "cancelled"]},
+                "partner_id": {"type": "integer"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/sales-invoices",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_sales_invoice",
+        description=(
+            "Liefert eine Ausgangsrechnung mit Positionen; bei Entwürfen nennt issue_problems, "
+            "was zum Ausstellen fehlt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"invoice_id": {"type": "integer"}},
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/sales-invoices/{invoice_id}",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="create_sales_invoice",
+        description=(
+            "Legt einen Rechnungsentwurf an, noch ohne Nummer und Buchung (verbindlich erst mit "
+            "issue_sales_invoice). Daten JJJJ-MM-TT; Leistungsdatum oder -zeitraum; due_date leer "
+            "= Zahlungsziel des Kunden; außer tax_treatment standard kein Steuerausweis. "
+            "Positionen: quantity negativ für Nachlässe, unit_code nach UN/ECE Rec 20 (C62, HUR, "
+            "DAY), tax_code_id bei standard Pflicht."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                "partner_id": {"type": "integer"},
+                **_SALES_INVOICE_FIELD_SCHEMA,
+            },
+            "required": ["company_id", "partner_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/sales-invoices",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_sales_invoice",
+        description="Ändert einen Entwurf wie create_sales_invoice; lines ersetzt alle Positionen.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "invoice_id": {"type": "integer"},
+                "partner_id": {"type": "integer"},
+                **_SALES_INVOICE_FIELD_SCHEMA,
+            },
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/sales-invoices/{invoice_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="delete_sales_invoice",
+        description="Löscht einen Rechnungsentwurf.",
+        input_schema={
+            "type": "object",
+            "properties": {"invoice_id": {"type": "integer"}},
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/sales-invoices/{invoice_id}/delete",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="issue_sales_invoice",
+        description=(
+            "Stellt einen Entwurf verbindlich aus: Nummer, Buchung, offener Posten, XRechnung, "
+            "PDF; danach unveränderlich. Fehlendes steht in problems."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "invoice_id": {"type": "integer"},
+                "issue_date": {"type": "string"},
+                "receivable_account_id": {"type": "integer"},
+            },
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/sales-invoices/{invoice_id}/issue",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="cancel_sales_invoice",
+        description=(
+            "Storniert eine unbezahlte Rechnung: Stornorechnung mit eigener Nummer, Stornobuchung, "
+            "Ausgleich des offenen Postens. Nach einer (Teil-)Zahlung abgewiesen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "invoice_id": {"type": "integer"},
+                "cancellation_date": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/sales-invoices/{invoice_id}/cancel",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="download_sales_invoice",
+        description=(
+            "PDF oder XML einer ausgestellten Rechnung als content_base64 und download_url (mit "
+            "download_link=true nur der Link); Link unverändert weitergeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "invoice_id": {"type": "integer"},
+                "format": {"type": "string", "enum": ["pdf", "xml"]},
+                "download_link": {"type": "boolean"},
+            },
+            "required": ["invoice_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/sales-invoices/{invoice_id}/content",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_company_master_data",
+        description=(
+            "Firmenstammdaten: Anschrift, Steuer, Kontakt, Register, Rechnungspräfix, IBAN/BIC."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/companies/{company_id}/master-data",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="update_company_master_data",
+        description=(
+            "Ändert Firmenstammdaten (Audit mit Vorher/Nachher). Die Bankverbindung ändert nur "
+            "set_company_bank_details."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer"},
+                **{
+                    field: {"type": ["string", "null"]}
+                    for field in (
+                        "street",
+                        "postal_code",
+                        "city",
+                        "country_code",
+                        "vat_id",
+                        "tax_number",
+                        "phone",
+                        "email",
+                        "website",
+                        "register_court",
+                        "register_number",
+                        "managing_directors",
+                        "bank_name",
+                    )
+                },
+                "invoice_prefix": {"type": "string"},
+                "is_small_business": {"type": "boolean"},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/companies/{company_id}/master-data",
         arg_location="json",
     ),
     ToolSpec(

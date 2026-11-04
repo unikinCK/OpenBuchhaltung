@@ -27,6 +27,10 @@
     </div>
     <div class="page-actions">
       <a class="button-secondary btn-sm" href="#stammdaten" data-open-details="#stammdaten">Stammdaten bearbeiten</a>
+      {% if partner.debtor_number %}
+        <a class="button-secondary btn-sm" href="{{ url_for('main.sales_invoices_page', company_id=partner.company_id, partner_id=partner.id) }}">Rechnungen</a>
+        {% if partner.is_active %}<a class="button-secondary btn-sm" href="{{ url_for('main.new_sales_invoice_page', company_id=partner.company_id, partner_id=partner.id) }}">Rechnung schreiben</a>{% endif %}
+      {% endif %}
       <a class="button btn-sm" href="{{ url_for('main.journal_page', company_id=partner.company_id, partner_id=partner.id) }}">Buchungen im Journal</a>
     </div>
   </div>

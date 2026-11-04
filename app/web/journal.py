@@ -76,6 +76,7 @@ SOURCE_LABELS = {
     "year_end_close": "Jahresabschluss",
     "carryforward": "Saldovortrag",
     "payroll": "Lohn",
+    "sales_invoice": "Rechnung",
     "cash_book": "Kassenbuch",
 }
 STATUS_FILTERS = {"offen": False, "festgeschrieben": True}
@@ -790,7 +791,7 @@ def _render_entry_detail(journal_entry_id: int):
             "can_reverse": (
                 not entry.reversal_of_id
                 and not reversed_by
-                and entry.source != SOURCE_CASH_BOOK
+                and entry.source not in {SOURCE_CASH_BOOK, "sales_invoice"}
             ),
             "history": history,
             "source_label": SOURCE_LABELS.get(entry.source),

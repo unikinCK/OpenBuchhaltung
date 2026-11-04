@@ -124,7 +124,10 @@ def _load_item_partner(
     return partner
 
 
-def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
+def create_open_item(
+    *, session: Session, payload: OpenItemInput, commit: bool = True
+) -> OpenItem:
+    """Legt einen Posten an; mit ``commit=False`` committet der Aufrufer (Ausgangsrechnung)."""
     company = session.get(Company, payload.company_id)
     if company is None:
         raise OpenItemError("Gesellschaft nicht gefunden.")
@@ -212,8 +215,9 @@ def create_open_item(*, session: Session, payload: OpenItemInput) -> OpenItem:
             "original_amount": str(item.original_amount),
         },
     )
-    session.commit()
-    session.refresh(item)
+    if commit:
+        session.commit()
+        session.refresh(item)
     return item
 
 
@@ -267,6 +271,33 @@ def set_open_item_partner(
         session.commit()
         session.refresh(item)
     return item
+
+
+def close_open_item_by_cancellation(
+    *, session: Session, item: OpenItem, reversal_entry: JournalEntry, changed_by: str
+) -> None:
+    """Schließt den Posten einer stornierten Rechnung, ohne Commit.
+
+    Kein Ausgleich: Es floss kein Geld, deshalb entsteht keine Zeile in ``OpenItemSettlement``.
+    Bei Istversteuerung gälte sie sonst als Zahlung und löste Umsatzsteuer aus.
+    """
+    item.settlement_journal_entry_id = reversal_entry.id
+    item.settlement_amount = item.open_amount
+    item.open_amount = Decimal("0.00")
+    item.status = "settled"
+    item.settled_at = datetime.now(timezone.utc)
+    item.settled_by = changed_by
+    log_audit_event(
+        session=session,
+        tenant_id=item.tenant_id,
+        company_id=item.company_id,
+        entity_type="open_item",
+        entity_id=str(item.id),
+        action="cancelled",
+        changed_by=changed_by,
+        payload={"reference": item.reference, "reversal_entry_id": reversal_entry.id},
+    )
+    session.flush()
 
 
 def settle_open_item(

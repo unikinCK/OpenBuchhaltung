@@ -22,6 +22,7 @@ from app.api.helpers import (
 )
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
+from app.services.company_master_data import seller_party
 from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
@@ -345,14 +346,7 @@ def export_einvoice_via_api():
         company = api_scoped_company(session, company_id)
         if company is None:
             return jsonify({"error": "Company not found."}), 404
-        seller = Party(
-            name=company.name,
-            street=current_app.config.get("SELLER_STREET", ""),
-            postal_code=current_app.config.get("SELLER_POSTAL_CODE", ""),
-            city=current_app.config.get("SELLER_CITY", ""),
-            country_code=current_app.config.get("SELLER_COUNTRY_CODE", "DE"),
-            vat_id=current_app.config.get("SELLER_VAT_ID", ""),
-        )
+        seller = seller_party(company)
         currency_code = company.currency_code
 
     try:

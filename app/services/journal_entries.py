@@ -39,6 +39,7 @@ from domain.models import (
     Period,
     PeriodLock,
     PostingNumberSequence,
+    SalesInvoice,
     TaxCode,
 )
 from domain.services.journal_entry_validation import (
@@ -1232,6 +1233,15 @@ def amend_journal_entry(
     if line_changes:
         changes["partners"] = line_changes
 
+    # Leistungsdatum und Partner stehen auf der Rechnung; die Kontierung darf ergänzt werden.
+    if changes:
+        invoice_number = _sales_invoice_number(session, entry.id)
+        if invoice_number is not None:
+            raise JournalEntryCreationError(
+                f"Buchung {entry.posting_number} gehört zur Ausgangsrechnung {invoice_number}; "
+                "Leistungsdatum und Partner sind dort festgelegt."
+            )
+
     for unit_type, requested_units in (
         ("cost_center", line_cost_centers),
         ("profit_center", line_profit_centers),
@@ -1296,6 +1306,7 @@ def reverse_journal_entry(
     reversal_date: date,
     changed_by: str,
     commit: bool = True,
+    from_sales_invoice: bool = False,
     from_cash_book: bool = False,
 ) -> JournalEntry:
     """Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip).
@@ -1310,13 +1321,22 @@ def reverse_journal_entry(
     gebuchter Lohnlauf wird wieder zum Entwurf und ein mit dieser Buchung
     ausgeglichener offener Posten lebt wieder auf. Alles in einer Transaktion.
 
-    Mit ``commit=False`` wird nur geflusht, der Aufrufer committet selbst. Die Buchung
-    eines Kassenbuch-Eintrags storniert nur das Kassenbuch (``from_cash_book=True``),
-    sonst liefen Kassenbestand und Konto auseinander.
+    Mit ``commit=False`` wird nur geflusht, der Aufrufer committet selbst. Die Buchung einer
+    Ausgangsrechnung lässt sich nur über deren Storno zurücknehmen (``from_sales_invoice``),
+    sonst liefen Rechnung und offener Posten auseinander. Die Buchung eines Kassenbuch-Eintrags
+    storniert nur das Kassenbuch (``from_cash_book=True``), sonst liefen Kassenbestand und
+    Konto auseinander.
     """
     original = session.get(JournalEntry, journal_entry_id)
     if original is None:
         raise JournalEntryCreationError("Buchung nicht gefunden.")
+    if not from_sales_invoice:
+        invoice_number = _sales_invoice_number(session, original.id)
+        if invoice_number is not None:
+            raise JournalEntryCreationError(
+                f"Buchung {original.posting_number} gehört zur Ausgangsrechnung "
+                f"{invoice_number}; bitte die Rechnung stornieren."
+            )
     if not from_cash_book:
         cash_entry_number = session.execute(
             select(CashEntry.entry_number).where(CashEntry.journal_entry_id == original.id)
@@ -1426,6 +1446,17 @@ def reverse_journal_entry(
     else:
         session.flush()
     return reversal
+
+
+def _sales_invoice_number(session: Session, journal_entry_id: int) -> str | None:
+    """Nummer der Ausgangsrechnung (keine Stornorechnung), die auf dieser Buchung beruht."""
+    row = session.execute(
+        select(SalesInvoice.invoice_number).where(
+            SalesInvoice.journal_entry_id == journal_entry_id,
+            SalesInvoice.invoice_type == "invoice",
+        )
+    ).first()
+    return row[0] if row else None
 
 
 def _release_subledgers(
