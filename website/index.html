@@ -242,7 +242,7 @@
           <article class="module">
             <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></div>
             <h3>Belege und E-Rechnung</h3>
-            <p>Belege als PDF, JPG oder PNG mit SHA-256-Hash und Versionierung. Eingangsrechnungen als XRechnung oder ZUGFeRD direkt verbuchen, Ausgangsrechnungen als E-Rechnung erzeugen.</p>
+            <p>Belege als PDF, JPG oder PNG mit SHA-256-Hash und Versionierung. Eingangsrechnungen als XRechnung oder ZUGFeRD direkt verbuchen. Ausgangsrechnungen schreiben und ausstellen: mit lückenloser Nummer, Buchung, offenem Posten, PDF und XRechnung, auch in Fremdwährung.</p>
             <ul>
               <li>XRechnung (UBL) und CII/ZUGFeRD</li>
               <li>Prüfung von Dateisignatur und Mindestgröße</li>
@@ -264,7 +264,7 @@
           <article class="module">
             <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg></div>
             <h3>Bank und Zahlungsverkehr</h3>
-            <p>Kontoauszüge als CSV, CAMT.053 oder MT940 importieren oder per FinTS/HBCI und Open Banking (PSD2) abrufen. Regeln kontieren wiederkehrende Umsätze vor.</p>
+            <p>Kontoauszüge als CSV, CAMT.053 oder MT940 importieren oder per FinTS/HBCI und Open Banking (PSD2) abrufen. Regeln kontieren wiederkehrende Umsätze vor. Dazu ein Kassenbuch mit fortlaufenden, unveränderbaren Einträgen und Kassensturz.</p>
             <ul>
               <li>TAN und pushTAN, die PIN wird nie gespeichert</li>
               <li>Deduplizierung über Bankreferenzen</li>
@@ -276,7 +276,7 @@
           <article class="module">
             <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></svg></div>
             <h3>Offene Posten und Mahnwesen</h3>
-            <p>Debitorische und kreditorische Posten mit Teilausgleich, Verknüpfung zu Bankumsatz oder Zahlungsbuchung und drei Mahnstufen mit druckbarem Mahnschreiben.</p>
+            <p>Debitorische und kreditorische Posten am Geschäftspartner mit Teilausgleich, Partnerkonto und Saldenliste, SEPA-Zahllauf und drei Mahnstufen. In Fremdwährung mit Kursdifferenz und Stichtagsbewertung.</p>
             <ul>
               <li>Mahnvorschläge nach Fälligkeit</li>
               <li>Storno lässt ausgeglichene Posten wieder aufleben</li>
@@ -286,7 +286,7 @@
           <article class="module">
             <div class="module-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg></div>
             <h3>Umsatzsteuer und ELSTER</h3>
-            <p>UStVA, Zusammenfassende Meldung und USt-Jahreserklärung aus den Buchungen, einschließlich Reverse Charge nach §&nbsp;13b und innergemeinschaftlichem Erwerb.</p>
+            <p>UStVA, Zusammenfassende Meldung und USt-Jahreserklärung aus den Buchungen, nach Soll- oder Istversteuerung, einschließlich Reverse Charge nach §&nbsp;13b und innergemeinschaftlichem Erwerb.</p>
             <ul>
               <li>Kennzahlen über die DATEV-Kontenfunktion</li>
               <li>ELSTER-Preflight und Testübermittlung</li>
@@ -555,6 +555,8 @@
               <dd>Korrekturen laufen über Gegenbuchungen. Ein Storno zieht die Nebenbücher mit: Bankumsatz, Anlage, Lohnlauf und offenen Posten.</dd>
             </div>
             <div>
+              <dt>Zwei-Faktor-Anmeldung</dt>
+              <dd>Die Anmeldung lässt sich mit einer Authenticator-App (TOTP) und Wiederherstellungscodes absichern, je Rolle auch verpflichtend.</dd>
               <dt>Verkettetes Audit-Log</dt>
               <dd>Jede Änderung landet unveränderlich im Audit-Log, je Mandant über Sequenznummer und Hash verkettet. Ein Kettenanker erkennt auch eine gekürzte Historie.</dd>
             </div>
@@ -983,17 +985,19 @@ Geprüft: 26 festgeschriebene Buchungen, 0 Belege, 131 Audit-Einträge.
               <li>Die GoBD-Funktionen sind eine technische Basis, keine Zertifizierung nach IDW&nbsp;PS&nbsp;880.</li>
               <li>Die produktive ELSTER-Übermittlung braucht eine lokale ERiC-Bibliothek und ein ELSTER-Zertifikat.</li>
               <li>Die Lohnbuchhaltung enthält noch keine ELStAM- und DEÜV-Meldungen.</li>
-              <li>Abgebildet ist die Sollversteuerung; Istversteuerung und Fremdwährungsbuchungen fehlen noch.</li>
+              <li>Die XRechnung ist nicht gegen den KoSIT-Validator geprüft.</li>
+              <li>Das Kassenbuch wird von Hand geführt und ersetzt keine TSE für elektronische Kassen.</li>
+              <li>Die Konsolidierung ist eine Auswertung mehrerer Gesellschaften, kein Konzernabschluss nach HGB.</li>
+              <li>Wechselkurse kommen von der EZB; die für die Umsatzsteuer maßgeblichen BMF-Monatskurse werden noch nicht importiert.</li>
             </ul>
           </div>
           <div>
             <h3>Als Nächstes geplant</h3>
             <ul class="checklist">
-              <li>Geschäftspartner in offenen Posten, Zahllauf, Mahnwesen und als DATEV-Personenkonten</li>
-              <li>Ausgangsrechnungen direkt in OpenBuchhaltung schreiben</li>
-              <li>Kassenbuch und Zwei-Faktor-Anmeldung</li>
-              <li>Istversteuerung und Fremdwährung</li>
-              <li>Konsolidierung mehrerer Gesellschaften</li>
+              <li>Rechnungen und Mahnungen direkt per E-Mail versenden</li>
+              <li>Geschäftspartner automatisch aus E-Rechnung, Beleg und Bankumsatz erkennen</li>
+              <li>Wiederkehrende Aufgaben im Hintergrund: Vorlagen buchen, AfA, Mahnlauf, Kontoabruf</li>
+              <li>Abschlagsrechnungen, wiederkehrende Rechnungen und Skonto</li>
             </ul>
           </div>
         </div>

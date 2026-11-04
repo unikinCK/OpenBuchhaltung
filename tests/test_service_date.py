@@ -353,7 +353,7 @@ def test_reversal_copies_the_service_date_and_neutralizes_the_period(
     )
 
     assert reversal.service_date == date(2026, 6, 30)
-    assert reversal.content_hash_version == 4
+    assert reversal.content_hash_version == 5
     assert _amounts(session, company, Q2)["81"] == Decimal("0")
     assert _amounts(session, company, Q4)["USt"] == Decimal("0.00")
 
@@ -508,7 +508,7 @@ def test_amend_refuses_finalized_and_locked_entries(session: Session) -> None:
         )
 
 
-def test_seal_version_4_covers_the_service_date_and_version_3_stays_valid(
+def test_seal_covers_the_service_date_and_version_3_stays_valid(
     session: Session,
 ) -> None:
     company = _company(session)
@@ -522,7 +522,7 @@ def test_seal_version_4_covers_the_service_date_and_version_3_stays_valid(
         service_date=date(2026, 6, 30),
     )
     finalized = finalize_journal_entry(session=session, journal_entry_id=entry.id, changed_by="t")
-    assert finalized.content_hash_version == 4
+    assert finalized.content_hash_version == 5
     sealed = finalized.content_hash
     finalized.service_date = date(2026, 7, 1)
     assert calculate_journal_entry_content_hash(finalized) != sealed

@@ -1016,7 +1016,7 @@ def test_partner_api_journal_exports_and_ui(tmp_path: Path) -> None:
         "partner_number,partner_name,service_date,"
         "foreign_currency_code,foreign_amount,exchange_rate"
     )
-    assert any(row.endswith("10000,Kunde Nord GmbH,") for row in rows)
+    assert any(row.endswith("10000,Kunde Nord GmbH,,,,") for row in rows)
 
     package = client.get(
         "/api/v1/exports/audit-package.zip",

@@ -47,6 +47,8 @@ können, was gebucht, exportiert und protokolliert wird.
   FinTS/HBCI-Direktabruf mit TAN-Flow, mehrere Bankkonten je Gesellschaft,
   Deduplizierung über Bankreferenzen, Matching, Saldenabgleich je Bankkonto,
   offene Posten und Zahlungsausgleich.
+- **Fremdwährung:** Wechselkurse von der EZB oder von Hand, offene Posten, Bankumsätze und Rechnungen in
+  Fremdwährung, Kursdifferenz beim Ausgleich, Stichtagsbewertung nach § 256a HGB; das Hauptbuch bleibt in Euro.
 - **Kassenbuch:** fortlaufende, verkettete und unveränderbare Einträge mit Tagessaldo,
   Kassensturz, Kassenbericht und automatischer Buchung; manuell geführt, ersetzt keine TSE.
 - **Arbeitskomfort:** Dashboard mit offenen Aufgaben (unverbuchte Umsätze,
