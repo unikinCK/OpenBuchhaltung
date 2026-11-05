@@ -8,6 +8,14 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Offene Posten: Bankumsatz nur bis zu seinem Betrag
+- **Behoben:** Derselbe Bankumsatz ließ sich beliebig oft zum Ausgleich offener Posten nutzen; jeder Aufruf ohne
+  Betrag zog erneut den vollen Umsatz ab. Jetzt verteilt sich ein Umsatz auf mehrere Posten (Sammelzahlung) nur bis
+  zu seinem Betrag: Ohne Betrag nimmt der Posten den Rest, ein höherer Betrag wird abgewiesen, ein ganz
+  zugeordneter Umsatz ebenso. Stornierte Ausgleiche geben ihren Teil wieder frei; Ausgleiche von Posten in
+  Fremdwährung belegen ihren gezahlten Euro-Betrag. Gilt in UI, REST und MCP. Zwei gleichzeitige Ausgleiche mit
+  demselben Umsatz laufen nacheinander.
+
 ### Fremdwährung
 - Wechselkurse je Mandant (EZB-Abruf und manuell), UI „Fremdwährung“, `GET`/`POST /api/v1/exchange-rates`,
   `POST /api/v1/exchange-rates/fetch`, MCP und CLI `flask fetch-exchange-rates`. Migration `20261103_0064`.

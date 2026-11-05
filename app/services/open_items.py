@@ -386,7 +386,18 @@ def settle_open_item(
     Währung des Postens (siehe ``_foreign_settlement``). Die Differenz zum Buchwert ist der
     Kursgewinn oder -verlust; gebucht wird sie, wenn die Zahlung auf dem Sammelkonto steht, im
     Zeitraum des Zahlungsdatums oder im nächsten offenen.
+
+    Ein Bankumsatz darf mehrere Posten bezahlen, zusammen aber nur bis zu seinem Betrag; was
+    stornierte Ausgleiche belegt hatten, ist wieder frei.
     """
+    if bank_transaction_id is not None:
+        # Erst den Umsatz sperren, dann den Posten, wie beim Storno: Zwei Ausgleiche mit demselben
+        # Umsatz laufen so nacheinander, der zweite sieht, was der erste schon belegt hat.
+        session.execute(
+            select(BankTransaction.id)
+            .where(BankTransaction.id == bank_transaction_id)
+            .with_for_update()
+        )
     item = session.execute(
         select(OpenItem)
         .where(OpenItem.id == open_item_id)
@@ -482,11 +493,21 @@ def settle_open_item(
                 f"Der Bankumsatz läuft in {bank_transaction.currency_code}, der Posten in "
                 f"{item.currency_code}."
             )
+        payment_left = (
+            _bank_transaction_left(session, item=item, bank_transaction=bank_transaction)
+            if bank_transaction is not None
+            else None
+        )
         settlement_amount = _settlement_amount(
             explicit_amount=amount,
-            bank_transaction=bank_transaction,
+            payment_left=payment_left,
             open_amount=item.open_amount,
         )
+        if payment_left is not None and settlement_amount > payment_left:
+            raise OpenItemError(
+                f"Der Betrag übersteigt den Bankumsatz, von ihm sind noch {payment_left} "
+                f"{item.currency_code} frei."
+            )
     if settlement_amount > item.open_amount:
         raise OpenItemError("Ausgleichsbetrag darf den offenen Betrag nicht übersteigen.")
 
@@ -977,16 +998,42 @@ def _book_fx_difference(
         raise OpenItemError(f"Kursdifferenz nicht gebucht: {exc}") from exc
 
 
+def _bank_transaction_left(
+    session: Session, *, item: OpenItem, bank_transaction: BankTransaction
+) -> Decimal:
+    """Was vom Umsatz noch frei ist: Betrag minus nicht stornierte Ausgleiche mit ihm.
+
+    Ausgleiche von Posten in Fremdwährung belegen ihren gezahlten Betrag in Firmenwährung.
+    """
+    payment = abs(bank_transaction.amount)
+    used = sum(
+        (
+            _paid_of(row)
+            for row in _settlements_of_payment(
+                session, entry_id=None, bank_transaction_id=bank_transaction.id
+            )
+        ),
+        Decimal("0.00"),
+    )
+    left = (payment - used).quantize(Decimal("0.01"))
+    if left <= 0:
+        raise OpenItemError(
+            f"Der Bankumsatz über {payment} {item.currency_code} ist schon vollständig "
+            "offenen Posten zugeordnet."
+        )
+    return left
+
+
 def _settlement_amount(
     *,
     explicit_amount: Decimal | None,
-    bank_transaction: BankTransaction | None,
+    payment_left: Decimal | None,
     open_amount: Decimal,
 ) -> Decimal:
     if explicit_amount is not None:
         return _positive_amount(explicit_amount)
-    if bank_transaction is not None:
-        return min(abs(bank_transaction.amount), open_amount).quantize(Decimal("0.01"))
+    if payment_left is not None:
+        return min(payment_left, open_amount)
     return open_amount
 
 
