@@ -35,7 +35,12 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
-from app.services.bank_proposals import booking_proposals
+from app.services.bank_proposals import (
+    book_transaction_to_open_item,
+    booking_proposals,
+    open_item_suggestions,
+    partner_matches,
+)
 from app.services.bank_rules import (
     BankRuleError,
     apply_rules,
@@ -45,6 +50,7 @@ from app.services.bank_rules import (
     set_rule_active,
 )
 from app.services.journal_entries import JournalEntryCreationError, resolve_partner_reference
+from app.services.open_items import OpenItemError
 from app.services.scoping import scoped_select
 from domain.models import Account, BankBookingRule, BankTransaction, JournalEntry
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -77,6 +83,7 @@ def _transaction_dict(transaction: BankTransaction) -> dict[str, object]:
         "currency_code": transaction.currency_code,
         "purpose": transaction.purpose,
         "counterparty": transaction.counterparty,
+        "counterparty_iban": transaction.counterparty_iban,
         "bank_reference": transaction.bank_reference,
         "status": transaction.status,
         "journal_entry_id": transaction.journal_entry_id,
@@ -315,8 +322,25 @@ def list_bank_transactions_via_api():
             if include_suggestions
             else None
         )
+        matches_by_tx = (
+            partner_matches(session=session, transactions=transactions)
+            if include_suggestions
+            else {}
+        )
+        items_by_tx = (
+            open_item_suggestions(
+                session=session, transactions=transactions, matches=matches_by_tx
+            )
+            if include_suggestions
+            else {}
+        )
         proposals_by_tx = (
-            booking_proposals(session=session, transactions=transactions)
+            booking_proposals(
+                session=session,
+                transactions=transactions,
+                matches=matches_by_tx,
+                item_suggestions=items_by_tx,
+            )
             if include_suggestions
             else {}
         )
@@ -336,6 +360,11 @@ def list_bank_transactions_via_api():
                 transaction_payload["booking_proposal"] = (
                     proposal.as_dict() if proposal else None
                 )
+                match = matches_by_tx.get(transaction.id)
+                transaction_payload["partner_match"] = match.as_dict() if match else None
+                transaction_payload["open_item_suggestions"] = [
+                    suggestion.as_dict() for suggestion in items_by_tx.get(transaction.id, [])
+                ]
             payload.append(transaction_payload)
 
         response_body: dict[str, object] = {
@@ -401,6 +430,7 @@ def create_bank_booking_rule_via_api():
                 tax_code_id=optional_int("tax_code_id"),
                 cost_center_id=optional_int("cost_center_id"),
                 profit_center_id=optional_int("profit_center_id"),
+                partner_id=optional_int("partner_id"),
                 changed_by=_api_changed_by(),
             )
         except BankRuleError as exc:
@@ -720,6 +750,48 @@ def match_bank_transaction_via_api(transaction_id: int):
         except BankImportError as exc:
             return jsonify({"error": str(exc)}), 422
         return jsonify(_transaction_dict(transaction)), 200
+
+
+@api_bp.post("/bank-transactions/<int:transaction_id>/book-open-item")
+def book_bank_transaction_to_open_item_via_api(transaction_id: int):
+    """Bucht den Umsatz auf das Sammelkonto des Postens und gleicht den Posten aus."""
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    try:
+        open_item_id = int(payload.get("open_item_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "open_item_id is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        transaction = session.get(BankTransaction, transaction_id)
+        if transaction is None or api_scoped_company(session, transaction.company_id) is None:
+            return jsonify({"error": "Bank transaction not found."}), 404
+        try:
+            item = book_transaction_to_open_item(
+                session=session,
+                transaction_id=transaction_id,
+                open_item_id=open_item_id,
+                description=(payload.get("description") or "").strip() or None,
+                changed_by=_api_changed_by(),
+            )
+        except (
+            BankImportError,
+            JournalEntryCreationError,
+            JournalEntryValidationError,
+            OpenItemError,
+        ) as exc:
+            return jsonify({"error": str(exc)}), 422
+        transaction = session.get(BankTransaction, transaction_id)
+        return jsonify(
+            {
+                "transaction": _transaction_dict(transaction),
+                "open_item_id": item.id,
+                "open_item_status": item.status,
+                "open_amount": str(item.open_amount),
+            }
+        )
 
 
 @api_bp.post("/bank-transactions/<int:transaction_id>/book")

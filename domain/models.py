@@ -980,9 +980,14 @@ class ReceiptMatchSuggestion(Base):
     tax_code_id: Mapped[int | None] = mapped_column(
         ForeignKey("tax_code.id", ondelete="SET NULL")
     )
+    # Nur bei eindeutiger Erkennung gesetzt; ein Vorschlag steht allein in ``partner_match``.
     partner_id: Mapped[int | None] = mapped_column(
         ForeignKey("business_partner.id", ondelete="SET NULL")
     )
+    # Ergebnis der Partnererkennung (``PartnerMatch.as_dict``) samt Kandidaten.
+    partner_match: Mapped[dict | None] = mapped_column(JSON)
+    supplier_iban: Mapped[str | None] = mapped_column(String(34))
+    due_date: Mapped[date | None] = mapped_column(Date)
     proposal_source: Mapped[str | None] = mapped_column(String(20))
     proposal_reason: Mapped[str | None] = mapped_column(Text)
     # Aufteilung je Steuersatz bei mehreren Sätzen: Liste von
@@ -1068,6 +1073,8 @@ class BankTransaction(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     purpose: Mapped[str] = mapped_column(String(255), nullable=False)
     counterparty: Mapped[str | None] = mapped_column(String(255))
+    # Gegen-IBAN aus dem Auszug für die Partnererkennung; nicht Teil des Dedup-Hashs.
+    counterparty_iban: Mapped[str | None] = mapped_column(String(34))
     # Bankseitige Referenz (CAMT AcctSvcrRef/EndToEndId, MT940-Bankreferenz);
     # fließt in den Dedup-Hash ein, damit echte Doppelumsätze unterscheidbar bleiben.
     bank_reference: Mapped[str | None] = mapped_column(String(64))
@@ -1155,6 +1162,10 @@ class BankBookingRule(Base):
     profit_center_id: Mapped[int | None] = mapped_column(
         ForeignKey("controlling_unit.id", ondelete="RESTRICT")
     )
+    # Optional: Die Regel setzt auch den Geschäftspartner der Buchung.
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="RESTRICT")
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
@@ -1162,6 +1173,7 @@ class BankBookingRule(Base):
 
     contra_account: Mapped[Account] = relationship(foreign_keys=[contra_account_id])
     tax_code: Mapped[TaxCode | None] = relationship(foreign_keys=[tax_code_id])
+    partner: Mapped[BusinessPartner | None] = relationship(foreign_keys=[partner_id])
 
 
 class OpenItem(Base):

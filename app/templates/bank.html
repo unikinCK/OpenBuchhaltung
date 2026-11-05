@@ -102,6 +102,7 @@
                 {% set rule = rule_by_tx.get(tx.id) %}
                 {% set transfer = transfer_by_tx.get(tx.id) %}
                 {% set proposal = proposal_by_tx.get(tx.id) %}
+                {% set match = partner_match_by_tx.get(tx.id) %}
                 {% set linked = entry_info.get(tx.journal_entry_id) if tx.journal_entry_id else none %}
                 <tr>
                   <td class="date">{{ tx.booking_date | datum }}</td>
@@ -109,6 +110,19 @@
                   <td>
                     <strong>{{ tx.counterparty or "–" }}</strong><br />
                     <span class="muted small">{{ tx.purpose }}</span>
+                    {% if tx.counterparty_iban %}<br /><span class="muted small">{{ tx.counterparty_iban }}</span>{% endif %}
+                    {% if tx.status == 'open' and match and match.status != 'none' %}
+                      <div class="entry-meta small">
+                        {% if match.partner %}<span class="badge badge-success">Partner</span> <span class="muted">{{ match.partner.name }} ({{ match.matched_on_labels | join(', ') }})</span>
+                        {% else %}<span class="badge badge-warning">Partner?</span> <span class="muted">{{ match.candidates | map(attribute='partner.name') | join(', ') }}</span>{% endif %}
+                      </div>
+                    {% endif %}
+                    {% if tx.status == 'open' and open_items_by_tx.get(tx.id) %}
+                      <div class="entry-meta small">
+                        <span class="badge badge-info">Offener Posten</span>
+                        <span class="muted">{{ open_items_by_tx.get(tx.id) | map(attribute='item.reference') | join(', ') }}</span>
+                      </div>
+                    {% endif %}
                     {% if tx.status == 'open' and (rule or transfer or proposal) %}
                       <div class="entry-meta small">
                         {% if proposal and proposal.source == 'history' %}<span class="badge badge-info">Wie zuletzt</span> <span class="muted">→ {{ account_link(proposal.contra_account.id, proposal.contra_account.code) }}{% if proposal.tax_code %} ({{ proposal.tax_code.code }}){% endif %}</span>{% endif %}
@@ -151,6 +165,10 @@
           {% set transfer = transfer_by_tx.get(tx.id) %}
           {% set proposal = proposal_by_tx.get(tx.id) %}
           {% set suggestions = suggestions_by_tx.get(tx.id, []) %}
+          {% set match = partner_match_by_tx.get(tx.id) %}
+          {% set item_suggestions = open_items_by_tx.get(tx.id, []) %}
+          {# Vorbelegt wird nur Eindeutiges: Regel, gewählter Partner der letzten Buchung, IBAN-Treffer. #}
+          {% set preselected_partner_id = (proposal.partner_id if proposal and proposal.partner_id else (match.partner.id if match and match.partner else none)) %}
           <div popover id="tx-panel-{{ tx.id }}" class="panel">
             <div class="panel-header">
               <div>
@@ -172,6 +190,23 @@
                     — kein Geldtransit-Konto (SKR03 1360, SKR04 1460) vorhanden, bitte unter Konten anlegen.
                   {% endif %}
                 </p>
+              {% endif %}
+
+              {% if item_suggestions %}
+                <div class="panel-section">
+                  <h4>Offenen Posten ausgleichen</h4>
+                  <p class="hint">Bucht den Umsatz auf das Sammelkonto des Postens, mit dessen Partner, und gleicht ihn aus.</p>
+                  <form method="post" action="{{ url_for('main.bank_book_open_item_action', transaction_id=tx.id) }}" class="inline-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                    <select name="open_item_id" required aria-label="Offener Posten">
+                      {% for suggestion in item_suggestions %}
+                        <option value="{{ suggestion.item.id }}">{{ suggestion.item.reference }} – {{ suggestion.item.partner.name if suggestion.item.partner else (suggestion.item.counterparty or "ohne Partner") }} – {{ suggestion.item.open_amount | betrag }}{% if suggestion.item.due_date %}, fällig {{ suggestion.item.due_date | datum }}{% endif %}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="secondary">Ausgleichen</button>
+                  </form>
+                </div>
               {% endif %}
 
               {% if suggestions %}
@@ -216,11 +251,26 @@
                         {% endfor %}
                       </select>
                     </div>
-                    <div class="field">
+                    <div class="field" data-partner-field>
                       <label for="partner-{{ tx.id }}">Geschäftspartner</label>
-                      <select id="partner-{{ tx.id }}" name="partner_id">
+                      {% if match and match.reason and match.status != 'none' %}
+                        <p class="hint">{% if match.partner %}<span class="badge badge-success">Erkannt</span>{% else %}<span class="badge badge-warning">Bitte bestätigen</span>{% endif %} {{ match.reason }}</p>
+                      {% endif %}
+                      {% if match and match.needs_confirmation %}
+                        <div class="partner-candidates">
+                          {% for candidate in match.candidates %}
+                            <button type="button" class="secondary btn-sm" data-partner-pick="{{ candidate.partner.id }}">{{ candidate.partner.name }}</button>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                      {% if match %}
+                        {% for warning in match.warnings %}
+                          <p class="callout callout-warning">{{ warning }}</p>
+                        {% endfor %}
+                      {% endif %}
+                      <select id="partner-{{ tx.id }}" name="partner_id" data-partner-select>
                         <option value="">Ohne Partner</option>
-                        {% for partner in partners %}<option value="{{ partner.id }}"{% if proposal and partner.id == proposal.partner_id %} selected{% endif %}>{{ partner.name }}</option>{% endfor %}
+                        {% for partner in partners %}<option value="{{ partner.id }}"{% if partner.id == preselected_partner_id %} selected{% endif %}>{{ partner.name }}</option>{% endfor %}
                       </select>
                     </div>
                     {% if cost_centers %}
@@ -538,6 +588,7 @@
                   <th>Muster</th>
                   <th>Gegenkonto</th>
                   <th>Steuer</th>
+                  <th>Partner</th>
                   <th class="actions"></th>
                 </tr>
               </thead>
@@ -547,6 +598,7 @@
                     <td>{{ rule.pattern }}</td>
                     <td>{{ account_link(rule.contra_account.id, rule.contra_account.code, rule.contra_account.name) }}</td>
                     <td>{{ rule.tax_code.code if rule.tax_code else "–" }}</td>
+                    <td>{{ rule.partner.name if rule.partner else "–" }}</td>
                     <td class="actions">
                       <form method="post" action="{{ url_for('main.bank_rule_deactivate_action', rule_id=rule.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
@@ -584,6 +636,13 @@
                   {% for account in contra_accounts if account.is_active %}
                     <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
                   {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="rule_partner">Geschäftspartner (optional)</label>
+                <select id="rule_partner" name="partner_id">
+                  <option value="">Ohne Partner</option>
+                  {% for partner in partners %}<option value="{{ partner.id }}">{{ partner.name }}</option>{% endfor %}
                 </select>
               </div>
               <div class="field">

@@ -2,10 +2,10 @@
 
 Quellen in dieser Reihenfolge:
 
-1. ``history`` – letzte Buchung desselben Geschäftspartners (erkannt an USt-IdNr.
-   oder Name) bzw. – ohne Stammsatz – die letzte Buchung, deren Buchungstext den
-   Lieferantennamen enthält („wie zuletzt“). Übernommen wird das Aufwands- bzw.
-   Anlagekonto dieser Buchung.
+1. ``history`` – letzte Buchung desselben Geschäftspartners (siehe
+   ``partner_recognition``) bzw. – ohne Stammsatz – die letzte Buchung, deren
+   Buchungstext den Lieferantennamen enthält („wie zuletzt“). Übernommen wird das
+   Aufwands- bzw. Anlagekonto dieser Buchung.
 2. ``ki`` – das Konto, das das LLM beim Auslesen aus dem Kontenplan gewählt hat
    (:attr:`ReceiptExtraction.suggested_account_code`).
 
@@ -14,13 +14,15 @@ Satz); bei Reverse Charge (§ 13b UStG) und ohne Steuer bleibt er leer. Weist de
 Beleg mehrere Steuersätze aus, enthält der Vorschlag die Aufteilung je Satz
 (``tax_lines``) mit dem jeweiligen Vorsteuer-Code.
 
+Der Partner des Vorschlags ist nur bei eindeutiger Erkennung gesetzt. Ein unsicherer
+Treffer steht allein in ``partner_match`` und bleibt ein Vorschlag zum Bestätigen.
+
 Grundlage für die Vorbelegung der Buchungsmasken (Beleg-OCR, Belegabgleich) und
 das Feld ``booking_proposal`` der REST-/MCP-Antworten.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -28,8 +30,19 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.services.incoming_invoice import input_tax_code_for_rate
+from app.services.partner_identifiers import find_ibans, find_tax_numbers, find_vat_ids
+from app.services.partner_recognition import (
+    NO_MATCH,
+    PartnerMatch,
+    PartnerSignals,
+    load_partner_directory,
+    name_tokens,
+    proposed_partner_data,
+)
+from app.services.partners import partner_display_number
 from app.services.receipt_ocr import ReceiptExtraction
 from domain.models import (
+    SUBLEDGER_CREDITOR,
     Account,
     BusinessPartner,
     FixedAsset,
@@ -37,35 +50,6 @@ from domain.models import (
     JournalEntryLine,
     TaxCode,
 )
-
-# Rechtsformzusätze und Füllwörter, die beim Namensvergleich nicht zählen.
-_NAME_NOISE = {
-    "gmbh",
-    "ag",
-    "kg",
-    "ug",
-    "ohg",
-    "gbr",
-    "ek",
-    "mbh",
-    "co",
-    "ltd",
-    "llc",
-    "inc",
-    "pbc",
-    "opco",
-    "sarl",
-    "bv",
-    "the",
-    "und",
-    "and",
-    "international",
-    "distribution",
-    "deutschland",
-    "germany",
-    "europe",
-    "emea",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +83,10 @@ class ReceiptBookingProposal:
     history_entry_id: int | None = None
     # Aufteilung je Steuersatz; leer bei einem einzigen Satz.
     tax_lines: tuple[ProposedTaxLine, ...] = ()
+    partner_match: PartnerMatch = NO_MATCH
+    # Bankverbindung des Belegs ohne eigene IBAN (Snapshot für den offenen Posten).
+    supplier_iban: str | None = None
+    proposed_partner: dict[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
         partner = self.partner
@@ -112,17 +100,15 @@ class ReceiptBookingProposal:
             "tax_code": self.tax_code.code if self.tax_code else None,
             "partner_id": partner.id if partner else None,
             "partner_number": (
-                (partner.creditor_number or partner.debtor_number) if partner else None
+                partner_display_number(partner, SUBLEDGER_CREDITOR) if partner else None
             ),
             "partner_name": partner.name if partner else None,
+            "partner_match": self.partner_match.as_dict(),
+            "supplier_iban": self.supplier_iban,
+            "proposed_partner": self.proposed_partner,
             "history_entry_id": self.history_entry_id,
             "tax_lines": [line.as_dict() for line in self.tax_lines],
         }
-
-
-def _name_tokens(value: str | None) -> set[str]:
-    tokens = re.findall(r"[a-z0-9äöüß]+", (value or "").lower())
-    return {token for token in tokens if token not in _NAME_NOISE and len(token) > 1}
 
 
 def booking_accounts(session: Session, company_id: int) -> list[Account]:
@@ -155,34 +141,19 @@ def account_choices(session: Session, company_id: int) -> list[tuple[str, str]]:
     return [(account.code, account.name) for account in booking_accounts(session, company_id)]
 
 
-def find_partner(
-    session: Session, company_id: int, *, supplier: str | None, vat_id: str | None
-) -> BusinessPartner | None:
-    """Geschäftspartner zum Beleg: erst per USt-IdNr., dann per Namensähnlichkeit."""
-    partners = session.execute(
-        select(BusinessPartner).where(
-            BusinessPartner.company_id == company_id, BusinessPartner.is_active.is_(True)
-        )
-    ).scalars().all()
-    if vat_id:
-        wanted = re.sub(r"\s", "", vat_id).upper()
-        for partner in partners:
-            if partner.vat_id and re.sub(r"\s", "", partner.vat_id).upper() == wanted:
-                return partner
-    supplier_tokens = _name_tokens(supplier)
-    if not supplier_tokens:
-        return None
-    best: tuple[float, BusinessPartner] | None = None
-    for partner in partners:
-        partner_tokens = _name_tokens(partner.name)
-        if not partner_tokens:
-            continue
-        overlap = len(supplier_tokens & partner_tokens)
-        score = overlap / len(partner_tokens)
-        # Alle Namensbestandteile des Stammsatzes müssen im Belegnamen stehen.
-        if score == 1 and (best is None or overlap > best[0]):
-            best = (overlap, partner)
-    return best[1] if best else None
+def receipt_partner_signals(extraction: ReceiptExtraction) -> PartnerSignals:
+    """Kennungen des Belegs: was die KI als Lieferant gelesen hat und was im Text steht.
+
+    Partnernummern zählen hier nicht: „Kundennummer“ ist auf einer Eingangsrechnung unsere
+    Nummer beim Lieferanten und hat mit unserem Nummernkreis nichts zu tun.
+    """
+    vat_ids = [extraction.supplier_vat_id] if extraction.supplier_vat_id else []
+    return PartnerSignals(
+        vat_ids=tuple(dict.fromkeys([*vat_ids, *find_vat_ids(extraction.raw_text)])),
+        tax_numbers=tuple(find_tax_numbers(extraction.raw_text)),
+        ibans=tuple(find_ibans(extraction.raw_text)),
+        name=extraction.supplier,
+    )
 
 
 def _last_line(
@@ -228,7 +199,7 @@ def _history_line(
         if found is not None:
             return found
     # Ohne Stammsatz: markantestes Namenswort im Buchungstext suchen.
-    tokens = sorted(_name_tokens(supplier), key=len, reverse=True)
+    tokens = sorted(name_tokens(supplier), key=len, reverse=True)
     tokens = [token for token in tokens if len(token) >= 4 and not token.isdigit()]
     if not tokens:
         return None
@@ -289,12 +260,26 @@ def propose_receipt_booking(
 ) -> ReceiptBookingProposal:
     """Kontierungsvorschlag für einen ausgelesenen Beleg."""
     accounts = {account.id: account for account in booking_accounts(session, company_id)}
-    partner = find_partner(
-        session,
-        company_id,
-        supplier=extraction.supplier,
-        vat_id=extraction.supplier_vat_id,
+    directory = load_partner_directory(session, company_id)
+    signals = receipt_partner_signals(extraction)
+    match = directory.match(signals, role=SUBLEDGER_CREDITOR)
+    partner = match.partner
+    supplier_iban = next(iter(directory.foreign_ibans(signals)), None)
+    proposed_partner = (
+        None
+        if partner is not None
+        else proposed_partner_data(
+            name=extraction.supplier,
+            vat_id=next(iter(directory.foreign_vat_ids(signals)), None),
+            tax_number=next(iter(signals.tax_numbers), None),
+            iban=supplier_iban,
+        )
     )
+    # Für „wie zuletzt“ reicht ein einzelner Kandidat: Das Konto bleibt ein Vorschlag, der
+    # Partner wird dadurch nicht zugeordnet.
+    history_partner = partner
+    if history_partner is None and len(match.candidates) == 1:
+        history_partner = match.candidates[0].partner
     tax_code = _tax_code_for(session, company_id, extraction)
     tax_lines = propose_tax_lines(
         session, company_id, extraction.tax_lines, reverse_charge=extraction.reverse_charge
@@ -303,13 +288,18 @@ def propose_receipt_booking(
     if extraction.reverse_charge:
         notes.append("Reverse Charge: ohne Vorsteuer-Code, § 13b-Steuer selbst buchen.")
 
+    common = dict(
+        partner_match=match,
+        supplier_iban=supplier_iban,
+        proposed_partner=proposed_partner,
+    )
     history = _history_line(
-        session, company_id, set(accounts), partner=partner, supplier=extraction.supplier
+        session, company_id, set(accounts), partner=history_partner, supplier=extraction.supplier
     )
     if history is not None:
         line, entry = history
         account = accounts[line.account_id]
-        who = partner.name if partner else extraction.supplier
+        who = history_partner.name if history_partner else extraction.supplier
         reason = (
             f"Wie zuletzt bei {who}: Buchung {entry.posting_number} vom "
             f"{entry.entry_date:%d.%m.%Y} auf {account.code} {account.name}."
@@ -322,6 +312,7 @@ def propose_receipt_booking(
             partner=partner,
             history_entry_id=entry.id,
             tax_lines=tax_lines,
+            **common,
         )
 
     if extraction.suggested_account_code:
@@ -338,6 +329,7 @@ def propose_receipt_booking(
                 tax_code=tax_code,
                 partner=partner,
                 tax_lines=tax_lines,
+                **common,
             )
 
     return ReceiptBookingProposal(
@@ -346,4 +338,5 @@ def propose_receipt_booking(
         tax_code=tax_code,
         partner=partner,
         tax_lines=tax_lines,
+        **common,
     )

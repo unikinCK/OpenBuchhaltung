@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% from "_receipt_booking.html" import skip_open_item_field %}
+
 {% block title %}E-Rechnung – OpenBuchhaltung{% endblock %}
 
 {% block content %}
@@ -17,13 +19,27 @@
         Die strukturierte Rechnung (XML) wird ausgelesen und als Eingangsrechnung gebucht:
         Netto auf das Aufwandskonto (Soll), Steuer auf das Steuerkonto (Soll), Brutto auf das
         Kreditorenkonto (Haben). Das XML wird als Beleg gespeichert und mit der Buchung verknüpft.
+        Nach der Dateiauswahl zeigt die Prüfung den erkannten Lieferanten.
       </p>
       <form method="post" action="{{ url_for('main.einvoice_book_action') }}" enctype="multipart/form-data" class="stacked">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
 
         <label for="einvoice_xml">Rechnungs-XML (XRechnung UBL oder ZUGFeRD/CII)</label>
-        <input id="einvoice_xml" name="einvoice_xml" type="file" accept=".xml,text/xml,application/xml" required />
+        <input id="einvoice_xml" name="einvoice_xml" type="file" accept=".xml,text/xml,application/xml" required
+               data-einvoice-preview="{{ url_for('main.einvoice_preview_action') }}"
+               data-einvoice-target="#einvoice-preview" />
+
+        <div id="einvoice-preview">
+          <label for="partner_id">Geschäftspartner</label>
+          <select id="partner_id" name="partner_id">
+            <option value="auto">Automatisch: nur ein eindeutiger Treffer</option>
+            <option value="">Ohne Geschäftspartner</option>
+            {% for partner in partners %}
+              <option value="{{ partner.id }}">{{ partner.creditor_number or partner.debtor_number }} {{ partner.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
         <label for="expense_account_id">Aufwandskonto (Netto, Soll)</label>
         <select id="expense_account_id" name="expense_account_id" required>
@@ -86,6 +102,8 @@
           {% endfor %}
         </select>
 
+        {{ skip_open_item_field() }}
+
         <button type="submit">E-Rechnung verbuchen</button>
       </form>
     {% endif %}
@@ -112,8 +130,17 @@
         <label for="issue_date">Rechnungsdatum</label>
         <input id="issue_date" name="issue_date" type="date" value="{{ today }}" required />
 
+        <label for="buyer_partner_id">Käufer aus dem Partnerstamm</label>
+        <select id="buyer_partner_id" name="buyer_partner_id">
+          <option value="">Nicht aus dem Stamm</option>
+          {% for partner in partners if partner.debtor_number %}
+            <option value="{{ partner.id }}">{{ partner.debtor_number }} {{ partner.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="hint">Der Stamm füllt die Felder, die unten leer bleiben.</p>
+
         <label for="buyer_name">Käufer (Name)</label>
-        <input id="buyer_name" name="buyer_name" required />
+        <input id="buyer_name" name="buyer_name" />
 
         <label for="buyer_street">Käufer Straße</label>
         <input id="buyer_street" name="buyer_street" />

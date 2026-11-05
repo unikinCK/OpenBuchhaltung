@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.audit_log import log_audit_event
 from app.services.compliance_integrity import seal_journal_entry
 from app.services.controlling import ControllingError, validate_controlling_assignment
+from app.services.open_items import close_open_item_by_cancellation
 from app.services.partners import (
     PartnerError,
     find_partner_by_number,
@@ -1596,6 +1597,25 @@ def _release_subledgers(
             },
         )
         released.setdefault("open_items", []).append(item.id)
+
+    # OPOS: Mit der Eingangsrechnung entfällt ihre Schuld, sonst stünde sie weiter im Zahllauf.
+    # Forderungen schließt das Storno der Ausgangsrechnung selbst.
+    invoice_items = (
+        session.execute(
+            select(OpenItem).where(
+                OpenItem.journal_entry_id == original.id,
+                OpenItem.item_type == "payable",
+                OpenItem.status == "open",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for item in invoice_items:
+        close_open_item_by_cancellation(
+            session=session, item=item, reversal_entry=reversal, changed_by=changed_by
+        )
+        released.setdefault("cancelled_open_items", []).append(item.id)
 
     session.flush()
     return released

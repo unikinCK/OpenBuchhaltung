@@ -27,8 +27,18 @@ from app.services.journal_entries import (
     create_journal_entry,
     parse_decimal,
 )
+from app.services.open_items import OpenItemError, OpenItemInput, create_open_item
+from app.services.partner_identifiers import clean_bic, clean_iban
 from domain.formatting import format_rate
-from domain.models import Account, BusinessPartner, Company, JournalEntry, TaxCode
+from domain.models import (
+    SUBLEDGER_CREDITOR,
+    Account,
+    BusinessPartner,
+    Company,
+    JournalEntry,
+    OpenItem,
+    TaxCode,
+)
 
 
 class IncomingInvoiceError(ValueError):
@@ -288,6 +298,63 @@ def book_incoming_invoice(
         ),
         commit=commit,
     )
+
+
+def create_invoice_open_item(
+    *,
+    session: Session,
+    company: Company,
+    entry: JournalEntry,
+    creditor_account_id: int,
+    amount: Decimal,
+    reference: str | None,
+    changed_by: str,
+    partner_id: int | None = None,
+    counterparty: str | None = None,
+    due_date: date | None = None,
+    iban: str | None = None,
+    bic: str | None = None,
+) -> OpenItem | None:
+    """Offener Posten zur gebuchten Eingangsrechnung, ohne Commit (Review #5).
+
+    Entsteht nur auf einem Kreditoren-Sammelkonto; eine direkt gegen Bank oder Kasse gebuchte
+    Rechnung ist schon bezahlt. Die Fälligkeit kommt aus dem Beleg, sonst aus dem Zahlungsziel
+    des Partners.
+
+    Die IBAN im Partnerstamm geht vor: Eine Rechnung darf den Zahlungsempfänger eines bekannten
+    Partners nicht umbiegen. Die IBAN des Belegs gilt nur, wenn der Stamm keine kennt, und der
+    Partnerstamm selbst ändert sich dadurch nie.
+    """
+    account = session.get(Account, creditor_account_id)
+    if account is None or account.subledger != SUBLEDGER_CREDITOR or amount <= Decimal("0.00"):
+        return None
+    partner = session.get(BusinessPartner, partner_id) if partner_id else None
+    if partner is not None and partner.creditor_number is None:
+        partner = None  # Das Sammelkonto trägt nur Lieferanten (siehe book_incoming_invoice).
+    if partner is not None and partner.iban:
+        iban = bic = None
+    try:
+        return create_open_item(
+            session=session,
+            payload=OpenItemInput(
+                company_id=company.id,
+                account_id=account.id,
+                item_type="payable",
+                reference=(reference or "").strip()[:120] or entry.posting_number,
+                entry_date=entry.entry_date,
+                amount=amount,
+                changed_by=changed_by,
+                journal_entry_id=entry.id,
+                counterparty=None if partner is not None else (counterparty or "")[:255] or None,
+                due_date=due_date,
+                counterparty_iban=clean_iban(iban),
+                counterparty_bic=clean_bic(bic),
+                partner_id=partner.id if partner is not None else None,
+            ),
+            commit=False,
+        )
+    except OpenItemError as exc:
+        raise IncomingInvoiceError(str(exc), code="open_item") from exc
 
 
 def _split_tax_code(session: Session, company: Company, split: InvoiceTaxSplit) -> TaxCode:

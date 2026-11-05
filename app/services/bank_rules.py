@@ -1,8 +1,8 @@
 """Auto-Kontierungsregeln für Bankumsätze.
 
 Eine Regel ordnet Umsätzen anhand eines Teilstrings in Verwendungszweck
-oder Gegenseite ein Gegenkonto (plus optional Steuercode und Controlling-
-Dimensionen) zu. Regeln liefern Vorschläge auf der Bank-Seite und können
+oder Gegenseite ein Gegenkonto (plus optional Steuercode, Controlling-
+Dimensionen und Geschäftspartner) zu. Regeln liefern Vorschläge auf der Bank-Seite und können
 per Regel-Lauf alle offenen Treffer direkt verbuchen.
 """
 
@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.audit_log import log_audit_event
 from app.services.bank_import import BankImportError, book_transaction
 from app.services.journal_entries import JournalEntryCreationError
+from app.services.partners import PartnerError
 from domain.formatting import format_amount
 from domain.models import (
     Account,
     BankBookingRule,
     BankTransaction,
+    BusinessPartner,
     Company,
     ControllingUnit,
     TaxCode,
@@ -52,6 +54,7 @@ def serialize_rule(rule: BankBookingRule) -> dict[str, object]:
         "tax_code_id": rule.tax_code_id,
         "cost_center_id": rule.cost_center_id,
         "profit_center_id": rule.profit_center_id,
+        "partner_id": rule.partner_id,
         "is_active": rule.is_active,
         "created_at": rule.created_at.isoformat(),
     }
@@ -66,6 +69,7 @@ def create_rule(
     tax_code_id: int | None = None,
     cost_center_id: int | None = None,
     profit_center_id: int | None = None,
+    partner_id: int | None = None,
     changed_by: str,
 ) -> BankBookingRule:
     company = session.get(Company, company_id)
@@ -89,6 +93,12 @@ def create_rule(
         unit = session.get(ControllingUnit, unit_id)
         if unit is None or unit.company_id != company.id or unit.unit_type != expected:
             raise BankRuleError("Controlling-Einheit nicht gefunden.")
+    if partner_id is not None:
+        partner = session.get(BusinessPartner, partner_id)
+        if partner is None or partner.company_id != company.id:
+            raise BankRuleError("Geschäftspartner nicht gefunden.")
+        if not partner.is_active:
+            raise BankRuleError(f"{partner.name} ist inaktiv und darf nicht bebucht werden.")
 
     rule = BankBookingRule(
         tenant_id=company.tenant_id,
@@ -98,6 +108,7 @@ def create_rule(
         tax_code_id=tax_code_id,
         cost_center_id=cost_center_id,
         profit_center_id=profit_center_id,
+        partner_id=partner_id,
     )
     session.add(rule)
     try:
@@ -114,7 +125,11 @@ def create_rule(
         entity_id=str(rule.id),
         action="created",
         changed_by=changed_by,
-        payload={"pattern": pattern, "contra_account_id": contra_account_id},
+        payload={
+            "pattern": pattern,
+            "contra_account_id": contra_account_id,
+            "partner_id": partner_id,
+        },
     )
     session.commit()
     session.refresh(rule)
@@ -130,6 +145,7 @@ def list_rules(
         .options(
             selectinload(BankBookingRule.contra_account),
             selectinload(BankBookingRule.tax_code),
+            selectinload(BankBookingRule.partner),
         )
         .order_by(BankBookingRule.pattern)
     )
@@ -222,11 +238,17 @@ def apply_rules(
                 tax_code_id=rule.tax_code_id,
                 cost_center_id=rule.cost_center_id,
                 profit_center_id=rule.profit_center_id,
+                partner_id=rule.partner_id,
                 description=f"Bank: {transaction.purpose} (Regel: {rule.pattern})",
                 changed_by=changed_by,
             )
             report.booked += 1
-        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
+        except (
+            BankImportError,
+            JournalEntryCreationError,
+            JournalEntryValidationError,
+            PartnerError,
+        ) as exc:
             session.rollback()
             report.errors.append(
                 f"Umsatz {transaction.id} ({transaction.booking_date:%d.%m.%Y}, "

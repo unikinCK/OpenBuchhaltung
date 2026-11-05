@@ -132,7 +132,11 @@ CHAT_BLOCKED_TOOL_NAMES = {
 }
 
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.
-CHAT_READ_ONLY_POST_TOOLS = {"preview_income_tax_return"}
+CHAT_READ_ONLY_POST_TOOLS = {
+    "preview_income_tax_return",
+    "recognize_partner",
+    "preview_einvoice",
+}
 
 # Seltene Fachgebiete blendet der Chat erst auf Anforderung ein (``load_tools``): Jede Definition
 # belegt bei jeder Anfrage Platz im Kontext des Modells, und das Budget aus Prompt und Tools ist
@@ -194,6 +198,14 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "verify_audit_log_integrity",
             "verify_compliance_integrity",
             "export_audit_package",
+        ),
+    ),
+    "partnererkennung": (
+        "Partner erkennen, E-Rechnung prüfen, Umsatz auf offenen Posten buchen",
+        (
+            "recognize_partner",
+            "preview_einvoice",
+            "book_bank_transaction_to_open_item",
         ),
     ),
     "rechnungen": (

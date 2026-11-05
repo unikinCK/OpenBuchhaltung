@@ -75,6 +75,7 @@ class ReceiptExtraction:
     tip_amount: Decimal | None = None
     reverse_charge: bool = False
     description: str | None = None
+    due_date: date | None = None
     # Vom LLM aus dem Kontenplan gewählte Kontonummer (nur mit Kontenliste).
     suggested_account_code: str | None = None
     # KI-Kontrolle: ob und mit welchem Ergebnis ein LLM gegengeprüft/ergänzt hat.
@@ -677,6 +678,19 @@ def _find_tax_rate(text: str) -> Decimal | None:
     return max(set(rates), key=rates.count)
 
 
+_DUE_DATE_RE = re.compile(
+    r"(?:zahlbar\s+bis(?:\s+zum)?|f(?:ä|ae)llig(?:keit)?(?:\s+am)?|zahlungsziel(?:\s+bis)?|"
+    r"due\s+date|payable\s+by)[:\s]*(\d{1,2}\.\d{1,2}\.\d{2,4}|\d{4}-\d{2}-\d{2})",
+    re.IGNORECASE,
+)
+
+
+def _find_due_date(text: str) -> date | None:
+    """Fälligkeit nur hinter einer Bezeichnung; sonst wäre es irgendein Datum des Belegs."""
+    match = _DUE_DATE_RE.search(text)
+    return _find_invoice_date(match.group(1)) if match else None
+
+
 def _find_invoice_date(text: str) -> date | None:
     """Erstes plausibles Datum (2000 bis nächstes Jahr) im Text."""
     for match in re.finditer(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})\b", text):
@@ -832,6 +846,7 @@ def analyze_receipt_text(text: str) -> ReceiptExtraction:
     result.gross_amount = gross
     result.tax_rate = rate
     result.invoice_date = _find_invoice_date(text)
+    result.due_date = _find_due_date(text)
     result.invoice_number = _find_invoice_number(text)
     result.supplier = _find_supplier(text)
     result.currency_code = _find_currency(text)

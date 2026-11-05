@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import case, func, select
 
 from app.services.partner_ledger import (
@@ -27,6 +27,7 @@ from app.services.partners import (
     partner_history,
     set_partner_bank_details,
     update_partner,
+    validate_bank_details,
 )
 from app.web.blueprint import main_bp
 from app.web.helpers import (
@@ -96,6 +97,18 @@ def _intercompany_choices(session, company_id: int) -> list[dict[str, Any]]:
         .order_by(Company.name)
     ).all()
     return [{"id": row.id, "name": row.name} for row in rows]
+
+
+_QUICK_CREATE_FIELDS = (
+    "name",
+    "vat_id",
+    "tax_number",
+    "street",
+    "postal_code",
+    "city",
+    "country_code",
+    "email",
+)
 
 
 def _form_fields() -> dict[str, Any]:
@@ -270,6 +283,63 @@ def create_partner_from_form():
     flash(f"Geschäftspartner „{partner_name}“ wurde angelegt.", "success")
     _flash_hints(hints)
     return redirect(url_for("main.partner_detail_page", partner_id=partner_id))
+
+
+@main_bp.post("/partner/schnellanlage")
+def quick_create_partner():
+    """„Lieferant anlegen“ in den Buchungsmasken (von app.js aufgerufen): bleibt auf der Seite."""
+    company_id = request.form.get("company_id", type=int)
+    if not company_id:
+        abort(404)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            validate_bank_details(request.form.get("iban"), request.form.get("bic"))
+            partner = create_partner(
+                session=session,
+                company=company,
+                changed_by=changed_by(),
+                is_supplier=True,
+                **{
+                    field: request.form.get(field, "")
+                    for field in _QUICK_CREATE_FIELDS
+                    if request.form.get(field)
+                },
+            )
+            iban = request.form.get("iban", "").strip()
+            bic = request.form.get("bic", "").strip()
+            if iban or bic:
+                set_partner_bank_details(
+                    session=session,
+                    partner=partner,
+                    changed_by=changed_by(),
+                    iban=iban,
+                    bic=bic,
+                )
+        except PartnerError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 422
+        hints = duplicate_hints(
+            session=session,
+            company_id=company.id,
+            name=partner.name,
+            vat_id=partner.vat_id,
+            iban=partner.iban,
+            exclude_id=partner.id,
+        )
+        session.commit()
+        return (
+            jsonify(
+                {
+                    "id": partner.id,
+                    "name": partner.name,
+                    "number": partner.creditor_number,
+                    "hints": hints,
+                }
+            ),
+            201,
+        )
 
 
 def _load_partner(session, partner_id: int) -> BusinessPartner:
