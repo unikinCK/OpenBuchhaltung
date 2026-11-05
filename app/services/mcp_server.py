@@ -3172,7 +3172,8 @@ TOOLS: list[ToolSpec] = [
         name="preview_einvoice",
         description=(
             "Liest eine E-Rechnung ohne zu buchen: Rechnungsdaten, erkannter Lieferant "
-            "(partner_match) und Vorbelegung für create_partner (proposed_partner)."
+            "(partner_match) und Vorbelegung für create_partner (proposed_partner, IBAN und BIC "
+            "nur zur Anzeige: Bankdaten laufen über set_partner_bank_details)."
         ),
         input_schema={
             "type": "object",

@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -309,6 +310,32 @@ def test_vat_id_of_one_and_iban_of_other_partner_are_ambiguous(session):
     assert match.status == STATUS_AMBIGUOUS
     assert match.partner is None
     assert len(match.candidates) == 2
+
+
+def test_iban_of_one_under_name_of_other_partner_is_ambiguous(session):
+    """Der bekannte Absender mit der Bankverbindung eines anderen wird nicht still zugeordnet."""
+    company = _company(session)
+    owner = _partner(session, company, "Kontoinhaber GmbH", iban=IBAN_A)
+    named = _partner(session, company, "Absender GmbH")
+
+    match = _match(session, company, ibans=(IBAN_A,), name="Absender GmbH")
+
+    assert match.status == STATUS_AMBIGUOUS
+    assert match.partner is None
+    assert [c.partner.id for c in match.candidates] == [owner.id, named.id]
+    assert match.candidates[1].matched_on == ("name",)
+
+
+def test_unknown_name_does_not_contradict_hard_identifier(session):
+    """Banken und Belege schreiben Namen anders; nur ein anderer bekannter Partner widerspricht."""
+    company = _company(session)
+    owner = _partner(session, company, "Kontoinhaber GmbH", iban=IBAN_A)
+    _partner(session, company, "Absender GmbH")
+
+    for name in ("Ganz anderer Name", "KONTOINHABER", None):
+        match = _match(session, company, ibans=(IBAN_A,), name=name)
+        assert match.status == STATUS_UNIQUE
+        assert match.partner.id == owner.id
 
 
 def test_required_role_resolves_duplicate_records(session):
@@ -871,6 +898,70 @@ def test_reversal_closes_open_item_of_incoming_invoice(books):
     assert item.open_amount == Decimal("0.00")
 
 
+def _pay_invoice(books, body, csv_row: str) -> int:
+    tx_id = _api_bank_transaction(books, csv_row)
+    with books.factory() as session:
+        book_transaction_to_open_item(
+            session=session,
+            transaction_id=tx_id,
+            open_item_id=body["open_item_id"],
+            changed_by="tester",
+        )
+        return session.get(BankTransaction, tx_id).journal_entry_id
+
+
+def _reverse(books, entry_id: int, day: date = date(2026, 7, 20)) -> None:
+    with books.factory() as session:
+        reverse_journal_entry(
+            session=session, journal_entry_id=entry_id, reversal_date=day, changed_by="tester"
+        )
+
+
+def test_partly_paid_invoice_stays_closed_after_both_reversals(books):
+    books.partner(vat_id=VAT_A)
+    body = books.import_invoice()
+    payment = _pay_invoice(books, body, "01.07.2026;Teilzahlung;Muster;;-40,00")
+    assert books.open_item(body["open_item_id"]).open_amount == Decimal("79.00")
+
+    _reverse(books, body["journal_entry_id"])
+    item = books.open_item(body["open_item_id"])
+    assert item.status == "settled"
+    assert item.open_amount == Decimal("0.00")
+
+    _reverse(books, payment)
+    item = books.open_item(body["open_item_id"])
+    assert item.status == "settled"
+    assert item.open_amount == Decimal("0.00")
+
+
+def test_paid_invoice_stays_closed_when_payment_is_reversed_after_invoice(books):
+    books.partner(vat_id=VAT_A)
+    body = books.import_invoice()
+    payment = _pay_invoice(books, body, "01.07.2026;Zahlung;Muster;;-119,00")
+
+    _reverse(books, body["journal_entry_id"])
+    assert books.open_item(body["open_item_id"]).status == "settled"
+    _reverse(books, payment)
+
+    item = books.open_item(body["open_item_id"])
+    assert item.status == "settled"
+    assert item.open_amount == Decimal("0.00")
+
+
+def test_payment_reversed_before_invoice_reopens_then_closes(books):
+    books.partner(vat_id=VAT_A)
+    body = books.import_invoice()
+    payment = _pay_invoice(books, body, "01.07.2026;Zahlung;Muster;;-119,00")
+
+    _reverse(books, payment)
+    item = books.open_item(body["open_item_id"])
+    assert item.status == "open"
+    assert item.open_amount == Decimal("119.00")
+
+    _reverse(books, body["journal_entry_id"])
+    assert books.open_item(body["open_item_id"]).status == "settled"
+
+
 def test_preview_books_nothing_and_proposes_new_supplier(books):
     response = books.client.post(
         "/api/v1/einvoices/preview",
@@ -1261,15 +1352,107 @@ def _upload_document(books) -> int:
             tenant_id=company.tenant_id,
             company_id=company.id,
             file_name="beleg.pdf",
-            storage_key="/tmp/beleg.pdf",
+            storage_key=f"/tmp/{uuid4().hex}.pdf",
             mime_type="application/pdf",
-            file_sha256="a" * 64,
+            file_sha256=uuid4().hex * 2,
             file_size_bytes=1024,
             document_date=date(2026, 6, 15),
         )
         session.add(document)
         session.commit()
         return document.id
+
+
+def _ocr_page(books, lines: list[str]) -> str:
+    from tests.test_receipt_matching import _pdf_with_text
+
+    _login(books)
+    response = books.client.post(
+        "/belege/ocr/vorschlag",
+        data={
+            "company_id": str(books.company_id),
+            "document_date": "2026-06-15",
+            "document_file": (BytesIO(_pdf_with_text(lines)), "beleg.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    return response.get_data(as_text=True)
+
+
+OCR_LINES = [
+    "Muster Lieferant GmbH",
+    "Rechnung Nr. B-1",
+    "Rechnungsdatum: 15.06.2026",
+    "Zahlbar bis 01.07.2026",
+    "Nettobetrag 100,00 EUR",
+    "MwSt 19 % 19,00 EUR",
+    "Gesamtbetrag 119,00 EUR",
+]
+
+
+def test_ocr_page_shows_name_match_as_suggestion_and_offers_creation(books):
+    partner_id = books.partner()
+
+    html = _ocr_page(books, OCR_LINES)
+
+    assert "Bitte bestätigen" in html
+    assert f'data-partner-pick="{partner_id}"' in html
+    # Die Auswahl der Gesellschaft im Kopf hat dieselben Werte: nur die Partnerauswahl ansehen.
+    start = html.index("data-partner-select")
+    select = html[start : html.index("</select>", start)]
+    assert " selected" not in select
+    assert 'type="hidden" name="partner_id"' not in html
+    assert "data-partner-create" in html
+    assert 'value="2026-07-01"' in html
+
+
+def test_ocr_page_preselects_unique_partner(books):
+    partner_id = books.partner(vat_id=VAT_A)
+
+    html = _ocr_page(books, [*OCR_LINES, f"USt-IdNr. {VAT_A}"])
+
+    assert "Erkannt" in html
+    assert f'<option value="{partner_id}" selected>' in html
+    assert "data-partner-create" not in html
+
+
+def test_ocr_web_booking_creates_open_item_unless_skipped(books):
+    partner_id = books.partner(iban=IBAN_B)
+    _login(books)
+
+    def book(**extra):
+        return books.client.post(
+            "/belege/ocr/buchen",
+            data={
+                "company_id": str(books.company_id),
+                "document_id": str(_upload_document(books)),
+                "expense_account_id": str(books.ids["expense"]),
+                "creditor_account_id": str(books.ids["creditor"]),
+                "tax_code_id": str(books.ids["tax_code"]),
+                "net_amount": "100.00",
+                "tax_amount": "19.00",
+                "entry_date": "2026-06-15",
+                "partner_id": str(partner_id),
+                "invoice_number": "B-1",
+                "due_date": "2026-07-01",
+                "supplier_iban": IBAN_A,
+                **extra,
+            },
+            follow_redirects=True,
+        ).get_data(as_text=True)
+
+    assert "Offener Posten angelegt" in book()
+    with books.factory() as session:
+        item = session.execute(select(OpenItem)).scalar_one()
+        assert item.reference == "B-1"
+        assert item.partner_id == partner_id
+        assert item.due_date == date(2026, 7, 1)
+        assert item.counterparty_iban == IBAN_B
+
+    assert "Offener Posten angelegt" not in book(skip_open_item="1")
+    with books.factory() as session:
+        assert len(session.execute(select(OpenItem)).scalars().all()) == 1
 
 
 def test_ocr_book_creates_open_item_with_partner(books):
@@ -1607,6 +1790,32 @@ def test_open_item_suggested_by_partner_and_amount(session):
     assert proposal.open_item_id == fitting.id
 
 
+def test_name_match_suggests_open_item_but_does_not_prefill_it(session):
+    """Sonst wäre der unsichere Partner über den Posten doch vorbelegt."""
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    partner = _partner(session, company, "Name GmbH")
+    item = _payable(session, company, creditor, partner, reference="X-1")
+    _import_csv(session, company, bank, "01.07.2026;Zahlung;Name GmbH;;-119,00")
+    tx = _transactions(session, company)[0]
+    matches = partner_matches(session=session, transactions=[tx])
+
+    found = open_item_suggestions(session=session, transactions=[tx], matches=matches)
+
+    assert [s.item.id for s in found[tx.id]] == [item.id]
+    assert tx.id not in booking_proposals(session=session, transactions=[tx])
+
+
+def test_item_of_other_partner_than_recognized_is_not_prefilled(session):
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    _partner(session, company, "Konto GmbH", iban=IBAN_A)
+    other = _partner(session, company, "Andere GmbH")
+    _payable(session, company, creditor, other, reference="RE-4711")
+    _import_csv(session, company, bank, f"01.07.2026;Zahlung RE-4711;Konto;{IBAN_A};-119,00")
+    tx = _transactions(session, company)[0]
+
+    assert tx.id not in booking_proposals(session=session, transactions=[tx])
+
+
 def test_open_item_suggested_by_reference_without_partner(session):
     company, bank, creditor, _debtor = _bank_accounts(session)
     item = _payable(session, company, creditor, None)
@@ -1670,6 +1879,28 @@ def test_open_items_of_other_company_are_not_suggested(session):
         )
         == {}
     )
+
+
+def test_foreign_currency_item_is_not_suggested_and_not_booked_blindly(session):
+    from app.services.bank_import import BankImportError
+
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    partner = _partner(session, company, "Konto GmbH", iban=IBAN_A)
+    item = _payable(session, company, creditor, partner)
+    item.foreign_currency_code = "USD"
+    item.foreign_open_amount = Decimal("130.00")
+    session.commit()
+    _import_csv(session, company, bank, f"01.07.2026;Zahlung;Konto;{IBAN_A};-119,00")
+    tx = _transactions(session, company)[0]
+
+    matches = partner_matches(session=session, transactions=[tx])
+    assert open_item_suggestions(session=session, transactions=[tx], matches=matches) == {}
+    with pytest.raises(BankImportError, match="USD"):
+        book_transaction_to_open_item(
+            session=session, transaction_id=tx.id, open_item_id=item.id, changed_by="tester"
+        )
+    session.refresh(tx)
+    assert tx.status == "open"
 
 
 def test_book_transaction_to_open_item_books_and_settles(session):

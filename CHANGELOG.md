@@ -8,6 +8,42 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Partnererkennung in automatischen Quellen
+- E-Rechnung, Beleg-OCR, Belegabgleich und Bankumsätze erkennen den Geschäftspartner über
+  USt-IdNr., Steuernummer, IBAN, Partnernummer und Namen (`partner_recognition`, Sprint 5a,
+  Schritt 5). Ergebnis: `unique`, `uncertain`, `ambiguous` oder `none`. Nur `unique` ordnet zu.
+  Name, Nummer aus Freitext, fehlende Rolle oder widersprüchliche Kennungen bleiben ein Vorschlag
+  zum Bestätigen. Gesucht wird nur in der eigenen Gesellschaft; inaktive Partner und die eigene
+  USt-IdNr. oder IBAN zählen nie.
+- **Verhalten geändert:** Der Belegvorschlag trug bisher auch reine Namenstreffer als
+  `partner_id`, die Maske schickte sie unsichtbar mit. Jetzt ist `booking_proposal.partner_id` nur
+  bei eindeutiger Erkennung gesetzt, Kandidaten stehen in `partner_match`. Die Masken zeigen den
+  Partner sichtbar und auswählbar.
+- E-Rechnung: `einvoice_import` liest USt-IdNr., Steuernummer, Anschrift, IBAN, BIC, Fälligkeit und
+  Zahlbetrag des Verkäufers. Neu `POST /api/v1/einvoices/preview` (MCP `preview_einvoice`), in der
+  Oberfläche als Prüfung nach der Dateiauswahl. `POST /api/v1/einvoices/import` nimmt `partner_id`,
+  `partner_number`, `auto_partner`, `create_open_item` und meldet `partner_match`, `open_item_id`,
+  `warnings`.
+- Eingangsrechnung → OPOS (Review #5): Auf einem Kreditoren-Sammelkonto legen E-Rechnung, Beleg-OCR
+  und Belegabgleich einen offenen Posten mit Fälligkeit an, abschaltbar für schon bezahlte Belege
+  (`create_open_item`, in der Oberfläche „Schon bezahlt“). Die IBAN im Partnerstamm geht vor, eine
+  abweichende IBAN des Belegs erzeugt eine Warnung und ändert den Stamm nie.
+- **Verhalten geändert:** Das Storno einer Buchung schließt ihre offenen Verbindlichkeiten
+  (`journal_entry_id`), auch bei einem von Hand verknüpften Posten. Sonst stünden sie weiter im
+  Zahllauf. Eine Zahlungszeile entsteht dabei nicht, und das spätere Storno einer Zahlung öffnet den
+  Posten nicht wieder.
+- Bank: `bank_transaction.counterparty_iban` aus CAMT, MT940, FinTS, Open Banking und CSV, nicht Teil
+  des Dedup-Hashs (Migration `20261104_0065`). Bereits importierte Umsätze bleiben ohne IBAN.
+  `include_suggestions=1` liefert `partner_match` und `open_item_suggestions`; `booking_proposal`
+  kennt die Quelle `open_item`. Neu `POST /api/v1/bank-transactions/<id>/book-open-item` (MCP
+  `book_bank_transaction_to_open_item`) und „Offenen Posten ausgleichen“ im Buchungsdialog. Posten in
+  Fremdwährung bleiben davon ausgenommen.
+- Kontierungsregeln können einen Partner setzen (`partner_id` in UI, REST, MCP).
+- Neu `POST /api/v1/partners/recognize` (MCP `recognize_partner`) und „Lieferant anlegen“ mit
+  vorbefüllten Daten in den Buchungsmasken. Die neuen Werkzeuge stehen im Chat in der Gruppe
+  `partnererkennung`; Bankdaten des Stamms bleiben dort gesperrt.
+- E-Rechnungs-Export: Der Käufer kommt auf Wunsch aus dem Partnerstamm (`buyer_partner_id`).
+
 ### Fremdwährung
 - Wechselkurse je Mandant (EZB-Abruf und manuell), UI „Fremdwährung“, `GET`/`POST /api/v1/exchange-rates`,
   `POST /api/v1/exchange-rates/fetch`, MCP und CLI `flask fetch-exchange-rates`. Migration `20261103_0064`.

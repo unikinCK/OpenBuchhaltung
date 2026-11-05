@@ -32,8 +32,8 @@ from domain.models import (
     Document,
     FixedAsset,
     JournalEntry,
-    ReceiptMatchJob,
     OpenItem,
+    ReceiptMatchJob,
     ReceiptMatchSuggestion,
     TaxCode,
     Tenant,
@@ -1315,6 +1315,7 @@ def test_new_booking_by_name_only_suggests_partner_without_assigning_it(tmp_path
             session=session,
             suggestion_id=created["id"],
             changed_by="t",
+            expense_account_id=None,
             creditor_account_id=_account_id(app, company_id, "1600"),
             net_amount=Decimal("200.00"),
             tax_amount=Decimal("38.00"),
@@ -1332,6 +1333,10 @@ def test_new_booking_confirmed_partner_and_open_item(tmp_path):
         "/api/v1/receipt-matching/suggestions",
         json={"company_id": company_id, "document_id": document_id},
     ).get_json()
+    # Ein Posten entsteht nur auf einem gekennzeichneten Kreditoren-Sammelkonto.
+    with app.extensions["db_session_factory"]() as session:
+        session.get(Account, _account_id(app, company_id, "1600")).subledger = "creditor"
+        session.commit()
 
     booked = client.post(
         f"/api/v1/receipt-matching/suggestions/{created['id']}/approve",
@@ -1347,13 +1352,14 @@ def test_new_booking_confirmed_partner_and_open_item(tmp_path):
     assert booked.status_code == 200, booked.get_json()
     with app.extensions["db_session_factory"]() as session:
         suggestion = session.get(ReceiptMatchSuggestion, created["id"])
-        partners = {line.partner_id for line in suggestion.journal_entry.lines}
-        assert partner_id in partners
-        items = session.query(OpenItem).filter_by(journal_entry_id=suggestion.journal_entry_id)
-        # Ein Posten entsteht nur, wenn 1600 als Kreditoren-Sammelkonto gekennzeichnet ist.
-        for item in items:
-            assert item.partner_id == partner_id
-            assert item.due_date == date(2026, 8, 1)
+        assert partner_id in {line.partner_id for line in suggestion.journal_entry.lines}
+        item = (
+            session.query(OpenItem).filter_by(journal_entry_id=suggestion.journal_entry_id).one()
+        )
+        assert item.partner_id == partner_id
+        assert item.reference == "2026-4711"
+        assert item.due_date == date(2026, 8, 1)
+        assert item.open_amount == Decimal("238.00")
 
 
 def test_new_booking_empty_partner_overrides_unique_recognition(tmp_path):

@@ -233,6 +233,8 @@ def open_item_suggestions(
                 OpenItem.company_id.in_({t.company_id for t in open_transactions}),
                 OpenItem.status == "open",
                 OpenItem.open_amount.in_({abs(t.amount) for t in open_transactions}),
+                # Posten in Fremdwährung brauchen beim Ausgleich Fremdbetrag oder Kurs.
+                OpenItem.foreign_currency_code.is_(None),
             )
             .order_by(OpenItem.due_date, OpenItem.id)
         )
@@ -290,6 +292,11 @@ def book_transaction_to_open_item(
         raise BankImportError("Offener Posten nicht gefunden.")
     if item.status != "open":
         raise BankImportError("Der offene Posten ist bereits ausgeglichen.")
+    if item.foreign_currency_code:
+        raise BankImportError(
+            f"Der Posten läuft in {item.foreign_currency_code}: Bitte unter Offene Posten mit "
+            "Fremdbetrag oder Kurs ausgleichen."
+        )
     if (item.item_type == "receivable") != (transaction.amount > 0):
         raise BankImportError(
             "Forderungen gleichen Zahlungseingänge aus, Verbindlichkeiten Zahlungsausgänge."
@@ -314,6 +321,27 @@ def book_transaction_to_open_item(
         journal_entry_id=transaction.journal_entry_id,
         changed_by=changed_by,
     )
+
+
+def _proposed_open_item(
+    found: Sequence[OpenItemSuggestion], match: PartnerMatch | None
+) -> OpenItem | None:
+    """Der Posten, mit dem der Buchungsdialog vorbelegt wird.
+
+    Nur bei genau einem Posten und einem sicheren Beleg: Referenz im Verwendungszweck oder
+    eindeutig erkannter Partner. Ein Namenstreffer bleibt in ``open_item_suggestions``, sonst
+    wäre sein Partner über den Posten doch vorbelegt. Nennt die Erkennung einen anderen Partner
+    als der Posten, entscheidet der Mensch.
+    """
+    if len(found) != 1:
+        return None
+    item = found[0].item
+    unique = match.partner if match is not None else None
+    if unique is not None and item.partner_id not in (None, unique.id):
+        return None
+    if "reference" in found[0].matched_on:
+        return item
+    return item if unique is not None and item.partner_id == unique.id else None
 
 
 def booking_proposals(
@@ -342,11 +370,11 @@ def booking_proposals(
             proposals[transaction_id] = replace(proposal, partner_id=match.partner.id)
 
     for transaction in open_transactions:
-        found = item_suggestions.get(transaction.id, [])
-        # Mehrere passende Posten: Der Mensch wählt, das Gegenkonto bleibt ohne Vorschlag.
-        if len(found) != 1:
+        item = _proposed_open_item(
+            item_suggestions.get(transaction.id, []), matches.get(transaction.id)
+        )
+        if item is None:
             continue
-        item = found[0].item
         account = session.get(Account, item.account_id)
         if account is None or not account.is_active:
             continue

@@ -26,7 +26,8 @@ können, was gebucht, exportiert und protokolliert wird.
   Bankverbindung; Partner hängen als Nebenbuch an Buchungszeilen auf
   Sammelkonten (z. B. 1400/1600) und als Partnerbezug an Direktbuchungen
   („Aufwand an Bank“), mit verketteter Änderungshistorie. Das Journal zeigt den
-  Geschäftspartner jeder Buchung und filtert danach.
+  Geschäftspartner jeder Buchung und filtert danach. E-Rechnung, Beleg-OCR und Bankumsätze
+  erkennen den Partner; nur ein eindeutiger Treffer wird ohne Bestätigung zugeordnet.
 - **Internes Rechnungswesen:** Kostenstellen und Profitcenter mit Hierarchie,
   Gültigkeit, historisierten Stammdaten, Buchungszeilen-Kontierung,
   Kostenstellenrechnung und Profitcenter-GuV mit Sprung zu den zugehörigen Buchungen
@@ -780,8 +781,8 @@ es auf den Buchungs-, Beleg- und OPOS-Seiten).
 hinterlegen: Trifft ein Teilstring-Muster (ohne Groß-/Kleinschreibung, min.
 3 Zeichen) auf Verwendungszweck oder Gegenseite eines offenen Umsatzes zu,
 wird das hinterlegte Gegenkonto samt optionalem Steuercode und
-Controlling-Dimensionen vorgeschlagen und im Buchen-Formular vorausgewählt;
-bei mehreren Treffern gewinnt das längste (spezifischste) Muster. Der
+Controlling-Dimensionen und Geschäftspartner vorgeschlagen und im Buchen-Formular
+vorausgewählt; bei mehreren Treffern gewinnt das längste (spezifischste) Muster. Der
 Regel-Lauf („Regel-Treffer verbuchen“) bucht alle offenen Treffer auf einmal
 — Fehler einzelner Buchungen (z. B. gesperrte Periode) brechen den Lauf
 nicht ab, sondern stehen im Ergebnisbericht. API:
@@ -794,10 +795,20 @@ einen offenen Umsatz Gegenkonto, Steuercode, Kontierung und Geschäftspartner de
 letzten Bankbuchung derselben Gegenseite vor (ohne Gegenseite: gleicher
 Verwendungszweck; nur gleiches Vorzeichen). Das gilt nicht, wenn die frühere Buchung
 mehrere Gegenkontozeilen hatte. Reihenfolge: Regel vor Eigenübertrag (Geldtransit) vor
-Historie. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
+genau einem passenden offenen Posten vor Historie. Eine eindeutige Partnererkennung über die IBAN
+geht dem Partner der Historie vor. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
 `list_bank_transactions`) liefert den Vorschlag je offenem Umsatz als
-`booking_proposal` mit `source` (`rule`, `transfer`, `history`), Gegenkonto, Steuercode,
-Kostenstelle, Profitcenter und Partner. Die iOS-App bucht damit mit einem Tipp.
+`booking_proposal` mit `source` (`rule`, `transfer`, `open_item`, `history`), Gegenkonto, Steuercode,
+Kostenstelle, Profitcenter und Partner, dazu `partner_match` und `open_item_suggestions`. Die iOS-App
+bucht damit mit einem Tipp.
+
+**Offenen Posten ausgleichen:** Passt ein offener Posten nach Partner oder Referenz im
+Verwendungszweck und Betrag, bietet der Buchungsdialog ihn an. Vorbelegt wird das Gegenkonto nur bei
+genau einem Posten mit Referenz oder eindeutig erkanntem Partner. Ein Klick bucht den Umsatz auf das
+Sammelkonto des Postens, mit dessen Partner, und gleicht ihn aus; das Storno der Zahlung öffnet ihn
+wieder, außer die Rechnung selbst ist storniert. Posten in Fremdwährung laufen weiter über **Offene Posten**, dort mit Fremdbetrag oder Kurs.
+API: `POST /api/v1/bank-transactions/<id>/book-open-item`; MCP:
+`book_bank_transaction_to_open_item`.
 
 **Saldenabgleich:** Die Bank-Seite zeigt je Bankkonto den Buchsaldo
 (Soll − Haben aller Buchungszeilen) neben der Summe der importierten
@@ -890,6 +901,26 @@ ebenso (Partner der Buchung, auch bei `PATCH /api/v1/journal-entries/<id>` und
 `partner_id` und liefert je Buchung `partners`. MCP: `list_partners`,
 `get_partner`, `create_partner`, `update_partner`, `set_partner_bank_details`,
 `get_partner_history`. Bankdaten lassen sich im KI-Chat nicht ändern.
+
+### Partnererkennung in automatischen Quellen
+
+E-Rechnung, Beleg-OCR, Belegabgleich und Bankumsätze suchen den Partner in der eigenen Gesellschaft:
+
+| Ergebnis (`status`) | Wann | Folge |
+|---|---|---|
+| `unique` | USt-IdNr., Steuernummer, IBAN oder ausdrücklich genannte Partnernummer treffen genau einen aktiven Partner | wird vorbelegt; die Buchung trägt ihn |
+| `uncertain` | ein Kandidat, aber nur über den Namen oder eine Nummer aus Freitext, ohne die nötige Rolle oder mit widersprechender USt-IdNr. | Vorschlag zum Bestätigen, keine Zuordnung |
+| `ambiguous` | mehrere Kandidaten, z. B. gleiche IBAN, die USt-IdNr. des einen und die IBAN des anderen oder die IBAN des einen unter dem Namen des anderen | Vorschlag zum Bestätigen, keine Zuordnung |
+| `none` | kein Kandidat | „Lieferant anlegen“ mit vorbefüllten Daten |
+
+Die eigene USt-IdNr. und IBAN der Gesellschaft zählen nicht, denn auf einer Eingangsrechnung steht
+auch der Empfänger. Inaktive Partner werden nie zugeordnet, aber genannt, damit keine Dublette
+entsteht. Weicht die IBAN eines Belegs vom Stamm ab, erscheint eine Warnung; bezahlt wird auf die
+IBAN im Stamm, und der Stamm ändert sich dadurch nicht. Ein Bankumsatz kennt nur die bevorzugte
+Rolle: Ein Zahlungseingang kann auch die Erstattung eines Lieferanten sein.
+
+Buchen ohne Bestätigung läuft ohne Partner; nachtragen lässt er sich an der offenen Buchung und am
+offenen Posten. API: `POST /api/v1/partners/recognize` (nur lesend); MCP: `recognize_partner`.
 
 ### Altdaten aus offenen Posten übernehmen
 
@@ -1145,8 +1176,21 @@ lässt sich je Satz ein Steuercode wählen (API/MCP: `tax_lines` mit `rate`,
 `tax_code_id`, optional `expense_account_id`).
 Beispieldateien: `data/demo/erechnung_ubl.xml`, `data/demo/erechnung_cii.xml`.
 
+Nach der Dateiauswahl zeigt die Seite die Rechnungsdaten und den erkannten Lieferanten
+(siehe Partnererkennung unter Geschäftspartner), noch ohne zu buchen. API:
+`POST /api/v1/einvoices/preview`; MCP: `preview_einvoice`. Beim Buchen gilt eine bestätigte Auswahl
+(`partner_id`), sonst nur ein eindeutiger Treffer (`auto_partner`, Standard an).
+
+Auf einem Kreditoren-Sammelkonto entsteht ein **offener Posten** über den Zahlbetrag der Rechnung,
+fällig zum Datum aus der Rechnung, sonst nach dem Zahlungsziel des Partners. Ist schon alles bezahlt
+oder steht `create_open_item` auf `false` („Schon bezahlt“ in der Oberfläche), entsteht keiner. Das
+Storno der Buchung schließt den Posten, ohne eine Zahlung zu erzeugen; das spätere Storno einer
+Teilzahlung öffnet ihn nicht wieder. Dasselbe gilt für Beleg-OCR
+und Belegabgleich; dort lässt sich die Fälligkeit in der Maske setzen.
+
 Umgekehrt lässt sich auf derselben Seite eine **E-Rechnung als reines XML
-erzeugen** (Käufer + Positionen erfassen, Format wählen) und als XRechnung (UBL)
+erzeugen** (Käufer aus dem Partnerstamm oder von Hand, Positionen erfassen, Format wählen; API/MCP:
+`buyer_partner_id`, ausgefüllte Felder gehen vor) und als XRechnung (UBL)
 oder ZUGFeRD/CII herunterladen. Die Verkäuferdaten stammen aus den Firmendaten, leere
 Felder aus den `SELLER_*`-Umgebungsvariablen. Beträge und Steueraufteilung werden aus
 den Positionen berechnet. Dieses Formular speichert und bucht nichts; Rechnungen mit
@@ -1708,9 +1752,10 @@ und als Eingangsrechnung vorbuchen:
    zurück. Ist gar kein Endpoint konfiguriert, funktioniert die Pipeline weiterhin für
    PDFs mit Textebene; Bild-Belege werden verständlich abgewiesen.
 2. **Analyse (regelbasiert):** Eine deterministische Heuristik erkennt Bruttobetrag,
-   Nettobetrag, Steuerbetrag und Steuersatz, Rechnungsdatum, Rechnungsnummer und
+   Nettobetrag, Steuerbetrag und Steuersatz, Rechnungsdatum, Rechnungsnummer, Fälligkeit und
    Lieferant und vervollständigt fehlende Beträge rechnerisch (z. B. Netto/Steuer aus
-   Brutto + Satz).
+   Brutto + Satz). USt-IdNr., Steuernummer und IBAN im Text dienen der Partnererkennung
+   (siehe Geschäftspartner), `booking_proposal.partner_match` nennt das Ergebnis.
 3. **KI-Unterstützung & -Kontrolle (optional):** Ist ein LLM-Endpoint konfiguriert,
    extrahiert zusätzlich ein Sprachmodell die Belegfelder strukturiert (als JSON):
 

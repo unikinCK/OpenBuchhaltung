@@ -7,8 +7,9 @@ Das Ergebnis ist entweder eine eindeutige Zuordnung oder ein Vorschlag zum Best�
   :attr:`PartnerMatch.partner` gesetzt und darf eine Buchung ihn ohne Rückfrage tragen.
 * ``uncertain``: Genau ein Kandidat, aber nur über den Namen, über eine Nummer aus Freitext,
   mit falscher Rolle oder mit einer widersprechenden Kennung.
-* ``ambiguous``: Mehrere Kandidaten, etwa zwei Partner mit derselben IBAN oder USt-IdNr. des
-  einen und IBAN des anderen. Eine präparierte Rechnung soll hier nicht durchrutschen.
+* ``ambiguous``: Mehrere Kandidaten, etwa zwei Partner mit derselben IBAN, USt-IdNr. des einen
+  und IBAN des anderen, oder die IBAN des einen unter dem Namen des anderen. Eine präparierte
+  Rechnung soll hier nicht durchrutschen.
 * ``none``: Kein Kandidat; die Oberflächen bieten „Lieferant anlegen“ an.
 
 Gesucht wird immer nur in einer Gesellschaft (Mandantentrennung), inaktive Partner werden nie
@@ -353,6 +354,28 @@ class PartnerDirectory:
                 candidates=ordered,
                 warnings=warnings,
             )
+        named_others = self._named_others(signals, partner)
+        if named_others:
+            others = ", ".join(_label(other) for other in named_others)
+            return PartnerMatch(
+                status=STATUS_AMBIGUOUS,
+                reason=(
+                    f"{_label(partner)} passt über {kinds_text}, der Name der Quelle aber zu "
+                    f"{others}. Bitte auswählen."
+                ),
+                candidates=(
+                    *ordered,
+                    *(
+                        PartnerCandidate(
+                            partner=other,
+                            matched_on=(MATCH_NAME,),
+                            role_fits=_has_role(other, role or preferred_role),
+                        )
+                        for other in named_others
+                    ),
+                )[:MAX_CANDIDATES],
+                warnings=warnings,
+            )
         return PartnerMatch(
             status=STATUS_UNIQUE,
             reason=f"{_label(partner)} eindeutig erkannt über {kinds_text}.",
@@ -360,6 +383,23 @@ class PartnerDirectory:
             candidates=ordered,
             warnings=warnings,
         )
+
+    def _named_others(
+        self, signals: PartnerSignals, partner: BusinessPartner
+    ) -> list[BusinessPartner]:
+        """Andere Partner, zu denen der Name passt, wenn er zum Treffer selbst nicht passt.
+
+        Ein unbekannter Name widerspricht nicht: Bankauszüge und Belege schreiben Namen oft anders.
+        Der Name eines anderen bekannten Partners dagegen schon.
+        """
+        wanted = name_tokens(signals.name)
+        if not wanted or _name_score(wanted, name_tokens(partner.name)) > 0:
+            return []
+        return [
+            other
+            for other, tokens in self.name_index
+            if other.id != partner.id and _name_score(wanted, tokens) > 0
+        ]
 
     def _vat_contradiction(
         self, signals: PartnerSignals, partner: BusinessPartner, kinds: list[str]
