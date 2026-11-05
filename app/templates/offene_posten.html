@@ -99,6 +99,19 @@
             </select>
           </div>
           <div class="field">
+            <label for="foreign_currency_code">Fremdwährung <span class="muted">(optional)</span></label>
+            <input id="foreign_currency_code" name="foreign_currency_code" maxlength="3" placeholder="USD" />
+          </div>
+          <div class="field">
+            <label for="foreign_amount">Fremdbetrag</label>
+            <input id="foreign_amount" name="foreign_amount" inputmode="decimal" />
+          </div>
+          <div class="field">
+            <label for="open_exchange_rate">Kurs <span class="muted">(je 1 €)</span></label>
+            <input id="open_exchange_rate" name="exchange_rate" inputmode="decimal" placeholder="Tageskurs" />
+            <span class="hint">Betrag leer lassen: Er ergibt sich aus Fremdbetrag und Kurs.</span>
+          </div>
+          <div class="field">
             <label for="counterparty_iban">IBAN der Gegenpartei <span class="muted">(für SEPA-Zahllauf)</span></label>
             <input id="counterparty_iban" name="counterparty_iban" placeholder="DE.." />
           </div>
@@ -177,7 +190,10 @@
                   {% else %}–{% endif %}
                 </td>
                 <td class="num">{{ item.original_amount | betrag }}</td>
-                <td class="num"><strong>{{ item.open_amount | betrag }}</strong></td>
+                <td class="num">
+                  <strong>{{ item.open_amount | betrag }}</strong>
+                  {% if item.foreign_currency_code %}<br /><span class="muted small">{{ item.foreign_open_amount | betrag }} {{ item.foreign_currency_code }}</span>{% endif %}
+                </td>
                 <td class="nowrap">
                   {% if item.status == "open" %}
                     {% if overdue %}<span class="badge badge-danger">überfällig</span>{% else %}<span class="badge badge-warning">offen</span>{% endif %}
@@ -228,17 +244,33 @@
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                         <div class="form-grid">
-                          <div class="field">
-                            <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>
-                            <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" placeholder="{{ item.open_amount }}" aria-label="Ausgleichsbetrag" />
-                            <span class="hint">leer = voller offener Betrag</span>
-                          </div>
+                          {% if item.foreign_currency_code %}
+                            <div class="field">
+                              <label for="settle-foreign-{{ item.id }}">Gezahlt in {{ item.foreign_currency_code }}</label>
+                              <input id="settle-foreign-{{ item.id }}" name="foreign_amount" inputmode="decimal" placeholder="{{ item.foreign_open_amount }}" />
+                            </div>
+                            <div class="field">
+                              <label for="settle-amount-{{ item.id }}">Gezahlt in €</label>
+                              <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" />
+                            </div>
+                            <div class="field">
+                              <label for="settle-rate-{{ item.id }}">Kurs <span class="muted">(je 1 €, gebucht {{ item.exchange_rate | kurs }})</span></label>
+                              <input id="settle-rate-{{ item.id }}" name="exchange_rate" inputmode="decimal" />
+                            </div>
+                            <p class="field-full muted small">Ein gebuchter Umsatz in {{ item.foreign_currency_code }} liefert die Beträge selbst, ein Umsatz muss dafür zuerst gebucht sein. Bei einer Zahlung in € bitte {{ item.foreign_currency_code }} und € oder den Kurs angeben. Ohne Zahlung gilt der ganze offene Betrag zum Kurs oder Tageskurs.</p>
+                          {% else %}
+                            <div class="field">
+                              <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>
+                              <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" placeholder="{{ item.open_amount }}" aria-label="Ausgleichsbetrag" />
+                              <span class="hint">leer = voller offener Betrag</span>
+                            </div>
+                          {% endif %}
                           <div class="field field-wide">
                             <label for="settle-tx-{{ item.id }}">Bankumsatz <span class="muted">(optional)</span></label>
                             <select id="settle-tx-{{ item.id }}" name="bank_transaction_id">
                               <option value="">Bankumsatz optional</option>
                               {% for tx in bank_transactions %}
-                                <option value="{{ tx.id }}">{{ tx.booking_date | datum }} – {{ tx.amount | betrag }} – {{ tx.purpose }}</option>
+                                <option value="{{ tx.id }}">{{ tx.booking_date | datum }} – {{ tx.amount | betrag }}{% if tx.currency_code and tx.currency_code != 'EUR' %} {{ tx.currency_code }}{% endif %} – {{ tx.purpose }}</option>
                               {% endfor %}
                             </select>
                           </div>

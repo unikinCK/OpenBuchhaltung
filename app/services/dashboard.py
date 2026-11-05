@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.services.account_chart_check import detect_company_chart
@@ -24,6 +24,7 @@ from app.services.scoping import scoped_select
 from domain.models import (
     Account,
     BankTransaction,
+    Company,
     Document,
     FinTSConnection,
     JournalEntry,
@@ -156,13 +157,29 @@ def bank_account_rows(session: Session, company_id: int) -> list[dict[str, objec
             .group_by(JournalEntryLine.account_id)
         ).all()
     }
+    # Die Summe der Auszüge nur in Firmenwährung: Währungen lassen sich nicht addieren.
+    company_currency = session.get(Company, company_id).currency_code
     statements = {
         row[0]: row[1:]
         for row in session.execute(
             select(
                 BankTransaction.bank_account_id,
                 func.count(),
-                func.coalesce(func.sum(BankTransaction.amount), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                or_(
+                                    BankTransaction.currency_code.is_(None),
+                                    BankTransaction.currency_code == company_currency,
+                                ),
+                                BankTransaction.amount,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
                 func.sum(case((BankTransaction.status == "open", 1), else_=0)),
                 func.max(BankTransaction.booking_date),
             )

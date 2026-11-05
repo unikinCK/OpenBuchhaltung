@@ -78,6 +78,8 @@ SOURCE_LABELS = {
     "payroll": "Lohn",
     "sales_invoice": "Rechnung",
     "cash_book": "Kassenbuch",
+    "fx_difference": "Kursdifferenz",
+    "fx_valuation": "Stichtagsbewertung",
 }
 STATUS_FILTERS = {"offen": False, "festgeschrieben": True}
 
@@ -720,6 +722,15 @@ def _render_entry_detail(journal_entry_id: int):
             .scalars()
             .all()
         )
+        foreign_by_line = {
+            line.line_number: {
+                "foreign_currency_code": line.foreign_currency_code,
+                "foreign_amount": line.foreign_amount,
+                "exchange_rate": line.exchange_rate,
+            }
+            for line in entry.lines
+            if line.foreign_currency_code
+        }
         lines = []
         for line in overview["lines"]:
             # Steuerzeilen bekommen keine Partnerauswahl, solange sie keinen tragen.
@@ -761,6 +772,7 @@ def _render_entry_detail(journal_entry_id: int):
                 {
                     **line,
                     "partner_editable": editable,
+                    **foreign_by_line.get(line["line_number"], {}),
                     "partner_choices": choices,
                     "cost_center_choices": unit_choices["cost_center"],
                     "profit_center_choices": unit_choices["profit_center"],

@@ -1379,6 +1379,9 @@ fieldset {
 
 /* Dialoge über das Popover-API (ohne JavaScript, kein Abschneiden in Karten) */
 [popover].panel {
+  /* Steht oft in einer Tabellenzelle: deren Umbruch und Ausrichtung nicht erben. */
+  white-space: normal;
+  text-align: left;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1.1rem 1.3rem 1.2rem;

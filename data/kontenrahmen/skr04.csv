@@ -15,6 +15,7 @@ code,name,account_type
 4300,Erlöse 7 % USt,income
 4400,Erlöse 19 % USt,income
 4830,Sonstige betriebliche Erträge,income
+4840,Erträge aus Kursdifferenzen,income
 5100,"Einkauf Roh-, Hilfs- und Betriebsstoffe",expense
 5200,Wareneingang,expense
 5900,Fremdleistungen,expense
@@ -28,4 +29,5 @@ code,name,account_type
 6460,Reparaturen und Instandhaltung von technischen Anlagen und Maschinen,expense
 6600,Werbekosten,expense
 6855,Nebenkosten des Geldverkehrs,expense
+6880,Aufwendungen aus Kursdifferenzen,expense
 6930,Forderungsverluste (übliche Höhe),expense

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from flask import abort, flash, redirect, render_template, request, url_for
+from sqlalchemy import select
 
 from app.services.journal_entries import parse_decimal
 from app.services.open_items import (
@@ -114,6 +115,15 @@ def open_items_page():
             journal_entries = (
                 session.execute(
                     scoped_select(JournalEntry, company_id=selected_company_id)
+                    # Stornierte Buchungen und Stornos gleichen nichts aus.
+                    .where(
+                        JournalEntry.reversal_of_id.is_(None),
+                        JournalEntry.id.not_in(
+                            select(JournalEntry.reversal_of_id).where(
+                                JournalEntry.reversal_of_id.is_not(None)
+                            )
+                        ),
+                    )
                     .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
                     .limit(LINK_SELECT_LIMIT)
                 )
@@ -213,15 +223,27 @@ def create_open_item_action():
     entry_date_raw = request.form.get("entry_date", "").strip()
     due_date_raw = request.form.get("due_date", "").strip()
     amount_raw = request.form.get("amount", "").strip()
+    foreign_currency_code = request.form.get("foreign_currency_code", "").strip() or None
+    foreign_amount_raw = request.form.get("foreign_amount", "").strip()
+    exchange_rate_raw = request.form.get("exchange_rate", "").strip().replace(",", ".")
 
-    if not company_id or not account_id or not item_type or not reference or not amount_raw:
+    if (
+        not company_id
+        or not account_id
+        or not item_type
+        or not reference
+        or not (amount_raw or foreign_amount_raw)
+    ):
         flash("Gesellschaft, Konto, Typ, Referenz und Betrag sind Pflichtfelder.", "error")
         return redirect(url_for("main.open_items_page", company_id=company_id))
 
     try:
         entry_date = date.fromisoformat(entry_date_raw) if entry_date_raw else date.today()
         due_date = date.fromisoformat(due_date_raw) if due_date_raw else None
-        amount = parse_decimal(amount_raw)
+        # Mit Fremdbetrag ergibt sich der Betrag in Firmenwährung aus dem Kurs.
+        amount = parse_decimal(amount_raw) if amount_raw else parse_decimal("0.00")
+        foreign_amount = parse_decimal(foreign_amount_raw) if foreign_amount_raw else None
+        exchange_rate = parse_decimal(exchange_rate_raw, places=None) if exchange_rate_raw else None
     except ValueError:
         flash("Datum oder Betrag ist ungültig.", "error")
         return redirect(url_for("main.open_items_page", company_id=company_id))
@@ -246,6 +268,9 @@ def create_open_item_action():
                     due_date=due_date,
                     amount=amount,
                     changed_by=changed_by(),
+                    foreign_currency_code=foreign_currency_code,
+                    foreign_amount=foreign_amount,
+                    exchange_rate=exchange_rate,
                 ),
             )
         except OpenItemError as exc:
@@ -291,9 +316,13 @@ def settle_open_item_action(open_item_id: int):
     amount_raw = request.form.get("amount", "").strip()
     bank_transaction_id = request.form.get("bank_transaction_id", type=int)
     journal_entry_id = request.form.get("journal_entry_id", type=int)
+    foreign_amount_raw = request.form.get("foreign_amount", "").strip()
+    exchange_rate_raw = request.form.get("exchange_rate", "").strip().replace(",", ".")
 
     try:
         amount = parse_decimal(amount_raw) if amount_raw else None
+        foreign_amount = parse_decimal(foreign_amount_raw) if foreign_amount_raw else None
+        exchange_rate = parse_decimal(exchange_rate_raw, places=None) if exchange_rate_raw else None
     except ValueError:
         flash("Ausgleichsbetrag ist ungültig.", "error")
         return redirect(url_for("main.open_items_page", company_id=company_id))
@@ -313,6 +342,8 @@ def settle_open_item_action(open_item_id: int):
                 bank_transaction_id=bank_transaction_id,
                 journal_entry_id=journal_entry_id,
                 changed_by=changed_by(),
+                foreign_amount=foreign_amount,
+                exchange_rate=exchange_rate,
             )
         except OpenItemError as exc:
             flash(str(exc), "error")
@@ -320,6 +351,12 @@ def settle_open_item_action(open_item_id: int):
 
     if item.status == "settled":
         flash(f"Offener Posten {item.reference} wurde ausgeglichen.", "success")
+    elif item.foreign_currency_code:
+        flash(
+            f"Teilzahlung erfasst. Offen: {format_amount(item.foreign_open_amount)} "
+            f"{item.foreign_currency_code}.",
+            "success",
+        )
     else:
         flash(f"Teilzahlung erfasst. Offen: {format_amount(item.open_amount)}.", "success")
     return redirect(url_for("main.open_items_page", company_id=company_id))

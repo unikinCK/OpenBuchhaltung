@@ -50,7 +50,7 @@ from app.services.fints_sync import (
     start_fints_sync,
     submit_fints_tan,
 )
-from app.services.journal_entries import JournalEntryCreationError
+from app.services.journal_entries import JournalEntryCreationError, parse_decimal
 from app.services.open_banking import (
     connection_status,
     list_open_banking_connections,
@@ -499,6 +499,12 @@ def bank_book_action(transaction_id: int):
     if not contra_account_id:
         flash("Bitte ein Gegenkonto auswählen.", "error")
         return redirect(url_for("main.bank_page", company_id=company_id))
+    raw_rate = (request.form.get("exchange_rate") or "").strip().replace(",", ".")
+    try:
+        exchange_rate = parse_decimal(raw_rate, places=None) if raw_rate else None
+    except ValueError:
+        flash("Der Kurs ist ungültig.", "error")
+        return redirect(url_for("main.bank_page", company_id=company_id))
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -517,6 +523,7 @@ def bank_book_action(transaction_id: int):
                 profit_center_id=request.form.get("profit_center_id", type=int),
                 partner_id=request.form.get("partner_id", type=int),
                 changed_by=changed_by(),
+                exchange_rate=exchange_rate,
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(str(exc), "error")

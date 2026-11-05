@@ -97,6 +97,13 @@ def _journal_entry_dict(entry: JournalEntry) -> dict[str, object]:
                     else None
                 ),
                 "partner_name": line.partner.name if line.partner else None,
+                "foreign_currency_code": line.foreign_currency_code,
+                "foreign_amount": (
+                    str(line.foreign_amount) if line.foreign_amount is not None else None
+                ),
+                "exchange_rate": (
+                    str(line.exchange_rate) if line.exchange_rate is not None else None
+                ),
                 "description": line.description,
                 "debit_amount": str(line.debit_amount),
                 "credit_amount": str(line.credit_amount),
@@ -341,6 +348,19 @@ def create_journal_entry_via_api():
                         partner_number=(
                             str(raw_partner_number).strip()
                             if raw_partner_number is not None
+                            else None
+                        ),
+                        foreign_currency_code=(
+                            str(line.get("foreign_currency_code") or "").strip() or None
+                        ),
+                        foreign_amount=(
+                            parse_decimal(str(line["foreign_amount"]))
+                            if line.get("foreign_amount") not in (None, "")
+                            else None
+                        ),
+                        exchange_rate=(
+                            parse_decimal(str(line["exchange_rate"]), places=None)
+                            if line.get("exchange_rate") not in (None, "")
                             else None
                         ),
                     )

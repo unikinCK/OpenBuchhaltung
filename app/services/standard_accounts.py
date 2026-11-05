@@ -106,6 +106,21 @@ VERBINDLICHKEITEN_LUL = StandardAccount(
 )
 
 
+# Kursdifferenzen (ADR-010); die Bezeichnung trennt Ertrag und Aufwand.
+KURSERTRAG = StandardAccount(
+    label="Erträge aus Kursdifferenzen",
+    codes=("4840", "2660"),
+    name_keyword="erträge aus kursdifferenzen",
+    code_account_types=frozenset({"income", "revenue"}),
+)
+KURSAUFWAND = StandardAccount(
+    label="Aufwendungen aus Kursdifferenzen",
+    codes=("6880", "2150"),
+    name_keyword="aufwendungen aus kursdifferenzen",
+    code_account_types=frozenset({"expense"}),
+)
+
+
 def pick_standard_account(
     accounts: Iterable[Account], standard: StandardAccount
 ) -> Account | None:

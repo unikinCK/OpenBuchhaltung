@@ -20,6 +20,7 @@ from app.web import (  # noqa: F401
     documents,
     dunning,
     einvoice,
+    exchange_rates,
     fixed_assets,
     formatting,
     income_taxes,

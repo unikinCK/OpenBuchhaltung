@@ -125,6 +125,9 @@ class OutgoingInvoice:
     buyer: Party
     lines: list[InvoiceLine]
     currency_code: str = "EUR"
+    # BT-6/BT-111: Steuerwährung und Steuer darin, wenn die Rechnung in Fremdwährung läuft.
+    tax_currency_code: str = ""
+    tax_total_in_tax_currency: Decimal | None = None
     buyer_reference: str = ""  # Leitweg-ID (Pflicht bei öffentlichen Auftraggebern)
     # BT-3: 380 Rechnung, 381 Gutschrift/Stornorechnung (UBL: Wurzel ``CreditNote``).
     type_code: str = INVOICE_TYPE_COMMERCIAL
@@ -304,6 +307,7 @@ def build_ubl(invoice: OutgoingInvoice) -> str:
     for note in invoice.notes:
         _sub_if(root, CBC_NS, "Note", note)
     _sub(root, CBC_NS, "DocumentCurrencyCode", cur)
+    _sub_if(root, CBC_NS, "TaxCurrencyCode", invoice.tax_currency_code)
     _sub_if(root, CBC_NS, "BuyerReference", invoice.buyer_reference)
 
     if invoice.service_period_from is not None or invoice.service_period_to is not None:
@@ -344,6 +348,15 @@ def build_ubl(invoice: OutgoingInvoice) -> str:
         money(subtotal, "TaxableAmount", group.basis)
         money(subtotal, "TaxAmount", group.tax_amount)
         _ubl_tax_category(subtotal, "TaxCategory", invoice, group.rate, with_reason=True)
+    if invoice.tax_currency_code and invoice.tax_total_in_tax_currency is not None:
+        tax_in_tax_currency = _sub(root, CAC_NS, "TaxTotal")
+        _sub(
+            tax_in_tax_currency,
+            CBC_NS,
+            "TaxAmount",
+            _amount(invoice.tax_total_in_tax_currency),
+            currencyID=invoice.tax_currency_code,
+        )
 
     monetary = _sub(root, CAC_NS, "LegalMonetaryTotal")
     money(monetary, "LineExtensionAmount", invoice.net_total)
@@ -477,6 +490,7 @@ def build_cii(invoice: OutgoingInvoice) -> str:
 
     settlement = _sub(transaction, RAM_NS, "ApplicableHeaderTradeSettlement")
     _sub_if(settlement, RAM_NS, "PaymentReference", invoice.payment_reference)
+    _sub_if(settlement, RAM_NS, "TaxCurrencyCode", invoice.tax_currency_code)
     _sub(settlement, RAM_NS, "InvoiceCurrencyCode", invoice.currency_code)
     if invoice.payment_iban:
         means = _sub(settlement, RAM_NS, "SpecifiedTradeSettlementPaymentMeans")
@@ -517,6 +531,14 @@ def build_cii(invoice: OutgoingInvoice) -> str:
         _amount(invoice.tax_total),
         currencyID=invoice.currency_code,
     )
+    if invoice.tax_currency_code and invoice.tax_total_in_tax_currency is not None:
+        _sub(
+            summation,
+            RAM_NS,
+            "TaxTotalAmount",
+            _amount(invoice.tax_total_in_tax_currency),
+            currencyID=invoice.tax_currency_code,
+        )
     _sub(summation, RAM_NS, "GrandTotalAmount", _amount(invoice.grand_total))
     _sub(summation, RAM_NS, "DuePayableAmount", _amount(invoice.grand_total))
     if invoice.preceding_invoice_number:

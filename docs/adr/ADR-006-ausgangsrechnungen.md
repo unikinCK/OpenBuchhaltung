@@ -84,7 +84,7 @@ auch für CII mit Typ 381, das bisher unbemerkt als Rechnung gebucht wurde.
   Rundlauf durch den eigenen Import und die Elementreihenfolge in Tests.
 
 ### 8. Bewusst nicht enthalten
-E-Mail-Versand (es gibt noch keinen Mailer), Fremdwährung (nur Firmenwährung), Abschlagsrechnungen,
+E-Mail-Versand (es gibt noch keinen Mailer), Abschlagsrechnungen,
 Skonto-Automatik, wiederkehrende Rechnungen, Gutschriften auf eine Teilmenge, Hinweis auf die
 Aufbewahrungspflicht bei Grundstücksleistungen an Privatpersonen (§ 14 Abs. 4 Nr. 9 UStG, derzeit über den
 Fußtext).

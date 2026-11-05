@@ -49,7 +49,11 @@ from app.services.bank_rules import (
     serialize_rule,
     set_rule_active,
 )
-from app.services.journal_entries import JournalEntryCreationError, resolve_partner_reference
+from app.services.journal_entries import (
+    JournalEntryCreationError,
+    parse_decimal,
+    resolve_partner_reference,
+)
 from app.services.open_items import OpenItemError
 from app.services.scoping import scoped_select
 from domain.models import Account, BankBookingRule, BankTransaction, JournalEntry
@@ -820,6 +824,14 @@ def book_bank_transaction_via_api(transaction_id: int):
         )
     except (TypeError, ValueError):
         return jsonify({"error": "contra_account_id must be an integer."}), 400
+    try:
+        exchange_rate = (
+            parse_decimal(str(payload["exchange_rate"]), places=None)
+            if payload.get("exchange_rate") not in (None, "")
+            else None
+        )
+    except (ArithmeticError, TypeError, ValueError):
+        return jsonify({"error": "exchange_rate must be a number."}), 400
     description = (payload.get("description") or "").strip() or None
     partner_number = str(payload.get("partner_number") or "").strip() or None
 
@@ -845,6 +857,7 @@ def book_bank_transaction_via_api(transaction_id: int):
                 profit_center_id=profit_center_id,
                 partner_id=partner_id,
                 changed_by=_api_changed_by(),
+                exchange_rate=exchange_rate,
             )
         except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
