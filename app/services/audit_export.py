@@ -526,7 +526,12 @@ def build_audit_export_package(
                 session,
                 VatExchangeRate,
                 VatExchangeRate.tenant_id == company.tenant_id,
-                _date_range(VatExchangeRate.rate_month, date_from, date_to),
+                # Der Monatskurs steht auf dem Monatsersten und gilt für den ganzen Monat.
+                _date_range(
+                    VatExchangeRate.rate_month,
+                    date_from.replace(day=1) if date_from else None,
+                    date_to,
+                ),
                 order_by=(VatExchangeRate.rate_month, VatExchangeRate.currency_code),
             )
         ],

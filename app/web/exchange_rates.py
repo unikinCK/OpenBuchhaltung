@@ -150,13 +150,13 @@ def fetch_vat_exchange_rates_action():
     with session_factory() as session:
         company = require_company_access(session, company_id)
         try:
-            if raw_year and not raw_year.isdigit():
-                raise ExchangeRateError(f"Ungültiges Jahr: {raw_year}.")
+            year = int(raw_year) if raw_year else None
+        except ValueError:
+            flash(f"Ungültiges Jahr: {raw_year}.", "error")
+            return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+        try:
             result = fetch_bmf_rates(
-                session=session,
-                company=company,
-                changed_by=changed_by(),
-                year=int(raw_year) if raw_year else None,
+                session=session, company=company, changed_by=changed_by(), year=year
             )
         except ExchangeRateError as exc:
             flash(str(exc), "error")

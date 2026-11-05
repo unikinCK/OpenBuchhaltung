@@ -60,6 +60,8 @@ ECB_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xm
 ECB_TIMEOUT_SECONDS = 20
 ECB_NAMESPACE = {"e": "http://www.ecb.int/vocabulary/2002-08-01/eurofxref"}
 LONG_TERM_DAYS = 365
+# Numeric(14, 6): acht Stellen vor dem Komma.
+MAX_RATE = Decimal("100000000")
 # Datenportal des BMF: eine CSV-Datei je Jahr, die laufende wird monatlich fortgeschrieben.
 BMF_RATES_URL = (
     "https://www.bundesfinanzministerium.de/Datenportal/Daten/offene-daten/steuern-zoelle/"
@@ -91,6 +93,10 @@ class ExchangeRateError(ValueError):
     """Ungültiger Kurs, fehlender Kurs oder gescheiterter Abruf."""
 
 
+class ExchangeRateSourceError(ExchangeRateError):
+    """Die Kursquelle liefert nicht oder nichts Lesbares; am Aufruf liegt es nicht."""
+
+
 def normalize_currency(value: Any) -> str:
     code = str(value or "").strip().upper()
     if len(code) != 3 or not code.isascii() or not code.isalpha():
@@ -105,6 +111,8 @@ def normalize_rate(value: Any) -> Decimal:
         raise ExchangeRateError(f"Ungültiger Kurs: {value!r}.") from exc
     if not rate.is_finite() or rate <= 0:
         raise ExchangeRateError("Der Kurs muss größer 0 sein.")
+    if rate >= MAX_RATE:
+        raise ExchangeRateError(f"Der Kurs {value} ist zu groß.")
     rate = rate.quantize(RATE_PLACES, rounding=ROUND_HALF_UP)
     if rate <= 0:
         raise ExchangeRateError("Der Kurs muss größer 0 sein.")
@@ -451,7 +459,7 @@ def _bmf_rows(content: bytes) -> list[list[str]]:
     try:
         return list(csv.reader(io.StringIO(text, newline=""), delimiter=";"))
     except csv.Error as exc:
-        raise ExchangeRateError("Die Kursdatei des BMF ist nicht lesbar.") from exc
+        raise ExchangeRateSourceError("Die Kursdatei des BMF ist nicht lesbar.") from exc
 
 
 def _bmf_month_columns(header: Iterable[str]) -> dict[int, int]:
@@ -475,14 +483,14 @@ def parse_bmf_rates(content: bytes, *, year: int) -> tuple[list[tuple[date, str,
         (index for index, row in enumerate(rows) if row and row[0].strip().lower() == "land"), None
     )
     if header_index is None:
-        raise ExchangeRateError("Die Kursdatei des BMF ist nicht lesbar.")
+        raise ExchangeRateSourceError("Die Kursdatei des BMF ist nicht lesbar.")
     columns = _bmf_month_columns(rows[header_index])
     if sorted(columns.values()) != list(range(1, 13)):
-        raise ExchangeRateError("Die Kursdatei des BMF nennt nicht alle zwölf Monate.")
+        raise ExchangeRateSourceError("Die Kursdatei des BMF nennt nicht alle zwölf Monate.")
     title = " ".join(cell for row in rows[:header_index] for cell in row)
     years = re.findall(r"\b(20\d\d)\b", title)
     if not years or int(years[0]) != year:
-        raise ExchangeRateError(f"Die Kursdatei des BMF gehört nicht zum Jahr {year}.")
+        raise ExchangeRateSourceError(f"Die Kursdatei des BMF gehört nicht zum Jahr {year}.")
 
     rates: list[tuple[date, str, Decimal]] = []
     ignored = 0
@@ -529,11 +537,11 @@ def _download_bmf_rates(year: int) -> bytes | None:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
-        raise ExchangeRateError(
+        raise ExchangeRateSourceError(
             f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ExchangeRateError(
+        raise ExchangeRateSourceError(
             f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
         ) from exc
 
@@ -572,7 +580,7 @@ def fetch_bmf_rates(
         ignored += not_readable
         fetched_years.append(candidate)
     if not fetched_years:
-        raise ExchangeRateError(
+        raise ExchangeRateSourceError(
             f"Beim BMF liegt keine Kursdatei für {', '.join(str(item) for item in years)} vor."
         )
 

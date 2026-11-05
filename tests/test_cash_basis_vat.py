@@ -17,6 +17,7 @@ from app.db import _alembic_config, create_session_factory
 from app.services.audit_export import EXPORT_TABLE_MODELS
 from app.services.bank_import import book_transaction
 from app.services.journal_entries import (
+    JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
@@ -319,6 +320,47 @@ def test_second_reversal_dated_before_the_settlement_keeps_the_sum(session: Sess
         Decimal("0.00"),
     )
     assert total == Decimal("0.00")
+
+
+def test_reversal_dated_in_a_reported_month_counts_in_the_next_open_one(session: Session) -> None:
+    """Februar bleibt wie gemeldet, die 19,00 € Korrektur stehen im März; auch in Euro."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = _booked_receipt(session, company, accounts, "119.00", date(2027, 2, 10), "weg")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    save_vat_return(
+        session=session, company_id=company.id, period_label="2027-02", changed_by="t"
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2027, 2, 20),
+        changed_by="t",
+    )
+    february = (date(2027, 2, 1), date(2027, 2, 28))
+    march = (date(2027, 3, 1), date(2027, 3, 31))
+    assert _kennzahlen(session, company, *february)["83"] == Decimal("19.00")
+    assert _kennzahlen(session, company, *march)["83"] == Decimal("-19.00")
+
+
+def test_paid_invoice_stays_until_its_payment_is_reversed(session: Session) -> None:
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    entry, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = _booked_receipt(session, company, accounts, "119.00", date(2027, 2, 10), "bleibt")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    with pytest.raises(JournalEntryCreationError, match="zuerst die Zahlung stornieren"):
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=entry.id,
+            reversal_date=date(2027, 3, 1),
+            changed_by="t",
+        )
 
 
 def test_payment_assigned_after_the_return_is_named(session: Session) -> None:

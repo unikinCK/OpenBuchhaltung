@@ -22,7 +22,8 @@ Zahlung fehlte.
    Teilzahlungen ohne Rundungsrest zur Rechnung summieren. Die übrige Auswertung (Kennzahlen, Steuersätze)
    bleibt dieselbe.
 3. **Stornierte Zahlungen** mindern im Zeitraum des Stornos. So bleibt eine bereits gemeldete Voranmeldung
-   richtig, und die Korrektur erscheint dort, wo sie entsteht.
+   richtig, und die Korrektur erscheint dort, wo sie entsteht. Läge das Datum des Stornos in einem festgehaltenen
+   Zeitraum, zählt er am ersten Tag dahinter (ADR-010, Entscheidung 8).
 4. **Abgrenzung:** Vorsteuer (§ 15 UStG), steuerfreie und nicht steuerbare Umsätze und direkt bezahlte
    Umsätze ändern sich nicht. Rechnungen von vor dem Beginn der Istversteuerung bleiben nach
    Buchungsdatum versteuert. Rechnungen auf einem Forderungskonto ohne verknüpften Posten zählen mit dem

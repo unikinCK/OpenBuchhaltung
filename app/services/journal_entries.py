@@ -41,6 +41,7 @@ from domain.models import (
     PostingNumberSequence,
     SalesInvoice,
     TaxCode,
+    VatReturn,
 )
 from domain.services.journal_entry_validation import (
     JournalEntryDraft,
@@ -1122,6 +1123,28 @@ def first_open_posting_date(*, session: Session, company_id: int, on: date) -> d
     return day
 
 
+def first_unreported_day(*, session: Session, item: OpenItem, on: date) -> date:
+    """``on`` oder der erste Tag danach außerhalb festgehaltener Umsatzsteuer-Zeiträume.
+
+    Gilt für Forderungen bei Istversteuerung: Ein Storno oder eine Neuzuordnung, deren Datum in
+    einem gemeldeten Zeitraum läge, ändert sonst dessen Neuberechnung, und die Korrektur erschiene
+    nirgends. Die Meldung bleibt, die Korrektur steht im nächsten offenen Zeitraum (ADR-010).
+    """
+    company = session.get(Company, item.company_id)
+    if item.item_type != "receivable" or company is None or company.vat_cash_basis_from is None:
+        return on
+    reported = session.execute(
+        select(VatReturn.date_from, VatReturn.date_to)
+        .where(VatReturn.company_id == item.company_id, VatReturn.date_to >= on)
+        .order_by(VatReturn.date_from, VatReturn.date_to)
+    ).all()
+    day = on
+    for start, end in reported:
+        if start <= day <= end:
+            day = end + timedelta(days=1)
+    return day
+
+
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
     locked = session.execute(select(PeriodLock.id).where(PeriodLock.period_id == period_id)).first()
     if locked:
@@ -1469,6 +1492,7 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} gleicht die gemeldete Umsatzsteuer an. Wird eine "
             "Zahlung storniert, bucht der Zeitraum des Stornos die Differenz zurück."
         )
+    _refuse_paid_cash_basis_invoice(session, original)
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1572,6 +1596,31 @@ def reverse_journal_entry(
     else:
         session.flush()
     return reversal
+
+
+def _refuse_paid_cash_basis_invoice(session: Session, original: JournalEntry) -> None:
+    """Bei Istversteuerung bleibt eine Rechnung stehen, solange eine Zahlung auf ihr steht.
+
+    Die Zahlung ist gemeldet und zählt weiter; ohne Rechnung bliebe sie im Hauptbuch ohne Gegenstück
+    und das Steuerkonto wiche von den Meldungen ab. Erst die Zahlung stornieren.
+    """
+    company = session.get(Company, original.company_id)
+    if company is None or company.vat_cash_basis_from is None:
+        return
+    reference = session.execute(
+        select(OpenItem.reference)
+        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
+        .where(
+            OpenItem.journal_entry_id == original.id,
+            OpenItem.item_type == "receivable",
+            OpenItemSettlement.reversed_on.is_(None),
+        )
+    ).first()
+    if reference is not None:
+        raise JournalEntryCreationError(
+            f"Auf Posten {reference[0]} steht eine Zahlung, die bei Istversteuerung schon zählt. "
+            f"Bitte zuerst die Zahlung stornieren, dann Buchung {original.posting_number}."
+        )
 
 
 def _sales_invoice_number(session: Session, journal_entry_id: int) -> str | None:
@@ -1705,7 +1754,11 @@ def _release_subledgers(
     restored_foreign: dict[int, Decimal] = {}
     for settlement in settlements:
         # Nie vor dem Ausgleich selbst: Sonst bliebe die Zahlung im Zeitraum dazwischen stehen.
-        settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
+        settlement.reversed_on = first_unreported_day(
+            session=session,
+            item=session.get(OpenItem, settlement.open_item_id),
+            on=max(reversal.entry_date, settlement.settlement_date),
+        )
         settlement.reversal_journal_entry_id = reversal.id
         restored_by_item[settlement.open_item_id] = (
             restored_by_item.get(settlement.open_item_id, Decimal("0.00")) + settlement.amount

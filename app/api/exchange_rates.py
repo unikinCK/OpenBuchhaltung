@@ -18,6 +18,7 @@ from app.api.helpers import (
 from app.auth import current_api_user
 from app.services.exchange_rates import (
     ExchangeRateError,
+    ExchangeRateSourceError,
     fetch_bmf_rates,
     fetch_ecb_rates,
     format_rate_month,
@@ -212,8 +213,10 @@ def fetch_vat_exchange_rates_via_api():
             result = fetch_bmf_rates(
                 session=session, company=company, changed_by=_api_changed_by(), year=year
             )
-        except ExchangeRateError as exc:
+        except ExchangeRateSourceError as exc:
             return jsonify({"error": str(exc)}), 502
+        except ExchangeRateError as exc:
+            return jsonify({"error": str(exc)}), 422
         latest = result["latest_month"]
         return jsonify({**result, "latest_month": format_rate_month(latest) if latest else None})
 

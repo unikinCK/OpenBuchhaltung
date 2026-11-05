@@ -7,9 +7,12 @@ USD netto, 190,00 USD Umsatzsteuer, 1.190,00 USD brutto, Rechnungskurs 1,25, als
 
 from __future__ import annotations
 
+import io
+import json
 import random
 import urllib.error
-from datetime import date
+import zipfile
+from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -21,8 +24,9 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.auth import hash_api_token, hash_password
 from app.db import _alembic_config, create_session_factory
-from app.services.audit_export import EXPORT_TABLE_MODELS
+from app.services.audit_export import EXPORT_TABLE_MODELS, build_audit_export_package
 from app.services.bank_import import book_transaction
+from app.services.datev_export import build_datev_export
 from app.services.exchange_rates import (
     ExchangeRateError,
     fetch_bmf_rates,
@@ -1046,6 +1050,561 @@ def test_random_payments_reversals_and_rebookings_keep_the_invariants(
 
 
 # ---------------------------------------------------------------------------
+# Funde des Reviews: Kursmonat, gemeldete Zeiträume, Grenzen
+# ---------------------------------------------------------------------------
+
+
+def _settled_full(session, company, accounts, tmp_path, tag="voll", day=date(2027, 2, 10)):
+    """Die ganze Rechnung über einen gebuchten Bankumsatz bezahlt; im Februar 158,33 € Steuer."""
+    issued = _invoice(session, company, accounts, tmp_path)
+    received = _received(session, company, accounts, "991.67", day, tag)
+    terms = {
+        "open_item_id": issued.open_item_id,
+        "changed_by": "t",
+        "bank_transaction_id": received.id,
+        "foreign_amount": Decimal("1190.00"),
+        "amount": Decimal("991.67"),
+    }
+    settle_open_item(session=session, **terms)
+    return issued, received, terms
+
+
+def _manual_receipt(session, company, accounts, day, amount="991.67"):
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=day,
+            description="Zahlung",
+            status="posted",
+            changed_by="t",
+            lines=[
+                JournalLineInput(account_id=accounts["1200"].id, debit_amount=Decimal(amount)),
+                JournalLineInput(account_id=accounts["1400"].id, credit_amount=Decimal(amount)),
+            ],
+        ),
+    )
+
+
+def test_rate_follows_the_bank_date_when_a_locked_month_forces_a_new_booking(
+    session: Session, tmp_path: Path
+) -> None:
+    """Der Bankumsatz vom 10.2. bleibt Februar, auch über eine neue Buchung vom 6.4.
+
+    Zum Aprilkurs stünde im April −158,33 + 172,73 = 14,40 €, und 1776 ginge auf −172,73 €.
+    """
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _, received, terms = _settled_full(session, company, accounts, tmp_path)
+    february = session.get(JournalEntry, received.journal_entry_id)
+    _save(session, company, "2027-02")
+    lock_period(session=session, period_id=february.period_id, locked_by="t")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 4, 5),
+        changed_by="t",
+    )
+    replacement = _manual_receipt(session, company, accounts, date(2027, 4, 6))
+    settle_open_item(session=session, journal_entry_id=replacement.id, **terms)
+
+    settlement = session.execute(
+        select(OpenItemSettlement).order_by(OpenItemSettlement.id.desc())
+    ).scalars().first()
+    assert settlement.settlement_date == date(2027, 4, 6)
+    assert settlement.received_on == date(2027, 2, 10)
+    assert _tax(session, company, "2027-04") == ZERO
+    _save(session, company, "2027-04")
+    assert _balance(session, accounts["1776"]) == Decimal("-158.33")
+
+
+@pytest.mark.parametrize(
+    ("explicit", "booking"),
+    [(date(2027, 3, 5), None), (None, date(2027, 3, 1))],
+    ids=["genanntes Datum", "Buchung im Folgemonat"],
+)
+def test_rate_month_is_the_bank_date_whatever_the_settlement_date_says(
+    session: Session, tmp_path: Path, explicit, booking
+) -> None:
+    """Geld am 27.2.: 190,00 USD / 1,20 = 158,33 €. Zum Märzkurs wären es 146,15 €."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    issued = _invoice(session, company, accounts, tmp_path)
+    received = _received(session, company, accounts, "991.67", date(2027, 2, 27), "datum")
+    entry = None
+    if booking is not None:
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=received.journal_entry_id,
+            reversal_date=date(2027, 2, 27),
+            changed_by="t",
+        )
+        entry = _manual_receipt(session, company, accounts, booking)
+    settle_open_item(
+        session=session,
+        open_item_id=issued.open_item_id,
+        changed_by="t",
+        bank_transaction_id=received.id,
+        journal_entry_id=entry.id if entry is not None else None,
+        settlement_date=explicit,
+        foreign_amount=Decimal("1190.00"),
+        amount=Decimal("991.67"),
+    )
+    assert _tax(session, company, "2027-03") == Decimal("158.33")
+    assert _tax(session, company, "2027-02") == ZERO
+
+
+def test_rate_month_without_a_bank_transaction_is_the_given_date(
+    session: Session, tmp_path: Path
+) -> None:
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    issued = _invoice(session, company, accounts, tmp_path)
+    _pay(session, issued.open_item_id, "1190.00", date(2027, 3, 5))
+    settlement = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert settlement.received_on == date(2027, 3, 5)
+    assert _tax(session, company, "2027-03") == Decimal("146.15")  # 190,00 / 1,30
+
+
+def test_reassignment_after_a_reported_reversal_goes_behind_the_reported_month(
+    session: Session, tmp_path: Path
+) -> None:
+    """Februar +158,33, März −158,33 (gemeldet), die Neuzuordnung zählt im April mit Februarkurs.
+
+    Auf dem Stornotag läge sie im gemeldeten März: Dessen Neuberechnung wäre 0,00 statt −158,33, und
+    die Meldungen ergäben in Summe 0,00, obwohl das Geld da ist.
+    """
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _, received, terms = _settled_full(session, company, accounts, tmp_path)
+    _save(session, company, "2027-02")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 3, 5),
+        changed_by="t",
+    )
+    _save(session, company, "2027-03")
+    assert _snapshot(session, company, "2027-03")["USt"] == "-158.33"
+
+    book_transaction(
+        session=session,
+        transaction_id=received.id,
+        contra_account_id=accounts["1400"].id,
+        changed_by="t",
+    )
+    settle_open_item(session=session, **terms)
+    settlement = session.execute(
+        select(OpenItemSettlement).order_by(OpenItemSettlement.id.desc())
+    ).scalars().first()
+    assert settlement.settlement_date == date(2027, 4, 1)
+    assert settlement.received_on == date(2027, 2, 10)
+
+    assert _tax(session, company, "2027-02") == Decimal("158.33")
+    assert _tax(session, company, "2027-03") == Decimal("-158.33")
+    assert _tax(session, company, "2027-04") == Decimal("158.33")
+    _save(session, company, "2027-04")
+    assert _balance(session, accounts["1776"]) == Decimal("-158.33")
+
+
+def test_reversal_dated_in_a_reported_month_counts_in_the_next_open_one(
+    session: Session, tmp_path: Path
+) -> None:
+    """Storno mit Datum 20.2. nach der Februar-Meldung: Februar bleibt, der März trägt −158,33 €."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _, received, _ = _settled_full(session, company, accounts, tmp_path)
+    _save(session, company, "2027-02")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 2, 20),
+        changed_by="t",
+    )
+    settlement = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert settlement.reversed_on == date(2027, 3, 1)
+    assert _tax(session, company, "2027-02") == Decimal("158.33")
+    assert _tax(session, company, "2027-03") == Decimal("-158.33")
+    _save(session, company, "2027-03")
+    assert _balance(session, accounts["1776"]) == Decimal("-152.00")
+
+
+def test_reported_period_shift_skips_quarters_and_only_touches_the_cash_basis(
+    session: Session, tmp_path: Path
+) -> None:
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _, received, _ = _settled_full(session, company, accounts, tmp_path)
+    _save(session, company, "2027-Q1")
+    _save(session, company, "2027-04")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 2, 20),
+        changed_by="t",
+    )
+    settlement = session.execute(select(OpenItemSettlement)).scalar_one()
+    assert settlement.reversed_on == date(2027, 5, 1)
+
+
+def test_paid_direct_invoice_cannot_be_reversed_until_the_payment_is(session: Session) -> None:
+    """Sonst bliebe der Rest der Differenz (6,33 €) dauerhaft auf dem Steuerkonto."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    tax_code = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+    invoice = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2027, 1, 15),
+            description="Rechnung",
+            status="posted",
+            changed_by="t",
+            expand_tax_lines=False,
+            lines=[
+                JournalLineInput(account_id=accounts["1400"].id, debit_amount=Decimal("952.00")),
+                JournalLineInput(
+                    account_id=accounts["8400"].id,
+                    credit_amount=Decimal("800.00"),
+                    tax_code_id=tax_code.id,
+                ),
+                JournalLineInput(
+                    account_id=tax_code.vat_account_id,
+                    credit_amount=Decimal("152.00"),
+                    tax_code_id=tax_code.id,
+                ),
+            ],
+        ),
+    )
+    item = create_open_item(
+        session=session,
+        payload=OpenItemInput(
+            company_id=company.id,
+            account_id=accounts["1400"].id,
+            item_type="receivable",
+            reference="RE-DIREKT",
+            entry_date=date(2027, 1, 15),
+            amount=Decimal("0"),
+            changed_by="t",
+            foreign_currency_code="USD",
+            foreign_amount=Decimal("1190.00"),
+            exchange_rate=Decimal("1.25"),
+            journal_entry_id=invoice.id,
+        ),
+    )
+    received = _received(session, company, accounts, "991.67", date(2027, 2, 10), "direkt")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=received.id,
+        foreign_amount=Decimal("1190.00"),
+        amount=Decimal("991.67"),
+    )
+    with pytest.raises(JournalEntryCreationError, match="zuerst die Zahlung stornieren"):
+        reverse_journal_entry(
+            session=session,
+            journal_entry_id=invoice.id,
+            reversal_date=date(2027, 3, 1),
+            changed_by="t",
+        )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 3, 1),
+        changed_by="t",
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=invoice.id,
+        reversal_date=date(2027, 3, 2),
+        changed_by="t",
+    )
+    assert _balance(session, accounts["1776"]) == ZERO
+
+
+def test_switch_back_to_accrual_refuses_when_a_difference_would_stay_behind(
+    session: Session, tmp_path: Path
+) -> None:
+    """Wechsel zum 1.1.: Das Jahr zählte 152,00 €, auf 1776 stünden 158,33 €."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _settled_full(session, company, accounts, tmp_path)
+    _save(session, company, "2027-02")
+    with pytest.raises(VatReturnError, match="Steuerdifferenz"):
+        set_company_vat_method(
+            session=session,
+            company=company,
+            method="soll",
+            valid_from=date(2027, 1, 1),
+            changed_by="t",
+        )
+    assert company.vat_cash_basis_from == date(2027, 1, 1)
+    # Ab später bleibt die Rechnung nach Ist; das bleibt möglich.
+    set_company_vat_method(
+        session=session,
+        company=company,
+        method="soll",
+        valid_from=date(2027, 6, 1),
+        changed_by="t",
+    )
+    assert company.vat_cash_basis_until == date(2027, 5, 31)
+
+
+def test_invoice_rate_counts_exactly_what_is_booked(session: Session) -> None:
+    """Kurs 0,5123 ohne Fremdbetrag an der Zeile: 10,39 € bleiben 10,39 €, nicht 10,38 €."""
+    company, accounts = _seed(session)
+    tax_code = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2027, 1, 15),
+            description="Rechnung",
+            status="posted",
+            changed_by="t",
+            expand_tax_lines=False,
+            lines=[
+                JournalLineInput(account_id=accounts["1400"].id, debit_amount=Decimal("65.08")),
+                JournalLineInput(
+                    account_id=accounts["8400"].id,
+                    credit_amount=Decimal("54.69"),
+                    tax_code_id=tax_code.id,
+                ),
+                JournalLineInput(
+                    account_id=tax_code.vat_account_id,
+                    credit_amount=Decimal("10.39"),
+                    tax_code_id=tax_code.id,
+                ),
+            ],
+        ),
+    )
+    item = create_open_item(
+        session=session,
+        payload=OpenItemInput(
+            company_id=company.id,
+            account_id=accounts["1400"].id,
+            item_type="receivable",
+            reference="RE-KLEIN",
+            entry_date=date(2027, 1, 15),
+            amount=Decimal("0"),
+            changed_by="t",
+            foreign_currency_code="GBP",
+            foreign_amount=Decimal("33.34"),
+            exchange_rate=Decimal("0.5123"),
+            journal_entry_id=entry.id,
+        ),
+    )
+    _pay(session, item.id, "33.34", date(2027, 2, 10), bank_rate="0.60")
+    kennzahlen, result = _kennzahlen(session, company, "2027-02")
+    assert kennzahlen["USt"] == Decimal("10.39")
+    event = result.foreign_payments[0]
+    assert event.rate_missing is True
+    assert event.tax == event.booked_tax == Decimal("10.39")
+
+
+def test_fx_gain_is_not_named_as_revenue_without_tax(session: Session, tmp_path: Path) -> None:
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _settled_full(session, company, accounts, tmp_path)
+    assert _balance(session, accounts["2660"]) == Decimal("-39.67")
+    result = _kennzahlen(session, company, "2027-02")[1]
+    assert result.unassigned == []
+    assert not any("Nicht in der UStVA" in warning for warning in result.warnings)
+
+
+def test_datev_does_not_treat_the_fx_account_as_a_tax_base(session: Session) -> None:
+    """Gegenläufig im Verhältnis 19 zu 100: +0,38 € auf 1776 aus einer, −2,00 € auf 1771 aus einer
+    anderen Rechnung.
+
+    Ohne Ausnahme liefen 2150 und 2660 im Stapel mit dem Schlüssel für 19 % Umsatzsteuer.
+    """
+    company, accounts = _seed(session)
+    _monthly_rates(session, company, {"2027-02": "1.20"})
+    tax_19 = session.execute(
+        select(TaxCode).where(TaxCode.company_id == company.id, TaxCode.code == "USt19")
+    ).scalar_one()
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2027, 2, 28),
+            description="Umsatzsteuer-Kursdifferenz",
+            status="posted",
+            changed_by="t",
+            expand_tax_lines=False,
+            source=SOURCE_VAT_FX_DIFFERENCE,
+            lines=[
+                JournalLineInput(account_id=tax_19.vat_account_id, debit_amount=Decimal("0.38")),
+                JournalLineInput(account_id=accounts["1771"].id, credit_amount=Decimal("2.00")),
+                JournalLineInput(account_id=accounts["2660"].id, credit_amount=Decimal("0.38")),
+                JournalLineInput(account_id=accounts["2150"].id, debit_amount=Decimal("2.00")),
+            ],
+        ),
+    )
+    text_export = build_datev_export(
+        session=session,
+        company_id=company.id,
+        generated_at=datetime(2028, 3, 1, tzinfo=timezone.utc),
+    )
+    rows = [row for row in text_export.splitlines() if entry.posting_number in row]
+    assert rows
+    assert not any('"101"' in row or '"102"' in row for row in rows)
+
+
+def test_export_contains_the_rate_of_a_payment_inside_a_month(
+    session: Session, tmp_path: Path
+) -> None:
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    _settled_full(session, company, accounts, tmp_path, day=date(2027, 2, 20))
+    package = build_audit_export_package(
+        session=session,
+        company_id=company.id,
+        generated_at=datetime(2028, 3, 1, tzinfo=timezone.utc),
+        date_from=date(2027, 2, 15),
+        date_to=date(2027, 2, 28),
+        include_documents=False,
+    )
+    with zipfile.ZipFile(io.BytesIO(package.payload)) as archive:
+        rates = json.loads(archive.read("data/vat_exchange_rates.json"))
+        settlements = json.loads(archive.read("data/open_item_settlements.json"))
+    assert {row["rate_month"] for row in rates} == {"2027-02-01"}
+    assert settlements[0]["received_on"] == "2027-02-20"
+
+
+@pytest.mark.parametrize("rate", ["1e30", "1e9", "100000000"])
+def test_absurd_rates_are_refused_before_they_reach_the_database(
+    session: Session, rate: str
+) -> None:
+    company, _ = _seed(session)
+    with pytest.raises(ExchangeRateError, match="zu groß"):
+        set_vat_exchange_rate(
+            session=session,
+            company=company,
+            currency_code="USD",
+            month="2027-03",
+            rate=rate,
+            changed_by="t",
+        )
+    with pytest.raises(ExchangeRateError, match="zu groß"):
+        set_exchange_rate(
+            session=session,
+            company=company,
+            currency_code="USD",
+            rate_date=date(2027, 3, 1),
+            rate=rate,
+            changed_by="t",
+        )
+
+
+def test_annual_preview_and_saving_name_the_missing_rate(tmp_path: Path) -> None:
+    app, company_id, _ = _api_app(tmp_path)
+    client = app.test_client()
+    with app.extensions["db_session_factory"]() as db:
+        company = db.get(Company, company_id)
+        accounts = {
+            row.code: row
+            for row in db.execute(select(Account).where(Account.company_id == company_id)).scalars()
+        }
+        issued = _invoice(db, company, accounts, tmp_path)
+        _pay(db, issued.open_item_id, "595.00", date(2027, 2, 10))
+
+    preview = client.get(
+        "/api/v1/vat-annual-return",
+        headers=READER,
+        query_string={"company_id": company_id, "year": 2027},
+    ).get_json()
+    assert any("USD 2027-02" in warning for warning in preview["warnings"])
+    assert preview["foreign_payments"][0]["rate_missing"] is True
+
+    refused = client.post(
+        "/api/v1/vat-annual-returns", headers=WRITER, json={"company_id": company_id, "year": 2027}
+    )
+    assert refused.status_code == 422
+    assert "USD 2027-02" in refused.get_json()["error"]
+    assert (
+        client.post(
+            "/api/v1/vat-annual-returns",
+            headers=WRITER,
+            json={"company_id": company_id, "year": "x"},
+        ).status_code
+        == 400
+    )
+
+
+def test_rest_tells_client_errors_from_source_errors(tmp_path: Path, monkeypatch) -> None:
+    app, company_id, _ = _api_app(tmp_path)
+    client = app.test_client()
+    with app.extensions["db_session_factory"]() as db:
+        franc_tenant = db.get(Company, company_id).tenant_id
+        franc = Company(tenant_id=franc_tenant, name="Franken AG", currency_code="CHF")
+        db.add(franc)
+        db.commit()
+        franc_id = franc.id
+    _fake_bmf(monkeypatch, {})
+    url = "/api/v1/vat-exchange-rates/fetch"
+    assert (
+        client.post(url, headers=WRITER, json={"company_id": company_id, "year": 2009}).status_code
+        == 422
+    )
+    assert client.post(url, headers=WRITER, json={"company_id": franc_id}).status_code == 422
+    assert client.post(url, headers=WRITER, json={"company_id": company_id}).status_code == 502
+    assert (
+        client.post(
+            "/api/v1/vat-exchange-rates",
+            headers=WRITER,
+            json={
+                "company_id": company_id,
+                "currency_code": "USD",
+                "month": "2027-02",
+                "rate": "1e30",
+            },
+        ).status_code
+        == 422
+    )
+
+
+def test_saved_returns_list_the_difference_entry_and_the_journal_page_labels_it(
+    tmp_path: Path,
+) -> None:
+    app, company_id, _ = _api_app(tmp_path)
+    client = app.test_client()
+    with app.extensions["db_session_factory"]() as db:
+        company = db.get(Company, company_id)
+        accounts = {
+            row.code: row
+            for row in db.execute(select(Account).where(Account.company_id == company_id)).scalars()
+        }
+        _monthly_rates(db, company)
+        issued = _invoice(db, company, accounts, tmp_path)
+        _pay(db, issued.open_item_id, "595.00", date(2027, 2, 10))
+        entry_id = _save(db, company, "2027-02").fx_journal_entry_id
+    listed = client.get(
+        "/api/v1/vat-returns", headers=READER, query_string={"company_id": company_id}
+    ).get_json()["vat_returns"]
+    assert listed[0]["fx_journal_entry_id"] == entry_id
+
+    client.post("/auth/login", data={"username": "buchhalter", "password": "geheim123"})
+    page = client.get(f"/buchungen/{entry_id}").get_data(as_text=True)
+    assert "Umsatzsteuer-Kursdifferenz" in page
+    assert ">Stornieren<" not in page
+    assert "Ergänzen" not in page
+    assert (
+        "Ungültiges Jahr"
+        in client.post(
+            "/fremdwaehrung/bmf",
+            data={"company_id": company_id, "year": "²"},
+            follow_redirects=True,
+        ).get_data(as_text=True)
+    )
+
+
+# ---------------------------------------------------------------------------
 # BMF-Kurse
 # ---------------------------------------------------------------------------
 
@@ -1570,3 +2129,48 @@ def test_migration_keeps_reported_payments_at_the_invoice_rate(tmp_path: Path) -
         )
         assert {row.kennziffer: row.amount for row in result.rows}["USt"] == Decimal("76.00")
         assert result.foreign_payments[0].booked_tax == result.foreign_payments[0].tax
+
+
+def test_migration_also_keeps_a_reported_reversal_at_the_invoice_rate(tmp_path: Path) -> None:
+    """Zahlung ungemeldet, Storno gemeldet zum Rechnungskurs: −152,00 € bleiben −152,00 €.
+
+    Zum Monatskurs wäre die Neuberechnung −158,33 €, das Jahr passte nicht mehr zu den Meldungen.
+    """
+    url = f"sqlite+pysqlite:///{tmp_path / 'mk-storno.db'}"
+    session_factory = create_session_factory(url)
+    with session_factory() as db:
+        company, accounts = _seed(db)
+        _monthly_rates(db, company)
+        _, received, _ = _settled_full(db, company, accounts, tmp_path)
+        reverse_journal_entry(
+            session=db,
+            journal_entry_id=received.journal_entry_id,
+            reversal_date=date(2027, 3, 5),
+            changed_by="t",
+        )
+        db.add(
+            VatReturn(
+                tenant_id=company.tenant_id,
+                company_id=company.id,
+                period_label="2027-03",
+                date_from=date(2027, 3, 1),
+                date_to=date(2027, 3, 31),
+                kennzahlen=[{"kennziffer": "USt", "label": "USt", "amount": "-152.00"}],
+                status="erstellt",
+                created_by="t",
+            )
+        )
+        db.commit()
+        company_id = company.id
+
+    engine = create_engine(url)
+    config = _alembic_config(engine)
+    command.downgrade(config, "20261103_0064")
+    command.upgrade(config, "head")
+    with Session(engine) as db:
+        for period, tax in (("2027-02", Decimal("152.00")), ("2027-03", Decimal("-152.00"))):
+            start, end, _ = period_bounds(period)
+            rows = compute_vat_return_details(
+                session=db, company_id=company_id, date_from=start, date_to=end
+            ).rows
+            assert {row.kennziffer: row.amount for row in rows}["USt"] == tax

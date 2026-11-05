@@ -57,8 +57,10 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
 
    **UStVA:** Die Rechnung bucht weiter zum Rechnungskurs. Die UStVA rechnet je Zahlung: Der Teil der Fremdbeträge, den
    sie deckt, wird zum Monatskurs umgerechnet. Der Meldezeitraum folgt dem Datum des Ausgleichs, der Kurs dem
-   Geldeingang (`received_on`): Wird ein Umsatz nach einem Storno neu zugeordnet, rückt das Datum hinter den Storno,
-   das Geld kam aber im ursprünglichen Monat. Der Storno einer Zahlung nimmt im Zeitraum des Stornos genau den
+   Geldeingang (`received_on`): dem Buchungstag des Bankumsatzes, ohne Bankumsatz dem genannten Datum oder dem der
+   Buchung. Wird ein Umsatz nach einem Storno neu zugeordnet, rückt das Datum hinter den Storno, und wenn der
+   Monat gesperrt ist, läuft die Neuzuordnung über eine neue Buchung; das Geld kam aber im ursprünglichen Monat. Der
+   Storno einer Zahlung nimmt im Zeitraum des Stornos genau den
    gemeldeten Betrag zurück, nicht den Betrag zum Kurs dieses Monats. Damit sich die Teile einer Rechnung ohne
    Rundungsrest summieren, zieht jede Zahlung die Teile ab, die bei ihrer Erfassung standen; das hängt an der
    tatsächlichen Reihenfolge, nicht an den Daten, und ändert sich durch spätere Vorgänge nicht.
@@ -77,9 +79,14 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
 
    **Gemeldete Zeiträume ändern sich nicht:** Beim Festhalten steht der Kurs an der Zahlung (`vat_rate`). Ein später
    erfasster oder korrigierter Monatskurs ändert weder die Neuberechnung des Zeitraums noch den Betrag eines späteren
-   Stornos, und der festgehaltene Snapshot bleibt ohnehin. Die Migration setzt schon gemeldete Zahlungen auf den
-   Rechnungskurs, zu dem sie gemeldet wurden. Eine nach der Meldung zugeordnete Zahlung nennt die UStVA weiter
-   (Entscheidung 5), ihre Differenz bucht spätestens die Jahreserklärung.
+   Stornos, und der festgehaltene Snapshot bleibt ohnehin. Die Migration setzt schon gemeldete Zahlungen und
+   gemeldete Stornos auf den Rechnungskurs, zu dem sie gemeldet wurden. Läge ein Storno oder eine Neuzuordnung
+   derselben Zahlung in einem festgehaltenen Zeitraum, rückt ihr Datum bei Istversteuerung auf den ersten Tag dahinter,
+   auch in Euro: Die Meldung bleibt, die Korrektur steht im nächsten offenen Zeitraum, und `reversed_on` kann dann
+   nach dem Datum der Stornobuchung liegen. Eine andere Zahlung behält ihr Datum; ist sie erst nach der Meldung
+   zugeordnet, nennt die UStVA sie weiter (Entscheidung 5), ihre Differenz bucht spätestens die Jahreserklärung.
+   Eine Rechnung mit stehender Zahlung lässt sich bei Istversteuerung nicht stornieren, erst die Zahlung. Der Wechsel
+   zurück zur Sollversteuerung ist nicht möglich, wenn für Rechnungen ab diesem Datum schon eine Differenz gebucht ist.
 
    **Fehlender Kurs:** Die Vorschau rechnet vorläufig zum Rechnungskurs und nennt Währung und Monat. Festhalten wird
    abgewiesen, wie bei jedem fehlenden Kurs (Entscheidung 3). Der Monatskurs erscheint Anfang des Folgemonats, also
@@ -87,11 +94,13 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
 
    **Abgrenzung:** Das gilt für Rechnungen mit verknüpftem Posten in einer Währung und zu einem Kurs. Liegen auf einer
    Buchung Posten in verschiedenen Währungen oder zu verschiedenen Kursen, zählt sie zum Rechnungskurs und die UStVA
-   warnt.
+   warnt. Im DATEV-Stapel läuft die Differenzbuchung ohne Steuerschlüssel. Eine Rechnung ohne Umsatzsteuer bleibt
+   nach ADR-009 im Rechnungsmonat; die steuerfreie Zeile einer gemischten Rechnung folgt der Zahlung.
 
    **Fachliche Bestätigung:** Gegenkonto, Zeitpunkt der Buchung und der Kurs nach einem Storno sind eigene Entscheidungen
    ohne ausdrückliche Vorgabe in § 16 Abs. 6 UStG oder Abschnitt 16.4 UStAE. Ein Steuerberater bestätigt sie vor dem
-   ersten Produktiveinsatz.
+   ersten Produktiveinsatz, dazu die Frage, ob bei einem niedrigeren Betrag zum Monatskurs der höhere Steuerbetrag der
+   Rechnung nach § 14c UStG geschuldet bleibt.
 9. **Monatskurse in eigener Tabelle `vat_exchange_rate`,** Quelle `bmf` oder `manual`, je Mandant wie die Tageskurse.
    In `exchange_rate` träfe ein Monatskurs am Monatsersten auf den Tageskurs, und Rechnungen, Zahlungen und
    Stichtagsbewertung läsen ihn als Tageskurs; dort gilt aber der Devisenkurs, nicht der Steuerkurs. Quelle ist die

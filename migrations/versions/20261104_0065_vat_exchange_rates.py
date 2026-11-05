@@ -75,8 +75,8 @@ def upgrade() -> None:
                     ),
                 )
 
-    # Bis hierher gemeldet: zum Kurs der Rechnung. Der gilt für diese Zahlungen weiter, auch für
-    # einen späteren Storno, und ihre Steuerdifferenz ist damit null.
+    # Bis hierher gemeldet: zum Kurs der Rechnung, sei es die Zahlung oder ihr Storno. Der gilt für
+    # diese Zahlungen weiter, auch für einen späteren Storno, und ihre Steuerdifferenz ist null.
     op.execute(
         """
         UPDATE open_item_settlement
@@ -97,9 +97,17 @@ def upgrade() -> None:
             SELECT 1
             FROM vat_return
             WHERE vat_return.company_id = open_item_settlement.company_id
-              AND vat_return.date_from <= open_item_settlement.settlement_date
-              AND vat_return.date_to >= open_item_settlement.settlement_date
               AND vat_return.created_at >= open_item_settlement.created_at
+              AND (
+                  (
+                      vat_return.date_from <= open_item_settlement.settlement_date
+                      AND vat_return.date_to >= open_item_settlement.settlement_date
+                  )
+                  OR (
+                      vat_return.date_from <= open_item_settlement.reversed_on
+                      AND vat_return.date_to >= open_item_settlement.reversed_on
+                  )
+              )
         )
         """
     )

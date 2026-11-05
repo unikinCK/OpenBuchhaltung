@@ -23,7 +23,6 @@ from app.auth import current_api_user
 from app.services.vat_returns import (
     VatReturnError,
     company_vat_method,
-    compute_vat_return,
     compute_vat_return_details,
     list_vat_returns,
     period_bounds,
@@ -190,6 +189,7 @@ def list_vat_returns_via_api():
                             "date_to": item.date_to.isoformat(),
                             "status": item.status,
                             "kennzahlen": item.kennzahlen,
+                            "fx_journal_entry_id": item.fx_journal_entry_id,
                             "created_at": item.created_at.isoformat(),
                             "created_by": item.created_by,
                         }
@@ -251,13 +251,16 @@ def get_vat_annual_return():
     with session_factory() as session:
         if api_scoped_company(session, company_id) is None:
             return jsonify({"error": "Company not found."}), 404
-        rows = compute_vat_return(
+        result = compute_vat_return_details(
             session=session,
             company_id=company_id,
             date_from=date_from,
             date_to=date_to,
             include_closing_entries=include_closing_entries,
         )
+        foreign_payments = [
+            serialize_foreign_payment(event) for event in result.foreign_payments
+        ]
 
     return (
         jsonify(
@@ -269,7 +272,10 @@ def get_vat_annual_return():
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
                 "include_closing_entries": include_closing_entries,
-                "kennzahlen": _rows_payload(rows),
+                "kennzahlen": _rows_payload(result.rows),
+                "warnings": result.warnings,
+                "unassigned": result.unassigned,
+                "foreign_payments": foreign_payments,
             }
         ),
         200,
@@ -299,10 +305,11 @@ def create_vat_annual_return_via_api():
                 changed_by=(current_api_user() or {}).get("username", "api"),
                 include_closing_entries=bool_payload(payload.get("include_closing_entries")),
             )
+        except VatReturnError as exc:
+            # Vor ValueError: VatReturnError ist einer.
+            return validation_error(str(exc))
         except (TypeError, ValueError):
             return jsonify({"error": "year must be an integer."}), 400
-        except VatReturnError as exc:
-            return validation_error(str(exc))
         return jsonify(_vat_return_payload(vat_return)), 201
 
 

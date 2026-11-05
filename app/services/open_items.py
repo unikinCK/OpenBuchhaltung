@@ -23,6 +23,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
     first_open_posting_date,
+    first_unreported_day,
 )
 from app.services.sepa_export import SepaExportError, normalize_bic, normalize_iban
 from domain.models import (
@@ -416,8 +417,9 @@ def settle_open_item(
             settlement_date = bank_transaction.booking_date
         else:
             settlement_date = date.today()
-    # Der Monatskurs der Umsatzsteuer folgt dem Geldeingang, auch wenn das Datum gleich rückt.
-    received_on = settlement_date
+    # Der Monatskurs der Umsatzsteuer folgt dem Geldeingang: dem Bankumsatz, sonst dem Datum hier.
+    # Das Datum des Ausgleichs kann davon abweichen und gleich noch rücken.
+    received_on = bank_transaction.booking_date if bank_transaction is not None else settlement_date
     # Dieselbe Zahlung: derselbe Umsatz, auch auf einem anderen Posten, oder dasselbe Datum auf
     # diesem Posten. Eine andere Zahlung behält ihr Datum.
     same_payment = [
@@ -431,8 +433,10 @@ def settle_open_item(
     last_reversal = session.execute(
         select(func.max(OpenItemSettlement.reversed_on)).where(or_(*same_payment))
     ).scalar()
-    if last_reversal is not None and settlement_date < last_reversal:
-        settlement_date = last_reversal
+    if last_reversal is not None:
+        settlement_date = first_unreported_day(
+            session=session, item=item, on=max(settlement_date, last_reversal)
+        )
 
     payment_entry_id = (linked_entry.id if linked_entry else None) or (
         bank_transaction.journal_entry_id if bank_transaction else None

@@ -96,6 +96,7 @@ from app.services.journal_entries import (
     create_journal_entry,
     first_open_posting_date,
 )
+from app.services.standard_accounts import KURSERTRAG, find_standard_account
 from app.services.tax_codes import company_special_tax_accounts, company_tax_accounts
 from app.services.tax_period import (
     INPUT,
@@ -558,7 +559,12 @@ def _foreign_paid_entry(
         if rate is None:
             rate = invoice_rate
 
-        amounts = {key: to_company_amount(part, rate) for key, part in foreign_part.items()}
+        # Zum Kurs der Rechnung zählt, was gebucht ist; aus den Fremdbeträgen käme Rundung dazu.
+        amounts = (
+            booked_part
+            if rate == invoice_rate
+            else {key: to_company_amount(part, rate) for key, part in foreign_part.items()}
+        )
         tax = booked_tax = ZERO
         differences: dict[int, Decimal] = {}
         for index, row in enumerate(invoice.rows):
@@ -933,6 +939,11 @@ def compute_vat_return_details(
         if rate is not None and rate > 0
     } | {Decimal("19.00"), Decimal("7.00")}
 
+    fx_gain_account = find_standard_account(
+        session=session, company_id=company_id, standard=KURSERTRAG
+    )
+    fx_gain_account_id = fx_gain_account.id if fx_gain_account is not None else None
+
     base_by_rate: dict[Decimal, Decimal] = {}
     bases: dict[str, Decimal] = {}
     output_tax = ZERO
@@ -1047,6 +1058,9 @@ def compute_vat_return_details(
                 untagged_output += amount
                 continue
             if row.line_account_type in {"revenue", "income"}:
+                if row.account_id == fx_gain_account_id:
+                    # Ein Kursgewinn ist kein Umsatz, auch kein vergessener.
+                    continue
                 amount = row.credit_amount - row.debit_amount
                 kennzahl = revenue_kennzahl(chart, row.account_code)
                 if kennzahl is not None:
@@ -1454,6 +1468,31 @@ def company_vat_method(company: Company, *, on: date | None = None) -> dict[str,
     }
 
 
+def _refuse_switch_with_booked_differences(
+    session: Session, company: Company, valid_from: date
+) -> None:
+    """Rechnungen ab dem Wechsel zählen wieder nach Soll, ihre gebuchte Differenz bliebe stehen."""
+    reference = session.execute(
+        select(OpenItem.reference)
+        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
+        .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
+        .where(
+            OpenItem.company_id == company.id,
+            JournalEntry.entry_date >= valid_from,
+            or_(
+                OpenItemSettlement.vat_fx_entry_id.is_not(None),
+                OpenItemSettlement.vat_fx_reversal_entry_id.is_not(None),
+            ),
+        )
+    ).first()
+    if reference is not None:
+        raise VatReturnError(
+            f"Für Posten {reference[0]} ist schon eine Steuerdifferenz zum Monatskurs gebucht. Ein "
+            f"Wechsel zum {valid_from.strftime('%d.%m.%Y')} ließe sie auf dem Steuerkonto stehen; "
+            "die Versteuerungsart wechselt deshalb erst nach den gemeldeten Zeiträumen."
+        )
+
+
 def set_company_vat_method(
     *,
     session: Session,
@@ -1487,6 +1526,7 @@ def set_company_vat_method(
             raise VatReturnError("Die Gesellschaft nutzt bereits die Sollversteuerung.")
         if valid_from < company.vat_cash_basis_from:
             raise VatReturnError("Das Datum liegt vor dem Beginn der Istversteuerung.")
+        _refuse_switch_with_booked_differences(session, company, valid_from)
         if valid_from == company.vat_cash_basis_from:
             company.vat_cash_basis_from = None
             company.vat_cash_basis_until = None

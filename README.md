@@ -1516,14 +1516,17 @@ Gestattung durch das Finanzamt, das prüft die App nicht. Im Zeitraum der Istver
   Datum der Ausgleichsbuchung, sonst des Bankumsatzes. Teilzahlungen summieren sich centgenau zur
   Rechnung. Ein storniertes Ausgleichen mindert im Zeitraum des Stornos, bereits gemeldete Zeiträume
   bleiben also richtig.
+- Fällt ein Storno oder die Neuzuordnung derselben Zahlung in einen festgehaltenen Zeitraum, zählt sie am ersten
+  Tag dahinter. Eine Rechnung, auf der eine Zahlung steht, lässt sich erst nach deren Storno stornieren.
 - Direkt bezahlte Umsätze (Bank an Erlöse), Vorsteuer und steuerfreie Umsätze bleiben unverändert.
 - Eine Rechnung auf einem Forderungskonto **ohne** verknüpften Posten zählt mit dem Buchungsdatum; die
   UStVA nennt sie als Warnung. Sie zeigt auch, wie viel Umsatzsteuer noch nicht fällig ist: Das
   Steuerkonto enthält sie bereits, weil gebucht wird wie bei der Sollversteuerung. Eine Umgliederung auf
   „Umsatzsteuer nicht fällig“ bucht die App nicht.
-- Eine Rechnung in **Fremdwährung** zählt je Zahlung zum Monatskurs des Monats, in dem das Geld einging (ADR-010). Ein
-  Storno nimmt im Zeitraum des Stornos genau den gemeldeten Betrag zurück; ein neu zugeordneter Umsatz behält den
-  Kurs seines Geldeingangs. `GET /api/v1/vat-return` und die Seite nennen je Zahlung Kurs, Steuer und gebuchte Steuer.
+- Eine Rechnung in **Fremdwährung** zählt je Zahlung zum Monatskurs des Monats, in dem das Geld einging (ADR-010):
+  Maßgeblich ist der Bankumsatz, ohne ihn das Datum des Ausgleichs. Ein Storno nimmt im Zeitraum des Stornos genau den
+  gemeldeten Betrag zurück; ein neu zugeordneter Umsatz behält den Kurs seines Geldeingangs. `GET /api/v1/vat-return`,
+  `GET /api/v1/vat-annual-return` und die Seite nennen je Zahlung Kurs, Steuer und gebuchte Steuer.
   Fehlt der Monatskurs, rechnet die Vorschau vorläufig zum Rechnungskurs, festhalten lässt sich der Zeitraum dann
   nicht. **Beim Festhalten** bleibt der Kurs an der Zahlung stehen, ein späterer Kurs ändert den Zeitraum nicht
   mehr, und die Differenz zur gebuchten Steuer wird auf dem Steuerkonto gegen die Kursdifferenz-Konten gebucht, auf das
