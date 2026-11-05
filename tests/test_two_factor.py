@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
@@ -44,6 +45,14 @@ PASSWORD = "geheim123"
 LOGIN_FORM = "/auth/login"
 SECOND_FACTOR = "/auth/login/zweiter-faktor"
 SETUP_PAGE = "/auth/zwei-faktor"
+# Die Uhr der Codes steht: Sonst fiele ein Code bei einem langsamen Lauf aus dem Fenster von
+# einem Zeitschritt (Passwort-Hashes, parallele Prozesse).
+TOTP_NOW = time.time()
+
+
+@pytest.fixture(autouse=True)
+def _frozen_totp_clock(monkeypatch):
+    monkeypatch.setattr("app.services.two_factor.time", SimpleNamespace(time=lambda: TOTP_NOW))
 
 
 def _create_app(tmp_path: Path, **overrides):
@@ -93,14 +102,14 @@ def _enable(app, user_id: int) -> tuple[str, list[str]]:
     with app.app_context(), app.extensions["db_session_factory"]() as session:
         user = session.get(User, user_id)
         secret = start_setup(session, user, password=PASSWORD, actor="test")
-        past = time.time() - 300
+        past = TOTP_NOW - 300
         codes = confirm_setup(session, user, code=totp_code(secret, past), actor="test", at=past)
         session.commit()
         return secret, codes
 
 
 def _now_code(secret: str) -> str:
-    return totp_code(secret, time.time())
+    return totp_code(secret, TOTP_NOW)
 
 
 def _login(client, username: str = "maria", password: str = PASSWORD, **kwargs):
@@ -177,7 +186,7 @@ def test_same_time_step_cannot_be_used_twice_and_no_older_step(tmp_path):
     app = _create_app(tmp_path)
     user_id = _seed_user(app)
     secret, _ = _enable(app, user_id)
-    at = time.time()
+    at = TOTP_NOW
     with app.app_context(), app.extensions["db_session_factory"]() as session:
         user = session.get(User, user_id)
         assert verify_code(session, user, totp_code(secret, at), at=at) == "totp"
@@ -332,7 +341,7 @@ def test_replayed_code_is_rejected_at_login(tmp_path):
     assert _audit_actions(app)[-1] == "two_factor_failed"
 
     # Der nächste Zeitschritt funktioniert.
-    assert _second_factor(second, totp_code(secret, time.time() + 30)).headers["Location"] == "/"
+    assert _second_factor(second, totp_code(secret, TOTP_NOW + 30)).headers["Location"] == "/"
 
 
 def test_failed_codes_count_in_rate_limit_and_password_does_not_reset_them(tmp_path):
@@ -683,7 +692,7 @@ def test_setup_flow_in_ui(tmp_path):
     fresh = app.test_client()
     assert _login(fresh).headers["Location"] == SECOND_FACTOR
     assert _second_factor(fresh, confirm_code).headers["Location"] == SECOND_FACTOR
-    next_code = totp_code(secret, time.time() + 30)
+    next_code = totp_code(secret, TOTP_NOW + 30)
     assert _second_factor(fresh, next_code).headers["Location"] == "/"
 
 
@@ -696,7 +705,7 @@ def test_setup_is_refused_while_active(tmp_path):
     _second_factor(client, _now_code(secret))
     before = _user_state(app, user_id).totp_secret_encrypted
     client.post(f"{SETUP_PAGE}/einrichten", data={"current_password": PASSWORD})
-    client.post(f"{SETUP_PAGE}/bestaetigen", data={"code": totp_code(secret, time.time() + 30)})
+    client.post(f"{SETUP_PAGE}/bestaetigen", data={"code": totp_code(secret, TOTP_NOW + 30)})
     assert _user_state(app, user_id).totp_secret_encrypted == before
 
 
@@ -712,7 +721,7 @@ def test_disable_requires_password_and_current_code(tmp_path):
     app = _create_app(tmp_path)
     user_id = _seed_user(app)
     client, secret, _ = _logged_in_with_two_factor(app, user_id)
-    next_code = totp_code(secret, time.time() + 30)
+    next_code = totp_code(secret, TOTP_NOW + 30)
 
     client.post(f"{SETUP_PAGE}/abschalten", data={"current_password": "falsch", "code": next_code})
     assert _user_state(app, user_id).totp_enabled_at is not None
@@ -753,7 +762,7 @@ def test_regenerating_recovery_codes_invalidates_the_old_ones(tmp_path):
 
     response = client.post(
         f"{SETUP_PAGE}/codes",
-        data={"current_password": PASSWORD, "code": totp_code(secret, time.time() + 30)},
+        data={"current_password": PASSWORD, "code": totp_code(secret, TOTP_NOW + 30)},
     )
     assert response.status_code == 200
     new_codes = re.findall(r"<li>([A-Z2-9-]{19})</li>", response.get_data(as_text=True))
@@ -774,7 +783,7 @@ def test_failed_attempts_on_sensitive_actions_count_in_rate_limit(tmp_path):
         client.post(f"{SETUP_PAGE}/abschalten", data={"current_password": PASSWORD, "code": "0"})
     client.post(
         f"{SETUP_PAGE}/abschalten",
-        data={"current_password": PASSWORD, "code": totp_code(secret, time.time() + 30)},
+        data={"current_password": PASSWORD, "code": totp_code(secret, TOTP_NOW + 30)},
     )
     assert _user_state(app, user_id).totp_enabled_at is not None
 
