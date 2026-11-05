@@ -12,5 +12,8 @@
     {% if invoice.seller_vat_id %}<br /><span class="small">USt-IdNr. {{ invoice.seller_vat_id }}</span>{% endif %}
     {% if invoice.seller_iban %}<br /><span class="small">IBAN {{ invoice.seller_iban }}</span>{% endif %}
   </div>
+  {% for warning in warnings or [] %}
+    <p class="callout callout-warning">{{ warning }}</p>
+  {% endfor %}
   {{ partner_field(partner_match, partners, company_id=company_id, proposed=proposed_partner) }}
 {% endif %}

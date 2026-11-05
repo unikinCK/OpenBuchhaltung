@@ -340,10 +340,7 @@ def list_bank_transactions_via_api():
         )
         proposals_by_tx = (
             booking_proposals(
-                session=session,
-                transactions=transactions,
-                matches=matches_by_tx,
-                item_suggestions=items_by_tx,
+                session=session, transactions=transactions, matches=matches_by_tx
             )
             if include_suggestions
             else {}

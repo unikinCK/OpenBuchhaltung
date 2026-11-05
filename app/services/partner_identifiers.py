@@ -54,12 +54,14 @@ IBAN_LENGTHS = {
 _IBAN_START_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2}) ?(\d{2})(?=[ A-Z0-9])")
 _DE_VAT_RE = re.compile(r"(?<![A-Z0-9])DE[ .]?(\d{3})[ .]?(\d{3})[ .]?(\d{3})(?![0-9])")
 _LABELLED_VAT_RE = re.compile(
+    r"(?<![A-Za-zÄÖÜäöüß])"
     r"(?:USt[-. ]?Id(?:ent)?[-. ]?(?:Nr|Nummer)?|UID(?:[-. ]?Nr)?|VAT(?:[- ]?(?:ID|No|Nr|Reg))?"
     r"|TVA|BTW)[.:# ]*(?:Nr\.?:? ?)?([A-Z]{2})[ .]?([0-9A-Z+*]{8,12})(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
 _LABELLED_TAX_NUMBER_RE = re.compile(
-    r"(?:St\.?[- ]?Nr\.?|Steuer[- ]?(?:nummer|nr\.?))[.: ]*(\d[\d/ ]{7,16}\d)",
+    # Ohne die Grenze zählte „Best.-Nr. 4500123456“ als Steuernummer.
+    r"(?<![A-Za-zÄÖÜäöüß])(?:St\.?[- ]?Nr\.?|Steuer[- ]?(?:nummer|nr\.?))[.: ]*(\d[\d/ ]{7,16}\d)",
     re.IGNORECASE,
 )
 

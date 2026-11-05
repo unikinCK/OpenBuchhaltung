@@ -108,6 +108,7 @@
           <input type="hidden" name="invoice_number" value="{{ extraction.invoice_number or '' }}" />
           <input type="hidden" name="supplier_name" value="{{ extraction.supplier or '' }}" />
           <input type="hidden" name="supplier_iban" value="{{ proposal.supplier_iban or '' }}" />
+          <input type="hidden" name="currency_code" value="{{ extraction.currency_code or '' }}" />
 
           {{ partner_field(proposal.partner_match, partners, company_id=selected_company_id, proposed=proposal.proposed_partner) }}
 

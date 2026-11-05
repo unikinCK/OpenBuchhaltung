@@ -785,7 +785,8 @@ Controlling-Dimensionen und Geschäftspartner vorgeschlagen und im Buchen-Formul
 vorausgewählt; bei mehreren Treffern gewinnt das längste (spezifischste) Muster. Der
 Regel-Lauf („Regel-Treffer verbuchen“) bucht alle offenen Treffer auf einmal
 — Fehler einzelner Buchungen (z. B. gesperrte Periode) brechen den Lauf
-nicht ab, sondern stehen im Ergebnisbericht. API:
+nicht ab, sondern stehen im Ergebnisbericht. Nennt die IBAN eindeutig einen anderen Partner als die
+Regel, bucht der Lauf den Umsatz nicht und meldet ihn. API:
 `GET/POST /api/v1/bank-booking-rules`, `POST /bank-booking-rules/<id>/active`,
 `POST /bank-booking-rules/apply`; MCP: `list/create_bank_booking_rule`,
 `set_bank_booking_rule_active`, `apply_bank_booking_rules`.
@@ -795,18 +796,18 @@ einen offenen Umsatz Gegenkonto, Steuercode, Kontierung und Geschäftspartner de
 letzten Bankbuchung derselben Gegenseite vor (ohne Gegenseite: gleicher
 Verwendungszweck; nur gleiches Vorzeichen). Das gilt nicht, wenn die frühere Buchung
 mehrere Gegenkontozeilen hatte. Reihenfolge: Regel vor Eigenübertrag (Geldtransit) vor
-genau einem passenden offenen Posten vor Historie. Eine eindeutige Partnererkennung über die IBAN
-geht dem Partner der Historie vor. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
+Historie. Eine eindeutige Partnererkennung über die IBAN geht dem Partner der Historie vor; widerspricht
+die Erkennung, bleibt der Partner leer. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
 `list_bank_transactions`) liefert den Vorschlag je offenem Umsatz als
-`booking_proposal` mit `source` (`rule`, `transfer`, `open_item`, `history`), Gegenkonto, Steuercode,
+`booking_proposal` mit `source` (`rule`, `transfer`, `history`), Gegenkonto, Steuercode,
 Kostenstelle, Profitcenter und Partner, dazu `partner_match` und `open_item_suggestions`. Die iOS-App
 bucht damit mit einem Tipp.
 
 **Offenen Posten ausgleichen:** Passt ein offener Posten nach Partner oder Referenz im
-Verwendungszweck und Betrag, bietet der Buchungsdialog ihn an. Vorbelegt wird das Gegenkonto nur bei
-genau einem Posten mit Referenz oder eindeutig erkanntem Partner. Ein Klick bucht den Umsatz auf das
-Sammelkonto des Postens, mit dessen Partner, und gleicht ihn aus; das Storno der Zahlung öffnet ihn
-wieder, außer die Rechnung selbst ist storniert. Posten in Fremdwährung laufen weiter über **Offene Posten**, dort mit Fremdbetrag oder Kurs.
+Verwendungszweck und Betrag, bietet der Buchungsdialog ihn an (`open_item_suggestions`). Ein Klick
+bucht den Umsatz auf das Sammelkonto des Postens, mit dessen Partner, und gleicht ihn in einer
+Transaktion aus; das Storno der Zahlung öffnet ihn wieder, außer die Rechnung selbst ist storniert.
+Normales Buchen auf das Sammelkonto gleicht keinen Posten aus. Posten in Fremdwährung laufen weiter über **Offene Posten**, dort mit Fremdbetrag oder Kurs.
 API: `POST /api/v1/bank-transactions/<id>/book-open-item`; MCP:
 `book_bank_transaction_to_open_item`.
 
@@ -910,14 +911,15 @@ E-Rechnung, Beleg-OCR, Belegabgleich und Bankumsätze suchen den Partner in der 
 |---|---|---|
 | `unique` | USt-IdNr., Steuernummer, IBAN oder ausdrücklich genannte Partnernummer treffen genau einen aktiven Partner | wird vorbelegt; die Buchung trägt ihn |
 | `uncertain` | ein Kandidat, aber nur über den Namen oder eine Nummer aus Freitext, ohne die nötige Rolle oder mit widersprechender USt-IdNr. | Vorschlag zum Bestätigen, keine Zuordnung |
-| `ambiguous` | mehrere Kandidaten, z. B. gleiche IBAN, die USt-IdNr. des einen und die IBAN des anderen oder die IBAN des einen unter dem Namen des anderen | Vorschlag zum Bestätigen, keine Zuordnung |
+| `ambiguous` | mehrere Kandidaten, z. B. gleiche IBAN, die USt-IdNr. des einen und die IBAN des anderen oder die IBAN des einen unter einem Namen, der besser zu einem anderen passt | Vorschlag zum Bestätigen, keine Zuordnung |
 | `none` | kein Kandidat | „Lieferant anlegen“ mit vorbefüllten Daten |
 
 Die eigene USt-IdNr. und IBAN der Gesellschaft zählen nicht, denn auf einer Eingangsrechnung steht
 auch der Empfänger. Inaktive Partner werden nie zugeordnet, aber genannt, damit keine Dublette
 entsteht. Weicht die IBAN eines Belegs vom Stamm ab, erscheint eine Warnung; bezahlt wird auf die
-IBAN im Stamm, und der Stamm ändert sich dadurch nicht. Ein Bankumsatz kennt nur die bevorzugte
-Rolle: Ein Zahlungseingang kann auch die Erstattung eines Lieferanten sein.
+IBAN im Stamm, und der Stamm ändert sich dadurch nicht. Kommt ein bekannter Partner infrage und ist
+keiner bestätigt, gelangt die IBAN des Belegs nicht auf den offenen Posten. Ein Bankumsatz kennt nur
+die bevorzugte Rolle: Ein Zahlungseingang kann auch die Erstattung eines Lieferanten sein.
 
 Buchen ohne Bestätigung läuft ohne Partner; nachtragen lässt er sich an der offenen Buchung und am
 offenen Posten. API: `POST /api/v1/partners/recognize` (nur lesend); MCP: `recognize_partner`.
@@ -1181,9 +1183,14 @@ Nach der Dateiauswahl zeigt die Seite die Rechnungsdaten und den erkannten Liefe
 `POST /api/v1/einvoices/preview`; MCP: `preview_einvoice`. Beim Buchen gilt eine bestätigte Auswahl
 (`partner_id`), sonst nur ein eindeutiger Treffer (`auto_partner`, Standard an).
 
+Dieselbe Rechnung (gleiche Nummer, gleicher Absender) lässt sich erst nach dem Storno der ersten
+Buchung erneut buchen; dasselbe gilt für einen Beleg in der Beleg-OCR.
+
 Auf einem Kreditoren-Sammelkonto entsteht ein **offener Posten** über den Zahlbetrag der Rechnung,
-fällig zum Datum aus der Rechnung, sonst nach dem Zahlungsziel des Partners. Ist schon alles bezahlt
-oder steht `create_open_item` auf `false` („Schon bezahlt“ in der Oberfläche), entsteht keiner. Das
+höchstens den Bruttobetrag, fällig zum Datum aus der Rechnung, sonst nach dem Zahlungsziel des
+Partners. Weicht der Zahlbetrag vom Brutto ab, erscheint eine Warnung. Ist schon alles bezahlt, läuft
+der Beleg in fremder Währung oder steht `create_open_item` auf `false` („Schon bezahlt“ in der
+Oberfläche), entsteht keiner. Das
 Storno der Buchung schließt den Posten, ohne eine Zahlung zu erzeugen; das spätere Storno einer
 Teilzahlung öffnet ihn nicht wieder. Dasselbe gilt für Beleg-OCR
 und Belegabgleich; dort lässt sich die Fälligkeit in der Maske setzen.

@@ -98,7 +98,7 @@ NAME_NOISE = {
 # Partnernummer im Verwendungszweck, nur hinter einer Bezeichnung: fünfstellige Zahlen kommen in
 # Freitexten auch sonst vor.
 _NUMBER_HINT_RE = re.compile(
-    r"(?:kunden|kd|debitor(?:en)?|kreditor(?:en)?|lieferanten|lief|partner)"
+    r"(?<![a-zäöüß])(?:kunden|kd|debitor(?:en)?|kreditor(?:en)?|lieferanten|lief|partner)"
     r"[-. ]*(?:nr|nummer|no)?[.:# ]*(\d{5,6})(?!\d)",
     re.IGNORECASE,
 )
@@ -317,9 +317,11 @@ class PartnerDirectory:
     ) -> PartnerMatch:
         fitting = {pid: hit for pid, hit in hits.items() if _has_role(hit[0], role)}
         pool = fitting or hits
-        kinds_found = {kind for _partner, kinds in pool.values() for kind in kinds}
         # Wer alle getroffenen Kennungsarten erfüllt, schlägt Partner mit nur einem Teil davon:
-        # USt-IdNr. und IBAN bei A, nur die IBAN bei B. USt-IdNr. bei A und IBAN bei B bleibt offen.
+        # USt-IdNr. und IBAN bei A, nur die IBAN bei B. USt-IdNr. bei A und IBAN bei B bleibt offen,
+        # auch wenn einer von beiden die verlangte Rolle nicht hat: Die Rolle löst Dubletten auf,
+        # keine widersprüchlichen Kennungen.
+        kinds_found = {kind for _partner, kinds in hits.values() for kind in kinds}
         complete = {pid: hit for pid, hit in pool.items() if set(hit[1]) == kinds_found}
         candidates = _sorted_candidates(hits, role=role, preferred_role=preferred_role)
 
@@ -378,7 +380,7 @@ class PartnerDirectory:
             )
         return PartnerMatch(
             status=STATUS_UNIQUE,
-            reason=f"{_label(partner)} eindeutig erkannt über {kinds_text}.",
+            reason=f"{_label(partner)} eindeutig erkannt über {kinds_text.rstrip('.')}.",
             partner=partner,
             candidates=ordered,
             warnings=warnings,
@@ -387,18 +389,20 @@ class PartnerDirectory:
     def _named_others(
         self, signals: PartnerSignals, partner: BusinessPartner
     ) -> list[BusinessPartner]:
-        """Andere Partner, zu denen der Name passt, wenn er zum Treffer selbst nicht passt.
+        """Andere Partner, zu denen der Name besser passt als zum Treffer selbst.
 
         Ein unbekannter Name widerspricht nicht: Bankauszüge und Belege schreiben Namen oft anders.
-        Der Name eines anderen bekannten Partners dagegen schon.
+        Der Name eines anderen bekannten Partners dagegen schon, auch wenn er nur ähnlich ist:
+        „Müller Bau GmbH“ mit der IBAN der „Müller GmbH“.
         """
         wanted = name_tokens(signals.name)
-        if not wanted or _name_score(wanted, name_tokens(partner.name)) > 0:
+        if not wanted:
             return []
+        own_score = _name_score(wanted, name_tokens(partner.name))
         return [
             other
             for other, tokens in self.name_index
-            if other.id != partner.id and _name_score(wanted, tokens) > 0
+            if other.id != partner.id and _name_score(wanted, tokens) > own_score
         ]
 
     def _vat_contradiction(
@@ -454,12 +458,20 @@ class PartnerDirectory:
             )
             for _score, partner, kinds in weak[:MAX_CANDIDATES]
         )
+        warnings = tuple(
+            dict.fromkeys(
+                warning
+                for candidate in candidates
+                for warning in self.identifier_warnings(signals, candidate.partner)
+            )
+        )
         if len(candidates) > 1:
             names = ", ".join(_label(candidate.partner) for candidate in candidates)
             return PartnerMatch(
                 status=STATUS_AMBIGUOUS,
                 reason=f"Mehrere Geschäftspartner kommen infrage ({names}). Bitte auswählen.",
                 candidates=candidates,
+                warnings=warnings,
             )
         candidate = candidates[0]
         return PartnerMatch(
@@ -469,6 +481,7 @@ class PartnerDirectory:
                 f"{_kinds_text(candidate.matched_on)}). Bitte bestätigen."
             ),
             candidates=candidates,
+            warnings=warnings,
         )
 
     def _no_match(self, signals: PartnerSignals) -> PartnerMatch:

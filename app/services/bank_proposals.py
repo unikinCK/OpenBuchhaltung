@@ -4,14 +4,17 @@ Quellen in dieser Reihenfolge:
 
 1. ``rule`` – passende Auto-Kontierungsregel (längstes Muster gewinnt).
 2. ``transfer`` – Übertrag zwischen eigenen Bankkonten → Geldtransit-Konto.
-3. ``open_item`` – genau ein offener Posten passt nach Partner bzw. Referenz und Betrag.
-4. ``history`` – letzte Bankbuchung derselben Gegenseite mit gleichem Vorzeichen
+3. ``history`` – letzte Bankbuchung derselben Gegenseite mit gleichem Vorzeichen
    („wie zuletzt“); Gegenkonto, Steuercode, Kontierung und Partner werden aus deren
    Buchung übernommen.
 
 Daneben erkennt :func:`partner_matches` den Partner (IBAN, Partnernummer im Text, Name). Eine
 eindeutige Erkennung geht vor der Historie, die nur am Namen hängt. Ein unsicherer Treffer
-bleibt ein Vorschlag; er wird weder vorbelegt noch beim Regel-Lauf verwendet.
+bleibt ein Vorschlag und wird nicht vorbelegt. Der Partner der letzten Buchung bleibt nur stehen,
+solange die Erkennung ihm nicht widerspricht: Er beruht auf einer Entscheidung eines Menschen.
+
+Offene Posten stehen bewusst nicht im ``booking_proposal``: Wer mit dessen Werten normal bucht,
+ließe den Posten offen. Sie laufen über :func:`book_transaction_to_open_item`.
 
 Grundlage für die Vorbelegung des Buchungsdialogs in Weboberfläche und App sowie für
 ``GET /api/v1/bank-transactions?include_suggestions=1`` (Felder ``booking_proposal``,
@@ -20,6 +23,7 @@ Grundlage für die Vorbelegung des Buchungsdialogs in Weboberfläche und App sow
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
@@ -35,6 +39,8 @@ from app.services.bank_import import (
 from app.services.bank_rules import match_rules_for
 from app.services.open_items import settle_open_item
 from app.services.partner_recognition import (
+    STATUS_NONE,
+    STATUS_UNCERTAIN,
     PartnerDirectory,
     PartnerMatch,
     load_partner_directory,
@@ -55,7 +61,6 @@ class BookingProposal:
     partner_id: int | None = None
     rule_pattern: str | None = None
     history_transaction_id: int | None = None
-    open_item_id: int | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -70,7 +75,6 @@ class BookingProposal:
             "partner_id": self.partner_id,
             "rule_pattern": self.rule_pattern,
             "history_transaction_id": self.history_transaction_id,
-            "open_item_id": self.open_item_id,
         }
 
 
@@ -211,6 +215,14 @@ def partner_matches(
     return matches
 
 
+def _reference_in_text(reference: str, text: str) -> bool:
+    """Referenz als ganzes Wort: „RE-77“ passt nicht auf „RE-776“."""
+    if len(reference) < 4:
+        return False
+    pattern = rf"(?<![0-9A-Za-z]){re.escape(reference)}(?![0-9A-Za-z])"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def open_item_suggestions(
     *,
     session: Session,
@@ -248,19 +260,21 @@ def open_item_suggestions(
             {candidate.partner.id for candidate in match.candidates} if match else set()
         )
         wanted_type = "receivable" if transaction.amount > 0 else "payable"
-        purpose = (transaction.purpose or "").casefold()
+        purpose = transaction.purpose or ""
         found: list[OpenItemSuggestion] = []
         for item in items:
             if (
                 item.company_id != transaction.company_id
                 or item.item_type != wanted_type
                 or item.open_amount != abs(transaction.amount)
+                or transaction.currency_code != item.currency_code
+                or (item.partner is not None and not item.partner.is_active)
             ):
                 continue
             matched_on: list[str] = []
             if item.partner_id is not None and item.partner_id in partner_ids:
                 matched_on.append("partner")
-            if len(item.reference) >= 4 and item.reference.casefold() in purpose:
+            if _reference_in_text(item.reference, purpose):
                 matched_on.append("reference")
             if matched_on:
                 found.append(OpenItemSuggestion(item=item, matched_on=(*matched_on, "amount")))
@@ -281,8 +295,8 @@ def book_transaction_to_open_item(
 ) -> OpenItem:
     """Bucht den Umsatz auf das Sammelkonto des Postens und gleicht den Posten damit aus.
 
-    Der Posten bringt Konto und Partner mit. Vorab geprüft, denn ``book_transaction`` und
-    ``settle_open_item`` committen getrennt.
+    Der Posten bringt Konto und Partner mit. Buchung und Ausgleich laufen in einer Transaktion:
+    Scheitert der Ausgleich, bleibt auch der Umsatz ungebucht.
     """
     transaction = session.get(BankTransaction, transaction_id)
     if transaction is None:
@@ -301,47 +315,65 @@ def book_transaction_to_open_item(
         raise BankImportError(
             "Forderungen gleichen Zahlungseingänge aus, Verbindlichkeiten Zahlungsausgänge."
         )
+    if transaction.currency_code != item.currency_code:
+        raise BankImportError(
+            f"Der Umsatz läuft in {transaction.currency_code}, der Posten in {item.currency_code}."
+        )
     if abs(transaction.amount) > item.open_amount:
         raise BankImportError("Der Umsatz ist höher als der offene Betrag des Postens.")
-    # Bestehende Posten inaktiver Partner bleiben ausgleichbar, neu bebuchen lässt er sich nicht.
+    # Ohne Partner stünde die Zahlung im Nebenbuch neben dem Posten: Der Saldo des Partners und die
+    # Zeile „ohne Partner“ blieben offen, obwohl der Posten ausgeglichen ist.
     partner = item.partner
-    transaction = book_transaction(
-        session=session,
-        transaction_id=transaction.id,
-        contra_account_id=item.account_id,
-        partner_id=partner.id if partner is not None and partner.is_active else None,
-        description=description or f"Bank: {item.reference} – {transaction.purpose}"[:500],
-        changed_by=changed_by,
-    )
-    return settle_open_item(
-        session=session,
-        open_item_id=item.id,
-        amount=abs(transaction.amount),
-        bank_transaction_id=transaction.id,
-        journal_entry_id=transaction.journal_entry_id,
-        changed_by=changed_by,
-    )
+    if partner is not None and not partner.is_active:
+        raise BankImportError(
+            f"{partner.name} ist inaktiv und darf nicht bebucht werden. Bitte reaktivieren."
+        )
+    try:
+        transaction = book_transaction(
+            session=session,
+            transaction_id=transaction.id,
+            contra_account_id=item.account_id,
+            partner_id=partner.id if partner is not None else None,
+            description=description or f"Bank: {item.reference} – {transaction.purpose}"[:500],
+            changed_by=changed_by,
+            commit=False,
+        )
+        return settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            amount=abs(transaction.amount),
+            bank_transaction_id=transaction.id,
+            journal_entry_id=transaction.journal_entry_id,
+            changed_by=changed_by,
+        )
+    except Exception:
+        session.rollback()
+        raise
 
 
-def _proposed_open_item(
-    found: Sequence[OpenItemSuggestion], match: PartnerMatch | None
-) -> OpenItem | None:
-    """Der Posten, mit dem der Buchungsdialog vorbelegt wird.
-
-    Nur bei genau einem Posten und einem sicheren Beleg: Referenz im Verwendungszweck oder
-    eindeutig erkannter Partner. Ein Namenstreffer bleibt in ``open_item_suggestions``, sonst
-    wäre sein Partner über den Posten doch vorbelegt. Nennt die Erkennung einen anderen Partner
-    als der Posten, entscheidet der Mensch.
-    """
-    if len(found) != 1:
+def _rule_partner_id(partner_id: int | None, match: PartnerMatch | None) -> int | None:
+    """Die Regel setzt ihren Partner, außer die IBAN nennt eindeutig einen anderen."""
+    recognized = match.partner if match is not None else None
+    if recognized is not None and partner_id not in (None, recognized.id):
         return None
-    item = found[0].item
-    unique = match.partner if match is not None else None
-    if unique is not None and item.partner_id not in (None, unique.id):
-        return None
-    if "reference" in found[0].matched_on:
-        return item
-    return item if unique is not None and item.partner_id == unique.id else None
+    return partner_id
+
+
+def _history_partner_id(partner_id: int | None, match: PartnerMatch | None) -> int | None:
+    """Partner eines „wie zuletzt“-Vorschlags, gemessen an der Erkennung dieses Umsatzes."""
+    if match is None or match.status == STATUS_NONE:
+        return partner_id
+    if match.partner is not None:
+        return match.partner.id
+    # Nur der Name stützt denselben Partner, den ein Mensch zuletzt gewählt hat: bleibt stehen.
+    # Sonst widerspricht die Erkennung, und der Mensch entscheidet.
+    if (
+        match.status == STATUS_UNCERTAIN
+        and len(match.candidates) == 1
+        and match.candidates[0].partner.id == partner_id
+    ):
+        return partner_id
+    return None
 
 
 def booking_proposals(
@@ -349,40 +381,20 @@ def booking_proposals(
     session: Session,
     transactions: Sequence[BankTransaction],
     matches: Mapping[int, PartnerMatch] | None = None,
-    item_suggestions: Mapping[int, list[OpenItemSuggestion]] | None = None,
 ) -> dict[int, BookingProposal]:
-    """Vorschlag je offenem Umsatz (Regel vor Geldtransit vor offenem Posten vor Historie)."""
+    """Vorschlag je offenem Umsatz (Regel vor Geldtransit vor Historie)."""
     open_transactions = [t for t in transactions if t.status == "open"]
     if not open_transactions:
         return {}
 
     if matches is None:
         matches = partner_matches(session=session, transactions=open_transactions)
-    if item_suggestions is None:
-        item_suggestions = open_item_suggestions(
-            session=session, transactions=open_transactions, matches=matches
-        )
 
     proposals = _history_proposals(session, open_transactions)
     for transaction_id, proposal in list(proposals.items()):
-        match = matches.get(transaction_id)
-        if match is not None and match.partner is not None:
-            proposals[transaction_id] = replace(proposal, partner_id=match.partner.id)
-
-    for transaction in open_transactions:
-        item = _proposed_open_item(
-            item_suggestions.get(transaction.id, []), matches.get(transaction.id)
-        )
-        if item is None:
-            continue
-        account = session.get(Account, item.account_id)
-        if account is None or not account.is_active:
-            continue
-        proposals[transaction.id] = BookingProposal(
-            source="open_item",
-            contra_account=account,
-            partner_id=item.partner_id,
-            open_item_id=item.id,
+        proposals[transaction_id] = replace(
+            proposal,
+            partner_id=_history_partner_id(proposal.partner_id, matches.get(transaction_id)),
         )
 
     transfers = detect_transfer_counterparts(session=session, transactions=open_transactions)
@@ -407,7 +419,7 @@ def booking_proposals(
             tax_code=rule.tax_code,
             cost_center_id=rule.cost_center_id,
             profit_center_id=rule.profit_center_id,
-            partner_id=rule.partner_id,
+            partner_id=_rule_partner_id(rule.partner_id, matches.get(transaction_id)),
             rule_pattern=rule.pattern,
         )
     return proposals

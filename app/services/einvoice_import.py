@@ -25,6 +25,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.incoming_invoice import (
@@ -54,6 +55,8 @@ from domain.models import (
 # Gutschriften und Stornorechnungen: Der Eingangsrechnungsweg würde sie als Rechnung mit
 # positivem Betrag buchen, deshalb lehnt ``book_einvoice`` sie ab.
 CREDIT_NOTE_TYPE_CODES = frozenset({"261", "381", "396", "532"})
+# Grenze der Betragsspalten (Numeric(14, 2)).
+MAX_INVOICE_AMOUNT = Decimal("1000000000000")
 
 
 class EInvoiceParseError(ValueError):
@@ -101,10 +104,13 @@ class ParsedInvoice:
 
     @property
     def amount_due(self) -> Decimal:
-        """Noch zu zahlender Betrag und damit Höhe des offenen Postens."""
-        if self.due_payable_amount is not None:
-            return self.due_payable_amount
-        return self.grand_total
+        """Noch zu zahlender Betrag und damit Höhe des offenen Postens.
+
+        Nie mehr als das Gebuchte: Ein höherer BT-115 ginge sonst ungeprüft in den Zahllauf.
+        """
+        if self.due_payable_amount is None or self.due_payable_amount > self.grand_total:
+            return self.grand_total
+        return self.due_payable_amount
 
     @property
     def primary_tax_rate(self) -> Decimal | None:
@@ -171,12 +177,14 @@ def _optional_date(value: str, *, fmt_hint: str | None = None) -> date | None:
 
 
 def _optional_decimal(value: str) -> Decimal | None:
+    """Betrag oder ``None``; ``NaN``, ``Infinity`` und ``1E+30`` passen in keine Buchung."""
     if not value:
         return None
     try:
-        return Decimal(value)
+        amount = Decimal(value)
     except InvalidOperation:
         return None
+    return amount if amount.is_finite() and abs(amount) < MAX_INVOICE_AMOUNT else None
 
 
 def _children(element: ET.Element | None, local_name: str) -> list[ET.Element]:
@@ -572,7 +580,7 @@ def book_einvoice(
         session=session,
         company=company,
         entry_date=invoice.issue_date,
-        description=f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})".strip(),
+        description=_einvoice_description(invoice),
         expense_account_id=expense_account_id,
         creditor_account_id=creditor_account_id,
         net_amount=invoice.net_total,
@@ -589,6 +597,52 @@ def book_einvoice(
         commit=False,
     )
     return entry, tax_splits
+
+
+def invoice_amount_warnings(invoice: ParsedInvoice) -> list[str]:
+    """Ein Zahlbetrag, der vom Brutto abweicht, soll jemand sehen, bevor er bezahlt wird."""
+    due = invoice.due_payable_amount
+    if due is None or due == invoice.grand_total:
+        return []
+    if due > invoice.grand_total:
+        return [
+            f"Der Zahlbetrag der Rechnung ({format_amount(due)}) liegt über dem Bruttobetrag "
+            f"({format_amount(invoice.grand_total)}). Der offene Posten nennt den Bruttobetrag."
+        ]
+    return [
+        f"Der Zahlbetrag der Rechnung ({format_amount(due)}) liegt unter dem Bruttobetrag "
+        f"({format_amount(invoice.grand_total)}), laut Rechnung ist schon etwas bezahlt."
+    ]
+
+
+def _einvoice_description(invoice: ParsedInvoice) -> str:
+    return f"E-Rechnung {invoice.invoice_number} ({invoice.seller_name})".strip()
+
+
+def find_booked_einvoice(
+    session: Session, company_id: int, invoice: ParsedInvoice
+) -> JournalEntry | None:
+    """Nicht stornierte Buchung derselben Rechnung (gleiche Nummer, gleicher Absender)."""
+    if not invoice.invoice_number:
+        return None
+    reversed_ids = select(JournalEntry.reversal_of_id).where(
+        JournalEntry.company_id == company_id, JournalEntry.reversal_of_id.is_not(None)
+    )
+    return (
+        session.execute(
+            select(JournalEntry)
+            .where(
+                JournalEntry.company_id == company_id,
+                JournalEntry.description == _einvoice_description(invoice),
+                JournalEntry.reversal_of_id.is_(None),
+                JournalEntry.id.not_in(reversed_ids),
+            )
+            .order_by(JournalEntry.id)
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
 
 
 def einvoice_partner_signals(invoice: ParsedInvoice) -> PartnerSignals:
@@ -657,6 +711,13 @@ def import_einvoice_booking(
     ``partner_id`` ist die bestätigte Wahl. Ohne sie gilt mit ``auto_partner`` nur eine eindeutige
     Erkennung; ein unsicherer Treffer bleibt ein Vorschlag, die Buchung läuft dann ohne Partner.
     """
+    duplicate = find_booked_einvoice(session, company.id, invoice)
+    if duplicate is not None:
+        raise IncomingInvoiceError(
+            f"E-Rechnung {invoice.invoice_number} von {invoice.seller_name} ist bereits als "
+            f"{duplicate.posting_number} gebucht. Zum erneuten Buchen zuerst stornieren.",
+            code="duplicate_invoice",
+        )
     directory = load_partner_directory(session, company.id)
     signals = einvoice_partner_signals(invoice)
     match = directory.match(signals, role=SUBLEDGER_CREDITOR)
@@ -679,6 +740,16 @@ def import_einvoice_booking(
     warnings = list(match.warnings)
     if partner is not None and (match.partner is None or match.partner.id != partner.id):
         warnings = list(directory.identifier_warnings(signals, partner))
+    warnings.extend(invoice_amount_warnings(invoice))
+    # Kommt ein bekannter Partner infrage, ist aber keiner gewählt, zählt die IBAN der Rechnung
+    # nicht: Sie stünde ungeprüft im Zahllauf (siehe create_invoice_open_item).
+    invoice_iban = invoice.seller_iban
+    if partner is None and match.candidates and invoice_iban:
+        invoice_iban = ""
+        warnings.append(
+            "Die IBAN der Rechnung wurde nicht auf den offenen Posten übernommen, weil der Partner "
+            "noch nicht bestätigt ist."
+        )
     open_item = None
     if create_open_item:
         open_item = create_invoice_open_item(
@@ -691,8 +762,8 @@ def import_einvoice_booking(
             partner_id=partner_id,
             counterparty=invoice.seller_name,
             due_date=invoice.due_date,
-            iban=invoice.seller_iban,
-            bic=invoice.seller_bic,
+            iban=invoice_iban,
+            bic=invoice.seller_bic if invoice_iban else None,
             changed_by=changed_by,
         )
     return EInvoiceBooking(
@@ -710,8 +781,17 @@ def preview_einvoice_payload(
 ) -> dict[str, object]:
     """Ergebnis der Prüfung vor dem Buchen (Oberfläche, REST und MCP)."""
     match = recognize_einvoice_partner(session, company_id, invoice)
+    warnings = invoice_amount_warnings(invoice)
+    duplicate = find_booked_einvoice(session, company_id, invoice)
+    if duplicate is not None:
+        warnings.insert(
+            0,
+            f"Diese Rechnung ist bereits als {duplicate.posting_number} gebucht und lässt sich "
+            "erst nach deren Storno erneut buchen.",
+        )
     return {
         "partner_match": match.as_dict(),
+        "warnings": warnings,
         # Nur ohne eindeutigen Treffer sinnvoll: sonst entstünde eine Dublette.
         "proposed_partner": (
             None if match.partner is not None else proposed_partner_for_invoice(invoice)

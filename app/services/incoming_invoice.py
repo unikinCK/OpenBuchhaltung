@@ -29,12 +29,14 @@ from app.services.journal_entries import (
 )
 from app.services.open_items import OpenItemError, OpenItemInput, create_open_item
 from app.services.partner_identifiers import clean_bic, clean_iban
+from app.services.partner_recognition import PartnerSignals, load_partner_directory
 from domain.formatting import format_rate
 from domain.models import (
     SUBLEDGER_CREDITOR,
     Account,
     BusinessPartner,
     Company,
+    Document,
     JournalEntry,
     OpenItem,
     TaxCode,
@@ -300,6 +302,20 @@ def book_incoming_invoice(
     )
 
 
+def document_already_booked(session: Session, document: Document) -> bool:
+    """Ob der Beleg an einer Buchung hängt, die nicht storniert ist.
+
+    Eine zweite Buchung desselben Belegs erzeugte auch einen zweiten offenen Posten und damit eine
+    doppelte Zahlung im Zahllauf; zudem verlöre die erste Buchung ihre Belegverknüpfung.
+    """
+    if document.journal_entry_id is None:
+        return False
+    reversal = session.execute(
+        select(JournalEntry.id).where(JournalEntry.reversal_of_id == document.journal_entry_id)
+    ).first()
+    return reversal is None
+
+
 def create_invoice_open_item(
     *,
     session: Session,
@@ -314,25 +330,37 @@ def create_invoice_open_item(
     due_date: date | None = None,
     iban: str | None = None,
     bic: str | None = None,
+    currency_code: str | None = None,
 ) -> OpenItem | None:
     """Offener Posten zur gebuchten Eingangsrechnung, ohne Commit (Review #5).
 
     Entsteht nur auf einem Kreditoren-Sammelkonto; eine direkt gegen Bank oder Kasse gebuchte
-    Rechnung ist schon bezahlt. Die Fälligkeit kommt aus dem Beleg, sonst aus dem Zahlungsziel
-    des Partners.
+    Rechnung ist schon bezahlt. Ein Beleg in fremder Währung bekommt keinen: Sein Nennbetrag ist
+    kein Betrag in Firmenwährung und ginge so in den Zahllauf. Die Fälligkeit kommt aus dem Beleg,
+    sonst aus dem Zahlungsziel des Partners.
 
     Die IBAN im Partnerstamm geht vor: Eine Rechnung darf den Zahlungsempfänger eines bekannten
     Partners nicht umbiegen. Die IBAN des Belegs gilt nur, wenn der Stamm keine kennt, und der
-    Partnerstamm selbst ändert sich dadurch nie.
+    Partnerstamm selbst ändert sich dadurch nie. Ohne bestätigten Partner gilt sie nur, wenn kein
+    bekannter Partner infrage kommt: Sonst stünde unter seinem Namen eine fremde Bankverbindung
+    im Zahllauf, und die Prüfung gegen den Stamm griffe nicht.
     """
     account = session.get(Account, creditor_account_id)
     if account is None or account.subledger != SUBLEDGER_CREDITOR or amount <= Decimal("0.00"):
+        return None
+    if currency_code and currency_code != company.currency_code:
         return None
     partner = session.get(BusinessPartner, partner_id) if partner_id else None
     if partner is not None and partner.creditor_number is None:
         partner = None  # Das Sammelkonto trägt nur Lieferanten (siehe book_incoming_invoice).
     if partner is not None and partner.iban:
         iban = bic = None
+    if partner is None and iban:
+        known = load_partner_directory(session, company.id).match(
+            PartnerSignals(ibans=(iban,), name=counterparty)
+        )
+        if known.candidates:
+            iban = bic = None
     try:
         return create_open_item(
             session=session,

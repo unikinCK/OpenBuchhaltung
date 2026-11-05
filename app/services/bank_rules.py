@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.audit_log import log_audit_event
 from app.services.bank_import import BankImportError, book_transaction
 from app.services.journal_entries import JournalEntryCreationError
+from app.services.partner_recognition import load_partner_directory, transaction_signals
 from app.services.partners import PartnerError
 from domain.formatting import format_amount
 from domain.models import (
@@ -226,9 +227,19 @@ def apply_rules(
 
     matches = match_rules_for(session=session, transactions=transactions)
     report = RuleRunReport(matched=len(matches))
+    directory = load_partner_directory(session, company_id)
     for transaction in transactions:
         rule = matches.get(transaction.id)
         if rule is None:
+            continue
+        # Ein Regel-Lauf bucht ohne Blick eines Menschen: Bei Widerspruch nicht buchen.
+        recognized = directory.match(transaction_signals(transaction)).partner
+        if rule.partner_id and recognized is not None and recognized.id != rule.partner_id:
+            report.errors.append(
+                f"Umsatz {transaction.id} ({transaction.booking_date:%d.%m.%Y}, "
+                f"{format_amount(transaction.amount)}): Die Regel „{rule.pattern}“ setzt einen "
+                f"anderen Partner, als die IBAN nennt ({recognized.name}). Bitte von Hand buchen."
+            )
             continue
         try:
             book_transaction(

@@ -226,7 +226,7 @@
               {% endif %}
 
               <div class="panel-section">
-                <h4>{% if suggestions %}Oder neu buchen{% else %}Buchen{% endif %}</h4>
+                <h4>{% if suggestions or item_suggestions %}Oder neu buchen{% else %}Buchen{% endif %}</h4>
                 <form method="post" action="{{ url_for('main.bank_book_action', transaction_id=tx.id) }}">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                   <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
@@ -261,7 +261,7 @@
                     <div class="field" data-partner-field>
                       <label for="partner-{{ tx.id }}">Geschäftspartner</label>
                       {% if match and match.reason and match.status != 'none' %}
-                        <p class="hint">{% if match.partner %}<span class="badge badge-success">Erkannt</span>{% else %}<span class="badge badge-warning">Bitte bestätigen</span>{% endif %} {{ match.reason }}</p>
+                        <p class="hint">{% if match.partner %}<span class="badge badge-success">Erkannt</span>{% elif preselected_partner_id %}<span class="badge badge-info">Wie zuletzt</span>{% else %}<span class="badge badge-warning">Bitte bestätigen</span>{% endif %} {{ match.reason }}</p>
                       {% endif %}
                       {% if match and match.needs_confirmation %}
                         <div class="partner-candidates">

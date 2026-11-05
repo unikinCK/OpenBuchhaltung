@@ -742,6 +742,7 @@ def book_new_booking_suggestion(
                 counterparty=suggestion.supplier,
                 due_date=due_date or suggestion.due_date,
                 iban=suggestion.supplier_iban,
+                currency_code=suggestion.currency_code,
                 changed_by=changed_by,
             )
             if create_open_item

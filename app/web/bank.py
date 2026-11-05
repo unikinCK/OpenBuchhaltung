@@ -238,10 +238,7 @@ def bank_page():
                 session=session, transactions=transactions, matches=partner_match_by_tx
             )
             proposal_by_tx = booking_proposals(
-                session=session,
-                transactions=transactions,
-                matches=partner_match_by_tx,
-                item_suggestions=open_items_by_tx,
+                session=session, transactions=transactions, matches=partner_match_by_tx
             )
             partners = (
                 session.execute(

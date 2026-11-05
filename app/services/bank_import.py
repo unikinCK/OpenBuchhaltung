@@ -1168,13 +1168,15 @@ def book_transaction(
     profit_center_id: int | None = None,
     partner_id: int | None = None,
     exchange_rate: Decimal | None = None,
+    commit: bool = True,
 ) -> BankTransaction:
     """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto).
 
     ``partner_id`` ist der Geschäftspartner der Buchung: Er steht auf Bank- und
     Gegenkontozeile, nicht auf der Steuerzeile (``apply_entry_partner``).
     Ein Umsatz in Fremdwährung wird zum ``exchange_rate`` oder zum Tageskurs umgerechnet; der
-    Fremdbetrag steht auf der Bankzeile (ADR-010).
+    Fremdbetrag steht auf der Bankzeile (ADR-010). Mit ``commit=False`` committet der Aufrufer,
+    etwa zusammen mit dem Ausgleich eines offenen Postens.
     """
     transaction = session.get(BankTransaction, transaction_id)
     if transaction is None:
@@ -1298,8 +1300,11 @@ def book_transaction(
             "partner_id": partner_id,
         },
     )
-    session.commit()
-    session.refresh(transaction)
+    if commit:
+        session.commit()
+        session.refresh(transaction)
+    else:
+        session.flush()
     return transaction
 
 

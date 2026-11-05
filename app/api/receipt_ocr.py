@@ -30,6 +30,7 @@ from app.services.incoming_invoice import (
     IncomingInvoiceError,
     book_incoming_invoice,
     create_invoice_open_item,
+    document_already_booked,
     invoice_gross_amount,
     parse_tax_splits,
     tax_splits_audit,
@@ -342,6 +343,8 @@ def book_receipt_ocr_suggestion_via_api():
         document = session.get(Document, document_id)
         if document is None or document.company_id != company.id:
             return jsonify({"error": "Document not found."}), 404
+        if document_already_booked(session, document):
+            return jsonify({"error": "Der Beleg ist bereits mit einer Buchung verknüpft."}), 409
 
         try:
             entry = book_incoming_invoice(
@@ -376,6 +379,7 @@ def book_receipt_ocr_suggestion_via_api():
                     counterparty=payload.get("supplier_name"),
                     due_date=due_date,
                     iban=payload.get("supplier_iban"),
+                    currency_code=payload.get("currency_code"),
                     changed_by=_api_changed_by(),
                 )
                 if payload.get("create_open_item", True) not in (False, "0", "false")

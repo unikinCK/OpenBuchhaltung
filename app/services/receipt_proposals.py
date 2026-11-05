@@ -264,7 +264,7 @@ def propose_receipt_booking(
     signals = receipt_partner_signals(extraction)
     match = directory.match(signals, role=SUBLEDGER_CREDITOR)
     partner = match.partner
-    supplier_iban = next(iter(directory.foreign_ibans(signals)), None)
+    document_iban = next(iter(directory.foreign_ibans(signals)), None)
     proposed_partner = (
         None
         if partner is not None
@@ -272,9 +272,12 @@ def propose_receipt_booking(
             name=extraction.supplier,
             vat_id=next(iter(directory.foreign_vat_ids(signals)), None),
             tax_number=next(iter(signals.tax_numbers), None),
-            iban=supplier_iban,
+            iban=document_iban,
         )
     )
+    # Für den offenen Posten nur ohne offene Frage: Bei einem Kandidaten ohne Bestätigung stünde
+    # sonst eine ungeprüfte Bankverbindung unter seinem Namen im Zahllauf.
+    supplier_iban = None if match.needs_confirmation else document_iban
     # Für „wie zuletzt“ reicht ein einzelner Kandidat: Das Konto bleibt ein Vorschlag, der
     # Partner wird dadurch nicht zugeordnet.
     history_partner = partner

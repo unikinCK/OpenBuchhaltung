@@ -4,7 +4,9 @@
 nicht zum Dedup-Hash, damit bereits importierte Umsätze Duplikate bleiben.
 ``bank_booking_rule.partner_id`` lässt eine Kontierungsregel den Partner setzen.
 ``receipt_match_suggestion`` merkt sich das Erkennungsergebnis, die IBAN und die Fälligkeit des
-Belegs, denn der Belegtext wird nicht gespeichert.
+Belegs, denn der Belegtext wird nicht gespeichert. Offene Vorschläge verlieren ihren Partner: Er
+stammt aus der alten Suche, die auch reine Namenstreffer zuordnete, und die Freigabe buchte ihn
+ungefragt. Die Maske bietet ihn weiter zur Auswahl an.
 
 Die Tabellen tragen keine Immutability-Trigger; die Spalten entstehen auf SQLite trotzdem per
 ``ALTER TABLE`` ohne Tabellen-Rebuild.
@@ -52,6 +54,7 @@ def upgrade() -> None:
         "receipt_match_suggestion", sa.Column("supplier_iban", sa.String(34), nullable=True)
     )
     op.add_column("receipt_match_suggestion", sa.Column("due_date", sa.Date(), nullable=True))
+    op.execute("UPDATE receipt_match_suggestion SET partner_id = NULL WHERE status = 'offen'")
 
 
 def downgrade() -> None:

@@ -752,9 +752,13 @@
 
   document.querySelectorAll("input[data-einvoice-preview]").forEach(function (input) {
     var latest = 0;
+    var target = document.querySelector(input.dataset.einvoiceTarget);
+    var initial = target ? target.innerHTML : "";
     input.addEventListener("change", function () {
-      var target = document.querySelector(input.dataset.einvoiceTarget);
-      if (!target || !input.files.length) return;
+      if (!target) return;
+      // Die Prüfung der vorigen Datei gilt nicht für die neue, auch wenn diese scheitert.
+      target.innerHTML = initial;
+      if (!input.files.length) return;
       var request = ++latest;
       fetch(input.dataset.einvoicePreview, {
         method: "POST",
@@ -763,6 +767,7 @@
       })
         .then(function (response) {
           // Sonst (Sitzung abgelaufen, CSRF) bleibt die Auswahl „Automatisch“ stehen.
+          if (response.redirected) return null;
           return response.ok || response.status === 422 ? response.text() : null;
         })
         .then(function (html) {

@@ -2916,6 +2916,10 @@ TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "IBAN des Belegs; die IBAN im Partnerstamm geht vor.",
                 },
+                "currency_code": {
+                    "type": "string",
+                    "description": "Währung des Belegs; bei Fremdwährung kein offener Posten.",
+                },
                 **_receipt_split_properties(),
             },
             "required": [
@@ -3602,10 +3606,11 @@ TOOLS: list[ToolSpec] = [
                         "(geldtransit_account_id) — solche Übertrage gegen Geldtransit "
                         "buchen, nie direkt gegen das andere Bankkonto. booking_proposal "
                         "je offenem Umsatz: Gegenkonto, Steuercode, Kontierung und "
-                        "Partner aus Regel (source=rule), Geldtransit (transfer), passendem "
-                        "offenem Posten (open_item) oder der letzten Buchung derselben Gegenseite "
-                        "(history). partner_match: erkannter Partner; bei uncertain/ambiguous "
-                        "bestätigen lassen. open_item_suggestions: passende offene Posten."
+                        "Partner aus Regel (source=rule), Geldtransit (transfer) oder der "
+                        "letzten Buchung derselben Gegenseite (history). partner_match: erkannter "
+                        "Partner; bei uncertain/ambiguous bestätigen lassen. "
+                        "open_item_suggestions: passende offene Posten, auszugleichen mit "
+                        "book_bank_transaction_to_open_item."
                     ),
                 },
                 "limit": {

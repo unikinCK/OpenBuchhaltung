@@ -15,6 +15,7 @@ from app.services.incoming_invoice import (
     IncomingInvoiceError,
     book_incoming_invoice,
     create_invoice_open_item,
+    document_already_booked,
     invoice_gross_amount,
     tax_splits_audit,
 )
@@ -312,6 +313,9 @@ def receipt_ocr_book():
         if document is None or document.company_id != company.id:
             flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
             return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+        if document_already_booked(session, document):
+            flash("Der Beleg ist bereits mit einer Buchung verknüpft.", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
         try:
             entry = book_incoming_invoice(
@@ -348,6 +352,7 @@ def receipt_ocr_book():
                     counterparty=request.form.get("supplier_name"),
                     due_date=due_date,
                     iban=request.form.get("supplier_iban"),
+                    currency_code=request.form.get("currency_code"),
                     changed_by=changed_by(),
                 )
             )
