@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.services.journal_entries import (
@@ -303,17 +303,30 @@ def book_incoming_invoice(
 
 
 def document_already_booked(session: Session, document: Document) -> bool:
-    """Ob der Beleg an einer Buchung hängt, die nicht storniert ist.
+    """Ob dieser Beleg oder dieselbe Datei an einer Buchung hängt, die nicht storniert ist.
 
     Eine zweite Buchung desselben Belegs erzeugte auch einen zweiten offenen Posten und damit eine
-    doppelte Zahlung im Zahllauf; zudem verlöre die erste Buchung ihre Belegverknüpfung.
+    doppelte Zahlung im Zahllauf; zudem verlöre die erste Buchung ihre Belegverknüpfung. Derselbe
+    Inhalt zählt, weil ein erneuter Upload einen neuen Datensatz anlegt.
     """
-    if document.journal_entry_id is None:
-        return False
-    reversal = session.execute(
-        select(JournalEntry.id).where(JournalEntry.reversal_of_id == document.journal_entry_id)
-    ).first()
-    return reversal is None
+    reversed_ids = select(JournalEntry.reversal_of_id).where(
+        JournalEntry.company_id == document.company_id, JournalEntry.reversal_of_id.is_not(None)
+    )
+    same_file = or_(
+        Document.id == document.id,
+        Document.file_sha256 == document.file_sha256,
+    )
+    return (
+        session.execute(
+            select(Document.id).where(
+                Document.company_id == document.company_id,
+                same_file,
+                Document.journal_entry_id.is_not(None),
+                Document.journal_entry_id.not_in(reversed_ids),
+            )
+        ).first()
+        is not None
+    )
 
 
 def create_invoice_open_item(
@@ -348,7 +361,8 @@ def create_invoice_open_item(
     account = session.get(Account, creditor_account_id)
     if account is None or account.subledger != SUBLEDGER_CREDITOR or amount <= Decimal("0.00"):
         return None
-    if currency_code and currency_code != company.currency_code:
+    code = (currency_code or "").strip().upper()
+    if len(code) == 3 and code != company.currency_code:
         return None
     partner = session.get(BusinessPartner, partner_id) if partner_id else None
     if partner is not None and partner.creditor_number is None:

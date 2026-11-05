@@ -61,7 +61,8 @@ _LABELLED_VAT_RE = re.compile(
 )
 _LABELLED_TAX_NUMBER_RE = re.compile(
     # Ohne die Grenze zählte „Best.-Nr. 4500123456“ als Steuernummer.
-    r"(?<![A-Za-zÄÖÜäöüß])(?:St\.?[- ]?Nr\.?|Steuer[- ]?(?:nummer|nr\.?))[.: ]*(\d[\d/ ]{7,16}\d)",
+    r"(?<![A-Za-zÄÖÜäöüß])(?:U(?:msatz)?)?(?:St\.?[- ]?Nr\.?|Steuer[- ]?(?:nummer|nr\.?))"
+    r"[.: ]*(\d[\d/ ]{7,16}\d)",
     re.IGNORECASE,
 )
 

@@ -160,6 +160,9 @@ def test_find_tax_numbers_needs_label():
     assert find_tax_numbers("Rechnung 123/456/78901") == []
     # F16: Die Bestellnummer endet zufällig auf „St.-Nr.“.
     assert find_tax_numbers("Best.-Nr. 4500123456") == []
+    # N6: Diese Bezeichnungen sind gängig und zählen.
+    assert find_tax_numbers("USt-Nr. 123/456/78901") == ["12345678901"]
+    assert find_tax_numbers("Umsatzsteuernummer: 123/456/78901") == ["12345678901"]
 
 
 def test_number_hints_need_label():
@@ -1026,6 +1029,70 @@ def test_other_invoice_of_same_seller_is_not_a_duplicate(books):
     assert books.import_invoice(_cii_xml(number="RE-4712"))["posting_number"]
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"seller": "MUSTER LIEFERANT GMBH"},
+        {"number": "re-4711"},
+        {"seller": "Muster Lieferant GmbH Berlin"},
+    ],
+)
+def test_other_spelling_of_same_invoice_is_a_duplicate(books, fields):
+    """N2: Sonst stünde eine Rechnung mehrfach im Zahllauf."""
+    books.partner(vat_id=VAT_A)
+    books.import_invoice()
+
+    response = books.client.post(
+        "/api/v1/einvoices/import",
+        json=books.import_payload(_cii_xml(**fields)),
+        headers=books.writer,
+    )
+
+    assert response.status_code == 422
+    with books.factory() as session:
+        assert len(session.execute(select(OpenItem)).scalars().all()) == 1
+
+
+def test_same_number_next_year_is_not_a_duplicate(books):
+    """N7: Mancher Nummernkreis beginnt jährlich neu."""
+    books.import_invoice()
+    next_year = _cii_xml().replace(b"20260615", b"20270615")
+    assert books.import_invoice(next_year)["posting_number"]
+
+
+def test_invoices_without_seller_name_are_not_compared_by_text(books):
+    """N7: Ohne Absendernamen sagt die gleiche Nummer nichts."""
+    books.import_invoice(_cii_xml(seller="", vat_id=VAT_A))
+    assert books.import_invoice(_cii_xml(seller="", vat_id=VAT_B))["posting_number"]
+
+
+def test_broken_grand_total_is_a_parse_error_not_a_crash(books):
+    """N5: Vorschau und Import antworten sauber."""
+    xml = _cii_xml().replace(
+        b"<ram:GrandTotalAmount>119.00", b"<ram:GrandTotalAmount>NaN"
+    )
+    with pytest.raises(EInvoiceParseError):
+        parse_einvoice(xml)
+    response = books.client.post(
+        "/api/v1/einvoices/preview",
+        json={
+            "company_id": books.company_id,
+            "file_name": "rechnung.xml",
+            "content_base64": base64.b64encode(xml).decode("ascii"),
+        },
+        headers=books.writer,
+    )
+    assert response.status_code == 422
+
+
+def test_negative_due_amount_counts_as_missing(books):
+    """N5: Sonst entstünde kein Posten, obwohl das Sammelkonto die Schuld trägt."""
+    assert parse_einvoice(_cii_xml(due_payable="-5.00")).due_payable_amount is None
+    body = books.import_invoice(_cii_xml(due_payable="-5.00"))
+    assert books.open_item(body["open_item_id"]).open_amount == Decimal("119.00")
+    assert body["warnings"] == []
+
+
 def test_reversal_closes_open_item_of_incoming_invoice(books):
     books.partner(vat_id=VAT_A)
     body = books.import_invoice()
@@ -1504,6 +1571,9 @@ def test_open_item_guard_drops_iban_under_known_name(session):
     # F10: Ein Nennbetrag in USD ist kein Betrag in Euro.
     assert create("Ganz Unbekannt GmbH", currency_code="USD") is None
     assert create("Ganz Unbekannt GmbH", currency_code="EUR") is not None
+    # N4: Schreibweisen des eigenen Codes und unbrauchbare Angaben verhindern keinen Posten.
+    assert create("Ganz Unbekannt GmbH", currency_code=" eur ") is not None
+    assert create("Ganz Unbekannt GmbH", currency_code="€") is not None
 
 
 def test_receipt_with_two_partner_vat_ids_stays_open(session):
@@ -1530,7 +1600,7 @@ def test_receipt_stays_inside_company(session):
     assert proposal.partner is None
 
 
-def _upload_document(books) -> int:
+def _upload_document(books, file_sha256: str | None = None) -> int:
     with books.factory() as session:
         company = session.get(Company, books.company_id)
         document = Document(
@@ -1539,7 +1609,7 @@ def _upload_document(books) -> int:
             file_name="beleg.pdf",
             storage_key=f"/tmp/{uuid4().hex}.pdf",
             mime_type="application/pdf",
-            file_sha256=uuid4().hex * 2,
+            file_sha256=file_sha256 or uuid4().hex * 2,
             file_size_bytes=1024,
             document_date=date(2026, 6, 15),
         )
@@ -1698,6 +1768,33 @@ def test_ocr_book_rejects_document_already_booked_until_reversed(books):
 
     _reverse(books, first.get_json()["journal_entry_id"])
     assert books.client.post(url, json=payload, headers=books.writer).status_code == 201
+
+
+def test_ocr_book_rejects_same_file_uploaded_again_until_reversed(books):
+    """N3: Ein erneuter Upload legt einen neuen Datensatz an, die Datei bleibt dieselbe."""
+    sha = uuid4().hex * 2
+    first_document = _upload_document(books, file_sha256=sha)
+    second_document = _upload_document(books, file_sha256=sha)
+    payload = {
+        "company_id": books.company_id,
+        "expense_account_id": books.ids["expense"],
+        "creditor_account_id": books.ids["creditor"],
+        "tax_code_id": books.ids["tax_code"],
+        "net_amount": "100.00",
+        "tax_amount": "19.00",
+        "entry_date": "2026-06-15",
+    }
+    url = "/api/v1/receipt-ocr/book"
+    first = books.client.post(
+        url, json={**payload, "document_id": first_document}, headers=books.writer
+    )
+    assert first.status_code == 201
+
+    again = {**payload, "document_id": second_document}
+    assert books.client.post(url, json=again, headers=books.writer).status_code == 409
+
+    _reverse(books, first.get_json()["journal_entry_id"])
+    assert books.client.post(url, json=again, headers=books.writer).status_code == 201
 
 
 def test_ocr_web_rejects_document_already_booked(books):
@@ -2221,6 +2318,79 @@ def test_history_partner_other_than_name_candidate_is_cleared(session):
     tx = _transactions(session, company)[-1]
 
     assert booking_proposals(session=session, transactions=[tx])[tx.id].partner_id is None
+
+
+def test_history_on_subledger_gives_way_to_waiting_open_item(books):
+    """N1: Normal gebucht bliebe der Posten der nächsten Rechnung offen."""
+    partner_id = books.partner(iban=IBAN_C)
+    first = books.import_invoice(_cii_xml(vat_id="", iban=IBAN_C, number="RE-1"))
+    second = books.import_invoice(_cii_xml(vat_id="", iban=IBAN_C, number="RE-2"))
+    assert first["partner_id"] == second["partner_id"] == partner_id
+    paid = _api_bank_transaction(books, f"01.07.2026;Zahlung RE-1;Muster;{IBAN_C};-119,00")
+    assert (
+        books.client.post(
+            f"/api/v1/bank-transactions/{paid}/book-open-item",
+            json={"open_item_id": first["open_item_id"]},
+            headers=books.writer,
+        ).status_code
+        == 200
+    )
+    next_tx = _api_bank_transaction(books, f"02.07.2026;Zahlung RE-2;Muster;{IBAN_C};-119,00")
+
+    def listed() -> dict:
+        rows = books.client.get(
+            f"/api/v1/bank-transactions?company_id={books.company_id}&include_suggestions=1",
+            headers=books.reader,
+        ).get_json()["transactions"]
+        return next(row for row in rows if row["id"] == next_tx)
+
+    row = listed()
+    assert row["booking_proposal"] is None
+    assert row["open_item_suggestions"][0]["open_item_id"] == second["open_item_id"]
+
+    # Ist kein Posten mehr offen, darf die Historie wieder vorschlagen.
+    with books.factory() as session:
+        session.get(OpenItem, second["open_item_id"]).status = "settled"
+        session.commit()
+    row = listed()
+    assert row["booking_proposal"]["source"] == "history"
+    assert row["booking_proposal"]["partner_id"] == partner_id
+
+
+def test_history_on_subledger_without_partner_counts_every_open_item(session):
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    _import_csv(session, company, bank, "01.06.2026;Abo;Anbieter;;-10,00")
+    book_transaction(
+        session=session,
+        transaction_id=_transactions(session, company)[0].id,
+        contra_account_id=creditor.id,
+        changed_by="tester",
+    )
+    _payable(session, company, creditor, None, reference="X-1", amount="500.00")
+    _import_csv(session, company, bank, "01.07.2026;Abo;Anbieter;;-11,00")
+    tx = _transactions(session, company)[-1]
+
+    assert tx.id not in booking_proposals(session=session, transactions=[tx])
+
+
+def test_history_on_normal_account_is_not_affected(session):
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    expense = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="4900",
+        name="Sonstiges",
+        account_type="expense",
+    )
+    session.add(expense)
+    session.commit()
+    partner = _partner(session, company, "Anbieter GmbH")
+    _payable(session, company, creditor, partner, reference="X-1")
+    _book_history(session, company, bank, expense, partner, "Anbieter GmbH")
+    _import_csv(session, company, bank, "01.07.2026;Abo;Anbieter GmbH;;-11,00")
+    tx = _transactions(session, company)[-1]
+
+    assert booking_proposals(session=session, transactions=[tx])[tx.id].source == "history"
 
 
 def test_rule_partner_contradicted_by_iban_is_not_booked(session):

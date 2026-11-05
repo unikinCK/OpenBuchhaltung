@@ -14,7 +14,8 @@ bleibt ein Vorschlag und wird nicht vorbelegt. Der Partner der letzten Buchung b
 solange die Erkennung ihm nicht widerspricht: Er beruht auf einer Entscheidung eines Menschen.
 
 Offene Posten stehen bewusst nicht im ``booking_proposal``: Wer mit dessen Werten normal bucht,
-ließe den Posten offen. Sie laufen über :func:`book_transaction_to_open_item`.
+ließe den Posten offen. Sie laufen über :func:`book_transaction_to_open_item`. Aus demselben Grund
+entfällt ein Vorschlag „wie zuletzt“ auf ein Sammelkonto, solange dort ein offener Posten wartet.
 
 Grundlage für die Vorbelegung des Buchungsdialogs in Weboberfläche und App sowie für
 ``GET /api/v1/bank-transactions?include_suggestions=1`` (Felder ``booking_proposal``,
@@ -351,6 +352,45 @@ def book_transaction_to_open_item(
         raise
 
 
+def _drop_proposals_past_open_items(
+    session: Session,
+    transactions: Sequence[BankTransaction],
+    proposals: dict[int, BookingProposal],
+) -> None:
+    """Entfernt „wie zuletzt“ auf ein Sammelkonto, wenn dort ein offener Posten wartet.
+
+    Nach der Zahlung einer Rechnung schlüge die Historie für die nächste sonst Sammelkonto und
+    Partner vor; normal gebucht bliebe deren Posten offen und stünde weiter im Zahllauf. Ohne
+    bekannten Partner zählt jeder offene Posten des Kontos.
+    """
+    wanted = {
+        transaction.id: proposal
+        for transaction in transactions
+        if (proposal := proposals.get(transaction.id)) is not None
+        and proposal.contra_account.subledger is not None
+    }
+    if not wanted:
+        return
+    waiting = session.execute(
+        select(OpenItem.account_id, OpenItem.partner_id, OpenItem.item_type).where(
+            OpenItem.account_id.in_({p.contra_account.id for p in wanted.values()}),
+            OpenItem.status == "open",
+        )
+    ).all()
+    for transaction in transactions:
+        proposal = wanted.get(transaction.id)
+        if proposal is None:
+            continue
+        item_type = "receivable" if transaction.amount > 0 else "payable"
+        if any(
+            account_id == proposal.contra_account.id
+            and kind == item_type
+            and (proposal.partner_id is None or partner_id == proposal.partner_id)
+            for account_id, partner_id, kind in waiting
+        ):
+            del proposals[transaction.id]
+
+
 def _rule_partner_id(partner_id: int | None, match: PartnerMatch | None) -> int | None:
     """Die Regel setzt ihren Partner, außer die IBAN nennt eindeutig einen anderen."""
     recognized = match.partner if match is not None else None
@@ -396,6 +436,7 @@ def booking_proposals(
             proposal,
             partner_id=_history_partner_id(proposal.partner_id, matches.get(transaction_id)),
         )
+    _drop_proposals_past_open_items(session, open_transactions, proposals)
 
     transfers = detect_transfer_counterparts(session=session, transactions=open_transactions)
     geldtransit_by_company: dict[int, Account | None] = {}

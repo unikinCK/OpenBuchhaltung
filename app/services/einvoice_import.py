@@ -25,7 +25,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.services.incoming_invoice import (
@@ -146,9 +146,12 @@ def _text(element: ET.Element | None) -> str:
 
 def _decimal(value: str) -> Decimal:
     try:
-        return Decimal(value)
+        amount = Decimal(value)
     except (InvalidOperation, TypeError):
         raise EInvoiceParseError(f"Ungültiger Betrag: {value!r}") from None
+    if not amount.is_finite() or abs(amount) >= MAX_INVOICE_AMOUNT:
+        raise EInvoiceParseError(f"Ungültiger Betrag: {value!r}")
+    return amount
 
 
 def _parse_date(value: str, *, fmt_hint: str | None = None) -> date:
@@ -177,14 +180,14 @@ def _optional_date(value: str, *, fmt_hint: str | None = None) -> date | None:
 
 
 def _optional_decimal(value: str) -> Decimal | None:
-    """Betrag oder ``None``; ``NaN``, ``Infinity`` und ``1E+30`` passen in keine Buchung."""
+    """Zahlbetrag oder ``None``; ``NaN``, ``1E+30`` und Negatives passen in keinen Posten."""
     if not value:
         return None
     try:
         amount = Decimal(value)
     except InvalidOperation:
         return None
-    return amount if amount.is_finite() and abs(amount) < MAX_INVOICE_AMOUNT else None
+    return amount if amount.is_finite() and 0 <= amount < MAX_INVOICE_AMOUNT else None
 
 
 def _children(element: ET.Element | None, local_name: str) -> list[ET.Element]:
@@ -620,22 +623,57 @@ def _einvoice_description(invoice: ParsedInvoice) -> str:
 
 
 def find_booked_einvoice(
-    session: Session, company_id: int, invoice: ParsedInvoice
+    session: Session,
+    company_id: int,
+    invoice: ParsedInvoice,
+    partner_id: int | None = None,
 ) -> JournalEntry | None:
-    """Nicht stornierte Buchung derselben Rechnung (gleiche Nummer, gleicher Absender)."""
+    """Nicht stornierte Buchung derselben Rechnung im selben Kalenderjahr.
+
+    Gleich heißt: dieselbe Nummer vom selben Absender, ohne Groß-/Kleinschreibung, oder dieselbe
+    Nummer auf einem Posten desselben Partners, wenn der Absender anders geschrieben ist. Das
+    Kalenderjahr gehört dazu, weil manche Lieferanten ihren Nummernkreis jährlich neu beginnen.
+    """
     if not invoice.invoice_number:
         return None
     reversed_ids = select(JournalEntry.reversal_of_id).where(
         JournalEntry.company_id == company_id, JournalEntry.reversal_of_id.is_not(None)
     )
+    same_invoice = [
+        JournalEntry.company_id == company_id,
+        JournalEntry.reversal_of_id.is_(None),
+        JournalEntry.id.not_in(reversed_ids),
+        JournalEntry.entry_date >= date(invoice.issue_date.year, 1, 1),
+        JournalEntry.entry_date <= date(invoice.issue_date.year, 12, 31),
+    ]
+    if invoice.seller_name:
+        found = (
+            session.execute(
+                select(JournalEntry)
+                .where(
+                    *same_invoice,
+                    func.lower(JournalEntry.description)
+                    == _einvoice_description(invoice).lower(),
+                )
+                .order_by(JournalEntry.id)
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if found is not None:
+            return found
+    if partner_id is None:
+        return None
     return (
         session.execute(
             select(JournalEntry)
+            .join(OpenItem, OpenItem.journal_entry_id == JournalEntry.id)
             .where(
-                JournalEntry.company_id == company_id,
-                JournalEntry.description == _einvoice_description(invoice),
-                JournalEntry.reversal_of_id.is_(None),
-                JournalEntry.id.not_in(reversed_ids),
+                *same_invoice,
+                OpenItem.partner_id == partner_id,
+                OpenItem.item_type == "payable",
+                func.lower(OpenItem.reference) == invoice.invoice_number.lower(),
             )
             .order_by(JournalEntry.id)
             .limit(1)
@@ -711,18 +749,23 @@ def import_einvoice_booking(
     ``partner_id`` ist die bestätigte Wahl. Ohne sie gilt mit ``auto_partner`` nur eine eindeutige
     Erkennung; ein unsicherer Treffer bleibt ein Vorschlag, die Buchung läuft dann ohne Partner.
     """
-    duplicate = find_booked_einvoice(session, company.id, invoice)
-    if duplicate is not None:
-        raise IncomingInvoiceError(
-            f"E-Rechnung {invoice.invoice_number} von {invoice.seller_name} ist bereits als "
-            f"{duplicate.posting_number} gebucht. Zum erneuten Buchen zuerst stornieren.",
-            code="duplicate_invoice",
-        )
     directory = load_partner_directory(session, company.id)
     signals = einvoice_partner_signals(invoice)
     match = directory.match(signals, role=SUBLEDGER_CREDITOR)
     if partner_id is None and auto_partner and match.partner is not None:
         partner_id = match.partner.id
+    duplicate = find_booked_einvoice(
+        session,
+        company.id,
+        invoice,
+        partner_id=partner_id or (match.partner.id if match.partner else None),
+    )
+    if duplicate is not None:
+        raise IncomingInvoiceError(
+            f"E-Rechnung {invoice.invoice_number} ist bereits als "
+            f"{duplicate.posting_number} gebucht. Zum erneuten Buchen zuerst stornieren.",
+            code="duplicate_invoice",
+        )
     entry, tax_splits = book_einvoice(
         session=session,
         company=company,
@@ -782,7 +825,9 @@ def preview_einvoice_payload(
     """Ergebnis der Prüfung vor dem Buchen (Oberfläche, REST und MCP)."""
     match = recognize_einvoice_partner(session, company_id, invoice)
     warnings = invoice_amount_warnings(invoice)
-    duplicate = find_booked_einvoice(session, company_id, invoice)
+    duplicate = find_booked_einvoice(
+        session, company_id, invoice, partner_id=match.partner.id if match.partner else None
+    )
     if duplicate is not None:
         warnings.insert(
             0,

@@ -43,9 +43,12 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   widerspricht.
 - Kontierungsregeln können einen Partner setzen (`partner_id` in UI, REST, MCP). Nennt die IBAN
   eindeutig einen anderen, bucht der Regel-Lauf nicht und meldet den Umsatz.
-- **Verhalten geändert:** Dieselbe E-Rechnung (gleiche Nummer, gleicher Absender) und derselbe Beleg
-  in der Beleg-OCR lassen sich nur nach dem Storno der ersten Buchung erneut buchen. Sonst stünde die
-  Schuld doppelt im Zahllauf.
+- **Verhalten geändert:** Dieselbe E-Rechnung im selben Kalenderjahr (gleiche Nummer vom selben
+  Absender oder auf einem Posten desselben Partners) sowie derselbe Beleg und dieselbe Datei in der
+  Beleg-OCR lassen sich nur nach dem Storno der ersten Buchung erneut buchen. Sonst stünde die Schuld
+  doppelt im Zahllauf.
+- **Verhalten geändert:** Der Vorschlag „wie zuletzt“ auf ein Sammelkonto entfällt, solange dort ein
+  offener Posten des Partners wartet.
 - Offene Belegvorschläge verlieren beim Update ihren Partner (Migration `20261104_0065`), denn er
   stammte aus der alten Suche; die Maske bietet ihn weiter zur Auswahl an.
 - Neu `POST /api/v1/partners/recognize` (MCP `recognize_partner`) und „Lieferant anlegen“ mit
