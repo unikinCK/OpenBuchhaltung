@@ -1053,6 +1053,30 @@ def test_other_spelling_of_same_invoice_is_a_duplicate(books, fields):
         assert len(session.execute(select(OpenItem)).scalars().all()) == 1
 
 
+def test_same_invoice_with_upper_case_umlaut_is_a_duplicate(books):
+    """``lower`` der Datenbank lässt „Ü“ stehen, Python nicht."""
+    xml = _cii_xml(seller="MÜLLER GMBH", vat_id="", iban="")
+    books.import_invoice(xml)
+    response = books.client.post(
+        "/api/v1/einvoices/import", json=books.import_payload(xml), headers=books.writer
+    )
+    assert response.status_code == 422
+
+
+def test_duplicate_is_found_on_partner_lines_without_open_item(books):
+    """Die erste Buchung hat keinen Posten, der Absender ist anders geschrieben."""
+    books.partner(vat_id=VAT_A)
+    books.import_invoice(create_open_item=False)
+
+    response = books.client.post(
+        "/api/v1/einvoices/import",
+        json=books.import_payload(_cii_xml(seller="MUSTER LIEFERANT GMBH BERLIN")),
+        headers=books.writer,
+    )
+
+    assert response.status_code == 422
+
+
 def test_same_number_next_year_is_not_a_duplicate(books):
     """N7: Mancher Nummernkreis beginnt jährlich neu."""
     books.import_invoice()
@@ -1574,6 +1598,9 @@ def test_open_item_guard_drops_iban_under_known_name(session):
     # N4: Schreibweisen des eigenen Codes und unbrauchbare Angaben verhindern keinen Posten.
     assert create("Ganz Unbekannt GmbH", currency_code=" eur ") is not None
     assert create("Ganz Unbekannt GmbH", currency_code="€") is not None
+    # Andere Symbole sind fremde Währung, nicht „unbekannt“.
+    for other in ("$", "£", "Dollar"):
+        assert create("Ganz Unbekannt GmbH", currency_code=other) is None
 
 
 def test_receipt_with_two_partner_vat_ids_stays_open(session):
@@ -2371,6 +2398,30 @@ def test_history_on_subledger_without_partner_counts_every_open_item(session):
     tx = _transactions(session, company)[-1]
 
     assert tx.id not in booking_proposals(session=session, transactions=[tx])
+
+
+def test_open_item_without_partner_also_stops_history_proposal(session):
+    """Der Posten kann zu diesem Partner gehören, nur ist er noch nicht zugeordnet."""
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    partner = _partner(session, company, "Anbieter GmbH")
+    _book_history(session, company, bank, creditor, partner, "Anbieter GmbH")
+    _payable(session, company, creditor, None, reference="X-1")
+    _import_csv(session, company, bank, "01.07.2026;Abo;Anbieter GmbH;;-119,00")
+    tx = _transactions(session, company)[-1]
+
+    assert tx.id not in booking_proposals(session=session, transactions=[tx])
+
+
+def test_open_item_of_other_partner_does_not_stop_history_proposal(session):
+    company, bank, creditor, _debtor = _bank_accounts(session)
+    partner = _partner(session, company, "Anbieter GmbH")
+    other = _partner(session, company, "Andere GmbH")
+    _book_history(session, company, bank, creditor, partner, "Anbieter GmbH")
+    _payable(session, company, creditor, other, reference="X-1")
+    _import_csv(session, company, bank, "01.07.2026;Abo;Anbieter GmbH;;-119,00")
+    tx = _transactions(session, company)[-1]
+
+    assert booking_proposals(session=session, transactions=[tx])[tx.id].partner_id == partner.id
 
 
 def test_history_on_normal_account_is_not_affected(session):

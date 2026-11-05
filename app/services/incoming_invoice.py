@@ -362,7 +362,9 @@ def create_invoice_open_item(
     if account is None or account.subledger != SUBLEDGER_CREDITOR or amount <= Decimal("0.00"):
         return None
     code = (currency_code or "").strip().upper()
-    if len(code) == 3 and code != company.currency_code:
+    if code == "€":
+        code = "EUR"
+    if code and code != company.currency_code:
         return None
     partner = session.get(BusinessPartner, partner_id) if partner_id else None
     if partner is not None and partner.creditor_number is None:

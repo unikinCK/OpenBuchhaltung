@@ -798,7 +798,7 @@ Verwendungszweck; nur gleiches Vorzeichen). Das gilt nicht, wenn die frühere Bu
 mehrere Gegenkontozeilen hatte. Reihenfolge: Regel vor Eigenübertrag (Geldtransit) vor
 Historie. Eine eindeutige Partnererkennung über die IBAN geht dem Partner der Historie vor; widerspricht
 die Erkennung, bleibt der Partner leer. Ein Vorschlag auf ein Sammelkonto entfällt, solange dort ein
-offener Posten des Partners wartet. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
+offener Posten des Partners oder ein Posten ohne Partner wartet. `GET /api/v1/bank-transactions?include_suggestions=1` (MCP
 `list_bank_transactions`) liefert den Vorschlag je offenem Umsatz als
 `booking_proposal` mit `source` (`rule`, `transfer`, `history`), Gegenkonto, Steuercode,
 Kostenstelle, Profitcenter und Partner, dazu `partner_match` und `open_item_suggestions`. Die iOS-App
@@ -1184,9 +1184,10 @@ Nach der Dateiauswahl zeigt die Seite die Rechnungsdaten und den erkannten Liefe
 `POST /api/v1/einvoices/preview`; MCP: `preview_einvoice`. Beim Buchen gilt eine bestätigte Auswahl
 (`partner_id`), sonst nur ein eindeutiger Treffer (`auto_partner`, Standard an).
 
-Dieselbe Rechnung im selben Kalenderjahr (gleiche Nummer vom selben Absender oder auf einem Posten
-desselben Partners) lässt sich erst nach dem Storno der ersten Buchung erneut buchen. Dasselbe gilt in
-der Beleg-OCR für denselben Beleg und dieselbe Datei.
+Dieselbe Rechnung im selben Kalenderjahr (gleiche Nummer vom selben Absender oder bei demselben
+Partner) lässt sich erst nach dem Storno der ersten Buchung erneut buchen. Dasselbe gilt in der
+Beleg-OCR für denselben Beleg und dieselbe Datei. Ohne Partner im Stamm erkennt die Prüfung einen anders
+geschriebenen Absender nicht.
 
 Auf einem Kreditoren-Sammelkonto entsteht ein **offener Posten** über den Zahlbetrag der Rechnung,
 höchstens den Bruttobetrag, fällig zum Datum aus der Rechnung, sonst nach dem Zahlungsziel des

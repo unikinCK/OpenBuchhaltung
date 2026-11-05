@@ -360,8 +360,9 @@ def _drop_proposals_past_open_items(
     """Entfernt „wie zuletzt“ auf ein Sammelkonto, wenn dort ein offener Posten wartet.
 
     Nach der Zahlung einer Rechnung schlüge die Historie für die nächste sonst Sammelkonto und
-    Partner vor; normal gebucht bliebe deren Posten offen und stünde weiter im Zahllauf. Ohne
-    bekannten Partner zählt jeder offene Posten des Kontos.
+    Partner vor; normal gebucht bliebe deren Posten offen und stünde weiter im Zahllauf. Ein Posten
+    ohne Partner zählt immer mit, er kann zu jedem gehören; ohne bekannten Partner zählt jeder
+    Posten des Kontos.
     """
     wanted = {
         transaction.id: proposal
@@ -385,7 +386,7 @@ def _drop_proposals_past_open_items(
         if any(
             account_id == proposal.contra_account.id
             and kind == item_type
-            and (proposal.partner_id is None or partner_id == proposal.partner_id)
+            and (proposal.partner_id is None or partner_id in (None, proposal.partner_id))
             for account_id, partner_id, kind in waiting
         ):
             del proposals[transaction.id]

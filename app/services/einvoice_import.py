@@ -25,7 +25,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.services.incoming_invoice import (
@@ -48,6 +48,7 @@ from domain.models import (
     BusinessPartner,
     Company,
     JournalEntry,
+    JournalEntryLine,
     OpenItem,
     TaxCode,
 )
@@ -639,41 +640,48 @@ def find_booked_einvoice(
     reversed_ids = select(JournalEntry.reversal_of_id).where(
         JournalEntry.company_id == company_id, JournalEntry.reversal_of_id.is_not(None)
     )
-    same_invoice = [
-        JournalEntry.company_id == company_id,
-        JournalEntry.reversal_of_id.is_(None),
-        JournalEntry.id.not_in(reversed_ids),
-        JournalEntry.entry_date >= date(invoice.issue_date.year, 1, 1),
-        JournalEntry.entry_date <= date(invoice.issue_date.year, 12, 31),
-    ]
+    number = invoice.invoice_number.lower()
+    same_invoice = []
     if invoice.seller_name:
-        found = (
-            session.execute(
-                select(JournalEntry)
-                .where(
-                    *same_invoice,
-                    func.lower(JournalEntry.description)
-                    == _einvoice_description(invoice).lower(),
+        description = _einvoice_description(invoice)
+        # Beides: ``lower`` der Datenbank behandelt Umlaute anders als Python.
+        same_invoice += [
+            JournalEntry.description == description,
+            func.lower(JournalEntry.description) == description.lower(),
+        ]
+    if partner_id is not None:
+        same_invoice += [
+            JournalEntry.id.in_(
+                select(OpenItem.journal_entry_id).where(
+                    OpenItem.partner_id == partner_id,
+                    OpenItem.item_type == "payable",
+                    func.lower(OpenItem.reference) == number,
                 )
-                .order_by(JournalEntry.id)
-                .limit(1)
-            )
-            .scalars()
-            .first()
-        )
-        if found is not None:
-            return found
-    if partner_id is None:
+            ),
+            # Eine frühere Buchung ohne offenen Posten trägt den Partner nur an den Zeilen.
+            and_(
+                JournalEntry.id.in_(
+                    select(JournalEntryLine.journal_entry_id).where(
+                        JournalEntryLine.partner_id == partner_id
+                    )
+                ),
+                func.lower(JournalEntry.description).startswith(
+                    f"e-rechnung {number} (", autoescape=True
+                ),
+            ),
+        ]
+    if not same_invoice:
         return None
     return (
         session.execute(
             select(JournalEntry)
-            .join(OpenItem, OpenItem.journal_entry_id == JournalEntry.id)
             .where(
-                *same_invoice,
-                OpenItem.partner_id == partner_id,
-                OpenItem.item_type == "payable",
-                func.lower(OpenItem.reference) == invoice.invoice_number.lower(),
+                JournalEntry.company_id == company_id,
+                JournalEntry.reversal_of_id.is_(None),
+                JournalEntry.id.not_in(reversed_ids),
+                JournalEntry.entry_date >= date(invoice.issue_date.year, 1, 1),
+                JournalEntry.entry_date <= date(invoice.issue_date.year, 12, 31),
+                or_(*same_invoice),
             )
             .order_by(JournalEntry.id)
             .limit(1)
