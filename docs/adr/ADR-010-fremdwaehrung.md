@@ -80,13 +80,21 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
    **Gemeldete Zeiträume ändern sich nicht:** Beim Festhalten steht der Kurs an der Zahlung (`vat_rate`). Ein später
    erfasster oder korrigierter Monatskurs ändert weder die Neuberechnung des Zeitraums noch den Betrag eines späteren
    Stornos, und der festgehaltene Snapshot bleibt ohnehin. Die Migration setzt schon gemeldete Zahlungen und
-   gemeldete Stornos auf den Rechnungskurs, zu dem sie gemeldet wurden. Läge ein Storno oder eine Neuzuordnung
-   derselben Zahlung in einem festgehaltenen Zeitraum, rückt ihr Datum bei Istversteuerung auf den ersten Tag dahinter,
-   auch in Euro: Die Meldung bleibt, die Korrektur steht im nächsten offenen Zeitraum, und `reversed_on` kann dann
-   nach dem Datum der Stornobuchung liegen. Eine andere Zahlung behält ihr Datum; ist sie erst nach der Meldung
-   zugeordnet, nennt die UStVA sie weiter (Entscheidung 5), ihre Differenz bucht spätestens die Jahreserklärung.
-   Eine Rechnung mit stehender Zahlung lässt sich bei Istversteuerung nicht stornieren, erst die Zahlung. Der Wechsel
-   zurück zur Sollversteuerung ist nicht möglich, wenn für Rechnungen ab diesem Datum schon eine Differenz gebucht ist.
+   gemeldete Stornos auf den Rechnungskurs, zu dem sie gemeldet wurden.
+
+   Auch ein Storno oder eine Neuzuordnung ändert keinen gemeldeten Zeitraum, in Euro wie in Fremdwährung. Dafür hat der
+   Ausgleich eigene Tage für die UStVA (`vat_settled_on`, `vat_reversed_on`); `settlement_date` und `reversed_on` bleiben
+   die echten Tage, nach denen sich etwa die Stichtagsbewertung richtet. Läge der Storno einer gemeldeten Zahlung in
+   einem festgehaltenen Zeitraum, zählt er am ersten Tag dahinter, ebenso die Neuzuordnung derselben Zahlung. Fehlt die
+   Zahlung in der Meldung ihres Zeitraums, weil sie erst danach zugeordnet wurde, gibt es nichts zu korrigieren: Ihr
+   Storno hebt sie an ihrem Tag auf, und in keinem anderen Zeitraum entsteht eine Minderung. Eine andere Zahlung
+   behält ihr Datum; ist sie erst nach der Meldung zugeordnet, nennt die UStVA sie weiter (Entscheidung 5), ihre
+   Differenz bucht spätestens die Jahreserklärung.
+
+   Eine Rechnung, die nach Ist zählt, lässt sich nicht stornieren, solange eine gebuchte Zahlung auf ihr steht: erst
+   die Zahlung. Ein Ausgleich ohne eigene Buchung fällt mit der Rechnung, ebenso die Zahlung auf derselben Buchung.
+   Auf eine stornierte Rechnung lässt sich keine Zahlung mehr zuordnen. Der Wechsel zurück zur Sollversteuerung ist
+   nicht möglich, wenn für Rechnungen ab diesem Datum eine gebuchte Differenz stehen bliebe.
 
    **Fehlender Kurs:** Die Vorschau rechnet vorläufig zum Rechnungskurs und nennt Währung und Monat. Festhalten wird
    abgewiesen, wie bei jedem fehlenden Kurs (Entscheidung 3). Der Monatskurs erscheint Anfang des Folgemonats, also

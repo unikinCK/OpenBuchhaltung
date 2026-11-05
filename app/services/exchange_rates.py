@@ -9,6 +9,7 @@ veröffentlicht, setzt Fremdwährung den Euro als Firmenwährung voraus.
 from __future__ import annotations
 
 import csv
+import http.client
 import io
 import re
 import urllib.error
@@ -540,7 +541,7 @@ def _download_bmf_rates(year: int) -> bytes | None:
         raise ExchangeRateSourceError(
             f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
         ) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
         raise ExchangeRateSourceError(
             f"Die Kurse des BMF konnten nicht abgerufen werden: {exc}"
         ) from exc

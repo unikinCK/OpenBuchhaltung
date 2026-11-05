@@ -74,8 +74,8 @@ from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.services.account_chart_check import detect_company_chart
 from app.services.audit_log import log_audit_event
@@ -89,6 +89,8 @@ from app.services.exchange_rates import (
 )
 from app.services.journal_entries import (
     CARRYFORWARD_SOURCES,
+    SOURCE_FX_DIFFERENCE,
+    SOURCE_FX_VALUATION,
     SOURCE_VAT_FX_DIFFERENCE,
     JournalEntryCreationError,
     JournalEntryInput,
@@ -96,7 +98,6 @@ from app.services.journal_entries import (
     create_journal_entry,
     first_open_posting_date,
 )
-from app.services.standard_accounts import KURSERTRAG, find_standard_account
 from app.services.tax_codes import company_special_tax_accounts, company_tax_accounts
 from app.services.tax_period import (
     INPUT,
@@ -360,8 +361,9 @@ def vat_entries(
     """Buchungszeilen je Buchung (ohne Saldovorträge), deren Steuer in den Zeitraum
     fallen kann: Buchungsdatum im Zeitraum oder Leistungsdatum im Zeitraum bzw. bis
     zu zwei Monate davor. Welche Teile einer Buchung zählen, entscheidet der
-    Steuerzeitpunkt (``_Entry.tax_point``). Die Differenzbuchung zum Monatskurs bildet die
-    gemeldete Steuer im Hauptbuch nach und ist selbst kein Umsatz."""
+    Steuerzeitpunkt (``_Entry.tax_point``). Kursdifferenzen und die Differenzbuchung zum
+    Monatskurs sind kein Umsatz, ihre Stornos ebenso wenig."""
+    fx_original = aliased(JournalEntry)
     stmt = _vat_lines_select().where(
         JournalEntry.company_id == company_id,
         or_(
@@ -371,7 +373,23 @@ def vat_entries(
                 JournalEntry.service_date <= date_to,
             ),
         ),
-        JournalEntry.source.notin_((*CARRYFORWARD_SOURCES, SOURCE_VAT_FX_DIFFERENCE)),
+        JournalEntry.source.notin_(
+            (
+                *CARRYFORWARD_SOURCES,
+                SOURCE_VAT_FX_DIFFERENCE,
+                SOURCE_FX_DIFFERENCE,
+                SOURCE_FX_VALUATION,
+            )
+        ),
+        or_(
+            JournalEntry.reversal_of_id.is_(None),
+            JournalEntry.reversal_of_id.notin_(
+                select(fx_original.id).where(
+                    fx_original.company_id == company_id,
+                    fx_original.source.in_((SOURCE_FX_DIFFERENCE, SOURCE_FX_VALUATION)),
+                )
+            ),
+        ),
     )
     if not include_closing_entries:
         stmt = stmt.where(Period.is_closing.is_(False))
@@ -538,10 +556,9 @@ def _foreign_paid_entry(
         foreign_parts[settlement.id] = foreign_part
         booked_parts[settlement.id] = booked_part
 
-        reversal_in_period = (
-            settlement.reversed_on is not None and date_from <= settlement.reversed_on <= date_to
-        )
-        payment_in_period = date_from <= settlement.settlement_date <= date_to
+        reversal_day = settlement.vat_reversal_date
+        reversal_in_period = reversal_day is not None and date_from <= reversal_day <= date_to
+        payment_in_period = date_from <= settlement.vat_payment_date <= date_to
         if not payment_in_period and not reversal_in_period:
             continue
 
@@ -698,9 +715,9 @@ def _apply_cash_basis(
         ).scalars():
             settlements_by_item.setdefault(settlement.open_item_id, []).append(settlement)
             events = events_by_item.setdefault(settlement.open_item_id, [])
-            events.append((settlement.settlement_date, settlement.amount))
-            if settlement.reversed_on is not None:
-                events.append((settlement.reversed_on, -settlement.amount))
+            events.append((settlement.vat_payment_date, settlement.amount))
+            if settlement.vat_reversal_date is not None:
+                events.append((settlement.vat_reversal_date, -settlement.amount))
 
     # Bis zum Periodenende stornierte Rechnungen werden nicht mehr fällig.
     cancelled = (
@@ -832,6 +849,9 @@ def _apply_cash_basis(
             "gebucht. Beim Festhalten wird das Steuerkonto gegen die Kursdifferenz angeglichen."
         )
     # Die Steuer entsteht mit der Zahlung; wird sie nach der Meldung zugeordnet, fehlt sie dort.
+    vat_payment_day = func.coalesce(
+        OpenItemSettlement.vat_settled_on, OpenItemSettlement.settlement_date
+    )
     late_payments = session.execute(
         select(OpenItem.reference, VatReturn.period_label)
         .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
@@ -839,8 +859,8 @@ def _apply_cash_basis(
             VatReturn,
             and_(
                 VatReturn.company_id == company.id,
-                VatReturn.date_from <= OpenItemSettlement.settlement_date,
-                VatReturn.date_to >= OpenItemSettlement.settlement_date,
+                VatReturn.date_from <= vat_payment_day,
+                VatReturn.date_to >= vat_payment_day,
                 VatReturn.created_at < OpenItemSettlement.created_at,
             ),
         )
@@ -851,8 +871,8 @@ def _apply_cash_basis(
             # sich hier nicht ersetzen, sonst stünde der Hinweis für immer da.
             or_(
                 and_(
-                    OpenItemSettlement.settlement_date >= date_from,
-                    OpenItemSettlement.settlement_date <= date_to,
+                    vat_payment_day >= date_from,
+                    vat_payment_day <= date_to,
                 ),
                 and_(
                     OpenItemSettlement.created_at
@@ -938,11 +958,6 @@ def compute_vat_return_details(
         ).all()
         if rate is not None and rate > 0
     } | {Decimal("19.00"), Decimal("7.00")}
-
-    fx_gain_account = find_standard_account(
-        session=session, company_id=company_id, standard=KURSERTRAG
-    )
-    fx_gain_account_id = fx_gain_account.id if fx_gain_account is not None else None
 
     base_by_rate: dict[Decimal, Decimal] = {}
     bases: dict[str, Decimal] = {}
@@ -1058,9 +1073,6 @@ def compute_vat_return_details(
                 untagged_output += amount
                 continue
             if row.line_account_type in {"revenue", "income"}:
-                if row.account_id == fx_gain_account_id:
-                    # Ein Kursgewinn ist kein Umsatz, auch kein vergessener.
-                    continue
                 amount = row.credit_amount - row.debit_amount
                 kennzahl = revenue_kennzahl(chart, row.account_code)
                 if kennzahl is not None:
@@ -1471,7 +1483,10 @@ def company_vat_method(company: Company, *, on: date | None = None) -> dict[str,
 def _refuse_switch_with_booked_differences(
     session: Session, company: Company, valid_from: date
 ) -> None:
-    """Rechnungen ab dem Wechsel zählen wieder nach Soll, ihre gebuchte Differenz bliebe stehen."""
+    """Rechnungen ab dem Wechsel zählen wieder nach Soll, ihre gebuchte Differenz bliebe stehen.
+
+    Sind Zahlung und Storno beide gebucht, heben sich ihre Differenzen genau auf.
+    """
     reference = session.execute(
         select(OpenItem.reference)
         .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
@@ -1480,8 +1495,14 @@ def _refuse_switch_with_booked_differences(
             OpenItem.company_id == company.id,
             JournalEntry.entry_date >= valid_from,
             or_(
-                OpenItemSettlement.vat_fx_entry_id.is_not(None),
-                OpenItemSettlement.vat_fx_reversal_entry_id.is_not(None),
+                and_(
+                    OpenItemSettlement.vat_fx_entry_id.is_not(None),
+                    OpenItemSettlement.vat_fx_reversal_entry_id.is_(None),
+                ),
+                and_(
+                    OpenItemSettlement.vat_fx_entry_id.is_(None),
+                    OpenItemSettlement.vat_fx_reversal_entry_id.is_not(None),
+                ),
             ),
         )
     ).first()

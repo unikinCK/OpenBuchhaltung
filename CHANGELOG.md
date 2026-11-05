@@ -31,11 +31,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   angeglichen und der Kurs an der Zahlung festgeschrieben. Ohne Monatskurs rechnet die Vorschau vorläufig zum
   Rechnungskurs, festhalten lässt sich der Zeitraum dann nicht. `GET /api/v1/vat-return` nennt die Zahlungen unter
   `foreign_payments`. **Vor dem Produktiveinsatz von einem Steuerberater zu bestätigen.**
-- Istversteuerung allgemein, auch in Euro: Ein Storno oder die Neuzuordnung derselben Zahlung, deren Datum in einem
-  festgehaltenen Zeitraum läge, zählt am ersten Tag dahinter. Eine Rechnung mit stehender Zahlung lässt sich erst nach
-  deren Storno stornieren. `GET /api/v1/vat-annual-return` nennt jetzt auch `warnings`, `unassigned` und
-  `foreign_payments`, und `POST /api/v1/vat-annual-returns` meldet Fachfehler als 422 statt als „year must be an integer“.
-  Ein Kursgewinn erscheint nicht mehr als Ertrag ohne Umsatzsteuer.
+- Istversteuerung allgemein, auch in Euro: Der Storno einer gemeldeten Zahlung oder die Neuzuordnung derselben Zahlung,
+  die in einen festgehaltenen Zeitraum fielen, zählen für die UStVA am ersten Tag dahinter; der Storno einer nie
+  gemeldeten Zahlung hebt sie an ihrem Tag auf. Eine Rechnung mit gebuchter Zahlung lässt sich erst nach deren Storno
+  stornieren, ein Ausgleich ohne Buchung fällt mit ihr, und auf eine stornierte Rechnung lässt sich nichts mehr zuordnen.
+  `GET /api/v1/vat-annual-return` nennt jetzt auch `warnings`, `unassigned` und `foreign_payments`, und
+  `POST /api/v1/vat-annual-returns` meldet Fachfehler als 422 statt als „year must be an integer“. Kursdifferenzen und
+  ihre Stornos erscheinen nicht mehr als Ertrag ohne Umsatzsteuer.
 - **Monatskurse des BMF:** eigene Quelle neben EZB und manuell, Abruf aus dem Datenportal
   (`POST /api/v1/vat-exchange-rates/fetch`, MCP `fetch_vat_exchange_rates`, CLI `flask fetch-vat-exchange-rates`),
   Erfassung von Hand und Liste (`GET`/`POST /api/v1/vat-exchange-rates`, MCP `list_vat_exchange_rates`,

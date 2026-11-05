@@ -18,6 +18,7 @@ from app.services.partners import (
     find_partner_by_number,
     validate_partner_assignment,
 )
+from app.services.tax_codes import company_tax_accounts
 from domain.formatting import format_number
 from domain.models import (
     TAX_KIND_INPUT,
@@ -1123,26 +1124,85 @@ def first_open_posting_date(*, session: Session, company_id: int, on: date) -> d
     return day
 
 
-def first_unreported_day(*, session: Session, item: OpenItem, on: date) -> date:
-    """``on`` oder der erste Tag danach außerhalb festgehaltener Umsatzsteuer-Zeiträume.
-
-    Gilt für Forderungen bei Istversteuerung: Ein Storno oder eine Neuzuordnung, deren Datum in
-    einem gemeldeten Zeitraum läge, ändert sonst dessen Neuberechnung, und die Korrektur erschiene
-    nirgends. Die Meldung bleibt, die Korrektur steht im nächsten offenen Zeitraum (ADR-010).
-    """
+def _reported_periods(session: Session, item: OpenItem, on: date) -> list:
+    """Festgehaltene Zeiträume bis ``on`` und danach, nur für Forderungen bei Istversteuerung."""
     company = session.get(Company, item.company_id)
     if item.item_type != "receivable" or company is None or company.vat_cash_basis_from is None:
-        return on
-    reported = session.execute(
-        select(VatReturn.date_from, VatReturn.date_to)
+        return []
+    return session.execute(
+        select(VatReturn.date_from, VatReturn.date_to, VatReturn.created_at)
         .where(VatReturn.company_id == item.company_id, VatReturn.date_to >= on)
         .order_by(VatReturn.date_from, VatReturn.date_to)
     ).all()
+
+
+def first_unreported_day(*, session: Session, item: OpenItem, on: date) -> date:
+    """``on`` oder der erste Tag danach außerhalb festgehaltener Umsatzsteuer-Zeiträume."""
     day = on
-    for start, end in reported:
+    for start, end, _ in _reported_periods(session, item, on):
         if start <= day <= end:
             day = end + timedelta(days=1)
     return day
+
+
+def _vat_reversal_day(
+    session: Session, item: OpenItem, settlement: OpenItemSettlement
+) -> date | None:
+    """Tag des Stornos für die UStVA, wenn er nicht der echte sein kann (ADR-010).
+
+    War die Zahlung gemeldet, steht die Korrektur im nächsten offenen Zeitraum: Der gemeldete
+    bleibt, wie er ist. Fehlt die Zahlung in der Meldung ihres Zeitraums, weil sie erst danach
+    zugeordnet wurde, gibt es nichts zu korrigieren: Der Storno hebt sie an ihrem Tag auf.
+    """
+    payment_day = settlement.vat_payment_date
+    covering = [
+        created_at
+        for start, end, created_at in _reported_periods(session, item, payment_day)
+        if start <= payment_day <= end
+    ]
+    if covering and all(created_at < settlement.created_at for created_at in covering):
+        return payment_day
+    day = first_unreported_day(session=session, item=item, on=settlement.reversed_on)
+    return day if day != settlement.reversed_on else None
+
+
+def cash_basis_invoice_items(session: Session, entry: JournalEntry) -> list[OpenItem]:
+    """Die Forderungen einer Buchung, die als Rechnung nach vereinnahmten Entgelten zählt.
+
+    Entspricht dem, was die UStVA aufschiebt: Buchung im Zeitraum der Istversteuerung, mit
+    Umsatzsteuer und verknüpftem Posten.
+    """
+    company = session.get(Company, entry.company_id)
+    if (
+        company is None
+        or company.vat_cash_basis_from is None
+        or entry.entry_date < company.vat_cash_basis_from
+        or (
+            company.vat_cash_basis_until is not None
+            and entry.entry_date > company.vat_cash_basis_until
+        )
+    ):
+        return []
+    tax_accounts = company_tax_accounts(session=session, company_id=entry.company_id)
+
+    def is_output_tax(line: JournalEntryLine) -> bool:
+        if line.debit_amount == line.credit_amount:
+            return False
+        if line.tax_code_id is None:
+            account = tax_accounts.get(line.account_id)
+            return account is not None and account.kind == TAX_KIND_OUTPUT
+        tax_code = session.get(TaxCode, line.tax_code_id)
+        return tax_code.vat_account_id == line.account_id and tax_code.kind != TAX_KIND_INPUT
+
+    if not any(is_output_tax(line) for line in entry.lines):
+        return []
+    return list(
+        session.execute(
+            select(OpenItem).where(
+                OpenItem.journal_entry_id == entry.id, OpenItem.item_type == "receivable"
+            )
+        ).scalars()
+    )
 
 
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
@@ -1492,7 +1552,6 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} gleicht die gemeldete Umsatzsteuer an. Wird eine "
             "Zahlung storniert, bucht der Zeitraum des Stornos die Differenz zurück."
         )
-    _refuse_paid_cash_basis_invoice(session, original)
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1519,6 +1578,7 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} wurde bereits storniert "
             f"({already_reversed.posting_number})."
         )
+    _refuse_paid_cash_basis_invoice(session, original)
 
     original_period = session.get(Period, original.period_id)
 
@@ -1598,29 +1658,37 @@ def reverse_journal_entry(
     return reversal
 
 
-def _refuse_paid_cash_basis_invoice(session: Session, original: JournalEntry) -> None:
-    """Bei Istversteuerung bleibt eine Rechnung stehen, solange eine Zahlung auf ihr steht.
+def _standing_settlements(session: Session, item: OpenItem) -> list[OpenItemSettlement]:
+    return list(
+        session.execute(
+            select(OpenItemSettlement).where(
+                OpenItemSettlement.open_item_id == item.id,
+                OpenItemSettlement.reversed_on.is_(None),
+            )
+        ).scalars()
+    )
 
-    Die Zahlung ist gemeldet und zählt weiter; ohne Rechnung bliebe sie im Hauptbuch ohne Gegenstück
-    und das Steuerkonto wiche von den Meldungen ab. Erst die Zahlung stornieren.
+
+def _refuse_paid_cash_basis_invoice(session: Session, original: JournalEntry) -> None:
+    """Bei Istversteuerung bleibt eine Rechnung stehen, solange eine gebuchte Zahlung auf ihr steht.
+
+    Die Zahlung zählt weiter; ohne Rechnung wiche das Steuerkonto dauerhaft von den Meldungen ab.
+    Sie lässt sich zuerst stornieren. Ein Ausgleich ohne eigene Buchung bewegt nichts im Hauptbuch
+    und fällt mit der Rechnung (``_release_subledgers``), ebenso die Zahlung auf dieser Buchung.
     """
-    company = session.get(Company, original.company_id)
-    if company is None or company.vat_cash_basis_from is None:
-        return
-    reference = session.execute(
-        select(OpenItem.reference)
-        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
-        .where(
-            OpenItem.journal_entry_id == original.id,
-            OpenItem.item_type == "receivable",
-            OpenItemSettlement.reversed_on.is_(None),
-        )
-    ).first()
-    if reference is not None:
-        raise JournalEntryCreationError(
-            f"Auf Posten {reference[0]} steht eine Zahlung, die bei Istversteuerung schon zählt. "
-            f"Bitte zuerst die Zahlung stornieren, dann Buchung {original.posting_number}."
-        )
+    for item in cash_basis_invoice_items(session, original):
+        for settlement in _standing_settlements(session, item):
+            payment_entry_id = settlement.journal_entry_id
+            if payment_entry_id is None and settlement.bank_transaction_id is not None:
+                payment_entry_id = session.get(
+                    BankTransaction, settlement.bank_transaction_id
+                ).journal_entry_id
+            if payment_entry_id is not None and payment_entry_id != original.id:
+                raise JournalEntryCreationError(
+                    f"Auf Posten {item.reference} steht eine Zahlung, die bei Istversteuerung "
+                    "schon zählt. Bitte zuerst die Zahlung stornieren, dann Buchung "
+                    f"{original.posting_number}."
+                )
 
 
 def _sales_invoice_number(session: Session, journal_entry_id: int) -> str | None:
@@ -1754,10 +1822,9 @@ def _release_subledgers(
     restored_foreign: dict[int, Decimal] = {}
     for settlement in settlements:
         # Nie vor dem Ausgleich selbst: Sonst bliebe die Zahlung im Zeitraum dazwischen stehen.
-        settlement.reversed_on = first_unreported_day(
-            session=session,
-            item=session.get(OpenItem, settlement.open_item_id),
-            on=max(reversal.entry_date, settlement.settlement_date),
+        settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
+        settlement.vat_reversed_on = _vat_reversal_day(
+            session, session.get(OpenItem, settlement.open_item_id), settlement
         )
         settlement.reversal_journal_entry_id = reversal.id
         restored_by_item[settlement.open_item_id] = (
@@ -1808,6 +1875,32 @@ def _release_subledgers(
             },
         )
         released.setdefault("open_items", []).append(item.id)
+
+    # Rechnung storniert: Was jetzt noch auf ihr steht, hat keine eigene Buchung und nichts im
+    # Hauptbuch (siehe ``_refuse_paid_cash_basis_invoice``). Es fällt mit ihr, sonst zählte es
+    # weiter.
+    for item in cash_basis_invoice_items(session, original):
+        for settlement in _standing_settlements(session, item):
+            settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
+            settlement.reversal_journal_entry_id = reversal.id
+            settlement.vat_reversed_on = _vat_reversal_day(session, item, settlement)
+            transaction = (
+                session.get(BankTransaction, settlement.bank_transaction_id)
+                if settlement.bank_transaction_id is not None
+                else None
+            )
+            if transaction is not None and transaction.status == "matched":
+                transaction.status = "open"
+                if item.bank_transaction_id == transaction.id:
+                    item.bank_transaction_id = None
+            log_audit_event(
+                **audit_common,
+                entity_type="open_item",
+                entity_id=str(item.id),
+                action="settlement_voided",
+                payload={**link, "settlement_id": settlement.id},
+            )
+            released.setdefault("open_item_settlements", []).append(settlement.id)
 
     session.flush()
     return released

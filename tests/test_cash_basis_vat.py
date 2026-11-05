@@ -346,6 +346,46 @@ def test_reversal_dated_in_a_reported_month_counts_in_the_next_open_one(session:
     assert _kennzahlen(session, company, *march)["83"] == Decimal("-19.00")
 
 
+def test_settlement_against_an_unbooked_transaction_falls_with_the_invoice(
+    session: Session,
+) -> None:
+    """Der Umsatz ist nur zugeordnet: Kein Weg, ihn zu stornieren, und nichts im Hauptbuch."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    entry, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=accounts["1200"].id,
+        booking_date=date(2027, 2, 10),
+        amount=Decimal("119.00"),
+        currency_code="EUR",
+        purpose="Zahlung",
+        status="open",
+        dedup_hash="ungebucht",
+    )
+    session.add(transaction)
+    session.commit()
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=transaction.id
+    )
+    assert transaction.status == "matched"
+    february = (date(2027, 2, 1), date(2027, 2, 28))
+    march = (date(2027, 3, 1), date(2027, 3, 31))
+    assert _kennzahlen(session, company, *february)["83"] == Decimal("19.00")
+
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=entry.id,
+        reversal_date=date(2027, 3, 5),
+        changed_by="t",
+    )
+    session.refresh(transaction)
+    assert transaction.status == "open"
+    assert _kennzahlen(session, company, *february)["83"] == Decimal("19.00")
+    assert _kennzahlen(session, company, *march)["83"] == Decimal("-19.00")
+
+
 def test_paid_invoice_stays_until_its_payment_is_reversed(session: Session) -> None:
     company, accounts = _seed(session)
     _set_cash_basis(session, company, date(2027, 1, 1))

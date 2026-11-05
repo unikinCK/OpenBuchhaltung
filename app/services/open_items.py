@@ -21,6 +21,7 @@ from app.services.journal_entries import (
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
+    cash_basis_invoice_items,
     create_journal_entry,
     first_open_posting_date,
     first_unreported_day,
@@ -398,6 +399,7 @@ def settle_open_item(
         raise OpenItemError("Offener Posten nicht gefunden.")
     if item.status != "open":
         raise OpenItemError("Der offene Posten ist bereits ausgeglichen.")
+    _refuse_cancelled_cash_basis_invoice(session, item)
 
     bank_transaction = _load_bank_transaction(
         session=session, item=item, bank_transaction_id=bank_transaction_id
@@ -433,10 +435,13 @@ def settle_open_item(
     last_reversal = session.execute(
         select(func.max(OpenItemSettlement.reversed_on)).where(or_(*same_payment))
     ).scalar()
+    if last_reversal is not None and settlement_date < last_reversal:
+        settlement_date = last_reversal
+    # Eine Neuzuordnung ändert keinen gemeldeten Zeitraum: Für die UStVA zählt sie im nächsten.
+    vat_settled_on = None
     if last_reversal is not None:
-        settlement_date = first_unreported_day(
-            session=session, item=item, on=max(settlement_date, last_reversal)
-        )
+        first_open_day = first_unreported_day(session=session, item=item, on=settlement_date)
+        vat_settled_on = first_open_day if first_open_day != settlement_date else None
 
     payment_entry_id = (linked_entry.id if linked_entry else None) or (
         bank_transaction.journal_entry_id if bank_transaction else None
@@ -505,6 +510,7 @@ def settle_open_item(
             amount=settlement_amount,
             settlement_date=settlement_date,
             received_on=received_on,
+            vat_settled_on=vat_settled_on,
             # Auch die Buchung des Bankumsatzes: Ihr Storno nimmt den Ausgleich zurück.
             journal_entry_id=payment_entry_id,
             bank_transaction_id=bank_transaction.id if bank_transaction else None,
@@ -561,6 +567,24 @@ def settle_open_item(
     session.commit()
     session.refresh(item)
     return item
+
+
+def _refuse_cancelled_cash_basis_invoice(session: Session, item: OpenItem) -> None:
+    """Bei Istversteuerung löste die Zahlung Umsatzsteuer auf eine Rechnung aus, die fehlt."""
+    if item.journal_entry_id is None or item.item_type != "receivable":
+        return
+    cancelled = session.execute(
+        select(JournalEntry.posting_number).where(
+            JournalEntry.reversal_of_id == item.journal_entry_id
+        )
+    ).first()
+    if cancelled is None:
+        return
+    if cash_basis_invoice_items(session, session.get(JournalEntry, item.journal_entry_id)):
+        raise OpenItemError(
+            f"Die Rechnung zu Posten {item.reference} ist storniert ({cancelled[0]}); auf sie "
+            "lässt sich keine Zahlung mehr zuordnen."
+        )
 
 
 def _load_bank_transaction(

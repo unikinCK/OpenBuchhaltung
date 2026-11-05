@@ -56,6 +56,8 @@ def upgrade() -> None:
 
     # Nullable Spalten ohne Tabellen-Rebuild.
     op.add_column("open_item_settlement", sa.Column("received_on", sa.Date(), nullable=True))
+    op.add_column("open_item_settlement", sa.Column("vat_settled_on", sa.Date(), nullable=True))
+    op.add_column("open_item_settlement", sa.Column("vat_reversed_on", sa.Date(), nullable=True))
     op.add_column("open_item_settlement", sa.Column("vat_rate", sa.Numeric(14, 6), nullable=True))
     for table, columns in _ENTRY_COLUMNS.items():
         for column, constraint in columns:
@@ -121,6 +123,8 @@ def downgrade() -> None:
                 "vat_fx_reversal_entry_id",
                 "vat_fx_entry_id",
                 "vat_rate",
+                "vat_reversed_on",
+                "vat_settled_on",
                 "received_on",
             ):
                 batch_op.drop_column(column)
@@ -131,6 +135,6 @@ def downgrade() -> None:
             for column, constraint in columns:
                 op.drop_constraint(constraint, table, type_="foreignkey")
                 op.drop_column(table, column)
-        op.drop_column("open_item_settlement", "vat_rate")
-        op.drop_column("open_item_settlement", "received_on")
+        for column in ("vat_rate", "vat_reversed_on", "vat_settled_on", "received_on"):
+            op.drop_column("open_item_settlement", column)
     op.drop_table("vat_exchange_rate")

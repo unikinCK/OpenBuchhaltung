@@ -1302,6 +1302,10 @@ class OpenItemSettlement(Base):
     received_on: Mapped[date | None] = mapped_column(Date)
     # Monatskurs, zu dem die Zahlung gemeldet wurde; danach ändert ihn kein neuer Kurs mehr.
     vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    # Tag für die UStVA, wenn der echte Tag in einem schon gemeldeten Zeitraum läge; sonst leer.
+    # ``settlement_date`` und ``reversed_on`` bleiben die echten Tage, etwa für die Bewertung.
+    vat_settled_on: Mapped[date | None] = mapped_column(Date)
+    vat_reversed_on: Mapped[date | None] = mapped_column(Date)
     # Buchung der Steuerdifferenz zum Rechnungskurs, je für die Zahlung und für ihr Storno.
     vat_fx_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("journal_entry.id", ondelete="SET NULL")
@@ -1311,6 +1315,14 @@ class OpenItemSettlement(Base):
     )
 
     open_item: Mapped[OpenItem] = relationship(back_populates="settlements")
+
+    @property
+    def vat_payment_date(self) -> date:
+        return self.vat_settled_on or self.settlement_date
+
+    @property
+    def vat_reversal_date(self) -> date | None:
+        return self.vat_reversed_on or self.reversed_on
 
 
 class ExchangeRate(Base):
