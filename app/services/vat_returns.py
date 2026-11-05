@@ -68,7 +68,7 @@ bezahlte Umsätze bleiben unverändert (ADR-009).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -414,14 +414,22 @@ def _apply_cash_basis(
     if company.vat_cash_basis_until is not None:
         filters.append(JournalEntry.entry_date <= company.vat_cash_basis_until)
     item_rows = session.execute(
-        select(OpenItem.id, OpenItem.journal_entry_id, OpenItem.original_amount)
+        select(
+            OpenItem.id,
+            OpenItem.journal_entry_id,
+            OpenItem.original_amount,
+            OpenItem.foreign_currency_code,
+        )
         .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
         .where(*filters)
     ).all()
 
     items_by_entry: dict[int, dict[int, Decimal]] = {}
-    for item_id, entry_id, original_amount in item_rows:
+    foreign_entries: set[int] = set()
+    for item_id, entry_id, original_amount, foreign_currency_code in item_rows:
         items_by_entry.setdefault(entry_id, {})[item_id] = original_amount
+        if foreign_currency_code:
+            foreign_entries.add(entry_id)
 
     invoices = (
         _collect_entries(
@@ -471,6 +479,7 @@ def _apply_cash_basis(
     }
 
     not_due = ZERO
+    foreign_paid: list[str] = []
     before = date_from - timedelta(days=1)
     for entry_id, invoice in deferred.items():
         item_amounts = items_by_entry[entry_id]
@@ -491,6 +500,8 @@ def _apply_cash_basis(
             )
         if share_after == share_before:
             continue
+        if entry_id in foreign_entries:
+            foreign_paid.append(invoice.posting_number)
         paid = _Entry(invoice.posting_number, date_to)
         for row in invoice.rows:
             values = row._asdict()
@@ -515,6 +526,54 @@ def _apply_cash_basis(
             f"Istversteuerung: {format_amount(not_due)} € Umsatzsteuer aus bis zum "
             f"{date_to.strftime('%d.%m.%Y')} gebuchten Rechnungen sind noch nicht fällig. "
             "Das Steuerkonto enthält sie bereits, deshalb weicht sein Saldo von der Zahllast ab."
+        )
+    if foreign_paid:
+        warnings.append(
+            "Istversteuerung: Diese Rechnungen in Fremdwährung wurden im Zeitraum bezahlt und "
+            "zählen hier zum Kurs der Rechnung. § 16 Abs. 6 UStG verlangt bei vereinnahmten "
+            "Entgelten den Durchschnittskurs des Zahlungsmonats; bitte die Steuer prüfen und "
+            "korrigieren: " + ", ".join(sorted(foreign_paid)[:10])
+            + (" …" if len(foreign_paid) > 10 else "")
+        )
+    # Die Steuer entsteht mit der Zahlung; wird sie nach der Meldung zugeordnet, fehlt sie dort.
+    late_payments = session.execute(
+        select(OpenItem.reference, VatReturn.period_label)
+        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
+        .join(
+            VatReturn,
+            and_(
+                VatReturn.company_id == company.id,
+                VatReturn.date_from <= OpenItemSettlement.settlement_date,
+                VatReturn.date_to >= OpenItemSettlement.settlement_date,
+                VatReturn.created_at < OpenItemSettlement.created_at,
+            ),
+        )
+        .where(
+            OpenItem.id.in_(item_ids),
+            OpenItemSettlement.reversed_on.is_(None),
+            # Nur im betroffenen Zeitraum und in dem der Zuordnung: Eine gespeicherte Meldung lässt
+            # sich hier nicht ersetzen, sonst stünde der Hinweis für immer da.
+            or_(
+                and_(
+                    OpenItemSettlement.settlement_date >= date_from,
+                    OpenItemSettlement.settlement_date <= date_to,
+                ),
+                and_(
+                    OpenItemSettlement.created_at
+                    >= datetime.combine(date_from, time.min, tzinfo=timezone.utc),
+                    OpenItemSettlement.created_at
+                    < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        .order_by(VatReturn.date_from, OpenItem.reference)
+    ).all()
+    if late_payments:
+        warnings.append(
+            "Istversteuerung: Diese Zahlungen liegen in einem schon gespeicherten Zeitraum, wurden "
+            "aber erst danach zugeordnet. Dort fehlt ihre Umsatzsteuer, bitte berichtigen: "
+            + ", ".join(f"{reference} ({label})" for reference, label in late_payments[:10])
+            + (" …" if len(late_payments) > 10 else "")
         )
     without_item = sorted(
         entry.posting_number

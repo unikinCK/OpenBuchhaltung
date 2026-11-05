@@ -36,7 +36,7 @@
                 {% endif %}
               </td>
               <td>{{ item.due_date | datum }} ({{ proposal.days_overdue }} Tage)</td>
-              <td class="num">{{ item.open_amount | betrag }} {{ item.currency_code }}</td>
+              <td class="num">{% if item.foreign_currency_code %}{{ item.foreign_open_amount | betrag }} {{ item.foreign_currency_code }}{% else %}{{ item.open_amount | betrag }} {{ item.currency_code }}{% endif %}</td>
               <td>
                 {% if item.dunning_level %}
                   <span class="badge">Stufe {{ item.dunning_level }}</span>

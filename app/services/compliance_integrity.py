@@ -17,9 +17,10 @@ from app.services.documents import verify_document_file
 from domain.models import Company, Document, JournalEntry
 
 # Version 3 nimmt den Geschäftspartner je Zeile auf, Version 4 das Leistungsdatum
-# der Buchung. Siegel älterer Versionen bleiben unverändert gültig und prüfbar.
-JOURNAL_CONTENT_HASH_VERSION = 4
-SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS = (2, 3, 4)
+# der Buchung, Version 5 Fremdwährung, Fremdbetrag und Kurs je Zeile. Siegel älterer
+# Versionen bleiben unverändert gültig und prüfbar.
+JOURNAL_CONTENT_HASH_VERSION = 5
+SUPPORTED_JOURNAL_CONTENT_HASH_VERSIONS = (2, 3, 4, 5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,16 @@ def calculate_journal_entry_content_hash(entry: JournalEntry) -> str:
         }
         if version >= 3:
             canonical_line["partner_id"] = line.partner_id
+        if version >= 5:
+            canonical_line["foreign_currency_code"] = line.foreign_currency_code
+            canonical_line["foreign_amount"] = (
+                _amount(line.foreign_amount) if line.foreign_amount is not None else None
+            )
+            canonical_line["exchange_rate"] = (
+                f"{Decimal(line.exchange_rate).quantize(Decimal('0.000001')):.6f}"
+                if line.exchange_rate is not None
+                else None
+            )
         canonical_lines.append(canonical_line)
 
     canonical = {

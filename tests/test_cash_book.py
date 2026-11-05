@@ -46,7 +46,7 @@ from app.services.journal_entries import (
     reverse_journal_entry,
 )
 from app.services.mcp_server import TOOLS_BY_NAME, ApiResponse, MCPServer
-from app.services.periods import lock_period
+from app.services.periods import lock_period, unlock_period
 from domain.models import (
     Account,
     AuditLog,
@@ -602,8 +602,10 @@ def test_failed_entry_rolls_back_everything_and_leaves_no_number_gap(session, se
     session.refresh(book)
     assert book.last_entry_number == 1
 
-    # Nach dem gesperrten Versuch geht es ohne Lücke weiter.
-    assert _entry(session, seed, book, entry_date=TODAY).entry_number == 2
+    # Nach dem gesperrten Versuch geht es ohne Lücke weiter. Entsperren statt auf ein späteres
+    # Datum ausweichen: Heute kann im selben Monat liegen wie die gesperrte Periode.
+    unlock_period(session=session, period_id=period.id, changed_by="pytest")
+    assert _entry(session, seed, book).entry_number == 2
 
 
 def test_closed_fiscal_year_blocks_the_entry(session, seed) -> None:

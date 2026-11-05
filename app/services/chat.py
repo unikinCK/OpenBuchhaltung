@@ -209,6 +209,16 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "download_sales_invoice",
         ),
     ),
+    "fremdwaehrung": (
+        "Wechselkurse und Stichtagsbewertung",
+        (
+            "list_exchange_rates",
+            "set_exchange_rate",
+            "fetch_exchange_rates",
+            "get_fx_valuation",
+            "post_fx_valuation",
+        ),
+    ),
     "kasse": (
         "Kassenbuch",
         (

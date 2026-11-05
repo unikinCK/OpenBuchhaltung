@@ -8,6 +8,30 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Fremdwährung
+- Wechselkurse je Mandant (EZB-Abruf und manuell), UI „Fremdwährung“, `GET`/`POST /api/v1/exchange-rates`,
+  `POST /api/v1/exchange-rates/fetch`, MCP und CLI `flask fetch-exchange-rates`. Migration `20261103_0064`.
+- Buchungszeilen tragen Fremdwährung, Fremdbetrag und Kurs. Sie sind mit festgeschrieben: **Hashversion 5**;
+  ältere Siegel bleiben unverändert gültig.
+- Offene Posten in Fremdwährung; der Ausgleich hält die Kursdifferenz fest und bucht sie, wenn die Zahlung auf dem
+  Sammelkonto steht. Eine Zahlung in Euro nennt Fremd- und Eurobetrag selbst, eine Zahlung in der Währung des
+  Postens liefert beides anteilig, auch bei Sammel- und Überzahlungen.
+- Ausgleich allgemein, auch in Euro: Der Ausgleich über einen gebuchten Bankumsatz hängt jetzt an dessen Buchung, ihr
+  Storno öffnet den Posten wieder. Stornierte Buchungen und Stornobuchungen gleichen nichts mehr aus, und einem
+  Umsatz lässt sich keine stornierte Buchung mehr zuordnen. Wird dieselbe Zahlung nach einem Storno neu zugeordnet,
+  liegt der Ausgleich nie vor dem Storno, damit sie nicht rückwirkend doppelt zählt. Bei Istversteuerung warnt die UStVA,
+  wenn eine Zahlung erst nach der Meldung ihres Zeitraums zugeordnet wurde.
+- Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen; vor dem Ausgleich eines
+  Postens in Fremdwährung muss ein Umsatz gebucht sein.
+- Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung; ohne erfassten Kurs
+  gilt der Kurs am Leistungsdatum. Bei Istversteuerung warnt die UStVA, weil § 16 Abs. 6 UStG dort den Kurs des
+  Zahlungsmonats verlangt. E-Rechnungen in Fremdwährung werden nicht mehr als Euro gebucht.
+- Stichtagsbewertung offener Posten nach § 256a HGB mit automatischer Auflösung am Folgetag
+  (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`).
+- Die Kontenrahmen enthalten die Konten für Kursdifferenzen (SKR03 2150/2660, SKR04 6880/4840).
+- Der Saldenabgleich der Bank vergleicht nur noch Umsätze in Firmenwährung. Die Journal-CSV hat drei neue
+  Spalten am Ende.
+
 ### Firmenstammdaten und Ausgangsrechnungen
 - Firmenstammdaten an der Gesellschaft (Anschrift, USt-IdNr, Steuernummer, Kontakt, Register,
   Bank, Rechnungspräfix, Kleinunternehmer): Verwaltung → Firmendaten,

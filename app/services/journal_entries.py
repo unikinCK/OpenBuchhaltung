@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -70,6 +70,11 @@ class JournalLineInput:
     # auf allen anderen Konten den Partnerbezug der Buchung.
     partner_id: int | None = None
     partner_number: str | None = None
+    # Fremdwährung (ADR-010): Soll/Haben bleiben in Firmenwährung, Fremdbetrag und Kurs stehen
+    # zusätzlich an der Zeile. Ohne Kurs ergibt er sich aus den beiden Beträgen.
+    foreign_currency_code: str | None = None
+    foreign_amount: Decimal | None = None
+    exchange_rate: Decimal | None = None
 
 
 @dataclass(slots=True)
@@ -113,11 +118,19 @@ SOURCE_YEAR_END_CLOSE = "year_end_close"
 SOURCE_CARRYFORWARD = "carryforward"
 # Buchung aus einem Kassenbuch-Eintrag (``app.services.cash_book``).
 SOURCE_CASH_BOOK = "cash_book"
+# Kursdifferenz beim Ausgleich und Stichtagsbewertung offener Posten (ADR-010).
+SOURCE_FX_DIFFERENCE = "fx_difference"
+SOURCE_FX_VALUATION = "fx_valuation"
 # Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
 # Quellen, die bestehende Partnerzuordnungen nur übernehmen (auch inaktive Partner).
-PARTNER_MIRROR_SOURCES = (SOURCE_STORNO, SOURCE_CARRYFORWARD)
+PARTNER_MIRROR_SOURCES = (
+    SOURCE_STORNO,
+    SOURCE_CARRYFORWARD,
+    SOURCE_FX_DIFFERENCE,
+    SOURCE_FX_VALUATION,
+)
 # Versuche, eine Buchung mit neuer Nummer anzulegen, wenn die gezogene Nummer
 # bereits vergeben ist (Altbestand mit gesellschaftsweitem Zähler, Wettlauf).
 POSTING_NUMBER_ATTEMPTS = 5
@@ -207,6 +220,7 @@ def create_journal_entry(
         raise JournalEntryCreationError("Gesellschaft nicht gefunden.")
 
     lines = _resolve_account_codes(session=session, company=company, lines=payload.lines)
+    lines = _resolve_foreign_amounts(company=company, lines=lines)
     lines = _resolve_partner_numbers(session=session, company=company, lines=lines)
     lines = apply_entry_partner(
         session=session,
@@ -278,7 +292,7 @@ def create_journal_entry(
                 company_id=company.id,
                 partner_id=line.partner_id,
                 account=account,
-                # Storno und Saldovortrag spiegeln Bestehendes – auch bei
+                # Storno, Saldovortrag und Kursdifferenzen führen Bestehendes fort – auch bei
                 # inzwischen deaktivierten Partnern.
                 allow_inactive=payload.source in PARTNER_MIRROR_SOURCES,
             )
@@ -343,6 +357,9 @@ def create_journal_entry(
             "cost_center_id": line.cost_center_id,
             "profit_center_id": line.profit_center_id,
             "partner_id": line.partner_id,
+            "foreign_currency_code": line.foreign_currency_code,
+            "foreign_amount": line.foreign_amount,
+            "exchange_rate": line.exchange_rate,
         }
         if line.debit_amount > Decimal("0.00"):
             line_payload["debit_amount"] = line.debit_amount
@@ -976,6 +993,67 @@ def _max_existing_posting_number(*, session: Session, company_id: int, prefix: s
     return highest
 
 
+def _resolve_foreign_amounts(
+    *, company: Company, lines: list[JournalLineInput]
+) -> list[JournalLineInput]:
+    """Prüft Fremdbeträge und ergänzt einen fehlenden Kurs aus den beiden Beträgen.
+
+    Fremdbetrag und Betrag in Firmenwährung müssen zum Kurs passen (ein Cent Rundung und was die
+    sechs Stellen des Kurses bei großen Beträgen ausmachen), sonst stünde auf der festgeschriebenen
+    Zeile ein Kurs, der nicht gerechnet wurde.
+    """
+    resolved = []
+    for number, line in enumerate(lines, start=1):
+        has_foreign = line.foreign_currency_code or line.foreign_amount is not None
+        if not has_foreign:
+            if line.exchange_rate is not None:
+                raise JournalEntryCreationError(
+                    f"Zeile {number}: Ein Kurs braucht Fremdwährung und Fremdbetrag."
+                )
+            resolved.append(line)
+            continue
+        code = (line.foreign_currency_code or "").strip().upper()
+        if len(code) != 3 or not code.isalpha():
+            raise JournalEntryCreationError(
+                f"Zeile {number}: Die Fremdwährung braucht einen Code aus drei Buchstaben."
+            )
+        if code == company.currency_code:
+            raise JournalEntryCreationError(
+                f"Zeile {number}: {code} ist die Firmenwährung, nicht eine Fremdwährung."
+            )
+        amount = line.debit_amount if line.debit_amount > 0 else line.credit_amount
+        if line.foreign_amount is None or line.foreign_amount <= 0 or amount <= 0:
+            raise JournalEntryCreationError(
+                f"Zeile {number}: Fremdbetrag und Betrag in {company.currency_code} müssen größer "
+                "0 sein."
+            )
+        rate = line.exchange_rate
+        if rate is None:
+            rate = (line.foreign_amount / amount).quantize(Decimal("0.000001"))
+        elif rate <= 0:
+            raise JournalEntryCreationError(f"Zeile {number}: Der Kurs muss größer 0 sein.")
+        else:
+            # So genau wie die Spalte: Das Siegel entsteht vor dem Speichern.
+            rate = rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        if rate <= 0:
+            raise JournalEntryCreationError(f"Zeile {number}: Der Kurs muss größer 0 sein.")
+        tolerance = Decimal("0.01") + line.foreign_amount / (rate * rate) * Decimal("0.0000005")
+        if line.exchange_rate is not None and abs(line.foreign_amount / rate - amount) > tolerance:
+            raise JournalEntryCreationError(
+                f"Zeile {number}: {line.foreign_amount} {code} ergeben zum Kurs {rate} nicht "
+                f"{amount} {company.currency_code}."
+            )
+        resolved.append(
+            replace(
+                line,
+                foreign_currency_code=code,
+                foreign_amount=line.foreign_amount.quantize(Decimal("0.01")),
+                exchange_rate=rate,
+            )
+        )
+    return resolved
+
+
 def _next_posting_number(*, session: Session, fiscal_year: FiscalYear) -> str:
     """Zieht die nächste Buchungsnummer aus dem Nummernkreis des Geschäftsjahres.
 
@@ -1014,6 +1092,32 @@ def _next_posting_number(*, session: Session, fiscal_year: FiscalYear) -> str:
 def _is_posting_number_conflict(exc: IntegrityError) -> bool:
     message = str(exc.orig if exc.orig is not None else exc)
     return "posting_number" in message or "uq_journal_entry_company_no" in message
+
+
+def first_open_posting_date(*, session: Session, company_id: int, on: date) -> date:
+    """``on`` oder der erste Tag danach außerhalb gesperrter Perioden und abgeschlossener Jahre."""
+    locked_periods = session.execute(
+        select(Period.start_date, Period.end_date)
+        .join(FiscalYear, FiscalYear.id == Period.fiscal_year_id)
+        .join(PeriodLock, PeriodLock.period_id == Period.id)
+        .where(
+            FiscalYear.company_id == company_id,
+            Period.is_closing.is_(False),
+            Period.end_date >= on,
+        )
+    ).all()
+    closed_years = session.execute(
+        select(FiscalYear.start_date, FiscalYear.end_date).where(
+            FiscalYear.company_id == company_id,
+            FiscalYear.is_closed.is_(True),
+            FiscalYear.end_date >= on,
+        )
+    ).all()
+    day = on
+    for start, end in sorted((*locked_periods, *closed_years)):
+        if start <= day <= end:
+            day = end + timedelta(days=1)
+    return day
 
 
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
@@ -1308,6 +1412,7 @@ def reverse_journal_entry(
     commit: bool = True,
     from_sales_invoice: bool = False,
     from_cash_book: bool = False,
+    from_settlement: bool = False,
 ) -> JournalEntry:
     """Storniert eine Buchung über eine Gegenbuchung (GoBD-Storno-Prinzip).
 
@@ -1325,7 +1430,8 @@ def reverse_journal_entry(
     Ausgangsrechnung lässt sich nur über deren Storno zurücknehmen (``from_sales_invoice``),
     sonst liefen Rechnung und offener Posten auseinander. Die Buchung eines Kassenbuch-Eintrags
     storniert nur das Kassenbuch (``from_cash_book=True``), sonst liefen Kassenbestand und
-    Konto auseinander.
+    Konto auseinander. Die Kursdifferenz einer Zahlung fällt nur mit dem Storno der Zahlung weg
+    (``from_settlement``), sonst stünde am Ausgleich eine Differenz ohne Buchung.
     """
     original = session.get(JournalEntry, journal_entry_id)
     if original is None:
@@ -1346,6 +1452,11 @@ def reverse_journal_entry(
                 f"Buchung {original.posting_number} gehört zu Eintrag Nr. {cash_entry_number} "
                 "im Kassenbuch und kann nur dort storniert werden."
             )
+    if original.source == SOURCE_FX_DIFFERENCE and not from_settlement:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} ist die Kursdifferenz einer Zahlung und fällt "
+            "mit dem Storno dieser Zahlung weg."
+        )
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1388,6 +1499,9 @@ def reverse_journal_entry(
             cost_center_id=line.cost_center_id,
             profit_center_id=line.profit_center_id,
             partner_id=line.partner_id,
+            foreign_currency_code=line.foreign_currency_code,
+            foreign_amount=line.foreign_amount,
+            exchange_rate=line.exchange_rate,
         )
         for line in sorted(original.lines, key=lambda line: line.line_number)
     ]
@@ -1556,10 +1670,19 @@ def _release_subledgers(
 
     # OPOS: mit dieser Buchung ausgeglichene Posten leben wieder auf. Die Zeile der Zahlung bleibt
     # mit Stornodatum stehen: Bei Istversteuerung korrigiert das den Zeitraum des Stornos.
+    # Ältere Zeilen kennen nur den Bankumsatz, nicht dessen Buchung.
     settlements = (
         session.execute(
             select(OpenItemSettlement).where(
-                OpenItemSettlement.journal_entry_id == original.id,
+                or_(
+                    OpenItemSettlement.journal_entry_id == original.id,
+                    and_(
+                        OpenItemSettlement.journal_entry_id.is_(None),
+                        OpenItemSettlement.bank_transaction_id.in_(
+                            [transaction.id for transaction in transactions]
+                        ),
+                    ),
+                ),
                 OpenItemSettlement.reversed_on.is_(None),
             )
         )
@@ -1567,17 +1690,41 @@ def _release_subledgers(
         .all()
     )
     restored_by_item: dict[int, Decimal] = {}
+    restored_foreign: dict[int, Decimal] = {}
     for settlement in settlements:
-        settlement.reversed_on = reversal.entry_date
+        # Nie vor dem Ausgleich selbst: Sonst bliebe die Zahlung im Zeitraum dazwischen stehen.
+        settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
         settlement.reversal_journal_entry_id = reversal.id
         restored_by_item[settlement.open_item_id] = (
             restored_by_item.get(settlement.open_item_id, Decimal("0.00")) + settlement.amount
         )
+        if settlement.foreign_amount is not None:
+            restored_foreign[settlement.open_item_id] = (
+                restored_foreign.get(settlement.open_item_id, Decimal("0.00"))
+                + settlement.foreign_amount
+            )
+        # Die Kursdifferenz dieser Zahlung fällt mit ihr weg.
+        if settlement.fx_journal_entry_id is not None:
+            # Die Differenz kann später gebucht sein als die Zahlung (gesperrter Monat).
+            difference_date = session.get(JournalEntry, settlement.fx_journal_entry_id).entry_date
+            reverse_journal_entry(
+                session=session,
+                journal_entry_id=settlement.fx_journal_entry_id,
+                reversal_date=max(reversal.entry_date, difference_date),
+                changed_by=changed_by,
+                commit=False,
+                from_settlement=True,
+            )
     for item_id, restored in restored_by_item.items():
         item = session.get(OpenItem, item_id)
         item.open_amount = min(
             item.original_amount, (item.open_amount + restored).quantize(Decimal("0.01"))
         )
+        if item_id in restored_foreign:
+            item.foreign_open_amount = min(
+                item.foreign_original_amount,
+                (item.foreign_open_amount + restored_foreign[item_id]).quantize(Decimal("0.01")),
+            )
         item.status = "open"
         item.settled_at = None
         item.settled_by = None

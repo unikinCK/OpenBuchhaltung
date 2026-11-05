@@ -526,6 +526,8 @@ _SALES_INVOICE_FIELD_SCHEMA: dict[str, Any] = {
             "service_period_from",
             "service_period_to",
             "due_date",
+            "currency_code",
+            "exchange_rate",
             "buyer_reference",
             "header_text",
             "footer_text",
@@ -1860,6 +1862,18 @@ TOOLS: list[ToolSpec] = [
                                     "Kreditoren-Sammelkonten (Nebenbuch) muss die Rolle "
                                     "passen, auf anderen Konten ist er Partnerbezug."
                                 ),
+                            },
+                            "foreign_currency_code": {
+                                "type": "string",
+                                "description": "Optional: Fremdwährung der Zeile, z. B. USD.",
+                            },
+                            "foreign_amount": {
+                                "type": "string",
+                                "description": "Betrag in Fremdwährung; Soll/Haben in Euro.",
+                            },
+                            "exchange_rate": {
+                                "type": "string",
+                                "description": "Kurs je 1 Euro; ohne Angabe aus den Beträgen.",
                             },
                             "partner_number": {
                                 "type": "string",
@@ -3773,6 +3787,12 @@ TOOLS: list[ToolSpec] = [
                 "contra_account_id": {"type": "integer", "description": "Gegenkonto."},
                 "tax_code_id": {"type": "integer", "description": "Optionaler Steuercode."},
                 "description": {"type": "string", "description": "Optionaler Buchungstext."},
+                "exchange_rate": {
+                    "type": "string",
+                    "description": (
+                        "Umsatz in Fremdwährung: Kurs je 1 Euro; ohne Angabe der Tageskurs."
+                    ),
+                },
                 "cost_center_id": {
                     "type": "integer",
                     "description": "Optionale Kostenstelle des Gegenkontos.",
@@ -4517,9 +4537,23 @@ TOOLS: list[ToolSpec] = [
                 },
                 "entry_date": {"type": "string", "description": "Datum JJJJ-MM-TT."},
                 "due_date": {"type": "string", "description": "Fälligkeitsdatum JJJJ-MM-TT."},
-                "amount": {"type": "string", "description": "Betrag, z. B. '1190.00'."},
+                "amount": {
+                    "type": "string",
+                    "description": (
+                        "Betrag in Firmenwährung, z. B. '1190.00'; bei Fremdbetrag optional."
+                    ),
+                },
+                "foreign_currency_code": {
+                    "type": "string",
+                    "description": "Optional: Fremdwährung, z. B. USD.",
+                },
+                "foreign_amount": {"type": "string", "description": "Betrag in Fremdwährung."},
+                "exchange_rate": {
+                    "type": "string",
+                    "description": "Kurs je 1 Euro; ohne Angabe der Tageskurs des Belegdatums.",
+                },
             },
-            "required": ["company_id", "account_id", "item_type", "reference", "amount"],
+            "required": ["company_id", "account_id", "item_type", "reference"],
             "additionalProperties": False,
         },
         http_method="POST",
@@ -4554,7 +4588,9 @@ TOOLS: list[ToolSpec] = [
         name="settle_open_item",
         description=(
             "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
-            "volle offene Betrag verwendet."
+            "volle offene Betrag verwendet. Bei einem Posten in Fremdwährung gilt das nur ohne "
+            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
+            "Bankumsatz muss zuerst gebucht sein."
         ),
         input_schema={
             "type": "object",
@@ -4571,6 +4607,23 @@ TOOLS: list[ToolSpec] = [
                         "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
                         "lebt der Posten um den Ausgleichsbetrag wieder auf."
                     ),
+                },
+                "foreign_amount": {
+                    "type": "string",
+                    "description": (
+                        "Posten in Fremdwährung: gezahlter Fremdbetrag, sonst aus einer Zahlung "
+                        "in dieser Währung. 'amount' ist dann der gezahlte Betrag in "
+                        "Firmenwährung; steht die Zahlung auf dem Sammelkonto, wird die "
+                        "Differenz zum Buchwert als Kursdifferenz gebucht."
+                    ),
+                },
+                "exchange_rate": {
+                    "type": "string",
+                    "description": "Fremdwährung: Kurs je 1 Euro statt 'amount'.",
+                },
+                "settlement_date": {
+                    "type": "string",
+                    "description": "Zahlungsdatum (JJJJ-MM-TT); sonst aus Buchung oder Bankumsatz.",
                 },
             },
             "required": ["open_item_id"],
@@ -4745,6 +4798,109 @@ TOOLS: list[ToolSpec] = [
         http_method="GET",
         path="/integrity",
         arg_location="query",
+    ),
+    ToolSpec(
+        name="list_exchange_rates",
+        description=(
+            "Wechselkurse des Mandanten: Einheiten der Fremdwährung je 1 Euro (EZB-Notierung), "
+            "neueste zuerst, optional je Währung und Zeitraum."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "currency_code": {"type": "string", "description": "Währung, z. B. USD."},
+                "date_from": {"type": "string", "description": "Von (JJJJ-MM-TT)."},
+                "date_to": {"type": "string", "description": "Bis (JJJJ-MM-TT)."},
+                "limit": {"type": "integer", "description": "Höchstens (Standard 200)."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/exchange-rates",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="set_exchange_rate",
+        description=(
+            "Erfasst oder ändert einen Wechselkurs (Fremdwährung je 1 Euro). Bereits gebuchte "
+            "Beträge bleiben unberührt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "currency_code": {"type": "string", "description": "Währung, z. B. USD."},
+                "rate_date": {"type": "string", "description": "Datum (JJJJ-MM-TT)."},
+                "rate": {"type": "string", "description": "Kurs, z. B. '1.0812'."},
+            },
+            "required": ["company_id", "currency_code", "rate_date", "rate"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/exchange-rates",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="fetch_exchange_rates",
+        description=(
+            "Übernimmt die Euro-Referenzkurse der EZB der letzten 90 Tage. Manuell erfasste "
+            "Kurse bleiben unangetastet."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/exchange-rates/fetch",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="get_fx_valuation",
+        description=(
+            "Stichtagsbewertung offener Fremdwährungsposten (§ 256a HGB): Buchwert, Wert zum "
+            "Stichtagskurs, Differenz und der zu buchende Teil (über 1 Jahr Restlaufzeit nur "
+            "Verluste). 'missing_rates' nennt fehlende Kurse."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "as_of": {
+                    "type": "string",
+                    "description": "Stichtag (JJJJ-MM-TT), Standard heute.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/fx-valuation",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="post_fx_valuation",
+        description=(
+            "Bucht die Stichtagsbewertung gegen die Kursdifferenz-Konten und löst sie am Folgetag "
+            "wieder auf; die offenen Posten behalten ihren Buchwert."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "as_of": {"type": "string", "description": "Stichtag (JJJJ-MM-TT)."},
+            },
+            "required": ["company_id", "as_of"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fx-valuation",
+        arg_location="json",
     ),
     ToolSpec(
         name="get_company_vat_method",

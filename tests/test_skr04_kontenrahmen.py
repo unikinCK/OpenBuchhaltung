@@ -249,7 +249,7 @@ def test_bundled_skr04_has_datev_numbers(session: Session) -> None:
     report = import_bundled_account_chart(session=session, company_id=company.id, chart="skr04")
 
     assert report.error_rows == 0
-    assert report.imported_rows == report.total_rows == 30
+    assert report.imported_rows == report.total_rows == 32
     accounts = _accounts_by_code(session, company)
     expected = {
         "1600": ("Kasse", "asset"),
@@ -494,11 +494,11 @@ def test_check_marks_skr04_accounts_added_by_reimport(session: Session) -> None:
     _add_accounts(session, company, LEGACY_SKR04_IMPORT)
     report = import_bundled_account_chart(session=session, company_id=company.id, chart="skr04")
     # Belegte Nummern (u. a. 1200 Bank, 1600 Verbindlichkeiten) werden übersprungen.
-    assert (report.imported_rows, report.duplicate_rows) == (21, 9)
+    assert (report.imported_rows, report.duplicate_rows) == (23, 9)
 
     result = check_account_chart(session=session, company_id=company.id)
     assert result["dominant_chart"] == "skr04"
-    assert result["chart_evidence"]["skr04"] == {"accounts": 18, "posting_count": 0}
+    assert result["chart_evidence"]["skr04"] == {"accounts": 20, "posting_count": 0}
     rows = {row["code"]: row for row in result["legacy_skr04_accounts"]}
     assert (rows["1200"]["skr04_status"], rows["1200"]["skr04_account"]["name"]) == (
         "present",
@@ -652,12 +652,12 @@ def test_check_stays_skr03_after_skr04_reimport(session: Session) -> None:
     # bucht weiter SKR03: Unbebuchte SKR04-Konten überstimmen das nicht.
     company, _ = _skr03_company(session)
     report = import_bundled_account_chart(session=session, company_id=company.id, chart="skr04")
-    assert report.imported_rows == 21
+    assert report.imported_rows == 23
 
     result = check_account_chart(session=session, company_id=company.id)
 
     assert result["dominant_chart"] == "skr03"
-    assert result["chart_evidence"]["skr04"] == {"accounts": 18, "posting_count": 0}
+    assert result["chart_evidence"]["skr04"] == {"accounts": 20, "posting_count": 0}
     assert result["legacy_skr04_accounts"] == []
     rows = {row["code"]: row for row in result["foreign_skr04_accounts"]}
     # SKR04 1800 „Bank“ belegt die SKR03-Nummer der Privatentnahmen …

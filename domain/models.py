@@ -498,7 +498,7 @@ class JournalEntry(Base):
             "AND content_hash_version IS NULL) OR "
             "(is_finalized = true AND content_hash IS NOT NULL "
             "AND length(content_hash) = 64 AND content_hash_version IS NOT NULL "
-            "AND content_hash_version IN (2, 3, 4)))",
+            "AND content_hash_version IN (2, 3, 4, 5)))",
             name="ck_journal_entry_finalized_content_hash",
         ),
     )
@@ -597,6 +597,11 @@ class JournalEntryLine(Base):
         Numeric(14, 2), nullable=False, default=Decimal("0.00")
     )
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Fremdwährung (ADR-010): Soll/Haben bleiben in Firmenwährung, Fremdbetrag und Kurs stehen
+    # zusätzlich an der Zeile (Einheiten der Fremdwährung je 1 Einheit Firmenwährung).
+    foreign_currency_code: Mapped[str | None] = mapped_column(String(3))
+    foreign_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    exchange_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
 
     journal_entry: Mapped[JournalEntry] = relationship(back_populates="lines")
     account: Mapped[Account] = relationship(back_populates="journal_lines")
@@ -1216,6 +1221,11 @@ class OpenItem(Base):
     original_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     open_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    # Fremdwährung (ADR-010): original_amount und open_amount bleiben der Buchwert in Firmenwährung.
+    foreign_currency_code: Mapped[str | None] = mapped_column(String(3))
+    foreign_original_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    foreign_open_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    exchange_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     # Mahnwesen (nur Forderungen): 0 = ungemahnt, 1-3 = Mahnstufe.
     dunning_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1279,8 +1289,42 @@ class OpenItemSettlement(Base):
     reversal_journal_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("journal_entry.id", ondelete="SET NULL")
     )
+    # Fremdwährung (ADR-010): ``amount`` ist der ausgebuchte Buchwert, ``paid_amount`` der gezahlte
+    # Betrag in Firmenwährung, die Differenz der realisierte Kursgewinn oder -verlust.
+    foreign_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    paid_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    fx_difference: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    fx_journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
 
     open_item: Mapped[OpenItem] = relationship(back_populates="settlements")
+
+
+class ExchangeRate(Base):
+    """Wechselkurs je Mandant: Einheiten der Fremdwährung je 1 Euro (Notierung der EZB)."""
+
+    __tablename__ = "exchange_rate"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "currency_code", "rate_date", name="uq_exchange_rate_tenant_currency_date"
+        ),
+        CheckConstraint("rate > 0", name="ck_exchange_rate_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate_date: Mapped[date] = mapped_column(Date, nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False)
+    # ``ecb`` oder ``manual``; ein manueller Kurs bleibt beim Abruf der EZB-Kurse erhalten.
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class FixedAsset(Base):

@@ -11,8 +11,10 @@ code,name,account_type
 1800,Privatentnahmen,equity
 1890,Privateinlagen,equity
 2000,Anlagevermögen,asset
+2150,Aufwendungen aus Kursdifferenzen,expense
 2400,Forderungsverluste,expense
 2600,Sonstige betriebliche Erträge,income
+2660,Erträge aus Kursdifferenzen,income
 3000,Rohstoffe und Hilfsstoffe,expense
 3200,Wareneingang,expense
 3400,Fremdleistungen,expense

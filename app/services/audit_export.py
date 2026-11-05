@@ -36,6 +36,7 @@ from domain.models import (
     Document,
     DocumentCategory,
     ElsterSubmission,
+    ExchangeRate,
     FiscalYear,
     FixedAsset,
     IncomeTaxReturn,
@@ -111,6 +112,7 @@ EXPORT_TABLE_MODELS = {
     "cash_closings": CashClosing,
     "open_items": OpenItem,
     "open_item_settlements": OpenItemSettlement,
+    "exchange_rates": ExchangeRate,
     "sales_invoices": SalesInvoice,
     "sales_invoice_lines": SalesInvoiceLine,
     "fixed_assets": FixedAsset,
@@ -161,7 +163,8 @@ TABLE_DESCRIPTIONS = {
         "und Differenz."
     ),
     "open_items": "Offene und ausgeglichene Forderungen und Verbindlichkeiten.",
-    "open_item_settlements": "Ausgleiche offener Posten mit Zahlungsdatum und Storno.",
+    "open_item_settlements": "Ausgleiche offener Posten mit Datum, Kursdifferenz und Storno.",
+    "exchange_rates": "Wechselkurse des Mandanten: Fremdwährung je 1 Euro, Quelle und Datum.",
     "sales_invoices": (
         "Ausgangsrechnungen und Stornorechnungen mit Nummer, Empfänger-Snapshot, Summen und "
         "Verweisen auf Buchung, offenen Posten und Belege."
@@ -496,6 +499,16 @@ def build_audit_export_package(
                 OpenItem.company_id == company.id,
                 _date_range(OpenItem.entry_date, date_from, date_to),
                 order_by=(OpenItem.entry_date, OpenItem.id),
+            )
+        ],
+        "exchange_rates": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                ExchangeRate,
+                ExchangeRate.tenant_id == company.tenant_id,
+                _date_range(ExchangeRate.rate_date, date_from, date_to),
+                order_by=(ExchangeRate.rate_date, ExchangeRate.currency_code),
             )
         ],
         "open_item_settlements": [

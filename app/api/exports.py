@@ -114,6 +114,9 @@ def export_journal_csv():
                 Account.name,
                 JournalEntryLine.debit_amount,
                 JournalEntryLine.credit_amount,
+                JournalEntryLine.foreign_currency_code,
+                JournalEntryLine.foreign_amount,
+                JournalEntryLine.exchange_rate,
                 cost_unit.code.label("cost_center_code"),
                 profit_unit.code.label("profit_center_code"),
                 Account.subledger,
@@ -149,6 +152,9 @@ def export_journal_csv():
             "partner_number",
             "partner_name",
             "service_date",
+            "foreign_currency_code",
+            "foreign_amount",
+            "exchange_rate",
         ]
     )
     for row in journal_rows:
@@ -170,6 +176,9 @@ def export_journal_csv():
                 partner_number,
                 row.partner_name,
                 row.service_date.isoformat() if row.service_date else "",
+                row.foreign_currency_code or "",
+                row.foreign_amount if row.foreign_amount is not None else "",
+                row.exchange_rate if row.exchange_rate is not None else "",
             ]
         )
 

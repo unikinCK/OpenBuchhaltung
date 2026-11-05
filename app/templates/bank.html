@@ -117,7 +117,7 @@
                       </div>
                     {% endif %}
                   </td>
-                  <td class="num{% if tx.amount < 0 %} negative{% endif %}">{{ tx.amount | betrag }}</td>
+                  <td class="num{% if tx.amount < 0 %} negative{% endif %}">{{ tx.amount | betrag }}{% if tx.currency_code and tx.currency_code != 'EUR' %} {{ tx.currency_code }}{% endif %}</td>
                   <td class="nowrap">
                     {% if tx.status == 'open' %}
                       <span class="badge badge-warning">offen</span>
@@ -196,6 +196,13 @@
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
                   <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                   <div class="form-grid">
+                    {% if tx.currency_code and tx.currency_code != "EUR" %}
+                      <div class="field">
+                        <label for="rate-{{ tx.id }}">Kurs <span class="muted">({{ tx.currency_code }} je 1 EUR)</span></label>
+                        <input id="rate-{{ tx.id }}" name="exchange_rate" inputmode="decimal" placeholder="Tageskurs" />
+                        <span class="hint">leer = hinterlegter Kurs des Buchungstags</span>
+                      </div>
+                    {% endif %}
                     <div class="field field-wide">
                       <label for="contra-{{ tx.id }}">Gegenkonto</label>
                       <select id="contra-{{ tx.id }}" name="contra_account_id" required>

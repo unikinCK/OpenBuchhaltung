@@ -44,6 +44,9 @@
         <dd>{% if invoice.service_date %}{{ invoice.service_date | datum }}{% else %}{{ invoice.service_period_from | datum }} bis {{ invoice.service_period_to | datum }}{% endif %}</dd>
       </div>
       <div><dt>Fällig am</dt><dd>{% if invoice.due_date %}{{ invoice.due_date | datum }}{% else %}<span class="muted">–</span>{% endif %}</dd></div>
+      {% if invoice.exchange_rate %}
+        <div><dt>Währung und Kurs</dt><dd>{{ invoice.currency_code }}, {{ invoice.exchange_rate | kurs }} je 1 {{ invoice.open_item.currency_code if invoice.open_item else "EUR" }}</dd></div>
+      {% endif %}
       <div><dt>Steuerbehandlung</dt><dd>{{ treatment.label }}</dd></div>
       <div><dt>Käuferreferenz</dt><dd>{{ invoice.buyer_reference or "–" }}</dd></div>
       <div>
@@ -52,7 +55,7 @@
       </div>
       <div>
         <dt>Offener Posten</dt>
-        <dd>{% if invoice.open_item %}{{ invoice.open_item.open_amount | betrag }} {{ invoice.open_item.currency_code }} offen{% else %}–{% endif %}</dd>
+        <dd>{% if invoice.open_item %}{{ invoice.open_item.open_amount | betrag }} {{ invoice.open_item.currency_code }} offen{% if invoice.open_item.foreign_currency_code %}<br /><span class="muted small">{{ invoice.open_item.foreign_open_amount | betrag }} {{ invoice.open_item.foreign_currency_code }}</span>{% endif %}{% else %}–{% endif %}</dd>
       </div>
       <div>
         <dt>Ausgestellt</dt>

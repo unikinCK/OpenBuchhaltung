@@ -87,6 +87,15 @@
           <p class="hint">Leer: Zahlungsziel des Kunden.</p>
         </div>
         <div class="field">
+          <label for="currency_code">Währung</label>
+          <input id="currency_code" name="currency_code" value="{{ values.currency_code or company.currency_code }}" maxlength="3" />
+        </div>
+        <div class="field">
+          <label for="exchange_rate">Kurs <span class="muted">(je 1 {{ company.currency_code }})</span></label>
+          <input id="exchange_rate" name="exchange_rate" inputmode="decimal" value="{{ values.exchange_rate }}" />
+          <p class="hint">Nur bei Fremdwährung. Leer: Kurs am Leistungsdatum.</p>
+        </div>
+        <div class="field">
           <label for="service_date">Leistungsdatum</label>
           <input id="service_date" name="service_date" type="date" value="{{ values.service_date }}" />
         </div>
