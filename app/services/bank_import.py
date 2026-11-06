@@ -883,6 +883,16 @@ def _reassign(
     Umgliederungsbuchung (altes Bankkonto an neues) mitgezogen — atomar mit
     dem Umzug.
     """
+    # Alle Umsätze vorab sperren, nach ID wie beim Ausgleich offener Posten, bevor der erste
+    # Eintrag im Audit-Protokoll entsteht. Sonst warteten ein gleichzeitiger Ausgleich mit einem
+    # der späteren Umsätze und das Umhängen aufeinander. Die Objekte werden dabei aufgefrischt.
+    session.execute(
+        select(BankTransaction)
+        .where(BankTransaction.id.in_([transaction.id for transaction in transactions]))
+        .order_by(BankTransaction.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     target = _resolve_bank_account(
         session=session, company_id=company_id, bank_account_id=bank_account_id
     )
@@ -1178,7 +1188,15 @@ def book_transaction(
     Fremdbetrag steht auf der Bankzeile (ADR-010). Mit ``commit=False`` committet der Aufrufer,
     etwa zusammen mit dem Ausgleich eines offenen Postens.
     """
-    transaction = session.get(BankTransaction, transaction_id)
+    # Den Umsatz sperren, bevor die Buchung (und mit ihr der Eintrag im Audit-Protokoll) entsteht,
+    # wie beim Ausgleich offener Posten (settle_open_item). Sonst warteten ein gleichzeitiger
+    # Ausgleich mit diesem Umsatz und das Buchen aufeinander.
+    transaction = session.execute(
+        select(BankTransaction)
+        .where(BankTransaction.id == transaction_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     if transaction is None:
         raise BankImportError("Bankumsatz nicht gefunden.")
     if transaction.status != "open":

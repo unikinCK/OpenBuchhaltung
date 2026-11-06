@@ -23,7 +23,9 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   wie auf dem Sammelkonto, statt doppelt zugeordnet zu werden.
 - Gleichzeitige Ausgleiche und Storno derselben Zahlung laufen nacheinander. Der Storno sperrt die Zahlung jetzt
   zuerst: Ein Ausgleich, der während eines Stornos lief, blieb sonst an der stornierten Buchung hängen, und ein
-  Ausgleich über den Umsatz konnte sich mit dem Storno gegenseitig blockieren (seit dem vorigen Abschnitt).
+  Ausgleich über den Umsatz konnte sich mit dem Storno gegenseitig blockieren (seit dem vorigen Abschnitt). Ebenso
+  sperren Buchen und Umhängen von Bankumsätzen den Umsatz, bevor sie ins Audit-Protokoll schreiben; beide konnten
+  sich sonst mit einem gleichzeitigen Ausgleich desselben Umsatzes blockieren.
 
 ### Offene Posten: Bankumsatz nur bis zu seinem Betrag
 - **Behoben:** Derselbe Bankumsatz ließ sich beliebig oft zum Ausgleich offener Posten nutzen; jeder Aufruf ohne
