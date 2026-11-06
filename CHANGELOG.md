@@ -8,6 +8,25 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Offene Posten: Zahlungsbuchung nur bis zu ihrem Betrag
+- **Behoben:** Ein Ausgleich nur mit Ausgleichsbuchung (ohne Bankumsatz) hatte keine Obergrenze: Ohne Betrag galt der
+  ganze offene Betrag, und dieselbe Buchung ließ sich auf beliebig viele Posten verteilen. Jetzt ist frei, was ihre
+  Zahlungszeilen auf dem Konto des Postens hergeben (bei Partnern nur die Zeilen dieses Partners oder ohne Partner),
+  abzüglich nicht stornierter Ausgleiche mit ihr. Ohne Betrag nimmt der Posten den Rest, ein höherer Betrag und eine
+  voll belegte Buchung werden abgewiesen.
+- **Verhalten geändert:** Ohne Bankumsatz muss die Ausgleichsbuchung die Zahlung auf dem Konto des Postens buchen
+  (Forderung im Haben, Verbindlichkeit im Soll); eine Rechnung oder eine Zahlung auf ein anderes Konto wird
+  abgewiesen. Mit Bankumsatz bleibt sie wie bisher frei wählbar.
+- Dieselbe Zahlung zählt nur einmal, ob über den Bankumsatz oder über seine Buchung zugeordnet, auch für ältere
+  Ausgleichszeilen, die nur den Umsatz kennen. Bisher ließ sich ein gebuchter Umsatz einmal über sich und einmal
+  über seine Buchung voll verwenden. Rundungscents einer Sammelzahlung bleiben dadurch als offener Rest stehen, so
+  wie auf dem Sammelkonto, statt doppelt zugeordnet zu werden.
+- Gleichzeitige Ausgleiche und Storno derselben Zahlung laufen nacheinander. Der Storno sperrt die Zahlung jetzt
+  zuerst: Ein Ausgleich, der während eines Stornos lief, blieb sonst an der stornierten Buchung hängen, und ein
+  Ausgleich über den Umsatz konnte sich mit dem Storno gegenseitig blockieren (seit dem vorigen Abschnitt). Ebenso
+  sperren Buchen und Umhängen von Bankumsätzen den Umsatz, bevor sie ins Audit-Protokoll schreiben; beide konnten
+  sich sonst mit einem gleichzeitigen Ausgleich desselben Umsatzes blockieren.
+
 ### Offene Posten: Bankumsatz nur bis zu seinem Betrag
 - **Behoben:** Derselbe Bankumsatz ließ sich beliebig oft zum Ausgleich offener Posten nutzen; jeder Aufruf ohne
   Betrag zog erneut den vollen Umsatz ab. Jetzt verteilt sich ein Umsatz auf mehrere Posten (Sammelzahlung) nur bis
