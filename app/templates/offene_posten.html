@@ -262,7 +262,7 @@
                             <div class="field">
                               <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>
                               <input id="settle-amount-{{ item.id }}" name="amount" inputmode="decimal" placeholder="{{ item.open_amount }}" aria-label="Ausgleichsbetrag" />
-                              <span class="hint">leer = voller offener Betrag</span>
+                              <span class="hint">leer = voller offener Betrag, mit Zahlung höchstens deren freier Rest</span>
                             </div>
                           {% endif %}
                           <div class="field field-wide">

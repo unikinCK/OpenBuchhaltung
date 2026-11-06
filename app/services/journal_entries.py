@@ -1473,6 +1473,23 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} ist eine Vortragsbuchung des "
             "Jahresabschlusses und kann nicht storniert werden."
         )
+    # Die Zahlung sperren, bevor der Storno etwas anlegt, in derselben Reihenfolge wie der
+    # Ausgleich offener Posten: erst die Umsätze dieser Buchung, dann sie selbst (ohne
+    # Schlüsselsperre, siehe settle_open_item). Ein gleichzeitiger Ausgleich mit ihr wartet so auf
+    # den Storno und sieht ihn, oder der Storno wartet und nimmt den Ausgleich mit zurück. Ohne
+    # die Sperre blieb ein solcher Ausgleich an der stornierten Buchung hängen, oder beide
+    # warteten aufeinander (Umsatz gegen Audit-Protokoll). Auch ein zweiter Storno wartet hier.
+    session.execute(
+        select(BankTransaction.id)
+        .where(BankTransaction.journal_entry_id == original.id)
+        .order_by(BankTransaction.id)
+        .with_for_update()
+    )
+    session.execute(
+        select(JournalEntry.id)
+        .where(JournalEntry.id == original.id)
+        .with_for_update(key_share=True)
+    )
     already_reversed = session.execute(
         select(JournalEntry.posting_number).where(
             JournalEntry.reversal_of_id == original.id

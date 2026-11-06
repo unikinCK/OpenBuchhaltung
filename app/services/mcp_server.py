@@ -4728,7 +4728,9 @@ TOOLS: list[ToolSpec] = [
         name="settle_open_item",
         description=(
             "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
-            "volle offene Betrag verwendet. Bei einem Posten in Fremdwährung gilt das nur ohne "
+            "volle offene Betrag verwendet, mit Bankumsatz oder Ausgleichsbuchung höchstens deren "
+            "noch freier Rest: Eine Zahlung deckt alle Posten zusammen nur bis zu ihrem Betrag. "
+            "Bei einem Posten in Fremdwährung gilt das nur ohne "
             "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
             "Bankumsatz muss zuerst gebucht sein."
         ),
@@ -4745,7 +4747,8 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": (
                         "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
-                        "lebt der Posten um den Ausgleichsbetrag wieder auf."
+                        "lebt der Posten um den Ausgleichsbetrag wieder auf. Ohne Bankumsatz "
+                        "muss sie die Zahlung auf dem Konto des Postens buchen."
                     ),
                 },
                 "foreign_amount": {
