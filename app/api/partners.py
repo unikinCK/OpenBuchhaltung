@@ -27,6 +27,7 @@ from app.services.partner_ledger import (
     serialize_partner_balances,
     serialize_statement_side,
 )
+from app.services.partner_recognition import PartnerSignals, recognize_partner
 from app.services.partner_takeover import (
     PartnerTakeoverError,
     apply_partner_takeover,
@@ -44,7 +45,12 @@ from app.services.partners import (
     set_partner_bank_details,
     update_partner,
 )
-from domain.models import SUBLEDGER_DEBTOR, SUBLEDGER_TYPES, BusinessPartner
+from domain.models import (
+    SUBLEDGER_CREDITOR,
+    SUBLEDGER_DEBTOR,
+    SUBLEDGER_TYPES,
+    BusinessPartner,
+)
 
 CREATE_FIELDS = {"company_id", *UPDATABLE_FIELDS}
 BANK_FIELDS = {"iban", "bic"}
@@ -71,6 +77,47 @@ def _bank_fields_error():
         ),
         400,
     )
+
+
+_RECOGNIZE_ROLES = {
+    "customer": SUBLEDGER_DEBTOR,
+    "debtor": SUBLEDGER_DEBTOR,
+    "supplier": SUBLEDGER_CREDITOR,
+    "creditor": SUBLEDGER_CREDITOR,
+}
+
+
+@api_bp.post("/partners/recognize")
+def recognize_partner_via_api():
+    """Erkennt einen Partner aus Kennungen; ändert nichts und ordnet nichts zu."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id is required."}), 400
+    role_name = str(payload.get("role") or "").strip().lower()
+    if role_name and role_name not in _RECOGNIZE_ROLES:
+        return jsonify({"error": "role must be customer or supplier."}), 400
+
+    def values(name: str) -> tuple[str, ...]:
+        value = str(payload.get(name) or "").strip()
+        return (value,) if value else ()
+
+    signals = PartnerSignals(
+        vat_ids=values("vat_id"),
+        tax_numbers=values("tax_number"),
+        ibans=values("iban"),
+        partner_numbers=values("partner_number"),
+        name=str(payload.get("name") or "").strip() or None,
+    )
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        match = recognize_partner(
+            session, company_id, signals, role=_RECOGNIZE_ROLES.get(role_name)
+        )
+        return jsonify(match.as_dict())
 
 
 @api_bp.get("/partners")

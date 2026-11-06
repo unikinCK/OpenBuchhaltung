@@ -32,6 +32,7 @@ from domain.models import (
     Document,
     FixedAsset,
     JournalEntry,
+    OpenItem,
     ReceiptMatchJob,
     ReceiptMatchSuggestion,
     TaxCode,
@@ -1074,7 +1075,7 @@ def test_new_booking_suggestion_proposes_account_from_supplier_history(tmp_path)
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)
     partner_id, office_id = _seed_supplier_history(app, company_id)
-    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    document_id = _upload_document(app, company_id, [*RECEIPT_LINES, "USt-IdNr. DE111111111"])
 
     with app.extensions["db_session_factory"]() as session:
         suggestion = create_match_suggestion(
@@ -1093,7 +1094,7 @@ def test_new_booking_suggestion_proposes_account_from_supplier_history(tmp_path)
     html = page.data.decode("utf-8")
     assert "Kontierungsvorschlag: Wie zuletzt bei Muster Lieferant GmbH" in html
     assert f'<option value="{office_id}" selected>4930' in html
-    assert f'name="partner_id" value="{partner_id}"' in html
+    assert f'<option value="{partner_id}" selected>' in html
 
     # Ohne Konto und Steuercode gilt der Vorschlag; der Partner steht auf den Zeilen.
     with app.extensions["db_session_factory"]() as session:
@@ -1285,11 +1286,116 @@ def test_suggestion_payload_carries_document_and_entry_amount(tmp_path):
     assert approved["document"]["journal_entry_id"] == entry_id
 
 
-def test_new_booking_payload_names_proposed_accounts(tmp_path):
+def test_new_booking_by_name_only_suggests_partner_without_assigning_it(tmp_path):
+    """Derselbe Name reicht für „wie zuletzt“, aber nicht für die Zuordnung des Partners."""
     app = _create_test_app(tmp_path)
     company_id = _seed_company_with_accounts(app)
     partner_id, office_id = _seed_supplier_history(app, company_id)
     document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+
+    created = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+    proposal = created["booking_proposal"]
+    assert proposal["expense_account_id"] == office_id
+    assert proposal["partner_id"] is None
+    assert proposal["partner_match"]["status"] == "uncertain"
+    assert proposal["partner_match"]["candidates"][0]["partner_id"] == partner_id
+
+    # Die Maske zeigt den Vorschlag zum Anklicken, die Auswahl bleibt leer.
+    html = client.get(f"/belege/abgleich?company_id={company_id}").data.decode("utf-8")
+    assert f'data-partner-pick="{partner_id}"' in html
+    assert f'<option value="{partner_id}" selected>' not in html
+
+    # Ohne Bestätigung bucht die Freigabe ohne Partner.
+    with app.extensions["db_session_factory"]() as session:
+        _suggestion, entry = receipt_matching.book_new_booking_suggestion(
+            session=session,
+            suggestion_id=created["id"],
+            changed_by="t",
+            expense_account_id=None,
+            creditor_account_id=_account_id(app, company_id, "1600"),
+            net_amount=Decimal("200.00"),
+            tax_amount=Decimal("38.00"),
+        )
+        assert {line.partner_id for line in entry.lines} == {None}
+
+
+def test_new_booking_confirmed_partner_and_open_item(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    partner_id, _office_id = _seed_supplier_history(app, company_id)
+    document_id = _upload_document(app, company_id, RECEIPT_LINES)
+    client = _logged_in_client(app)
+    created = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+    # Ein Posten entsteht nur auf einem gekennzeichneten Kreditoren-Sammelkonto.
+    with app.extensions["db_session_factory"]() as session:
+        session.get(Account, _account_id(app, company_id, "1600")).subledger = "creditor"
+        session.commit()
+
+    booked = client.post(
+        f"/api/v1/receipt-matching/suggestions/{created['id']}/approve",
+        json={
+            "company_id": company_id,
+            "creditor_account_id": _account_id(app, company_id, "1600"),
+            "net_amount": "200.00",
+            "tax_amount": "38.00",
+            "partner_id": partner_id,
+            "due_date": "2026-08-01",
+        },
+    )
+    assert booked.status_code == 200, booked.get_json()
+    with app.extensions["db_session_factory"]() as session:
+        suggestion = session.get(ReceiptMatchSuggestion, created["id"])
+        assert partner_id in {line.partner_id for line in suggestion.journal_entry.lines}
+        item = (
+            session.query(OpenItem).filter_by(journal_entry_id=suggestion.journal_entry_id).one()
+        )
+        assert item.partner_id == partner_id
+        assert item.reference == "2026-4711"
+        assert item.due_date == date(2026, 8, 1)
+        assert item.open_amount == Decimal("238.00")
+
+
+def test_new_booking_empty_partner_overrides_unique_recognition(tmp_path):
+    """Bewusst ohne Partner: Ein ausdrückliches null schlägt den eindeutigen Treffer."""
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    partner_id, _office_id = _seed_supplier_history(app, company_id)
+    document_id = _upload_document(app, company_id, [*RECEIPT_LINES, "USt-IdNr. DE111111111"])
+    client = _logged_in_client(app)
+    created = client.post(
+        "/api/v1/receipt-matching/suggestions",
+        json={"company_id": company_id, "document_id": document_id},
+    ).get_json()
+    assert created["booking_proposal"]["partner_id"] == partner_id
+
+    booked = client.post(
+        f"/api/v1/receipt-matching/suggestions/{created['id']}/approve",
+        json={
+            "company_id": company_id,
+            "creditor_account_id": _account_id(app, company_id, "1600"),
+            "net_amount": "200.00",
+            "tax_amount": "38.00",
+            "partner_id": None,
+        },
+    )
+    assert booked.status_code == 200, booked.get_json()
+    with app.extensions["db_session_factory"]() as session:
+        suggestion = session.get(ReceiptMatchSuggestion, created["id"])
+        assert {line.partner_id for line in suggestion.journal_entry.lines} == {None}
+
+
+def test_new_booking_payload_names_proposed_accounts(tmp_path):
+    app = _create_test_app(tmp_path)
+    company_id = _seed_company_with_accounts(app)
+    partner_id, office_id = _seed_supplier_history(app, company_id)
+    document_id = _upload_document(app, company_id, [*RECEIPT_LINES, "USt-IdNr. DE111111111"])
     client = _logged_in_client(app)
 
     created = client.post(

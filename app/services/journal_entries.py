@@ -1573,6 +1573,18 @@ def _sales_invoice_number(session: Session, journal_entry_id: int) -> str | None
     return row[0] if row else None
 
 
+def _payable_invoice_reversed(session: Session, item: OpenItem) -> bool:
+    """Ob die Buchung, aus der eine Verbindlichkeit stammt, storniert ist."""
+    if item.item_type != "payable" or item.journal_entry_id is None:
+        return False
+    return (
+        session.execute(
+            select(JournalEntry.id).where(JournalEntry.reversal_of_id == item.journal_entry_id)
+        ).first()
+        is not None
+    )
+
+
 def _release_subledgers(
     *, session: Session, original: JournalEntry, reversal: JournalEntry, changed_by: str
 ) -> dict[str, list[int]]:
@@ -1717,6 +1729,9 @@ def _release_subledgers(
             )
     for item_id, restored in restored_by_item.items():
         item = session.get(OpenItem, item_id)
+        # Eine stornierte Eingangsrechnung schuldet nichts mehr, auch wenn die Zahlung wegfällt.
+        if _payable_invoice_reversed(session, item):
+            continue
         item.open_amount = min(
             item.original_amount, (item.open_amount + restored).quantize(Decimal("0.01"))
         )
@@ -1743,6 +1758,28 @@ def _release_subledgers(
             },
         )
         released.setdefault("open_items", []).append(item.id)
+
+    # OPOS: Mit der Eingangsrechnung entfällt ihre Schuld, sonst stünde sie weiter im Zahllauf.
+    # Forderungen schließt das Storno der Ausgangsrechnung selbst.
+    # Erst hier importiert: open_items nutzt dieses Modul.
+    from app.services.open_items import close_open_item_by_cancellation
+
+    invoice_items = (
+        session.execute(
+            select(OpenItem).where(
+                OpenItem.journal_entry_id == original.id,
+                OpenItem.item_type == "payable",
+                OpenItem.status == "open",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for item in invoice_items:
+        close_open_item_by_cancellation(
+            session=session, item=item, reversal_entry=reversal, changed_by=changed_by
+        )
+        released.setdefault("cancelled_open_items", []).append(item.id)
 
     session.flush()
     return released

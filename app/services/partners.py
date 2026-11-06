@@ -563,6 +563,17 @@ def update_partner(
     return True
 
 
+def validate_bank_details(iban: Any, bic: Any = None) -> None:
+    """Prüft eine Bankverbindung, bevor der Partner dazu entsteht (Fehler als ``PartnerError``).
+
+    Auf SQLite überlebt der Partner sonst den Rollback, weil der Savepoint der Nummernvergabe die
+    äußere Transaktion festschreibt.
+    """
+    normalized_iban = _iban(iban or None)
+    if _bic(bic or None) and not normalized_iban:
+        raise PartnerError("Eine BIC ohne IBAN ist nicht zulässig.")
+
+
 def set_partner_bank_details(
     *,
     session: Session,

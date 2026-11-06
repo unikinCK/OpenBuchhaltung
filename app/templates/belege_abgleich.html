@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_receipt_booking.html" import tax_split_rows, tip_field %}
+{% from "_receipt_booking.html" import tax_split_rows, tip_field, partner_field, open_item_fields with context %}
 
 {% block title %}Belegabgleich – OpenBuchhaltung{% endblock %}
 
@@ -132,12 +132,15 @@
             <form method="post" action="{{ url_for('main.receipt_matching_book', suggestion_id=suggestion.id) }}" class="stacked">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
               <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
-              {% if suggestion.partner_id %}
-                <input type="hidden" name="partner_id" value="{{ suggestion.partner_id }}" />
-              {% endif %}
               {% if suggestion.proposal_reason %}
                 <p class="muted">Kontierungsvorschlag: {{ suggestion.proposal_reason }}</p>
               {% endif %}
+
+              {{ partner_field(suggestion.partner_match, partners, "_" ~ suggestion.id,
+                               company_id=selected_company_id,
+                               proposed=dict(name=suggestion.supplier, vat_id=suggestion.supplier_vat_id,
+                                             iban=suggestion.supplier_iban, country_code='DE'),
+                               selected_id=suggestion.partner_id) }}
 
               <label for="entry_date_{{ suggestion.id }}">Buchungsdatum</label>
               <input id="entry_date_{{ suggestion.id }}" name="entry_date" type="date"
@@ -146,6 +149,8 @@
               <label for="description_{{ suggestion.id }}">Buchungstext</label>
               <input id="description_{{ suggestion.id }}" name="description"
                      value="{{ [suggestion.supplier, suggestion.invoice_number, suggestion.description] | select | join(' – ') }}" />
+
+              {{ open_item_fields(suggestion.due_date, "_" ~ suggestion.id) }}
 
               <label for="expense_account_id_{{ suggestion.id }}">Aufwands-/Anlagekonto (Netto, Soll)</label>
               <select id="expense_account_id_{{ suggestion.id }}" name="expense_account_id" required>

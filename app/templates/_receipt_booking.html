@@ -1,4 +1,83 @@
-{# Gemeinsame Felder der Belegbuchung (Beleg-OCR, Belegabgleich). #}
+{# Gemeinsame Felder der Belegbuchung (Beleg-OCR, Belegabgleich, E-Rechnung). #}
+
+{# Partnererkennung: Vorbelegt ist nur ein eindeutiger Treffer. Ein unsicherer Treffer erscheint
+   als Vorschlag zum Anklicken, die Auswahl bleibt leer. Die Eingabefelder von „Lieferant anlegen“
+   haben keinen name: Sie gehören nicht zur Buchung, app.js schickt sie getrennt ab. #}
+{% macro partner_field(match, partners, suffix="", company_id=none, proposed=none, selected_id=none) -%}
+  {%- set match = match or {} -%}
+  {%- set chosen = selected_id if selected_id is not none else match.partner_id -%}
+  <div class="partner-field" data-partner-field>
+    <label for="partner_id{{ suffix }}">Geschäftspartner</label>
+    {% if match.status == 'unique' %}
+      <p class="hint"><span class="badge badge-success">Erkannt</span> {{ match.reason }}</p>
+    {% elif match.status in ('uncertain', 'ambiguous') %}
+      <p class="hint"><span class="badge badge-warning">Bitte bestätigen</span> {{ match.reason }}</p>
+    {% elif match.status == 'none' %}
+      <p class="hint"><span class="badge">Nicht erkannt</span> {{ match.reason }}</p>
+    {% endif %}
+    {% if match.status in ('uncertain', 'ambiguous') %}
+      <div class="partner-candidates">
+        {% for candidate in match.candidates %}
+          <button type="button" class="secondary btn-sm" data-partner-pick="{{ candidate.partner_id }}">
+            {{ candidate.partner_number }} {{ candidate.partner_name }}
+            ({{ candidate.matched_on_labels | join(', ') }})
+          </button>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% for warning in match.warnings or [] %}
+      <p class="callout callout-warning">{{ warning }}</p>
+    {% endfor %}
+    <select id="partner_id{{ suffix }}" name="partner_id" data-partner-select>
+      <option value="">Ohne Geschäftspartner</option>
+      {% for partner in partners %}
+        <option value="{{ partner.id }}"{% if partner.id == chosen %} selected{% endif %}>
+          {{- partner.creditor_number or partner.debtor_number }} {{ partner.name -}}
+        </option>
+      {% endfor %}
+    </select>
+    {% if proposed and company_id and match.status != 'unique' %}
+      {{ partner_quick_create(proposed, company_id, suffix) }}
+    {% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro partner_quick_create(proposed, company_id, suffix="") -%}
+  <details class="partner-create" data-partner-create
+           data-url="{{ url_for('main.quick_create_partner') }}"
+           data-company-id="{{ company_id }}" data-csrf="{{ csrf_token() }}">
+    <summary>Lieferant anlegen</summary>
+    <div class="form-grid">
+      {% for field, label in [
+        ('name', 'Name'), ('vat_id', 'USt-IdNr.'), ('tax_number', 'Steuernummer'),
+        ('street', 'Straße'), ('postal_code', 'PLZ'), ('city', 'Ort'),
+        ('country_code', 'Land'), ('email', 'E-Mail'), ('iban', 'IBAN'), ('bic', 'BIC')
+      ] %}
+        <div class="field">
+          <label for="partner_new_{{ field }}{{ suffix }}">{{ label }}</label>
+          <input id="partner_new_{{ field }}{{ suffix }}" data-field="{{ field }}" value="{{ proposed[field] or '' }}" />
+        </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="secondary" data-partner-create-submit>Anlegen und auswählen</button>
+    <p class="hint" data-partner-create-message role="status"></p>
+  </details>
+{%- endmacro %}
+
+{# OPOS: Auf einem Kreditoren-Sammelkonto entsteht beim Buchen ein offener Posten. #}
+{% macro open_item_fields(due_date=none, suffix="") -%}
+  <label for="due_date{{ suffix }}">Fällig am (für den offenen Posten, leer = Zahlungsziel des Partners)</label>
+  <input id="due_date{{ suffix }}" name="due_date" type="date" value="{{ due_date.isoformat() if due_date else '' }}" />
+  {{ skip_open_item_field(suffix) }}
+{%- endmacro %}
+
+{% macro skip_open_item_field(suffix="") -%}
+  <label class="check" for="skip_open_item{{ suffix }}">
+    <input id="skip_open_item{{ suffix }}" name="skip_open_item" type="checkbox" value="1" />
+    Schon bezahlt: keinen offenen Posten anlegen
+  </label>
+  <p class="hint">Auf einem Kreditoren-Sammelkonto entsteht sonst ein offener Posten für Zahllauf und Mahnwesen.</p>
+{%- endmacro %}
 
 {# Aufteilung je Steuersatz: je Zeile Netto, Steuercode, Steuer und optional ein
    abweichendes Konto. Eine leere Zusatzzeile erlaubt einen weiteren Satz;

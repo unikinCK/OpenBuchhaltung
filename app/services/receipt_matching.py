@@ -39,6 +39,7 @@ from app.services.incoming_invoice import (
     IncomingInvoiceError,
     InvoiceTaxSplit,
     book_incoming_invoice,
+    create_invoice_open_item,
     invoice_gross_amount,
     tax_splits_audit,
 )
@@ -523,6 +524,9 @@ def create_match_suggestion(
         expense_account_id=proposal.account.id if proposal.account else None,
         tax_code_id=proposal.tax_code.id if proposal.tax_code else None,
         partner_id=proposal.partner.id if proposal.partner else None,
+        partner_match=proposal.partner_match.as_dict(),
+        supplier_iban=proposal.supplier_iban,
+        due_date=extraction.due_date,
         proposal_source=proposal.source,
         proposal_reason=_clean_db_text(proposal.reason),
         tax_lines=[
@@ -646,8 +650,11 @@ def book_new_booking_suggestion(
     cost_center_id: int | None = None,
     profit_center_id: int | None = None,
     partner_id: int | None = None,
+    use_suggested_partner: bool = True,
     tax_splits: Sequence[InvoiceTaxSplit] | None = None,
     tip_amount: Decimal | None = None,
+    create_open_item: bool = True,
+    due_date: date | None = None,
 ) -> tuple[ReceiptMatchSuggestion, JournalEntry]:
     """Gibt einen New-Booking-Vorschlag frei: erzeugt die Buchung und verknüpft den Beleg.
 
@@ -656,6 +663,10 @@ def book_new_booking_suggestion(
     Kontierungsvorschlag. ``tax_splits`` bucht mehrere Steuersätze (ersetzt
     ``net_amount``/``tax_amount``/``tax_code_id``), ``tip_amount`` Trinkgeld als
     eigene Zeile ohne Steuer – siehe :func:`book_incoming_invoice`.
+
+    ``use_suggested_partner=False`` heißt: bewusst ohne den vorgeschlagenen Partner buchen.
+    Auf einem Kreditoren-Sammelkonto entsteht ein offener Posten (abschaltbar mit
+    ``create_open_item``), siehe :func:`create_invoice_open_item`.
     """
     suggestion, document = _load_open_suggestion(session, suggestion_id)
     if suggestion.suggestion_type != TYPE_NEW_BOOKING:
@@ -691,6 +702,10 @@ def book_new_booking_suggestion(
         f"Belegbuchung (Abgleich): {default_text}" if default_text else "Belegbuchung (Abgleich)"
     )
 
+    booking_partner_id = partner_id
+    if booking_partner_id is None and use_suggested_partner:
+        booking_partner_id = suggestion.partner_id
+
     company = session.get(Company, suggestion.company_id)
     # commit=False: Buchung, Belegverknüpfung und Vorschlagsstatus werden
     # gemeinsam persistiert — sonst bliebe bei einem Fehler eine Buchung ohne
@@ -709,11 +724,29 @@ def book_new_booking_suggestion(
             expense_line_description=booking_text,
             cost_center_id=cost_center_id,
             profit_center_id=profit_center_id,
-            partner_id=partner_id or suggestion.partner_id,
+            partner_id=booking_partner_id,
             tax_splits=tax_splits,
             tip_amount=tip,
             changed_by=changed_by,
             commit=False,
+        )
+        open_item = (
+            create_invoice_open_item(
+                session=session,
+                company=company,
+                entry=entry,
+                creditor_account_id=creditor_account_id,
+                amount=gross_amount,
+                reference=suggestion.invoice_number,
+                partner_id=booking_partner_id,
+                counterparty=suggestion.supplier,
+                due_date=due_date or suggestion.due_date,
+                iban=suggestion.supplier_iban,
+                currency_code=suggestion.currency_code,
+                changed_by=changed_by,
+            )
+            if create_open_item
+            else None
         )
     except IncomingInvoiceError as exc:
         raise ReceiptMatchError(str(exc)) from exc
@@ -744,6 +777,8 @@ def book_new_booking_suggestion(
             "tip_amount": str(tip) if tip else None,
             "cost_center_id": cost_center_id,
             "profit_center_id": profit_center_id,
+            "partner_id": booking_partner_id,
+            "open_item_id": open_item.id if open_item is not None else None,
         },
     )
     session.commit()
