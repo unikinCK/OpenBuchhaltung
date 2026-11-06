@@ -8,6 +8,14 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Offene Posten: Bankumsatz nur bis zu seinem Betrag
+- **Behoben:** Derselbe Bankumsatz ließ sich beliebig oft zum Ausgleich offener Posten nutzen; jeder Aufruf ohne
+  Betrag zog erneut den vollen Umsatz ab. Jetzt verteilt sich ein Umsatz auf mehrere Posten (Sammelzahlung) nur bis
+  zu seinem Betrag: Ohne Betrag nimmt der Posten den Rest, ein höherer Betrag wird abgewiesen, ein ganz
+  zugeordneter Umsatz ebenso. Stornierte Ausgleiche geben ihren Teil wieder frei; Ausgleiche von Posten in
+  Fremdwährung belegen ihren gezahlten Euro-Betrag. Gilt in UI, REST und MCP. Zwei gleichzeitige Ausgleiche mit
+  demselben Umsatz laufen nacheinander.
+
 ### Partnererkennung in automatischen Quellen
 - E-Rechnung, Beleg-OCR, Belegabgleich und Bankumsätze erkennen den Geschäftspartner über
   USt-IdNr., Steuernummer, IBAN, Partnernummer und Namen (`partner_recognition`, Sprint 5a,
