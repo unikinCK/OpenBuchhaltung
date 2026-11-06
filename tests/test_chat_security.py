@@ -171,7 +171,8 @@ def test_read_only_tools_run_without_confirmation() -> None:
     for tool in TOOLS:
         if chat_tool_blocked(tool.name):
             continue
-        expected = tool.http_method != "GET" and tool.name != "preview_income_tax_return"
+        read_only_post = {"preview_income_tax_return", "recognize_partner", "preview_einvoice"}
+        expected = tool.http_method != "GET" and tool.name not in read_only_post
         assert chat_tool_requires_confirmation(tool.name) is expected, tool.name
     assert chat_tool_requires_confirmation("unknown_tool") is False
 

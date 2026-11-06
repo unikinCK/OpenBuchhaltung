@@ -14,6 +14,8 @@ from app.services.documents import document_file_metadata
 from app.services.incoming_invoice import (
     IncomingInvoiceError,
     book_incoming_invoice,
+    create_invoice_open_item,
+    document_already_booked,
     invoice_gross_amount,
     tax_splits_audit,
 )
@@ -32,6 +34,7 @@ from app.services.receipt_proposals import (
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
+from app.web.einvoice import active_partners
 from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
@@ -84,7 +87,9 @@ def _render_receipt_ocr_page(
         tax_codes: list = []
         cost_centers: list = []
         profit_centers: list = []
+        partners: list = []
         if selected_company_id:
+            partners = active_partners(session, selected_company_id)
             expense_accounts, creditor_accounts, tax_codes = _receipt_account_context(
                 session, selected_company_id
             )
@@ -101,6 +106,7 @@ def _render_receipt_ocr_page(
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
     return render_template(
         "belege_ocr.html",
+        partners=partners,
         companies=companies,
         selected_company_id=selected_company_id,
         expense_accounts=expense_accounts,
@@ -272,6 +278,7 @@ def receipt_ocr_book():
     tax_code_id = request.form.get("tax_code_id", type=int)
     partner_id = request.form.get("partner_id", type=int)
     entry_date_raw = request.form.get("entry_date", "").strip()
+    due_date_raw = request.form.get("due_date", "").strip()
     description = request.form.get("description", "").strip()
     cost_center_id = request.form.get("cost_center_id", type=int)
     profit_center_id = request.form.get("profit_center_id", type=int)
@@ -291,8 +298,9 @@ def receipt_ocr_book():
 
     try:
         entry_date = date.fromisoformat(entry_date_raw) if entry_date_raw else date.today()
+        due_date = date.fromisoformat(due_date_raw) if due_date_raw else None
     except ValueError:
-        flash("Ungültiges Buchungsdatum.", "error")
+        flash("Ungültiges Buchungs- oder Fälligkeitsdatum.", "error")
         return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
     gross_amount = invoice_gross_amount(net_amount, tax_amount, tax_splits, tip_amount)
@@ -304,6 +312,9 @@ def receipt_ocr_book():
         document = session.get(Document, document_id) if document_id else None
         if document is None or document.company_id != company.id:
             flash("Zugehöriger Beleg wurde nicht gefunden.", "error")
+            return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
+        if document_already_booked(session, document):
+            flash("Der Beleg ist bereits mit einer Buchung verknüpft.", "error")
             return redirect(url_for("main.receipt_ocr_page", company_id=company_id))
 
         try:
@@ -326,6 +337,24 @@ def receipt_ocr_book():
                 tip_amount=tip_amount,
                 changed_by=changed_by(),
                 commit=False,
+            )
+            open_item = (
+                None
+                if request.form.get("skip_open_item")
+                else create_invoice_open_item(
+                    session=session,
+                    company=company,
+                    entry=entry,
+                    creditor_account_id=creditor_account_id,
+                    amount=gross_amount,
+                    reference=request.form.get("invoice_number"),
+                    partner_id=partner_id,
+                    counterparty=request.form.get("supplier_name"),
+                    due_date=due_date,
+                    iban=request.form.get("supplier_iban"),
+                    currency_code=request.form.get("currency_code"),
+                    changed_by=changed_by(),
+                )
             )
         except IncomingInvoiceError as exc:
             flash(str(exc), "error")
@@ -354,14 +383,17 @@ def receipt_ocr_book():
                 "document_date": document.document_date.isoformat(),
                 "cost_center_id": cost_center_id,
                 "profit_center_id": profit_center_id,
+                "partner_id": partner_id,
+                "open_item_id": open_item.id if open_item is not None else None,
             },
         )
         session.commit()
         posting_number = entry.posting_number
+        open_item_note = " Offener Posten angelegt." if open_item is not None else ""
 
     flash(
         f"Beleg verbucht als {posting_number} (brutto {format_amount(gross_amount)} EUR) "
-        "und mit der Buchung verknüpft.",
+        f"und mit der Buchung verknüpft.{open_item_note}",
         "success",
     )
     return redirect(url_for("main.journal_page", company_id=company_id))

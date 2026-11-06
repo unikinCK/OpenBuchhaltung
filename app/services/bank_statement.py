@@ -19,6 +19,8 @@ from xml.etree import ElementTree as ET
 
 import mt940
 
+from app.services.partner_identifiers import clean_iban, leading_iban
+
 MAX_TEXT_LENGTH = 255
 MAX_REFERENCE_LENGTH = 64
 
@@ -41,6 +43,8 @@ class BankStatementRow:
     counterparty: str | None = None
     currency_code: str | None = None
     bank_reference: str | None = None
+    # Für die Partnererkennung; nicht Teil des Dedup-Hashs.
+    counterparty_iban: str | None = None
 
 
 @dataclass(slots=True)
@@ -175,6 +179,23 @@ def _camt_counterparty(entry: ET.Element, incoming: bool) -> str | None:
     return None
 
 
+def _camt_counterparty_iban(entry: ET.Element, incoming: bool) -> str | None:
+    """Gegen-IBAN eines Ntry; bei Sammelbuchungen nur, wenn alle Zahlungen dieselbe nennen."""
+    account_tag = "DbtrAcct" if incoming else "CdtrAcct"
+    ibans = [
+        next(
+            (
+                clean_iban(_text(account, "Id", "IBAN"))
+                for account in _children(parties, account_tag)
+            ),
+            None,
+        )
+        for parties in _iter_descendants(entry, "RltdPties")
+    ]
+    distinct = set(ibans)
+    return distinct.pop() if len(distinct) == 1 else None
+
+
 def parse_camt053(content: bytes) -> list[StatementItem]:
     """Liest alle Ntry-Elemente eines CAMT.053/052-Dokuments.
 
@@ -236,6 +257,7 @@ def parse_camt053(content: bytes) -> list[StatementItem]:
                 counterparty=counterparty,
                 currency_code=currency,
                 bank_reference=_camt_reference(entry),
+                counterparty_iban=_camt_counterparty_iban(entry, incoming=amount > 0),
             )
         )
     return items
@@ -243,6 +265,16 @@ def parse_camt053(content: bytes) -> list[StatementItem]:
 
 # ---------------------------------------------------------------------------
 # MT940
+
+
+def _mt940_counterparty_iban(data: dict) -> str | None:
+    """Gegen-IBAN aus ``?31`` oder ``IBAN+``. Die mt-940-Bibliothek hängt ``?31`` je nach Version
+    vor den Namen und ``BIC+`` hinter die IBAN, deshalb zählt nur der Anfang des Feldes."""
+    for key in ("applicant_iban", "gvc_applicant_iban", "applicant_name"):
+        iban = leading_iban(data.get(key))
+        if iban:
+            return iban
+    return None
 
 
 def row_from_mt940_data(position: int, data: dict) -> StatementItem:
@@ -284,6 +316,7 @@ def row_from_mt940_data(position: int, data: dict) -> StatementItem:
         counterparty=counterparty,
         currency_code=currency,
         bank_reference=bank_reference,
+        counterparty_iban=_mt940_counterparty_iban(data),
     )
 
 
@@ -345,6 +378,7 @@ def row_from_open_banking_transaction(position: int, data: dict) -> StatementIte
 
     party = data.get("creditor" if is_debit else "debtor") or {}
     counterparty = _clip(party.get("name"))
+    account = data.get("creditor_account" if is_debit else "debtor_account") or {}
     bank_reference = (
         _clean_reference(data.get("entry_reference"))
         or _clean_reference(data.get("transaction_id"))
@@ -359,4 +393,5 @@ def row_from_open_banking_transaction(position: int, data: dict) -> StatementIte
         counterparty=counterparty,
         currency_code=(amount_obj.get("currency") or "").upper() or None,
         bank_reference=bank_reference,
+        counterparty_iban=clean_iban(account.get("iban")),
     )

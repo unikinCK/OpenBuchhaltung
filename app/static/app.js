@@ -686,6 +686,97 @@
     }
   });
 
+  // Partnererkennung: Vorschlag übernehmen, Lieferant anlegen, E-Rechnung prüfen.
+  // Die Prüfung ersetzt den Bereich in der Maske, deshalb per Delegation.
+  function partnerSelect(element) {
+    var field = element.closest("[data-partner-field]");
+    return field ? field.querySelector("[data-partner-select]") : null;
+  }
+
+  function createPartner(button) {
+    var panel = button.closest("[data-partner-create]");
+    var message = panel.querySelector("[data-partner-create-message]");
+    var body = new FormData();
+    body.append("_csrf_token", panel.dataset.csrf);
+    body.append("company_id", panel.dataset.companyId);
+    panel.querySelectorAll("[data-field]").forEach(function (input) {
+      body.append(input.dataset.field, input.value.trim());
+    });
+    button.disabled = true;
+    fetch(panel.dataset.url, {
+      method: "POST",
+      body: body,
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (!result.ok) {
+          message.textContent = result.data.error || "Der Lieferant konnte nicht angelegt werden.";
+          button.disabled = false;
+          return;
+        }
+        var label = result.data.number + " " + result.data.name;
+        var select = partnerSelect(panel);
+        if (select) {
+          var option = document.createElement("option");
+          option.value = result.data.id;
+          option.textContent = label;
+          select.appendChild(option);
+          select.value = String(result.data.id);
+        }
+        message.textContent = ["Angelegt: " + label + "."]
+          .concat(result.data.hints || [])
+          .join(" ");
+      })
+      .catch(function () {
+        message.textContent = "Der Lieferant konnte nicht angelegt werden.";
+        button.disabled = false;
+      });
+  }
+
+  document.addEventListener("click", function (event) {
+    var pick = event.target.closest("[data-partner-pick]");
+    if (pick) {
+      var select = partnerSelect(pick);
+      if (select) select.value = pick.dataset.partnerPick;
+      return;
+    }
+    var submit = event.target.closest("[data-partner-create-submit]");
+    if (submit) createPartner(submit);
+  });
+
+  document.querySelectorAll("input[data-einvoice-preview]").forEach(function (input) {
+    var latest = 0;
+    var target = document.querySelector(input.dataset.einvoiceTarget);
+    var initial = target ? target.innerHTML : "";
+    input.addEventListener("change", function () {
+      if (!target) return;
+      // Die Prüfung der vorigen Datei gilt nicht für die neue, auch wenn diese scheitert.
+      target.innerHTML = initial;
+      if (!input.files.length) return;
+      var request = ++latest;
+      fetch(input.dataset.einvoicePreview, {
+        method: "POST",
+        body: new FormData(input.form),
+        credentials: "same-origin",
+      })
+        .then(function (response) {
+          // Sonst (Sitzung abgelaufen, CSRF) bleibt die Auswahl „Automatisch“ stehen.
+          if (response.redirected) return null;
+          return response.ok || response.status === 422 ? response.text() : null;
+        })
+        .then(function (html) {
+          if (html !== null && request === latest) target.innerHTML = html;
+        })
+        .catch(function () {});
+    });
+  });
+
   // Sicherheitsabfrage (data-confirm am Formular oder Submit-Button) und
   // Doppel-Submit-Schutz für alle Formulare.
   document.addEventListener("submit", function (event) {

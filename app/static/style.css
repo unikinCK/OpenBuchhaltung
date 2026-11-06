@@ -1454,6 +1454,17 @@ fieldset {
   color: var(--warning-text);
 }
 
+.partner-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.5rem;
+}
+
+.partner-create {
+  margin-top: 0.5rem;
+}
+
 .submission-history {
   margin-top: 0.35rem;
 }

@@ -19,7 +19,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app.services.audit_log import log_audit_event
-from app.services.company_master_data import seller_party
+from app.services.company_master_data import partner_party, seller_party
 from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
@@ -32,8 +32,9 @@ from app.services.einvoice_export import (
 from app.services.einvoice_import import (
     EInvoiceParseError,
     RateAssignment,
-    book_einvoice,
+    import_einvoice_booking,
     parse_einvoice,
+    preview_einvoice_payload,
 )
 from app.services.incoming_invoice import IncomingInvoiceError, tax_splits_audit
 from app.services.journal_entries import JournalEntryCreationError
@@ -47,7 +48,7 @@ from app.web.helpers import (
     get_session_factory,
     require_company_access,
 )
-from domain.models import Account, ControllingUnit, Document, TaxCode
+from domain.models import Account, BusinessPartner, ControllingUnit, Document, TaxCode
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
@@ -57,6 +58,7 @@ def einvoice_page():
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
 
+        partners = []
         expense_accounts = []
         creditor_accounts = []
         tax_codes = []
@@ -94,9 +96,11 @@ def einvoice_page():
             )
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
+            partners = active_partners(session, selected_company_id)
 
     return render_template(
         "erechnung.html",
+        partners=partners,
         companies=companies,
         selected_company_id=selected_company_id,
         expense_accounts=expense_accounts,
@@ -121,6 +125,18 @@ def _rate_tax_codes(tax_codes: list[TaxCode]) -> list[tuple[Decimal, list[TaxCod
     return sorted(grouped.items())
 
 
+def active_partners(session, company_id: int) -> list[BusinessPartner]:
+    return (
+        session.execute(
+            scoped_select(BusinessPartner, company_id=company_id)
+            .where(BusinessPartner.is_active.is_(True))
+            .order_by(BusinessPartner.name)
+        )
+        .scalars()
+        .all()
+    )
+
+
 def _form_rate_assignments(form) -> list[RateAssignment]:
     """Steuercode je Steuersatz aus der Maske (leer = automatisch)."""
     assignments = []
@@ -134,9 +150,40 @@ def _form_rate_assignments(form) -> list[RateAssignment]:
     return assignments
 
 
+@main_bp.post("/erechnung/pruefen")
+def einvoice_preview_action():
+    """Prüfung nach der Dateiauswahl (von app.js aufgerufen): Rechnung und Partnererkennung."""
+    company_id = request.form.get("company_id", type=int)
+    uploaded_file = request.files.get("einvoice_xml")
+    if not company_id or uploaded_file is None or not uploaded_file.filename:
+        return (
+            render_template("_erechnung_pruefung.html", error="Bitte eine XML-Datei wählen."),
+            400,
+        )
+    try:
+        invoice = parse_einvoice(uploaded_file.read())
+    except EInvoiceParseError as exc:
+        return render_template("_erechnung_pruefung.html", error=str(exc)), 422
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        preview = preview_einvoice_payload(session, company.id, invoice)
+        return render_template(
+            "_erechnung_pruefung.html",
+            invoice=invoice,
+            partners=active_partners(session, company.id),
+            company_id=company.id,
+            **preview,
+        )
+
+
 @main_bp.post("/erechnung/buchen")
 def einvoice_book_action():
     company_id = request.form.get("company_id", type=int)
+    # ``auto`` (ohne Prüfung per JavaScript): nur ein eindeutiger Treffer wird zugeordnet.
+    # Leer heißt nach der Prüfung: bewusst ohne Partner.
+    partner_choice = request.form.get("partner_id", "auto").strip()
     expense_account_id = request.form.get("expense_account_id", type=int)
     creditor_account_id = request.form.get("creditor_account_id", type=int)
     tax_code_id = request.form.get("tax_code_id", type=int)
@@ -171,7 +218,7 @@ def einvoice_book_action():
         company = require_company_access(session, company_id)
 
         try:
-            entry, tax_splits = book_einvoice(
+            booking = import_einvoice_booking(
                 session=session,
                 company=company,
                 invoice=invoice,
@@ -181,8 +228,12 @@ def einvoice_book_action():
                 assignments=assignments,
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                partner_id=int(partner_choice) if partner_choice.isdigit() else None,
+                auto_partner=partner_choice == "auto",
+                create_open_item=not request.form.get("skip_open_item"),
                 changed_by=changed_by(),
             )
+            entry, tax_splits = booking.entry, booking.tax_splits
         except IncomingInvoiceError as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.einvoice_page", company_id=company_id))
@@ -239,16 +290,29 @@ def einvoice_book_action():
                 "document_date": document.document_date.isoformat(),
                 "cost_center_id": cost_center_id,
                 "profit_center_id": profit_center_id,
+                "partner_id": booking.partner_id,
+                "partner_match_status": booking.partner_match.status,
+                "open_item_id": booking.open_item.id if booking.open_item else None,
             },
         )
         session.commit()
         posting_number = entry.posting_number
+        partner = session.get(BusinessPartner, booking.partner_id) if booking.partner_id else None
+        partner_note = (
+            f" Partner: {partner.name}."
+            if partner is not None
+            else f" Ohne Partner: {booking.partner_match.reason}"
+        )
+        open_item_note = " Offener Posten angelegt." if booking.open_item is not None else ""
 
     flash(
         f"E-Rechnung {invoice.invoice_number} verbucht als {posting_number} "
-        f"(brutto {format_amount(invoice.grand_total)} {invoice.currency_code}).",
+        f"(brutto {format_amount(invoice.grand_total)} {invoice.currency_code})."
+        f"{partner_note}{open_item_note}",
         "success",
     )
+    for warning in booking.warnings:
+        flash(warning, "error")
     return redirect(url_for("main.journal_page", company_id=company_id))
 
 
@@ -262,8 +326,14 @@ def einvoice_export_action():
     invoice_number = request.form.get("invoice_number", "").strip()
     issue_date_raw = request.form.get("issue_date", "").strip()
     buyer_name = request.form.get("buyer_name", "").strip()
+    buyer_partner_id = request.form.get("buyer_partner_id", type=int)
 
-    if not company_id or not invoice_number or not issue_date_raw or not buyer_name:
+    if (
+        not company_id
+        or not invoice_number
+        or not issue_date_raw
+        or not (buyer_name or buyer_partner_id)
+    ):
         flash("Gesellschaft, Rechnungsnummer, Datum und Käufer sind Pflichtfelder.", "error")
         return redirect(url_for("main.einvoice_page", company_id=company_id))
 
@@ -314,15 +384,20 @@ def einvoice_export_action():
         company = require_company_access(session, company_id)
         seller = seller_party(company)
         currency = company.currency_code
-
-    buyer = Party(
-        name=buyer_name,
-        street=request.form.get("buyer_street", "").strip(),
-        postal_code=request.form.get("buyer_postal_code", "").strip(),
-        city=request.form.get("buyer_city", "").strip(),
-        country_code=request.form.get("buyer_country_code", "DE").strip() or "DE",
-        vat_id=request.form.get("buyer_vat_id", "").strip(),
-    )
+        buyer = Party(
+            name=buyer_name,
+            street=request.form.get("buyer_street", "").strip(),
+            postal_code=request.form.get("buyer_postal_code", "").strip(),
+            city=request.form.get("buyer_city", "").strip(),
+            country_code=request.form.get("buyer_country_code", "DE").strip() or "DE",
+            vat_id=request.form.get("buyer_vat_id", "").strip(),
+        )
+        if buyer_partner_id:
+            partner = session.get(BusinessPartner, buyer_partner_id)
+            if partner is None or partner.company_id != company.id:
+                flash("Geschäftspartner nicht gefunden.", "error")
+                return redirect(url_for("main.einvoice_page", company_id=company_id))
+            buyer = partner_party(partner, overrides=buyer)
 
     try:
         invoice = OutgoingInvoice(

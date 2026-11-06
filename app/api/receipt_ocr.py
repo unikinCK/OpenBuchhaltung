@@ -29,6 +29,8 @@ from app.services.documents import (
 from app.services.incoming_invoice import (
     IncomingInvoiceError,
     book_incoming_invoice,
+    create_invoice_open_item,
+    document_already_booked,
     invoice_gross_amount,
     parse_tax_splits,
     tax_splits_audit,
@@ -66,6 +68,7 @@ def _extraction_dict(extraction: ReceiptExtraction) -> dict[str, object]:
         "control_status": extraction.control_status,
         "has_booking_basis": extraction.has_booking_basis,
         "supplier_vat_id": extraction.supplier_vat_id,
+        "due_date": extraction.due_date.isoformat() if extraction.due_date else None,
         "description": extraction.description,
         "tip_amount": str(extraction.tip_amount) if extraction.tip_amount else None,
         "reverse_charge": extraction.reverse_charge,
@@ -320,6 +323,7 @@ def book_receipt_ocr_suggestion_via_api():
             int(payload["partner_id"]) if payload.get("partner_id") not in (None, "") else None
         )
         entry_date = date.fromisoformat(payload.get("entry_date") or date.today().isoformat())
+        due_date = date.fromisoformat(payload["due_date"]) if payload.get("due_date") else None
         net_amount = parse_decimal(str(payload.get("net_amount") or "0"))
         tax_amount = parse_decimal(str(payload.get("tax_amount") or "0"))
         tax_splits = parse_tax_splits(payload.get("tax_lines"))
@@ -339,6 +343,8 @@ def book_receipt_ocr_suggestion_via_api():
         document = session.get(Document, document_id)
         if document is None or document.company_id != company.id:
             return jsonify({"error": "Document not found."}), 404
+        if document_already_booked(session, document):
+            return jsonify({"error": "Der Beleg ist bereits mit einer Buchung verknüpft."}), 409
 
         try:
             entry = book_incoming_invoice(
@@ -360,6 +366,24 @@ def book_receipt_ocr_suggestion_via_api():
                 tip_amount=tip_amount,
                 changed_by=_api_changed_by(),
                 commit=False,
+            )
+            open_item = (
+                create_invoice_open_item(
+                    session=session,
+                    company=company,
+                    entry=entry,
+                    creditor_account_id=creditor_account_id,
+                    amount=gross_amount,
+                    reference=payload.get("invoice_number"),
+                    partner_id=partner_id,
+                    counterparty=payload.get("supplier_name"),
+                    due_date=due_date,
+                    iban=payload.get("supplier_iban"),
+                    currency_code=payload.get("currency_code"),
+                    changed_by=_api_changed_by(),
+                )
+                if payload.get("create_open_item", True) not in (False, "0", "false")
+                else None
             )
         except IncomingInvoiceError as exc:
             return incoming_invoice_error_response(exc)
@@ -386,6 +410,8 @@ def book_receipt_ocr_suggestion_via_api():
                 "document_date": document.document_date.isoformat(),
                 "cost_center_id": cost_center_id,
                 "profit_center_id": profit_center_id,
+                "partner_id": partner_id,
+                "open_item_id": open_item.id if open_item is not None else None,
             },
         )
         session.commit()
@@ -396,6 +422,7 @@ def book_receipt_ocr_suggestion_via_api():
                     "journal_entry_id": entry.id,
                     "posting_number": entry.posting_number,
                     "gross_amount": str(gross_amount),
+                    "open_item_id": open_item.id if open_item is not None else None,
                 }
             ),
             201,

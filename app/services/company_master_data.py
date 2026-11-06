@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.services.audit_log import log_audit_event
 from app.services.einvoice_export import Party
 from app.services.partners import PartnerError, normalize_vat_id
-from domain.models import Company
+from domain.models import BusinessPartner, Company
 
 DEFAULT_INVOICE_PREFIX = "RE"
 DEFAULT_COUNTRY_CODE = "DE"
@@ -250,6 +250,23 @@ def resolve_seller(company: Company, config: Mapping[str, Any] | None = None) ->
         bank_name=company.bank_name or "",
         iban=company.iban or "",
         bic=company.bic or "",
+    )
+
+
+def partner_party(partner: BusinessPartner, *, overrides: Party | None = None) -> Party:
+    """Käufer einer E-Rechnung aus dem Partnerstamm; ausgefüllte Angaben gehen vor."""
+    given = overrides or Party(name="", country_code="")
+    return Party(
+        name=given.name or partner.name,
+        street=given.street or partner.street or "",
+        postal_code=given.postal_code or partner.postal_code or "",
+        city=given.city or partner.city or "",
+        # Das Land hat einen Standardwert und zählt deshalb nur zusammen mit einer Anschrift.
+        country_code=(given.country_code if given.street else "") or partner.country_code or "DE",
+        vat_id=given.vat_id or partner.vat_id or "",
+        contact_name=partner.contact_person or "",
+        phone=partner.phone or "",
+        email=partner.email or "",
     )
 
 

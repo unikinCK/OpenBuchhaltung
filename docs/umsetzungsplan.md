@@ -630,8 +630,12 @@ und Feature-Nummern #1–#15 beziehen sich darauf). Reihenfolge nach Risiko.
   - [x] Kunden-/Lieferantenstamm, PR 4 *(2026-11-03)*: DATEV-Personenkonten im
         Buchungsstapel, Stammdatenexport Debitoren/Kreditoren (Kategorie 16) und
         Altdatenübernahme aus den Freitexten offener Posten; UI/API/MCP.
-  - [ ] Kunden-/Lieferantenstamm, PR 3: Partnererkennung in automatischen Quellen
-        (deckt #5 ab).
+  - [x] Kunden-/Lieferantenstamm, PR 3 *(2026-11-05)*: Partnererkennung in E-Rechnung,
+        Beleg-OCR, Belegabgleich und Bank über USt-IdNr., Steuernummer, IBAN, Partnernummer und Name;
+        nur ein eindeutiger Treffer wird zugeordnet, alles andere bleibt ein Vorschlag. Eingangsrechnung
+        → OPOS mit Fälligkeit (#5), `counterparty_iban` am Bankumsatz, OPOS-Vorschlag nach Partner oder
+        Referenz und Betrag, Partner an Kontierungsregeln, Käufer im E-Rechnungs-Export aus dem Stamm;
+        UI/API/MCP (Migration `20261104_0065`).
 - [ ] **Sprint 6 – UX**: deutsches Betrags-/Datumsformat (U2);
       Formular-Repopulation (U1); Buchungsmaske für Vielbucher (U3);
       Bestätigungsdialoge, CSS-Klassen, A11y (U4, U7, U8); Dashboard mit

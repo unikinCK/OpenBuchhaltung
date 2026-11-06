@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_receipt_booking.html" import tax_split_rows, tip_field %}
+{% from "_receipt_booking.html" import tax_split_rows, tip_field, partner_field, open_item_fields with context %}
 
 {% block title %}Beleg-OCR – OpenBuchhaltung{% endblock %}
 
@@ -84,6 +84,12 @@
           {% if proposal.partner_name %}
             <tr><th>Geschäftspartner</th><td>{{ proposal.partner_number or '' }} {{ proposal.partner_name }}</td></tr>
           {% endif %}
+          {% if proposal.supplier_iban %}
+            <tr><th>IBAN</th><td>{{ proposal.supplier_iban }}</td></tr>
+          {% endif %}
+          {% if extraction.due_date %}
+            <tr><th>Fällig am</th><td>{{ extraction.due_date | datum }}</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </section>
@@ -99,9 +105,12 @@
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
           <input type="hidden" name="document_id" value="{{ document_id }}" />
-          {% if proposal.partner_id %}
-            <input type="hidden" name="partner_id" value="{{ proposal.partner_id }}" />
-          {% endif %}
+          <input type="hidden" name="invoice_number" value="{{ extraction.invoice_number or '' }}" />
+          <input type="hidden" name="supplier_name" value="{{ extraction.supplier or '' }}" />
+          <input type="hidden" name="supplier_iban" value="{{ proposal.supplier_iban or '' }}" />
+          <input type="hidden" name="currency_code" value="{{ extraction.currency_code or '' }}" />
+
+          {{ partner_field(proposal.partner_match, partners, company_id=selected_company_id, proposed=proposal.proposed_partner) }}
 
           <label for="entry_date">Buchungsdatum</label>
           <input id="entry_date" name="entry_date" type="date"
@@ -110,6 +119,8 @@
           <label for="description">Buchungstext</label>
           <input id="description" name="description"
                  value="{{ [extraction.supplier, extraction.invoice_number, extraction.description] | select | join(' – ') }}" />
+
+          {{ open_item_fields(extraction.due_date) }}
 
           <label for="expense_account_id">Aufwands-/Anlagekonto (Netto, Soll)</label>
           <select id="expense_account_id" name="expense_account_id" required>
