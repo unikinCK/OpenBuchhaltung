@@ -1523,7 +1523,13 @@ def test_settlement_without_a_booking_falls_with_the_invoice(session: Session) -
     assert _balance(session, accounts["1776"]) == ZERO
 
 
-def test_entry_that_is_invoice_and_payment_can_be_reversed(session: Session) -> None:
+def test_entry_that_is_invoice_and_payment_can_be_reversed(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Altbestand: Heute wird die Rechnung als Zahlung abgewiesen, ältere Ausgleiche gibt es."""
+    monkeypatch.setattr(
+        "app.services.open_items._money_side_limit", lambda *_args, **_kwargs: None
+    )
     company, accounts = _seed(session)
     _monthly_rates(session, company)
     invoice, item = _direct_invoice(session, company, accounts)
