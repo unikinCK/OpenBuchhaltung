@@ -1345,11 +1345,6 @@ def _post_vat_fx_difference(
         raise VatReturnError(
             f"Die Steuerdifferenz zum Monatskurs ist nicht gebucht: {exc}"
         ) from exc
-    for event in pending:
-        if event.is_reversal:
-            event.settlement.vat_fx_reversal_entry_id = entry.id
-        else:
-            event.settlement.vat_fx_entry_id = entry.id
     return entry
 
 
@@ -1452,10 +1447,18 @@ def save_vat_return(
             "fx_journal_entry_id": vat_return.fx_journal_entry_id,
         },
     )
-    # Erst nach dem Audit-Eintrag ändern: Auch der Storno schreibt ins Audit und dann am Ausgleich.
+    # Erst nach dem Audit-Eintrag und zusammen in einem UPDATE je Ausgleich: Ein zweites UPDATE
+    # derselben Zeile prüft in PostgreSQL alle Fremdschlüssel neu und wartet auf den Bankumsatz,
+    # den ein Storno hält, während der auf die Buchungsnummer wartet.
     for event in details.foreign_payments:
-        if event.settlement.vat_rate is None:
-            event.settlement.vat_rate = event.rate
+        settlement = event.settlement
+        if settlement.vat_rate is None:
+            settlement.vat_rate = event.rate
+        if fx_entry is not None and not event.is_posted:
+            if event.is_reversal:
+                settlement.vat_fx_reversal_entry_id = fx_entry.id
+            else:
+                settlement.vat_fx_entry_id = fx_entry.id
     session.commit()
     session.refresh(vat_return)
     return vat_return
