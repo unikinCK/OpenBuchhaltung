@@ -23,6 +23,7 @@ from app.services.journal_entries import (
     CARRYFORWARD_SOURCES,
     KEEP_PARTNER,
     SOURCE_CASH_BOOK,
+    SOURCE_VAT_FX_DIFFERENCE,
     JournalEntryCreationError,
     JournalEntryInput,
     JournalLineInput,
@@ -80,6 +81,7 @@ SOURCE_LABELS = {
     "cash_book": "Kassenbuch",
     "fx_difference": "Kursdifferenz",
     "fx_valuation": "Stichtagsbewertung",
+    "vat_fx_difference": "Umsatzsteuer-Kursdifferenz",
 }
 STATUS_FILTERS = {"offen": False, "festgeschrieben": True}
 
@@ -257,6 +259,7 @@ def _is_amendable(entry: JournalEntry, reversed_by: object) -> bool:
         not entry.is_finalized
         and not reversed_by
         and entry.source not in CARRYFORWARD_SOURCES
+        and entry.source != SOURCE_VAT_FX_DIFFERENCE
     )
 
 
@@ -803,7 +806,8 @@ def _render_entry_detail(journal_entry_id: int):
             "can_reverse": (
                 not entry.reversal_of_id
                 and not reversed_by
-                and entry.source not in {SOURCE_CASH_BOOK, "sales_invoice"}
+                and entry.source
+                not in {SOURCE_CASH_BOOK, SOURCE_VAT_FX_DIFFERENCE, "sales_invoice"}
             ),
             "history": history,
             "source_label": SOURCE_LABELS.get(entry.source),

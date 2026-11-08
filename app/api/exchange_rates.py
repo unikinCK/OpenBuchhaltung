@@ -18,13 +18,19 @@ from app.api.helpers import (
 from app.auth import current_api_user
 from app.services.exchange_rates import (
     ExchangeRateError,
+    ExchangeRateSourceError,
+    fetch_bmf_rates,
     fetch_ecb_rates,
+    format_rate_month,
     fx_valuation_report,
     list_exchange_rates,
+    list_vat_exchange_rates,
     post_fx_valuation,
     serialize_exchange_rate,
     serialize_fx_valuation,
+    serialize_vat_exchange_rate,
     set_exchange_rate,
+    set_vat_exchange_rate,
 )
 from app.services.journal_entries import JournalEntryCreationError
 from domain.services.journal_entry_validation import JournalEntryValidationError
@@ -126,6 +132,93 @@ def fetch_exchange_rates_via_api():
         except ExchangeRateError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({**result, "latest_rate_date": result["latest_rate_date"].isoformat()})
+
+
+@api_bp.get("/vat-exchange-rates")
+def list_vat_exchange_rates_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            rows = list_vat_exchange_rates(
+                session=session,
+                tenant_id=company.tenant_id,
+                currency_code=(request.args.get("currency_code") or "").strip() or None,
+                month_from=(request.args.get("month_from") or "").strip() or None,
+                month_to=(request.args.get("month_to") or "").strip() or None,
+                limit=request.args.get("limit", default=200, type=int) or 200,
+            )
+        except ExchangeRateError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(
+            {
+                "company_id": company_id,
+                "vat_exchange_rates": [serialize_vat_exchange_rate(row) for row in rows],
+            }
+        )
+
+
+@api_bp.post("/vat-exchange-rates")
+def set_vat_exchange_rate_via_api():
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    company_id = _company_id_from(payload.get("company_id"))
+    if company_id is None:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            row = set_vat_exchange_rate(
+                session=session,
+                company=company,
+                currency_code=payload.get("currency_code"),
+                month=payload.get("month"),
+                rate=payload.get("rate"),
+                changed_by=_api_changed_by(),
+            )
+        except ExchangeRateError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return jsonify(serialize_vat_exchange_rate(row)), 201
+
+
+@api_bp.post("/vat-exchange-rates/fetch")
+def fetch_vat_exchange_rates_via_api():
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    company_id = _company_id_from(payload.get("company_id"))
+    if company_id is None:
+        return jsonify({"error": "company_id is required."}), 400
+    year = None
+    if payload.get("year") not in (None, ""):
+        try:
+            year = int(payload["year"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "year must be an integer."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            result = fetch_bmf_rates(
+                session=session, company=company, changed_by=_api_changed_by(), year=year
+            )
+        except ExchangeRateSourceError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except ExchangeRateError as exc:
+            return jsonify({"error": str(exc)}), 422
+        latest = result["latest_month"]
+        return jsonify({**result, "latest_month": format_rate_month(latest) if latest else None})
 
 
 @api_bp.get("/fx-valuation")

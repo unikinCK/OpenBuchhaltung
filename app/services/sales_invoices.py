@@ -1394,12 +1394,21 @@ def _booking_lines(
         if tax == 0:
             continue
         tax_code = session.get(TaxCode, tax_code_id)
+        tax_amount = ledger_amount(invoice, tax)
+        # Der Fremdbetrag ist die Grundlage der Steuer zum Monatskurs bei Istversteuerung (ADR-010):
+        # Aus dem gerundeten Eurobetrag ergäbe er sich bei hohen Kursen nicht auf den Cent genau.
+        tax_foreign_fields = (
+            {**foreign_fields, "foreign_amount": abs(tax)}
+            if foreign_fields and tax_amount != 0
+            else {}
+        )
         tax_lines.append(
             _signed_line(
                 tax_code.vat_account_id,
-                ledger_amount(invoice, tax),
+                tax_amount,
                 description=f"{tax_code.code} {tax_code.rate}% {label}",
                 tax_code_id=tax_code_id,
+                **tax_foreign_fields,
             )
         )
     # Einzeln umgerechnet kann die Summe um Cents vom Brutto abweichen. Die Rundung liegt auf dem

@@ -90,7 +90,7 @@
         </form>
       </div>
       <p class="muted small">Einheiten der Fremdwährung je 1 {{ company_currency }}. Der Abruf übernimmt die Referenzkurse der letzten 90 Tage und lässt manuell erfasste Kurse stehen.
-        Für die Umsatzsteuer gelten nach § 16 Abs. 6 UStG die monatlichen Durchschnittskurse des BMF (Soll: Monat der Leistung, Ist: Monat der Zahlung); ein Tageskurs braucht die Gestattung des Finanzamts. Die BMF-Kurse können Sie hier manuell erfassen.</p>
+        Diese Tageskurse gelten für Rechnungen, Zahlungen und die Stichtagsbewertung. Für die Umsatzsteuer gelten die Monatskurse unten.</p>
       <form method="post" action="{{ url_for('main.set_exchange_rate_action') }}" class="inline-form">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
@@ -122,6 +122,54 @@
         </div>
       {% else %}
         <p class="empty-state">Noch keine Kurse erfasst.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Umsatzsteuer-Umrechnungskurse</h2>
+        <form method="post" action="{{ url_for('main.fetch_vat_exchange_rates_action') }}" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <label for="vat_rate_year">Jahr</label>
+          <input id="vat_rate_year" name="year" inputmode="numeric" maxlength="4" placeholder="{{ this_year }}" style="width:5rem;" />
+          <button type="submit" class="secondary">BMF-Kurse abrufen</button>
+        </form>
+      </div>
+      <p class="muted small">Monatliche Durchschnittskurse des BMF nach § 16 Abs. 6 UStG, Einheiten der Fremdwährung je 1 {{ company_currency }}. Ohne Jahr ruft der Abruf das laufende Jahr und das Vorjahr ab; das BMF veröffentlicht einen Monat jeweils Anfang des Folgemonats. Manuell erfasste Kurse bleiben stehen.
+        Bei Istversteuerung nimmt die UStVA den Kurs des Monats, in dem das Geld einging. Festgehaltene Zeiträume behalten ihren Kurs, auch wenn er sich hier noch ändert.
+        Ein Tageskurs braucht die Gestattung des Finanzamts (§ 16 Abs. 6 Satz 3 UStG). Währungen ohne BMF-Kurs lassen sich von Hand erfassen.</p>
+      <form method="post" action="{{ url_for('main.set_vat_exchange_rate_action') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="vat_rate_currency">Währung</label>
+        <input id="vat_rate_currency" name="currency_code" maxlength="3" required placeholder="USD" style="width:5rem;" />
+        <label for="vat_rate_month">Monat</label>
+        <input id="vat_rate_month" name="month" type="month" value="{{ this_month }}" required style="width:auto;" />
+        <label for="vat_rate_value">Kurs</label>
+        <input id="vat_rate_value" name="rate" inputmode="decimal" required placeholder="1,1202" style="width:7rem;" />
+        <button type="submit">Speichern</button>
+      </form>
+      {% if vat_rates %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr><th>Monat</th><th>Währung</th><th class="num">Kurs</th><th>Quelle</th></tr>
+            </thead>
+            <tbody>
+              {% for rate in vat_rates %}
+                <tr>
+                  <td class="date">{{ rate.rate_month.strftime("%m/%Y") }}</td>
+                  <td>{{ rate.currency_code }}</td>
+                  <td class="num">{{ rate.rate | kurs }}</td>
+                  <td>{{ "BMF" if rate.source == "bmf" else "manuell" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">Noch keine Monatskurse erfasst.</p>
       {% endif %}
     </section>
   {% endif %}

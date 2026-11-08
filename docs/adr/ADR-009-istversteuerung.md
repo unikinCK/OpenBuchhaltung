@@ -18,11 +18,13 @@ Zahlung fehlte.
 2. **Berechnung statt zusätzlicher Buchungen.** Im Hauptbuch wird weiter gebucht wie bei der
    Sollversteuerung. Nur die UStVA rechnet anders: Eine Rechnung mit Umsatzsteuer und verknüpftem offenen
    Posten fällt aus der Zuordnung nach Datum heraus; stattdessen zählen ihre Zeilen, skaliert auf den im
-   Meldezeitraum bezahlten Anteil. Die Skalierung läuft über den kumulierten Anteil, sodass sich
-   Teilzahlungen ohne Rundungsrest zur Rechnung summieren. Die übrige Auswertung (Kennzahlen, Steuersätze)
-   bleibt dieselbe.
+   Meldezeitraum bezahlten Anteil. Jede Zahlung deckt einen festen Teil der Rechnung: den kumulierten Anteil
+   abzüglich der Teile, die bei ihrer Erfassung standen. So summieren sich Teilzahlungen ohne Rundungsrest zur
+   Rechnung, und eine rückdatierte Zahlung ändert keinen anderen Teil (ADR-010, Entscheidung 8). Die übrige
+   Auswertung (Kennzahlen, Steuersätze) bleibt dieselbe.
 3. **Stornierte Zahlungen** mindern im Zeitraum des Stornos. So bleibt eine bereits gemeldete Voranmeldung
-   richtig, und die Korrektur erscheint dort, wo sie entsteht.
+   richtig, und die Korrektur erscheint dort, wo sie entsteht. Läge das Datum des Stornos in einem festgehaltenen
+   Zeitraum, zählt er am ersten Tag dahinter (ADR-010, Entscheidung 8).
 4. **Abgrenzung:** Vorsteuer (§ 15 UStG), steuerfreie und nicht steuerbare Umsätze und direkt bezahlte
    Umsätze ändern sich nicht. Rechnungen von vor dem Beginn der Istversteuerung bleiben nach
    Buchungsdatum versteuert. Rechnungen auf einem Forderungskonto ohne verknüpften Posten zählen mit dem
@@ -36,6 +38,8 @@ Zahlung fehlte.
   rückwirkend auf noch nicht gemeldete Zeiträume; gespeicherte Voranmeldungen bleiben wie festgehalten.
   Die Zahlungstabelle ist zugleich die Grundlage für Kursdifferenzen. Der Storno stellt jetzt alle
   Ausgleiche einer Buchung wieder her, nicht nur den letzten.
+- Ausnahme: Bei Rechnungen in Fremdwährung gleicht das Festhalten das Steuerkonto an die zum Monatskurs gemeldete Steuer
+  an (ADR-010, Entscheidung 8).
 - Negativ: Das Steuerkonto enthält auch noch nicht fällige Umsatzsteuer. Sein Saldo weicht deshalb von der
   Zahllast ab; die UStVA nennt den Betrag als Warnung. Wer „Umsatzsteuer nicht fällig“ ausweisen möchte, bucht
   zum Abschluss um.

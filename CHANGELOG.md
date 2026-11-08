@@ -108,8 +108,26 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - Bankumsätze in Fremdwährung lassen sich zum Tageskurs oder einem angegebenen Kurs buchen; vor dem Ausgleich eines
   Postens in Fremdwährung muss ein Umsatz gebucht sein.
 - Ausgangsrechnungen in Fremdwährung mit Kurs und Umsatzsteuer in Euro auf PDF und XRechnung; ohne erfassten Kurs
-  gilt der Kurs am Leistungsdatum. Bei Istversteuerung warnt die UStVA, weil § 16 Abs. 6 UStG dort den Kurs des
-  Zahlungsmonats verlangt. E-Rechnungen in Fremdwährung werden nicht mehr als Euro gebucht.
+  gilt der Kurs am Leistungsdatum. E-Rechnungen in Fremdwährung werden nicht mehr als Euro gebucht.
+- **Umsatzsteuer zum Monatskurs bei Istversteuerung** (§ 16 Abs. 6 Satz 2 UStG, ADR-010): Die UStVA rechnet Rechnungen
+  in Fremdwährung je Zahlung zum Durchschnittskurs des Monats, in dem das Geld einging; ein Storno nimmt genau den
+  gemeldeten Betrag zurück. Beim Festhalten wird das Steuerkonto gegen die Kursdifferenz-Konten an die gemeldete Steuer
+  angeglichen und der Kurs an der Zahlung festgeschrieben. Ohne Monatskurs rechnet die Vorschau vorläufig zum
+  Rechnungskurs, festhalten lässt sich der Zeitraum dann nicht. `GET /api/v1/vat-return` nennt die Zahlungen unter
+  `foreign_payments`. **Vor dem Produktiveinsatz von einem Steuerberater zu bestätigen.**
+- Istversteuerung allgemein, auch in Euro: Der Storno einer gemeldeten Zahlung oder die Neuzuordnung derselben Zahlung,
+  die in einen festgehaltenen Zeitraum fielen, zählen für die UStVA am ersten Tag dahinter; der Storno einer nie
+  gemeldeten Zahlung hebt sie an ihrem Tag auf. Jede Zahlung deckt einen festen Teil der Rechnung, eine rückdatierte
+  Zahlung verschiebt also keinen gemeldeten Monat mehr. Eine Direktbuchung als Rechnung mit gebuchter Zahlung lässt
+  sich erst nach deren Storno stornieren, ein Ausgleich ohne Buchung fällt mit ihr, und ihr Posten schließt. Festhalten,
+  Ausgleich und Storno laufen bei Istversteuerung je Gesellschaft nacheinander.
+  `GET /api/v1/vat-annual-return` nennt jetzt auch `warnings`, `unassigned` und `foreign_payments`, und
+  `POST /api/v1/vat-annual-returns` meldet Fachfehler als 422 statt als „year must be an integer“. Kursdifferenzen und
+  ihre Stornos erscheinen nicht mehr als Ertrag ohne Umsatzsteuer.
+- **Monatskurse des BMF:** eigene Quelle neben EZB und manuell, Abruf aus dem Datenportal
+  (`POST /api/v1/vat-exchange-rates/fetch`, MCP `fetch_vat_exchange_rates`, CLI `flask fetch-vat-exchange-rates`),
+  Erfassung von Hand und Liste (`GET`/`POST /api/v1/vat-exchange-rates`, MCP `list_vat_exchange_rates`,
+  `set_vat_exchange_rate`), UI „Fremdwährung“. Migration `20261108_0066`.
 - Stichtagsbewertung offener Posten nach § 256a HGB mit automatischer Auflösung am Folgetag
   (`GET`/`POST /api/v1/fx-valuation`, MCP `get_fx_valuation`, `post_fx_valuation`).
 - Die Kontenrahmen enthalten die Konten für Kursdifferenzen (SKR03 2150/2660, SKR04 6880/4840).

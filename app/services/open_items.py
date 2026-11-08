@@ -23,6 +23,8 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
     first_open_posting_date,
+    first_unreported_day,
+    lock_cash_basis_company,
 )
 from app.services.sepa_export import SepaExportError, normalize_bic, normalize_iban
 from domain.models import (
@@ -391,6 +393,12 @@ def settle_open_item(
     ihrem Betrag; was stornierte Ausgleiche belegt hatten, ist wieder frei. Dieselbe Zahlung zählt
     dabei nur einmal, ob sie über den Umsatz oder über dessen Buchung zugeordnet wird.
     """
+    # Bei Istversteuerung zuerst die Gesellschaft: siehe ``lock_cash_basis_company``.
+    company_id = session.execute(
+        select(OpenItem.company_id).where(OpenItem.id == open_item_id)
+    ).scalar()
+    if company_id is not None:
+        lock_cash_basis_company(session, company_id)
     # Erst die Zahlung sperren, dann den Posten: den Umsatz, danach die Buchungen nach ihrer ID,
     # in derselben Reihenfolge wie der Storno (reverse_journal_entry). Zwei Ausgleiche oder ein
     # Ausgleich und ein Storno derselben Zahlung laufen so nacheinander, der zweite sieht, was der
@@ -441,12 +449,19 @@ def settle_open_item(
             settlement_date = bank_transaction.booking_date
         else:
             settlement_date = date.today()
+    # Der Monatskurs der Umsatzsteuer folgt dem Geldeingang: dem Bankumsatz, sonst dem Datum hier.
+    # Das Datum des Ausgleichs kann davon abweichen und gleich noch rücken.
+    received_on = bank_transaction.booking_date if bank_transaction is not None else settlement_date
     # Dieselbe Zahlung: derselbe Umsatz, auch auf einem anderen Posten, oder dasselbe Datum auf
     # diesem Posten. Eine andere Zahlung behält ihr Datum.
     same_payment = [
         and_(
             OpenItemSettlement.open_item_id == item.id,
-            OpenItemSettlement.settlement_date == settlement_date,
+            # Auch über den Geldeingang: Das Datum einer früheren Neuzuordnung ist schon gerückt.
+            or_(
+                OpenItemSettlement.settlement_date == settlement_date,
+                OpenItemSettlement.received_on == settlement_date,
+            ),
         )
     ]
     if bank_transaction is not None:
@@ -456,6 +471,11 @@ def settle_open_item(
     ).scalar()
     if last_reversal is not None and settlement_date < last_reversal:
         settlement_date = last_reversal
+    # Eine Neuzuordnung ändert keinen gemeldeten Zeitraum: Für die UStVA zählt sie im nächsten.
+    vat_settled_on = None
+    if last_reversal is not None:
+        first_open_day = first_unreported_day(session=session, item=item, on=settlement_date)
+        vat_settled_on = first_open_day if first_open_day != settlement_date else None
 
     payment_entry_id = (linked_entry.id if linked_entry else None) or (
         bank_transaction.journal_entry_id if bank_transaction else None
@@ -539,6 +559,8 @@ def settle_open_item(
             open_item_id=item.id,
             amount=settlement_amount,
             settlement_date=settlement_date,
+            received_on=received_on,
+            vat_settled_on=vat_settled_on,
             # Auch die Buchung des Bankumsatzes: Ihr Storno nimmt den Ausgleich zurück.
             journal_entry_id=payment_entry_id,
             bank_transaction_id=bank_transaction.id if bank_transaction else None,

@@ -8,11 +8,15 @@ from flask import flash, redirect, render_template, request, url_for
 
 from app.services.exchange_rates import (
     ExchangeRateError,
+    fetch_bmf_rates,
     fetch_ecb_rates,
+    format_rate_month,
     fx_valuation_report,
     list_exchange_rates,
+    list_vat_exchange_rates,
     post_fx_valuation,
     set_exchange_rate,
+    set_vat_exchange_rate,
 )
 from app.services.journal_entries import JournalEntryCreationError
 from app.web.blueprint import main_bp
@@ -42,12 +46,16 @@ def exchange_rates_page():
     with session_factory() as session:
         companies, selected_company_id = company_context(session)
         rates = []
+        vat_rates = []
         report = None
         company_currency = None
         if selected_company_id:
             company = session.get(Company, selected_company_id)
             company_currency = company.currency_code
             rates = list_exchange_rates(
+                session=session, tenant_id=company.tenant_id, limit=60
+            )
+            vat_rates = list_vat_exchange_rates(
                 session=session, tenant_id=company.tenant_id, limit=60
             )
             report = fx_valuation_report(session=session, company=company, as_of=as_of)
@@ -57,9 +65,12 @@ def exchange_rates_page():
             selected_company_id=selected_company_id,
             company_currency=company_currency,
             rates=rates,
+            vat_rates=vat_rates,
             report=report,
             as_of=as_of,
             today=date.today().isoformat(),
+            this_month=date.today().strftime("%Y-%m"),
+            this_year=date.today().year,
         )
 
 
@@ -102,6 +113,64 @@ def fetch_exchange_rates_action():
         f"{result['latest_rate_date'].strftime('%d.%m.%Y')}.",
         "success",
     )
+    return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+
+
+@main_bp.post("/fremdwaehrung/monatskurs")
+def set_vat_exchange_rate_action():
+    company_id = request.form.get("company_id", type=int)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            row = set_vat_exchange_rate(
+                session=session,
+                company=company,
+                currency_code=request.form.get("currency_code"),
+                month=request.form.get("month"),
+                rate=request.form.get("rate"),
+                changed_by=changed_by(),
+            )
+        except ExchangeRateError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+        flash(
+            f"Monatskurs für {row.currency_code} {format_rate_month(row.rate_month)} wurde "
+            "gespeichert.",
+            "success",
+        )
+    return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+
+
+@main_bp.post("/fremdwaehrung/bmf")
+def fetch_vat_exchange_rates_action():
+    company_id = request.form.get("company_id", type=int)
+    raw_year = (request.form.get("year") or "").strip()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = require_company_access(session, company_id)
+        try:
+            year = int(raw_year) if raw_year else None
+        except ValueError:
+            flash(f"Ungültiges Jahr: {raw_year}.", "error")
+            return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+        try:
+            result = fetch_bmf_rates(
+                session=session, company=company, changed_by=changed_by(), year=year
+            )
+        except ExchangeRateError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.exchange_rates_page", company_id=company_id))
+    latest = result["latest_month"]
+    message = f"{result['created']} neue und {result['updated']} geänderte Monatskurse übernommen"
+    flash(f"{message}, neuester für {format_rate_month(latest)}." if latest else f"{message}.",
+          "success")
+    if result["ignored"]:
+        flash(
+            f"{result['ignored']} Angaben der BMF-Datei waren nicht lesbar und fehlen. "
+            "Bitte bei Bedarf von Hand erfassen.",
+            "warning",
+        )
     return redirect(url_for("main.exchange_rates_page", company_id=company_id))
 
 

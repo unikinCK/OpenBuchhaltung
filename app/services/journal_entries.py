@@ -18,6 +18,7 @@ from app.services.partners import (
     find_partner_by_number,
     validate_partner_assignment,
 )
+from app.services.tax_codes import company_tax_accounts
 from domain.formatting import format_number
 from domain.models import (
     TAX_KIND_INPUT,
@@ -41,6 +42,7 @@ from domain.models import (
     PostingNumberSequence,
     SalesInvoice,
     TaxCode,
+    VatReturn,
 )
 from domain.services.journal_entry_validation import (
     JournalEntryDraft,
@@ -121,6 +123,8 @@ SOURCE_CASH_BOOK = "cash_book"
 # Kursdifferenz beim Ausgleich und Stichtagsbewertung offener Posten (ADR-010).
 SOURCE_FX_DIFFERENCE = "fx_difference"
 SOURCE_FX_VALUATION = "fx_valuation"
+# Steuer zum Monatskurs statt zum Rechnungskurs bei Istversteuerung; kein Umsatz (ADR-010).
+SOURCE_VAT_FX_DIFFERENCE = "vat_fx_difference"
 # Vortragsbuchungen: technische Buchungen des Jahresabschlusses, die in GuV,
 # UStVA und Ertragsteuern nie Ergebnis oder Umsatz darstellen.
 CARRYFORWARD_SOURCES = (SOURCE_YEAR_END_CLOSE, SOURCE_CARRYFORWARD)
@@ -1120,6 +1124,102 @@ def first_open_posting_date(*, session: Session, company_id: int, on: date) -> d
     return day
 
 
+def _reported_periods(session: Session, item: OpenItem, on: date) -> list:
+    """Festgehaltene Zeiträume bis ``on`` und danach, nur für Forderungen bei Istversteuerung."""
+    company = session.get(Company, item.company_id)
+    if item.item_type != "receivable" or company is None or company.vat_cash_basis_from is None:
+        return []
+    return session.execute(
+        select(VatReturn.date_from, VatReturn.date_to, VatReturn.created_at)
+        .where(VatReturn.company_id == item.company_id, VatReturn.date_to >= on)
+        .order_by(VatReturn.date_from, VatReturn.date_to)
+    ).all()
+
+
+def lock_cash_basis_company(session: Session, company_id: int) -> None:
+    """Festhalten, Ausgleich und Storno laufen bei Istversteuerung je Gesellschaft nacheinander.
+
+    Das Festhalten rechnet aus Zahlungen, und Ausgleich und Storno lesen die festgehaltenen
+    Zeiträume; gleichzeitig ginge eine Zahlung oder ein Storno in keiner Meldung auf. Als Erstes zu
+    nehmen, noch vor dem Umsatz. Ohne Schlüsselsperre: Neue Verweise auf die Gesellschaft warten
+    nicht.
+    """
+    session.execute(
+        select(Company.id)
+        .where(Company.id == company_id, Company.vat_cash_basis_from.is_not(None))
+        .with_for_update(key_share=True)
+    )
+
+
+def first_unreported_day(*, session: Session, item: OpenItem, on: date) -> date:
+    """``on`` oder der erste Tag danach außerhalb festgehaltener Umsatzsteuer-Zeiträume."""
+    day = on
+    for start, end, _ in _reported_periods(session, item, on):
+        if start <= day <= end:
+            day = end + timedelta(days=1)
+    return day
+
+
+def _vat_reversal_day(
+    session: Session, item: OpenItem, settlement: OpenItemSettlement
+) -> date | None:
+    """Tag des Stornos für die UStVA, wenn er nicht der echte sein kann (ADR-010).
+
+    War die Zahlung gemeldet, steht die Korrektur im nächsten offenen Zeitraum: Der gemeldete
+    bleibt, wie er ist. Fehlt die Zahlung in der Meldung ihres Zeitraums, weil sie erst danach
+    zugeordnet wurde, gibt es nichts zu korrigieren: Der Storno hebt sie an ihrem Tag auf.
+    """
+    payment_day = settlement.vat_payment_date
+    covering = [
+        created_at
+        for start, end, created_at in _reported_periods(session, item, payment_day)
+        if start <= payment_day <= end
+    ]
+    if covering and all(created_at < settlement.created_at for created_at in covering):
+        return payment_day
+    day = first_unreported_day(session=session, item=item, on=settlement.reversed_on)
+    return day if day != settlement.reversed_on else None
+
+
+def cash_basis_invoice_items(session: Session, entry: JournalEntry) -> list[OpenItem]:
+    """Die Forderungen einer Buchung, die als Rechnung nach vereinnahmten Entgelten zählt.
+
+    Entspricht dem, was die UStVA aufschiebt: Buchung im Zeitraum der Istversteuerung, mit
+    Umsatzsteuer und verknüpftem Posten.
+    """
+    company = session.get(Company, entry.company_id)
+    if (
+        company is None
+        or company.vat_cash_basis_from is None
+        or entry.entry_date < company.vat_cash_basis_from
+        or (
+            company.vat_cash_basis_until is not None
+            and entry.entry_date > company.vat_cash_basis_until
+        )
+    ):
+        return []
+    tax_accounts = company_tax_accounts(session=session, company_id=entry.company_id)
+
+    def is_output_tax(line: JournalEntryLine) -> bool:
+        if line.debit_amount == line.credit_amount:
+            return False
+        if line.tax_code_id is None:
+            account = tax_accounts.get(line.account_id)
+            return account is not None and account.kind == TAX_KIND_OUTPUT
+        tax_code = session.get(TaxCode, line.tax_code_id)
+        return tax_code.vat_account_id == line.account_id and tax_code.kind != TAX_KIND_INPUT
+
+    if not any(is_output_tax(line) for line in entry.lines):
+        return []
+    return list(
+        session.execute(
+            select(OpenItem).where(
+                OpenItem.journal_entry_id == entry.id, OpenItem.item_type == "receivable"
+            )
+        ).scalars()
+    )
+
+
 def _ensure_period_is_open(*, session: Session, period_id: int) -> None:
     locked = session.execute(select(PeriodLock.id).where(PeriodLock.period_id == period_id)).first()
     if locked:
@@ -1268,6 +1368,11 @@ def amend_journal_entry(
         raise JournalEntryCreationError(
             f"Buchung {entry.posting_number} ist eine Vortragsbuchung des Jahresabschlusses "
             "und kann nicht ergänzt werden."
+        )
+    if entry.source == SOURCE_VAT_FX_DIFFERENCE:
+        raise JournalEntryCreationError(
+            f"Buchung {entry.posting_number} gleicht die gemeldete Umsatzsteuer an und kann nicht "
+            "ergänzt werden."
         )
     reversal_number = session.execute(
         select(JournalEntry.posting_number).where(JournalEntry.reversal_of_id == entry.id)
@@ -1457,6 +1562,11 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} ist die Kursdifferenz einer Zahlung und fällt "
             "mit dem Storno dieser Zahlung weg."
         )
+    if original.source == SOURCE_VAT_FX_DIFFERENCE:
+        raise JournalEntryCreationError(
+            f"Buchung {original.posting_number} gleicht die gemeldete Umsatzsteuer an. Wird eine "
+            "Zahlung storniert, bucht der Zeitraum des Stornos die Differenz zurück."
+        )
     if original.reversal_of_id is not None:
         raise JournalEntryCreationError(
             f"Buchung {original.posting_number} ist selbst eine Stornobuchung "
@@ -1473,15 +1583,32 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} ist eine Vortragsbuchung des "
             "Jahresabschlusses und kann nicht storniert werden."
         )
+    # Nur auf oberster Ebene: Wer hier mit commit=False ankommt, hat womöglich schon ins Audit
+    # geschrieben, und die Gesellschaft kommt in der Sperrreihenfolge vor dem Audit.
+    if commit:
+        lock_cash_basis_company(session, original.company_id)
     # Die Zahlung sperren, bevor der Storno etwas anlegt, in derselben Reihenfolge wie der
     # Ausgleich offener Posten: erst die Umsätze dieser Buchung, dann sie selbst (ohne
     # Schlüsselsperre, siehe settle_open_item). Ein gleichzeitiger Ausgleich mit ihr wartet so auf
     # den Storno und sieht ihn, oder der Storno wartet und nimmt den Ausgleich mit zurück. Ohne
     # die Sperre blieb ein solcher Ausgleich an der stornierten Buchung hängen, oder beide
     # warteten aufeinander (Umsatz gegen Audit-Protokoll). Auch ein zweiter Storno wartet hier.
+    # Bei einer Rechnung nach Ist auch die Umsätze ihrer Ausgleiche und danach ihre Posten, damit
+    # die Prüfung auf Zahlungen weiter unten nicht gegen einen neuen Ausgleich läuft.
+    invoice_item_ids = [item.id for item in cash_basis_invoice_items(session, original)]
     session.execute(
         select(BankTransaction.id)
-        .where(BankTransaction.journal_entry_id == original.id)
+        .where(
+            or_(
+                BankTransaction.journal_entry_id == original.id,
+                BankTransaction.id.in_(
+                    select(OpenItemSettlement.bank_transaction_id).where(
+                        OpenItemSettlement.open_item_id.in_(invoice_item_ids),
+                        OpenItemSettlement.reversed_on.is_(None),
+                    )
+                ),
+            )
+        )
         .order_by(BankTransaction.id)
         .with_for_update()
     )
@@ -1490,6 +1617,13 @@ def reverse_journal_entry(
         .where(JournalEntry.id == original.id)
         .with_for_update(key_share=True)
     )
+    if invoice_item_ids:
+        session.execute(
+            select(OpenItem.id)
+            .where(OpenItem.id.in_(invoice_item_ids))
+            .order_by(OpenItem.id)
+            .with_for_update()
+        )
     already_reversed = session.execute(
         select(JournalEntry.posting_number).where(
             JournalEntry.reversal_of_id == original.id
@@ -1500,6 +1634,7 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} wurde bereits storniert "
             f"({already_reversed.posting_number})."
         )
+    _refuse_paid_cash_basis_invoice(session, original)
 
     original_period = session.get(Period, original.period_id)
 
@@ -1577,6 +1712,39 @@ def reverse_journal_entry(
     else:
         session.flush()
     return reversal
+
+
+def _standing_settlements(session: Session, item: OpenItem) -> list[OpenItemSettlement]:
+    return list(
+        session.execute(
+            select(OpenItemSettlement).where(
+                OpenItemSettlement.open_item_id == item.id,
+                OpenItemSettlement.reversed_on.is_(None),
+            )
+        ).scalars()
+    )
+
+
+def _refuse_paid_cash_basis_invoice(session: Session, original: JournalEntry) -> None:
+    """Bei Istversteuerung bleibt eine Rechnung stehen, solange eine gebuchte Zahlung auf ihr steht.
+
+    Die Zahlung zählt weiter; ohne Rechnung wiche das Steuerkonto dauerhaft von den Meldungen ab.
+    Sie lässt sich zuerst stornieren. Ein Ausgleich ohne eigene Buchung bewegt nichts im Hauptbuch
+    und fällt mit der Rechnung (``_release_subledgers``), ebenso die Zahlung auf dieser Buchung.
+    """
+    for item in cash_basis_invoice_items(session, original):
+        for settlement in _standing_settlements(session, item):
+            payment_entry_id = settlement.journal_entry_id
+            if payment_entry_id is None and settlement.bank_transaction_id is not None:
+                payment_entry_id = session.get(
+                    BankTransaction, settlement.bank_transaction_id
+                ).journal_entry_id
+            if payment_entry_id is not None and payment_entry_id != original.id:
+                raise JournalEntryCreationError(
+                    f"Auf Posten {item.reference} steht eine Zahlung, die bei Istversteuerung "
+                    "schon zählt. Bitte zuerst die Zahlung stornieren, dann Buchung "
+                    f"{original.posting_number}."
+                )
 
 
 def _sales_invoice_number(session: Session, journal_entry_id: int) -> str | None:
@@ -1723,6 +1891,9 @@ def _release_subledgers(
     for settlement in settlements:
         # Nie vor dem Ausgleich selbst: Sonst bliebe die Zahlung im Zeitraum dazwischen stehen.
         settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
+        settlement.vat_reversed_on = _vat_reversal_day(
+            session, session.get(OpenItem, settlement.open_item_id), settlement
+        )
         settlement.reversal_journal_entry_id = reversal.id
         restored_by_item[settlement.open_item_id] = (
             restored_by_item.get(settlement.open_item_id, Decimal("0.00")) + settlement.amount
@@ -1776,11 +1947,55 @@ def _release_subledgers(
         )
         released.setdefault("open_items", []).append(item.id)
 
-    # OPOS: Mit der Eingangsrechnung entfällt ihre Schuld, sonst stünde sie weiter im Zahllauf.
-    # Forderungen schließt das Storno der Ausgangsrechnung selbst.
     # Erst hier importiert: open_items nutzt dieses Modul.
     from app.services.open_items import close_open_item_by_cancellation
 
+    # Rechnung nach Ist storniert: Was jetzt noch auf ihr steht, hat keine eigene Buchung und nichts
+    # im Hauptbuch (siehe ``_refuse_paid_cash_basis_invoice``). Es fällt mit ihr, sonst zählte es
+    # weiter, und ihr Posten schließt, sonst bliebe er offen und ginge in die Bewertung ein. Die
+    # Ausgangsrechnung schließt ihren Posten selbst.
+    is_sales_invoice = _sales_invoice_number(session, original.id) is not None
+    for item in cash_basis_invoice_items(session, original):
+        for settlement in _standing_settlements(session, item):
+            settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
+            settlement.reversal_journal_entry_id = reversal.id
+            settlement.vat_reversed_on = _vat_reversal_day(session, item, settlement)
+            transaction = (
+                session.get(BankTransaction, settlement.bank_transaction_id)
+                if settlement.bank_transaction_id is not None
+                else None
+            )
+            # Bleibt ein anderer Ausgleich mit diesem Umsatz stehen, bleibt er zugeordnet.
+            if (
+                transaction is not None
+                and transaction.status == "matched"
+                and session.execute(
+                    select(OpenItemSettlement.id).where(
+                        OpenItemSettlement.bank_transaction_id == transaction.id,
+                        OpenItemSettlement.reversed_on.is_(None),
+                    )
+                ).first()
+                is None
+            ):
+                transaction.status = "open"
+                if item.bank_transaction_id == transaction.id:
+                    item.bank_transaction_id = None
+            log_audit_event(
+                **audit_common,
+                entity_type="open_item",
+                entity_id=str(item.id),
+                action="settlement_voided",
+                payload={**link, "settlement_id": settlement.id},
+            )
+            released.setdefault("open_item_settlements", []).append(settlement.id)
+        if not is_sales_invoice:
+            close_open_item_by_cancellation(
+                session=session, item=item, reversal_entry=reversal, changed_by=changed_by
+            )
+            released.setdefault("cancelled_open_items", []).append(item.id)
+
+    # OPOS: Mit der Eingangsrechnung entfällt ihre Schuld, sonst stünde sie weiter im Zahllauf.
+    # Forderungen schließt das Storno der Ausgangsrechnung selbst.
     invoice_items = (
         session.execute(
             select(OpenItem).where(
