@@ -490,6 +490,12 @@ def settle_open_item(
     settled_foreign = paid_amount = fx_difference = None
     fx_entry = None
     if item.foreign_currency_code:
+        bank_limit = _euro_bank_limit(
+            session,
+            item=item,
+            bank_transaction=bank_transaction,
+            payment_entry_id=payment_entry_id,
+        )
         settled_foreign, settlement_amount, paid_amount = _foreign_settlement(
             session=session,
             item=item,
@@ -500,6 +506,8 @@ def settle_open_item(
             payment_entry_id=payment_entry_id,
             settlement_date=settlement_date,
         )
+        if bank_limit is not None and paid_amount > bank_limit.left:
+            raise OpenItemError(bank_limit.exceeded)
         fx_difference = paid_amount - settlement_amount
         # Nur was die Zahlung auf das Sammelkonto gebracht hat, lässt dort eine Differenz stehen.
         if _payment_reaches_item_account(
@@ -1089,6 +1097,36 @@ def _payment_limit(
         if limit is not None:
             limits.append(limit)
     return min(limits, key=lambda limit: limit.left, default=None)
+
+
+def _euro_bank_limit(
+    session: Session,
+    *,
+    item: OpenItem,
+    bank_transaction: BankTransaction | None,
+    payment_entry_id: int | None,
+) -> _PaymentLimit | None:
+    """Rest des Bankumsatzes in Firmenwährung, mit dem ein Posten in Fremdwährung bezahlt wird.
+
+    Über die Buchung des Umsatzes zugeordnet ist es derselbe Umsatz. Hängen mehrere Umsätze an
+    der Buchung, ist sie nur verknüpft und keiner von ihnen ihre Zahlung. Ein Umsatz in
+    Fremdwährung begrenzt über seinen Fremdbetrag (``_foreign_payment_source``).
+    """
+    if bank_transaction is None and payment_entry_id is not None:
+        booked = list(
+            session.execute(
+                select(BankTransaction).where(BankTransaction.journal_entry_id == payment_entry_id)
+            ).scalars()
+        )
+        bank_transaction = booked[0] if len(booked) == 1 else None
+    if bank_transaction is None or bank_transaction.currency_code != item.currency_code:
+        return None
+    return _bank_transaction_limit(
+        session,
+        item=item,
+        bank_transaction=bank_transaction,
+        entry_ids={bank_transaction.journal_entry_id, payment_entry_id} - {None},
+    )
 
 
 def _bank_transaction_limit(

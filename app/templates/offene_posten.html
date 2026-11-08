@@ -257,7 +257,7 @@
                               <label for="settle-rate-{{ item.id }}">Kurs <span class="muted">(je 1 €, gebucht {{ item.exchange_rate | kurs }})</span></label>
                               <input id="settle-rate-{{ item.id }}" name="exchange_rate" inputmode="decimal" />
                             </div>
-                            <p class="field-full muted small">Ein gebuchter Umsatz in {{ item.foreign_currency_code }} liefert die Beträge selbst, ein Umsatz muss dafür zuerst gebucht sein. Bei einer Zahlung in € bitte {{ item.foreign_currency_code }} und € oder den Kurs angeben. Ohne Zahlung gilt der ganze offene Betrag zum Kurs oder Tageskurs.</p>
+                            <p class="field-full muted small">Ein gebuchter Umsatz in {{ item.foreign_currency_code }} liefert die Beträge selbst, ein Umsatz muss dafür zuerst gebucht sein. Bei einer Zahlung in € bitte {{ item.foreign_currency_code }} und € oder den Kurs angeben; ein Umsatz in € deckt alle Posten zusammen nur bis zu seinem Betrag. Ohne Zahlung gilt der ganze offene Betrag zum Kurs oder Tageskurs.</p>
                           {% else %}
                             <div class="field">
                               <label for="settle-amount-{{ item.id }}">Ausgleichsbetrag</label>

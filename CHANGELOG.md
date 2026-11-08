@@ -8,6 +8,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Offene Posten in Fremdwährung: Euro-Bankumsatz nur bis zu seinem Betrag
+- **Behoben:** Ein Euro-Bankumsatz, der nicht auf das Sammelkonto des Postens gebucht ist, ließ sich beliebig oft
+  zum Ausgleich von Posten in Fremdwährung nutzen. Jetzt belegt jeder nicht stornierte Ausgleich seinen gezahlten
+  Eurobetrag, zusammen höchstens bis zum Betrag des Umsatzes, auch gemeinsam mit Euro-Posten am selben Umsatz. Ein
+  höherer Betrag wird mit „von ihm sind noch … frei“ abgewiesen, ein ganz zugeordneter Umsatz mit „schon vollständig
+  offenen Posten zugeordnet“. Dieselbe Zahlung zählt nur einmal, ob über den Umsatz oder nur über dessen Buchung
+  zugeordnet; stornierte Ausgleiche geben ihren Teil wieder frei. Gilt in UI, REST und MCP. Umsätze in Fremdwährung
+  begrenzt weiter ihr Fremdbetrag.
+
 ### Offene Posten: Zahlungsbuchung nur bis zu ihrem Betrag
 - **Behoben:** Ein Ausgleich nur mit Ausgleichsbuchung (ohne Bankumsatz) hatte keine Obergrenze: Ohne Betrag galt der
   ganze offene Betrag, und dieselbe Buchung ließ sich auf beliebig viele Posten verteilen. Jetzt ist frei, was ihre
