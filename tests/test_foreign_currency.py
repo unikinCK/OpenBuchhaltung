@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
+from test_mcp_server import _TestClientHttp
 
 from app import create_app
 from app.auth import hash_api_token, hash_password
@@ -54,6 +55,7 @@ from app.services.journal_entries import (
     first_open_posting_date,
     reverse_journal_entry,
 )
+from app.services.mcp_server import MCPServer
 from app.services.open_items import (
     OpenItemError,
     OpenItemInput,
@@ -710,6 +712,243 @@ def test_euro_item_gets_only_what_a_foreign_item_left_of_the_bank_payment(
             changed_by="t",
             bank_transaction_id=transaction.id,
         )
+
+
+def _off_collective_payment(session, company, accounts, amount="1000.00") -> BankTransaction:
+    """Ein gebuchter Euro-Umsatz, der das Sammelkonto der Posten nicht berührt."""
+    return _booked_bank_tx(session, company, accounts, amount, "EUR", contra="8338")
+
+
+def _pay_in_euro(session, item, paid, foreign, **payment) -> OpenItem:
+    return settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        foreign_amount=Decimal(foreign),
+        amount=Decimal(paid),
+        **payment,
+    )
+
+
+def test_euro_bank_payment_off_the_collective_account_covers_only_its_amount(
+    session: Session,
+) -> None:
+    """Steht die Zahlung nicht auf dem Sammelkonto, ist der Umsatz selbst die Obergrenze."""
+    company, accounts = _seed(session)
+    first = _fx_item(session, company, accounts["1400"])
+    second = _fx_item(session, company, accounts["1400"], reference="FX-2")
+    transaction = _off_collective_payment(session, company, accounts)
+    by_transaction = {"bank_transaction_id": transaction.id}
+
+    _pay_in_euro(session, first, "600.00", "648.00", **by_transaction)
+    with pytest.raises(OpenItemError, match="noch 400.00 EUR frei"):
+        _pay_in_euro(session, second, "400.01", "432.00", **by_transaction)
+    # Auch nicht ein zweites Mal auf demselben Posten.
+    with pytest.raises(OpenItemError, match="noch 400.00 EUR frei"):
+        _pay_in_euro(session, first, "500.00", "432.00", **by_transaction)
+    _pay_in_euro(session, second, "400.00", "432.00", **by_transaction)
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _pay_in_euro(session, second, "0.01", "1.08", **by_transaction)
+
+    session.refresh(first)
+    session.refresh(second)
+    assert first.foreign_open_amount == Decimal("432.00")
+    assert second.foreign_open_amount == Decimal("648.00")
+    rows = session.execute(select(OpenItemSettlement)).scalars().all()
+    assert sum(row.paid_amount for row in rows) == Decimal("1000.00")
+
+
+def test_euro_bank_payment_limit_applies_to_the_amount_from_a_rate(session: Session) -> None:
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _off_collective_payment(session, company, accounts, "900.00")
+    with pytest.raises(OpenItemError, match="noch 900.00 EUR frei"):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+            foreign_amount=Decimal("1080.00"),
+            exchange_rate=Decimal("1.08"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("first_by", "second_by"),
+    [("transaction", "entry"), ("entry", "transaction"), ("entry", "entry")],
+)
+def test_euro_bank_payment_counts_once_through_transaction_or_its_booking(
+    session: Session, first_by: str, second_by: str
+) -> None:
+    company, accounts = _seed(session)
+    first = _fx_item(session, company, accounts["1400"])
+    second = _fx_item(session, company, accounts["1400"], reference="FX-2")
+    transaction = _off_collective_payment(session, company, accounts)
+    via = {
+        "transaction": {"bank_transaction_id": transaction.id},
+        "entry": {"journal_entry_id": transaction.journal_entry_id},
+    }
+
+    _pay_in_euro(session, first, "700.00", "756.00", **via[first_by])
+    with pytest.raises(OpenItemError, match="noch 300.00 EUR frei"):
+        _pay_in_euro(session, second, "300.01", "324.00", **via[second_by])
+    _pay_in_euro(session, second, "300.00", "324.00", **via[second_by])
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _pay_in_euro(session, second, "0.01", "1.08", **via[second_by])
+
+
+def test_euro_bank_payment_is_shared_with_euro_items(session: Session) -> None:
+    """Posten in Fremdwährung und Euro-Posten belegen denselben Umsatz."""
+    company, accounts = _seed(session)
+    fx_item = _fx_item(session, company, accounts["1400"])
+    euro_first = _euro_item(session, company, accounts["1400"], "500.00")
+    euro_second = _euro_item(session, company, accounts["1400"], "500.00", reference="EUR-2")
+    transaction = _off_collective_payment(session, company, accounts)
+    by_transaction = {"bank_transaction_id": transaction.id}
+
+    settle_open_item(
+        session=session, open_item_id=euro_first.id, changed_by="t", **by_transaction
+    )
+    with pytest.raises(OpenItemError, match="noch 500.00 EUR frei"):
+        _pay_in_euro(session, fx_item, "500.01", "540.00", **by_transaction)
+    _pay_in_euro(session, fx_item, "400.00", "432.00", **by_transaction)
+    settled = settle_open_item(
+        session=session, open_item_id=euro_second.id, changed_by="t", **by_transaction
+    )
+    assert settled.open_amount == Decimal("400.00")
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _pay_in_euro(session, fx_item, "0.01", "1.08", **by_transaction)
+
+
+def test_reversed_settlement_frees_the_euro_bank_payment(session: Session) -> None:
+    company, accounts = _seed(session)
+    first = _fx_item(session, company, accounts["1400"])
+    second = _fx_item(session, company, accounts["1400"], reference="FX-2")
+    transaction = _off_collective_payment(session, company, accounts)
+    _pay_in_euro(session, first, "1000.00", "1080.00", bank_transaction_id=transaction.id)
+    # Ein verbrauchter Umsatz wird genannt, bevor nach den Beträgen gefragt wird.
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        settle_open_item(
+            session=session,
+            open_item_id=second.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2026, 3, 25),
+        changed_by="t",
+    )
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=accounts["8338"].id,
+        changed_by="t",
+    )
+    settled = _pay_in_euro(
+        session, second, "1000.00", "1080.00", bank_transaction_id=transaction.id
+    )
+    assert settled.status == "settled"
+    session.refresh(first)
+    assert first.status == "open"
+
+
+def test_transactions_sharing_a_linked_entry_keep_their_own_limits(session: Session) -> None:
+    """Eine Buchung als „Ausgleichsbuchung“ zweier Umsätze legt deren Beträge nicht zusammen."""
+    company, accounts = _seed(session)
+    first = _fx_item(session, company, accounts["1400"])
+    second = _fx_item(session, company, accounts["1400"], reference="FX-2")
+    invoice = _book(session, company, accounts["1400"], accounts["8338"], "2000.00")
+    small = _bank_tx(session, company, accounts["1200"], "400.00", "EUR")
+    large = _bank_tx(session, company, accounts["1200"], "600.00", "EUR")
+
+    for item, transaction, paid, foreign in (
+        (first, small, "400.00", "432.00"),
+        (second, large, "600.00", "648.00"),
+    ):
+        _pay_in_euro(
+            session,
+            item,
+            paid,
+            foreign,
+            bank_transaction_id=transaction.id,
+            journal_entry_id=invoice.id,
+        )
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _pay_in_euro(
+            session,
+            first,
+            "0.01",
+            "1.08",
+            bank_transaction_id=small.id,
+            journal_entry_id=invoice.id,
+        )
+
+
+def test_bank_payment_in_foreign_currency_is_not_limited_in_euro(session: Session) -> None:
+    """Der Betrag eines Umsatzes in USD ist kein Eurobetrag; hier gilt der Fremdbetrag."""
+    company, accounts = _seed(session)
+    item = _fx_item(session, company, accounts["1400"])
+    transaction = _booked_usd_payment(session, company, accounts, "1080.00", rate="0.90")
+    settled = _pay_in_euro(
+        session, item, "1200.00", "1080.00", bank_transaction_id=transaction.id
+    )
+    assert settled.status == "settled"
+
+
+def test_used_euro_bank_payment_is_refused_in_api_mcp_and_ui(tmp_path: Path) -> None:
+    app, company_id, _, _ = _api_app(tmp_path)
+    with app.extensions["db_session_factory"]() as db:
+        company = db.get(Company, company_id)
+        accounts = {
+            account.code: account
+            for account in db.execute(select(Account).where(Account.company_id == company_id))
+            .scalars()
+            .all()
+        }
+        first_id = _fx_item(db, company, accounts["1400"]).id
+        second_id = _fx_item(db, company, accounts["1400"], reference="FX-2").id
+        transaction_id = _off_collective_payment(db, company, accounts).id
+
+    client = app.test_client()
+    part = {"bank_transaction_id": transaction_id, "foreign_amount": "648.00", "amount": "600.00"}
+    too_much = {**part, "amount": "400.01"}
+    rest = {**part, "amount": "400.00"}
+    assert (
+        client.post(f"/api/v1/open-items/{first_id}/settle", json=part, headers=WRITER).status_code
+        == 200
+    )
+    refused = client.post(f"/api/v1/open-items/{second_id}/settle", json=too_much, headers=WRITER)
+    assert refused.status_code == 422
+    assert "noch 400.00 EUR frei" in refused.get_json()["error"]
+
+    server = MCPServer(http=_TestClientHttp(client, token="obk_buchhalter-fx"))
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call"}
+    tool = {"name": "settle_open_item", "arguments": {"open_item_id": second_id, **too_much}}
+    result = server.handle({**call, "params": tool})["result"]
+    assert result["isError"] is True
+    assert "noch 400.00 EUR frei" in result["content"][0]["text"]
+
+    assert (
+        client.post(
+            "/auth/login", data={"username": "buchhalter", "password": "geheim123"}
+        ).status_code
+        == 302
+    )
+    page = client.post(
+        f"/offene-posten/{second_id}/ausgleichen",
+        data={"company_id": company_id, **too_much},
+        follow_redirects=True,
+    )
+    assert "noch 400.00 EUR frei" in page.get_data(as_text=True)
+
+    settled = client.post(f"/api/v1/open-items/{second_id}/settle", json=rest, headers=WRITER)
+    assert settled.status_code == 200
+    refused = client.post(f"/api/v1/open-items/{second_id}/settle", json=rest, headers=WRITER)
+    assert refused.status_code == 422
+    assert "schon vollständig" in refused.get_json()["error"]
 
 
 def test_unbooked_bank_transaction_is_refused(session: Session) -> None:

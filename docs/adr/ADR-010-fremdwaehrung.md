@@ -34,8 +34,9 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
    Sammelkonto belegen nur Posten gleicher Währung und gleichen Partners; auf der Geldseite belegen alle Posten
    dasselbe Geld, andere Währungen anteilig. Ein Bankumsatz muss vor dem Ausgleich gebucht sein, sonst stünde die
    Zahlung nicht im Hauptbuch. Steht die Zahlung auf dem Sammelkonto, lässt sich einem Posten in Fremdwährung nicht
-   mehr zuordnen, als sie dort bewegt hat. Ein nicht zugeordneter Rest bleibt sichtbar stehen; das kann auch ein zu
-   niedrig angegebener Kurs sein.
+   mehr zuordnen, als sie dort bewegt hat. Ein Bankumsatz in Euro trägt alle Posten zusammen nur bis zu seinem Betrag,
+   wohin er auch gebucht ist; jeder Ausgleich belegt seinen gezahlten Eurobetrag. Ein nicht zugeordneter Rest bleibt
+   sichtbar stehen; das kann auch ein zu niedrig angegebener Kurs sein.
 
    **Datum:** Wird dieselbe Zahlung nach einem Storno neu zugeordnet, auch auf einen anderen Posten, liegt der neue
    Ausgleich nie vor dem Storno, sonst stünde sie rückwirkend doppelt in einem gemeldeten Zeitraum und am Stichtag.

@@ -4732,7 +4732,7 @@ TOOLS: list[ToolSpec] = [
             "noch freier Rest: Eine Zahlung deckt alle Posten zusammen nur bis zu ihrem Betrag. "
             "Bei einem Posten in Fremdwährung gilt das nur ohne "
             "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
-            "Bankumsatz muss zuerst gebucht sein."
+            "Bankumsatz muss zuerst gebucht sein und deckt zusammen nur seinen Euro-Betrag."
         ),
         input_schema={
             "type": "object",
