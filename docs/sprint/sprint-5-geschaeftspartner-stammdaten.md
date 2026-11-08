@@ -1,7 +1,7 @@
 # Sprint 5a – Geschäftspartner-Stammdaten (Debitoren/Kreditoren) – Detailplan
 
-- **Stand:** 2026-11-03; Entscheidungen aus Abschnitt 9 angenommen (ADR-002),
-  PR 1 (Schritte 0–2), PR 2 (Schritte 3–4) und PR 4 (Schritte 6–7) umgesetzt
+- **Stand:** 2026-11-05; Entscheidungen aus Abschnitt 9 angenommen (ADR-002),
+  PR 1 (Schritte 0–2), PR 2 (Schritte 3–4), PR 3 (Schritt 5) und PR 4 (Schritte 6–7) umgesetzt
 - **Bezug:** Projektreview 2026-09-19, Feature #1 „Kunden-/Lieferantenstamm“
   (Phase 5, Sprint 5 – Produkt-Basis). Berührt #5 (Eingangsrechnung → OPOS),
   F3 (DATEV-Export) und F8 (OPOS/Zahllauf).
@@ -356,26 +356,31 @@ anderen Konten erscheinen höchstens als Buchungsliste des Partners.
   Dashboard-Kachel) verlinkt auf den Partner.
 
 ### Schritt 5 – Partnererkennung in automatischen Quellen (M–L)
-- [ ] E-Rechnung-Import:
-  - Zusätzlich parsen: USt-IdNr (BT-31), Anschrift, IBAN (BT-84) und
-    Fälligkeit (BT-9).
-  - Partner suchen in dieser Reihenfolge: USt-IdNr, IBAN, normalisierter Name.
+Bei der Umsetzung festgelegt: Nur eine harte Kennung ohne Widerspruch ordnet zu. Treffen
+USt-IdNr. und IBAN verschiedene Partner oder nennt die Quelle den Namen eines anderen bekannten
+Partners, bleibt es mehrdeutig, statt der Reihenfolge zu folgen: Das ist das Muster einer gefälschten
+Rechnung mit fremder Bankverbindung.
+
+- [x] E-Rechnung-Import:
+  - Zusätzlich parsen: USt-IdNr (BT-31), Steuernummer (BT-32), Lieferantenkennung (BT-29),
+    Anschrift, IBAN (BT-84), BIC (BT-86), Fälligkeit (BT-9) und Zahlbetrag (BT-115).
+  - Partner suchen über USt-IdNr, Steuernummer, IBAN, zuletzt den normalisierten Namen.
     Ohne Treffer: „Lieferant anlegen“ mit vorbefüllten Daten.
   - Die Kreditorzeile bekommt den Partner, und ein OPOS mit Fälligkeit wird
     angelegt. Damit ist Review #5 abgedeckt.
-- [ ] Beleg-OCR und Belegabgleich:
-  - IBAN und USt-IdNr per Regex erkennen und einen Partner vorschlagen.
+- [x] Beleg-OCR und Belegabgleich:
+  - IBAN, USt-IdNr und Steuernummer per Regex erkennen und einen Partner vorschlagen.
   - Gebucht wird auf demselben Weg wie bei der E-Rechnung.
-- [ ] Bank:
+- [x] Bank:
   - `counterparty_iban` übernehmen: aus CAMT (`RltdPties/…Acct`), aus MT940
-    (`gvc_applicant_iban`) und über einen CSV-Alias. Nicht in den Dedup-Hash.
-  - Partnervorschlag per IBAN.
-  - OPOS-Vorschlag nach Partner und Betrag.
-- [ ] Kontierungsregeln können optional einen Partner setzen.
-- [ ] E-Rechnung-Export:
+    (`?31` bzw. `gvc_applicant_iban`), aus Open Banking und über einen CSV-Alias. Nicht in den
+    Dedup-Hash.
+  - Partnervorschlag per IBAN, Partnernummer im Text und Name.
+  - OPOS-Vorschlag nach Partner oder Referenz und Betrag.
+- [x] Kontierungsregeln können optional einen Partner setzen.
+- [x] E-Rechnung-Export:
   - Der Käufer kommt aus dem Partner (Anschrift, USt-IdNr).
-  - CII um Käuferanschrift und Käufer-USt-IdNr ergänzen; heute wird nur der
-    Name geschrieben.
+  - CII schreibt Käuferanschrift und Käufer-USt-IdNr seit den Ausgangsrechnungen (ADR-006).
 
 ### Schritt 6 – DATEV (M, nach oder zusammen mit F3)
 - [x] Buchungsstapel: Eine Sammelkontozeile mit Partner wird mit der

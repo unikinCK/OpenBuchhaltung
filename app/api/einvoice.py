@@ -22,7 +22,7 @@ from app.api.helpers import (
 )
 from app.auth import current_api_user
 from app.services.audit_log import log_audit_event
-from app.services.company_master_data import seller_party
+from app.services.company_master_data import partner_party, seller_party
 from app.services.document_categories import find_document_category_by_name
 from app.services.documents import document_file_metadata
 from app.services.einvoice_export import (
@@ -35,13 +35,18 @@ from app.services.einvoice_export import (
 from app.services.einvoice_import import (
     EInvoiceParseError,
     ParsedInvoice,
-    book_einvoice,
+    import_einvoice_booking,
     parse_einvoice,
     parse_rate_assignments,
+    preview_einvoice_payload,
 )
 from app.services.incoming_invoice import IncomingInvoiceError, tax_splits_audit
-from app.services.journal_entries import JournalEntryCreationError, parse_decimal
-from domain.models import Document
+from app.services.journal_entries import (
+    JournalEntryCreationError,
+    parse_decimal,
+    resolve_partner_reference,
+)
+from domain.models import BusinessPartner, Document
 from domain.services.journal_entry_validation import JournalEntryValidationError
 
 ALLOWED_EINVOICE_MIME_TYPES = {"application/xml", "text/xml", "application/octet-stream"}
@@ -56,6 +61,12 @@ def _invoice_dict(invoice: ParsedInvoice) -> dict[str, object]:
         "invoice_number": invoice.invoice_number,
         "issue_date": invoice.issue_date.isoformat(),
         "seller_name": invoice.seller_name,
+        "seller_vat_id": invoice.seller_vat_id or None,
+        "seller_tax_number": invoice.seller_tax_number or None,
+        "seller_iban": invoice.seller_iban or None,
+        "seller_bic": invoice.seller_bic or None,
+        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+        "amount_due": str(invoice.amount_due),
         "currency_code": invoice.currency_code,
         "net_total": str(invoice.net_total),
         "tax_total": str(invoice.tax_total),
@@ -85,6 +96,15 @@ def _form_json(raw: str | None) -> object:
         return raw
 
 
+def _flag(value: object, default: bool) -> bool:
+    """Schalter aus JSON oder Multipart: fehlend = Standard, ``0``/``false`` = aus."""
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "nein", "no"}
+
+
 def _load_import_payload():
     if request.files:
         uploaded_file = request.files.get("einvoice_xml")
@@ -98,6 +118,10 @@ def _load_import_payload():
                 "tax_code_id": request.form.get("tax_code_id", type=int),
                 "cost_center_id": request.form.get("cost_center_id", type=int),
                 "profit_center_id": request.form.get("profit_center_id", type=int),
+                "partner_id": request.form.get("partner_id", type=int),
+                "partner_number": request.form.get("partner_number"),
+                "auto_partner": request.form.get("auto_partner"),
+                "create_open_item": request.form.get("create_open_item"),
                 "tax_lines": _form_json(request.form.get("tax_lines")),
                 "file_name": secure_filename(uploaded_file.filename),
                 "mime_type": uploaded_file.mimetype or "application/xml",
@@ -123,6 +147,10 @@ def _load_import_payload():
             "tax_code_id": payload.get("tax_code_id"),
             "cost_center_id": payload.get("cost_center_id"),
             "profit_center_id": payload.get("profit_center_id"),
+            "partner_id": payload.get("partner_id"),
+            "partner_number": payload.get("partner_number"),
+            "auto_partner": payload.get("auto_partner"),
+            "create_open_item": payload.get("create_open_item"),
             "tax_lines": payload.get("tax_lines"),
             "file_name": secure_filename((payload.get("file_name") or "").strip()),
             "mime_type": payload.get("mime_type") or "application/xml",
@@ -188,6 +216,38 @@ def _parse_export_lines(payload: dict[str, object]) -> list[InvoiceLine]:
     return lines
 
 
+@api_bp.post("/einvoices/preview")
+def preview_einvoice_via_api():
+    """Liest eine E-Rechnung und erkennt den Lieferanten, ohne etwas zu buchen."""
+    upload, error_response, status_code = _load_import_payload()
+    if error_response is not None:
+        return error_response, status_code
+    try:
+        company_id = int(upload["company_id"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id is required."}), 400
+    validation_error = _validate_xml_upload(
+        file_name=upload["file_name"], mime_type=upload["mime_type"], content=upload["content"]
+    )
+    if validation_error:
+        return jsonify({"error": validation_error}), 422
+    try:
+        invoice = parse_einvoice(upload["content"])
+    except EInvoiceParseError as exc:
+        return jsonify({"error": str(exc)}), 422
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        return jsonify(
+            {
+                "invoice": _invoice_dict(invoice),
+                **preview_einvoice_payload(session, company_id, invoice),
+            }
+        )
+
+
 @api_bp.post("/einvoices/import")
 def import_einvoice_via_api():
     if not api_can_write():
@@ -213,6 +273,9 @@ def import_einvoice_via_api():
             int(upload["profit_center_id"])
             if upload.get("profit_center_id") not in (None, "")
             else None
+        )
+        partner_id = (
+            int(upload["partner_id"]) if upload.get("partner_id") not in (None, "") else None
         )
     except (TypeError, ValueError):
         return jsonify({"error": "company_id and account IDs are required."}), 400
@@ -242,7 +305,7 @@ def import_einvoice_via_api():
             return jsonify({"error": "Company not found."}), 404
 
         try:
-            entry, tax_splits = book_einvoice(
+            booking = import_einvoice_booking(
                 session=session,
                 company=company,
                 invoice=invoice,
@@ -252,8 +315,17 @@ def import_einvoice_via_api():
                 assignments=assignments,
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
+                partner_id=resolve_partner_reference(
+                    session=session,
+                    company_id=company.id,
+                    partner_id=partner_id,
+                    partner_number=upload.get("partner_number"),
+                ),
+                auto_partner=_flag(upload.get("auto_partner"), True),
+                create_open_item=_flag(upload.get("create_open_item"), True),
                 changed_by=_api_changed_by(),
             )
+            entry, tax_splits = booking.entry, booking.tax_splits
         except IncomingInvoiceError as exc:
             return incoming_invoice_error_response(exc)
         except (JournalEntryCreationError, JournalEntryValidationError) as exc:
@@ -306,6 +378,9 @@ def import_einvoice_via_api():
                 "document_date": document.document_date.isoformat(),
                 "cost_center_id": cost_center_id,
                 "profit_center_id": profit_center_id,
+                "partner_id": booking.partner_id,
+                "partner_match_status": booking.partner_match.status,
+                "open_item_id": booking.open_item.id if booking.open_item else None,
             },
         )
         session.commit()
@@ -316,6 +391,10 @@ def import_einvoice_via_api():
                     "posting_number": entry.posting_number,
                     "document_id": document.id,
                     "invoice": _invoice_dict(invoice),
+                    "partner_id": booking.partner_id,
+                    "partner_match": booking.partner_match.as_dict(),
+                    "open_item_id": booking.open_item.id if booking.open_item else None,
+                    "warnings": booking.warnings,
                 }
             ),
             201,
@@ -338,7 +417,15 @@ def export_einvoice_via_api():
 
     invoice_number = str(payload.get("invoice_number") or "").strip()
     buyer = _party_from_payload("buyer", payload)
-    if not invoice_number or not buyer.name:
+    try:
+        buyer_partner_id = (
+            int(payload["buyer_partner_id"])
+            if payload.get("buyer_partner_id") not in (None, "")
+            else None
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "buyer_partner_id must be a number."}), 400
+    if not invoice_number or (not buyer.name and buyer_partner_id is None):
         return jsonify({"error": "invoice_number and buyer_name are required."}), 400
 
     session_factory = get_session_factory()
@@ -348,6 +435,11 @@ def export_einvoice_via_api():
             return jsonify({"error": "Company not found."}), 404
         seller = seller_party(company)
         currency_code = company.currency_code
+        if buyer_partner_id is not None:
+            partner = session.get(BusinessPartner, buyer_partner_id)
+            if partner is None or partner.company_id != company.id:
+                return jsonify({"error": "Buyer partner not found."}), 404
+            buyer = partner_party(partner, overrides=buyer)
 
     try:
         invoice = OutgoingInvoice(

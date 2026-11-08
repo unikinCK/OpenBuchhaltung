@@ -22,6 +22,7 @@ from app.services.receipt_proposals import booking_accounts
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import VERBINDLICHKEITEN_LUL, standard_account_id
 from app.web.blueprint import main_bp
+from app.web.einvoice import active_partners
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -174,6 +175,9 @@ def receipt_matching_page():
             selected_company_id=selected_company_id,
             unmatched_documents=unmatched_documents,
             jobs_by_document=jobs_by_document,
+            partners=(
+                active_partners(session, selected_company_id) if selected_company_id else []
+            ),
             open_suggestions=open_suggestions,
             decided_suggestions=decided_suggestions,
             entry_options=entry_options,
@@ -280,6 +284,7 @@ def receipt_matching_book(suggestion_id: int):
     cost_center_id = request.form.get("cost_center_id", type=int)
     profit_center_id = request.form.get("profit_center_id", type=int)
     entry_date_raw = request.form.get("entry_date", "").strip()
+    due_date_raw = request.form.get("due_date", "").strip()
     description = request.form.get("description", "").strip()
 
     if not company_id or not expense_account_id or not creditor_account_id:
@@ -297,8 +302,9 @@ def receipt_matching_book(suggestion_id: int):
 
     try:
         entry_date = date.fromisoformat(entry_date_raw) if entry_date_raw else None
+        due_date = date.fromisoformat(due_date_raw) if due_date_raw else None
     except ValueError:
-        flash("Ungültiges Buchungsdatum.", "error")
+        flash("Ungültiges Buchungs- oder Fälligkeitsdatum.", "error")
         return redirect(url_for("main.receipt_matching_page", company_id=company_id))
 
     session_factory = get_session_factory()
@@ -324,8 +330,12 @@ def receipt_matching_book(suggestion_id: int):
                 cost_center_id=cost_center_id,
                 profit_center_id=profit_center_id,
                 partner_id=partner_id,
+                # Die Maske zeigt den Vorschlag: Leer heißt dort bewusst ohne Partner.
+                use_suggested_partner="partner_id" not in request.form,
                 tax_splits=tax_splits,
                 tip_amount=tip_amount,
+                create_open_item=not request.form.get("skip_open_item"),
+                due_date=due_date,
             )
         except (
             ReceiptMatchError,

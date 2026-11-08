@@ -38,6 +38,7 @@ from app.services.journal_entries import (
     JournalLineInput,
     create_journal_entry,
 )
+from app.services.partner_identifiers import clean_iban
 from app.services.push import notify_bank_transactions
 from app.services.standard_accounts import GELDTRANSIT, find_standard_account
 from domain.models import (
@@ -63,6 +64,19 @@ CSV_FIELD_ALIASES = {
         "auftraggeber",
         "empfänger",
         "beguenstigter/zahlungspflichtiger",
+    ),
+    # Eine bloße Spalte „IBAN“ kann auch das eigene Konto sein; die Erkennung ignoriert es dann.
+    "counterparty_iban": (
+        "counterparty_iban",
+        "counterparty iban",
+        "iban zahlungsbeteiligter",
+        "iban gegenkonto",
+        "gegenkonto iban",
+        "gegen-iban",
+        "kontonummer/iban",
+        "empfänger iban",
+        "auftraggeber iban",
+        "iban",
     ),
 }
 DATE_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y")
@@ -227,6 +241,7 @@ def import_bank_items(
                 currency_code=item.currency_code or company.currency_code,
                 purpose=purpose,
                 counterparty=counterparty,
+                counterparty_iban=item.counterparty_iban,
                 bank_reference=item.bank_reference,
                 dedup_hash=dedup_hash,
             )
@@ -372,6 +387,7 @@ def _generic_csv_items(reader: csv.DictReader) -> Iterable[StatementItem]:
             amount=amount,
             purpose=row["purpose"],
             counterparty=row.get("counterparty") or None,
+            counterparty_iban=clean_iban(row.get("counterparty_iban")),
         )
 
 
@@ -442,6 +458,7 @@ def _finom_items(reader: csv.DictReader) -> Iterable[StatementItem]:
             counterparty=counterparty,
             currency_code=row.get("zahlungswährung", "").upper() or None,
             bank_reference=row.get("transaktions-id", "")[:MAX_REFERENCE_LENGTH] or None,
+            counterparty_iban=clean_iban(row.get("counterparty iban")),
         )
 
 
@@ -866,6 +883,16 @@ def _reassign(
     Umgliederungsbuchung (altes Bankkonto an neues) mitgezogen — atomar mit
     dem Umzug.
     """
+    # Alle Umsätze vorab sperren, nach ID wie beim Ausgleich offener Posten, bevor der erste
+    # Eintrag im Audit-Protokoll entsteht. Sonst warteten ein gleichzeitiger Ausgleich mit einem
+    # der späteren Umsätze und das Umhängen aufeinander. Die Objekte werden dabei aufgefrischt.
+    session.execute(
+        select(BankTransaction)
+        .where(BankTransaction.id.in_([transaction.id for transaction in transactions]))
+        .order_by(BankTransaction.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     target = _resolve_bank_account(
         session=session, company_id=company_id, bank_account_id=bank_account_id
     )
@@ -1151,15 +1178,25 @@ def book_transaction(
     profit_center_id: int | None = None,
     partner_id: int | None = None,
     exchange_rate: Decimal | None = None,
+    commit: bool = True,
 ) -> BankTransaction:
     """Erzeugt aus einem offenen Bankumsatz eine Buchung (Bankkonto gegen Gegenkonto).
 
     ``partner_id`` ist der Geschäftspartner der Buchung: Er steht auf Bank- und
     Gegenkontozeile, nicht auf der Steuerzeile (``apply_entry_partner``).
     Ein Umsatz in Fremdwährung wird zum ``exchange_rate`` oder zum Tageskurs umgerechnet; der
-    Fremdbetrag steht auf der Bankzeile (ADR-010).
+    Fremdbetrag steht auf der Bankzeile (ADR-010). Mit ``commit=False`` committet der Aufrufer,
+    etwa zusammen mit dem Ausgleich eines offenen Postens.
     """
-    transaction = session.get(BankTransaction, transaction_id)
+    # Den Umsatz sperren, bevor die Buchung (und mit ihr der Eintrag im Audit-Protokoll) entsteht,
+    # wie beim Ausgleich offener Posten (settle_open_item). Sonst warteten ein gleichzeitiger
+    # Ausgleich mit diesem Umsatz und das Buchen aufeinander.
+    transaction = session.execute(
+        select(BankTransaction)
+        .where(BankTransaction.id == transaction_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     if transaction is None:
         raise BankImportError("Bankumsatz nicht gefunden.")
     if transaction.status != "open":
@@ -1281,8 +1318,11 @@ def book_transaction(
             "partner_id": partner_id,
         },
     )
-    session.commit()
-    session.refresh(transaction)
+    if commit:
+        session.commit()
+        session.refresh(transaction)
+    else:
+        session.flush()
     return transaction
 
 

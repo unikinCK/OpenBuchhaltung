@@ -1406,9 +1406,6 @@ def save_vat_return(
             + ", ".join(f"{code} {format_rate_month(month)}" for code, month in missing_rates)
             + ". Bitte unter Fremdwährung abrufen oder erfassen, dann festhalten."
         )
-    for event in details.foreign_payments:
-        if event.settlement.vat_rate is None:
-            event.settlement.vat_rate = event.rate
     fx_entry = _post_vat_fx_difference(
         session=session,
         company=company,
@@ -1455,6 +1452,10 @@ def save_vat_return(
             "fx_journal_entry_id": vat_return.fx_journal_entry_id,
         },
     )
+    # Erst nach dem Audit-Eintrag ändern: Auch der Storno schreibt ins Audit und dann am Ausgleich.
+    for event in details.foreign_payments:
+        if event.settlement.vat_rate is None:
+            event.settlement.vat_rate = event.rate
     session.commit()
     session.refresh(vat_return)
     return vat_return

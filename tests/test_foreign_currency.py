@@ -668,6 +668,50 @@ def test_euro_bank_payment_of_foreign_item_needs_both_amounts(session: Session) 
     assert _balance(session, accounts["1400"]) == Decimal("0.00")
 
 
+def test_euro_item_gets_only_what_a_foreign_item_left_of_the_bank_payment(
+    session: Session,
+) -> None:
+    """Ein Posten in Fremdwährung belegt am Umsatz seinen gezahlten Betrag in Euro."""
+    company, accounts = _seed(session)
+    _book(session, company, accounts["1400"], accounts["8338"], "1500.00", day=date(2026, 3, 3))
+    item = _fx_item(session, company, accounts["1400"])
+    euro_item = create_open_item(
+        session=session,
+        payload=OpenItemInput(
+            company_id=company.id,
+            account_id=accounts["1400"].id,
+            item_type="receivable",
+            reference="EUR-1",
+            entry_date=date(2026, 3, 3),
+            amount=Decimal("500.00"),
+            changed_by="t",
+        ),
+    )
+    transaction = _booked_bank_tx(session, company, accounts, "1010.00", "EUR")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+        foreign_amount=Decimal("648.00"),
+        amount=Decimal("600.00"),
+    )
+    settled = settle_open_item(
+        session=session,
+        open_item_id=euro_item.id,
+        changed_by="t",
+        bank_transaction_id=transaction.id,
+    )
+    assert settled.open_amount == Decimal("90.00")
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        settle_open_item(
+            session=session,
+            open_item_id=euro_item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+
+
 def test_unbooked_bank_transaction_is_refused(session: Session) -> None:
     """Sonst stünde die Zahlung nie im Hauptbuch und die Differenz bliebe ungebucht."""
     company, accounts = _seed(session)

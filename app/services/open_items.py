@@ -388,7 +388,32 @@ def settle_open_item(
     Währung des Postens (siehe ``_foreign_settlement``). Die Differenz zum Buchwert ist der
     Kursgewinn oder -verlust; gebucht wird sie, wenn die Zahlung auf dem Sammelkonto steht, im
     Zeitraum des Zahlungsdatums oder im nächsten offenen.
+
+    Ein Bankumsatz oder eine Zahlungsbuchung darf mehrere Posten bezahlen, zusammen aber nur bis zu
+    ihrem Betrag; was stornierte Ausgleiche belegt hatten, ist wieder frei. Dieselbe Zahlung zählt
+    dabei nur einmal, ob sie über den Umsatz oder über dessen Buchung zugeordnet wird.
     """
+    # Erst die Zahlung sperren, dann den Posten: den Umsatz, danach die Buchungen nach ihrer ID,
+    # in derselben Reihenfolge wie der Storno (reverse_journal_entry). Zwei Ausgleiche oder ein
+    # Ausgleich und ein Storno derselben Zahlung laufen so nacheinander, der zweite sieht, was der
+    # erste getan hat. Die Buchung ohne Schlüsselsperre (FOR NO KEY UPDATE): Neue Verweise auf
+    # sie, etwa ein Posten zur Rechnung, warten dann nicht.
+    entry_ids = {journal_entry_id} - {None}
+    if bank_transaction_id is not None:
+        booked_entry_id = session.execute(
+            select(BankTransaction.journal_entry_id)
+            .where(BankTransaction.id == bank_transaction_id)
+            .with_for_update()
+        ).scalar()
+        if booked_entry_id is not None:
+            entry_ids.add(booked_entry_id)
+    if entry_ids:
+        session.execute(
+            select(JournalEntry.id)
+            .where(JournalEntry.id.in_(entry_ids))
+            .order_by(JournalEntry.id)
+            .with_for_update(key_share=True)
+        )
     item = session.execute(
         select(OpenItem)
         .where(OpenItem.id == open_item_id)
@@ -493,11 +518,19 @@ def settle_open_item(
                 f"Der Bankumsatz läuft in {bank_transaction.currency_code}, der Posten in "
                 f"{item.currency_code}."
             )
+        limit = _payment_limit(
+            session,
+            item=item,
+            bank_transaction=bank_transaction,
+            payment_entry_id=payment_entry_id,
+        )
         settlement_amount = _settlement_amount(
             explicit_amount=amount,
-            bank_transaction=bank_transaction,
+            payment_left=limit.left if limit is not None else None,
             open_amount=item.open_amount,
         )
+        if limit is not None and settlement_amount > limit.left:
+            raise OpenItemError(limit.exceeded)
     if settlement_amount > item.open_amount:
         raise OpenItemError("Ausgleichsbetrag darf den offenen Betrag nicht übersteigen.")
 
@@ -699,6 +732,11 @@ def _settlements_of_payment(
         payment.append(OpenItemSettlement.journal_entry_id == entry_id)
     if bank_transaction_id is not None:
         payment.append(OpenItemSettlement.bank_transaction_id == bank_transaction_id)
+    return _active_settlements(session, *payment)
+
+
+def _active_settlements(session: Session, *payment) -> list[OpenItemSettlement]:
+    """Nicht stornierte Ausgleiche, die eine der Bedingungen erfüllen."""
     if not payment:
         return []
     return list(
@@ -732,18 +770,15 @@ def _payment_reaches_item_account(
     """Steht die Zahlung auf dem Sammelkonto? Mehr als dort gebucht lässt sich nicht zuordnen."""
     if entry_id is None:
         return False
-    lines = _collective_lines(session, item, entry_id)
-    if not lines:
-        return False
-    booked = sum((line.debit_amount + line.credit_amount for line in lines), Decimal("0.00"))
-    assigned = sum(
-        (
-            _paid_of(row)
-            for row in _settlements_of_payment(session, entry_id=entry_id, bank_transaction_id=None)
-            if _competes_for_lines(item, row.open_item, lines)
-        ),
-        Decimal("0.00"),
+    usage = _entry_usage(
+        session,
+        item=item,
+        entry_id=entry_id,
+        rows=_settlements_of_payment(session, entry_id=entry_id, bank_transaction_id=None),
     )
+    if usage is None:
+        return False
+    booked, assigned = usage
     if paid + assigned > booked:
         raise OpenItemError(
             f"Die Buchung steht nur mit {booked} {item.currency_code} auf dem Sammelkonto, davon "
@@ -751,6 +786,24 @@ def _payment_reaches_item_account(
             f"{item.currency_code} passen nicht mehr hinein."
         )
     return True
+
+
+def _entry_usage(
+    session: Session, *, item: OpenItem, entry_id: int, rows: list[OpenItemSettlement]
+) -> tuple[Decimal, Decimal] | None:
+    """Was die Buchung auf dem Sammelkonto für den Posten bucht und was ``rows`` davon belegen.
+
+    ``None``, wenn sie dort nichts bucht, womit sich der Posten bezahlen lässt.
+    """
+    lines = _collective_lines(session, item, entry_id)
+    if not lines:
+        return None
+    booked = sum((line.debit_amount + line.credit_amount for line in lines), Decimal("0.00"))
+    assigned = sum(
+        (_paid_of(row) for row in rows if _competes_for_lines(item, row.open_item, lines)),
+        Decimal("0.00"),
+    )
+    return booked, assigned
 
 
 @dataclass(slots=True)
@@ -1008,16 +1061,133 @@ def _book_fx_difference(
         raise OpenItemError(f"Kursdifferenz nicht gebucht: {exc}") from exc
 
 
+@dataclass(slots=True)
+class _PaymentLimit:
+    """Was von einer Zahlung noch frei ist, und die Meldung für einen höheren Betrag."""
+
+    left: Decimal
+    exceeded: str
+
+
+def _payment_limit(
+    session: Session,
+    *,
+    item: OpenItem,
+    bank_transaction: BankTransaction | None,
+    payment_entry_id: int | None,
+) -> _PaymentLimit | None:
+    """Obergrenze eines Ausgleichs in Firmenwährung: der Rest von Umsatz und Zahlungsbuchung.
+
+    Ohne Umsatz ist die Buchung die Zahlung und muss den Posten auf seinem Konto bezahlen. Mit
+    Umsatz begrenzt sie nur, wenn sie das tut; sonst ist sie nur verknüpft (etwa die Rechnung).
+    """
+    limits = []
+    if bank_transaction is not None:
+        limits.append(
+            _bank_transaction_limit(
+                session,
+                item=item,
+                bank_transaction=bank_transaction,
+                entry_ids={bank_transaction.journal_entry_id, payment_entry_id} - {None},
+            )
+        )
+    if payment_entry_id is not None:
+        limit = _entry_limit(
+            session, item=item, entry_id=payment_entry_id, required=bank_transaction is None
+        )
+        if limit is not None:
+            limits.append(limit)
+    return min(limits, key=lambda limit: limit.left, default=None)
+
+
+def _bank_transaction_limit(
+    session: Session, *, item: OpenItem, bank_transaction: BankTransaction, entry_ids: set[int]
+) -> _PaymentLimit:
+    """Rest des Umsatzes: Betrag minus nicht stornierte Ausgleiche mit ihm oder nur über seine
+    Buchung. Ausgleiche anderer Umsätze mit derselben verknüpften Buchung zählen nicht.
+
+    Ausgleiche von Posten in Fremdwährung belegen ihren gezahlten Betrag in Firmenwährung.
+    """
+    payment = abs(bank_transaction.amount)
+    rows = _active_settlements(
+        session,
+        OpenItemSettlement.bank_transaction_id == bank_transaction.id,
+        and_(
+            OpenItemSettlement.bank_transaction_id.is_(None),
+            OpenItemSettlement.journal_entry_id.in_(entry_ids),
+        ),
+    )
+    used = sum((_paid_of(row) for row in rows), Decimal("0.00"))
+    left = (payment - used).quantize(Decimal("0.01"))
+    if left <= 0:
+        raise OpenItemError(
+            f"Der Bankumsatz über {payment} {item.currency_code} ist schon vollständig "
+            "offenen Posten zugeordnet."
+        )
+    return _PaymentLimit(
+        left=left,
+        exceeded=(
+            f"Der Betrag übersteigt den Bankumsatz, von ihm sind noch {left} "
+            f"{item.currency_code} frei."
+        ),
+    )
+
+
+def _entry_limit(
+    session: Session, *, item: OpenItem, entry_id: int, required: bool
+) -> _PaymentLimit | None:
+    """Rest der Buchung: ihre Zahlungszeilen auf dem Konto des Postens minus nicht stornierte
+    Ausgleiche, die sie belegen (``_collective_lines``, ``_competes_for_lines``).
+
+    Mit dabei sind Ausgleiche über einen Umsatz, dessen Buchung sie ist, auch ältere, die nur den
+    Umsatz kennen. Bucht sie dort nichts, ist das ohne Umsatz ein Fehler (``required``).
+    """
+    entry = session.get(JournalEntry, entry_id)
+    rows = _active_settlements(
+        session,
+        OpenItemSettlement.journal_entry_id == entry_id,
+        and_(
+            OpenItemSettlement.journal_entry_id.is_(None),
+            OpenItemSettlement.bank_transaction_id.in_(
+                select(BankTransaction.id).where(BankTransaction.journal_entry_id == entry_id)
+            ),
+        ),
+    )
+    usage = _entry_usage(session, item=item, entry_id=entry_id, rows=rows)
+    if usage is None:
+        if not required:
+            return None
+        side = "Haben" if item.item_type == "receivable" else "Soll"
+        raise OpenItemError(
+            f"Buchung {entry.posting_number} bucht auf Konto {item.account.code} nichts im "
+            f"{side}, was diesen Posten bezahlt."
+        )
+    booked, assigned = usage
+    left = (booked - assigned).quantize(Decimal("0.01"))
+    if left <= 0:
+        raise OpenItemError(
+            f"Buchung {entry.posting_number} steht mit {booked} {item.currency_code} auf Konto "
+            f"{item.account.code}, das ist schon vollständig offenen Posten zugeordnet."
+        )
+    return _PaymentLimit(
+        left=left,
+        exceeded=(
+            f"Der Betrag übersteigt die Buchung {entry.posting_number}, von ihr sind noch "
+            f"{left} {item.currency_code} frei."
+        ),
+    )
+
+
 def _settlement_amount(
     *,
     explicit_amount: Decimal | None,
-    bank_transaction: BankTransaction | None,
+    payment_left: Decimal | None,
     open_amount: Decimal,
 ) -> Decimal:
     if explicit_amount is not None:
         return _positive_amount(explicit_amount)
-    if bank_transaction is not None:
-        return min(abs(bank_transaction.amount), open_amount).quantize(Decimal("0.01"))
+    if payment_left is not None:
+        return min(payment_left, open_amount)
     return open_amount
 
 

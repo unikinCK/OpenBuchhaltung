@@ -20,7 +20,12 @@ from app.services.bank_import import (
     reassign_bank_transactions,
     suggest_matches_for,
 )
-from app.services.bank_proposals import booking_proposals
+from app.services.bank_proposals import (
+    book_transaction_to_open_item,
+    booking_proposals,
+    open_item_suggestions,
+    partner_matches,
+)
 from app.services.bank_rules import (
     BankRuleError,
     apply_rules,
@@ -51,6 +56,7 @@ from app.services.open_banking import (
     list_open_banking_connections,
     open_banking_configured,
 )
+from app.services.open_items import OpenItemError
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import BANK, standard_account_id
 from app.web.blueprint import main_bp
@@ -227,7 +233,13 @@ def bank_page():
             )
             booking_rules = list_rules(session=session, company_id=selected_company_id)
             rule_by_tx = match_rules_for(session=session, transactions=transactions)
-            proposal_by_tx = booking_proposals(session=session, transactions=transactions)
+            partner_match_by_tx = partner_matches(session=session, transactions=transactions)
+            open_items_by_tx = open_item_suggestions(
+                session=session, transactions=transactions, matches=partner_match_by_tx
+            )
+            proposal_by_tx = booking_proposals(
+                session=session, transactions=transactions, matches=partner_match_by_tx
+            )
             partners = (
                 session.execute(
                     scoped_select(BusinessPartner, company_id=selected_company_id)
@@ -296,6 +308,8 @@ def bank_page():
         booking_rules=booking_rules,
         rule_by_tx=rule_by_tx,
         proposal_by_tx=proposal_by_tx,
+        partner_match_by_tx=partner_match_by_tx,
+        open_items_by_tx=open_items_by_tx,
         cost_centers=cost_centers,
         profit_centers=profit_centers,
         fints_connections=fints_connections,
@@ -666,6 +680,46 @@ def fints_tan_action():
     return _handle_fints_result(result, company_id)
 
 
+@main_bp.post("/bank/umsaetze/<int:transaction_id>/offener-posten")
+def bank_book_open_item_action(transaction_id: int):
+    company_id = request.form.get("company_id", type=int)
+    open_item_id = request.form.get("open_item_id", type=int)
+    if not open_item_id:
+        flash("Bitte einen offenen Posten auswählen.", "error")
+        return redirect(url_for("main.bank_page", company_id=company_id))
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        transaction = session.get(BankTransaction, transaction_id)
+        if transaction is None:
+            abort(404)
+        require_company_access(session, transaction.company_id)
+        try:
+            item = book_transaction_to_open_item(
+                session=session,
+                transaction_id=transaction_id,
+                open_item_id=open_item_id,
+                changed_by=changed_by(),
+            )
+        except (
+            BankImportError,
+            JournalEntryCreationError,
+            JournalEntryValidationError,
+            OpenItemError,
+        ) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+        reference = item.reference
+        settled = item.status == "settled"
+
+    flash(
+        f"Bankumsatz gebucht, Posten {reference} "
+        f"{'ausgeglichen' if settled else 'teilweise ausgeglichen'}.",
+        "success",
+    )
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
 @main_bp.post("/bank/regeln")
 def bank_rule_create_action():
     company_id = request.form.get("company_id", type=int)
@@ -683,6 +737,7 @@ def bank_rule_create_action():
                 tax_code_id=request.form.get("tax_code_id", type=int),
                 cost_center_id=request.form.get("cost_center_id", type=int),
                 profit_center_id=request.form.get("profit_center_id", type=int),
+                partner_id=request.form.get("partner_id", type=int),
                 changed_by=changed_by(),
             )
         except BankRuleError as exc:

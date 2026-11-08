@@ -2893,6 +2893,33 @@ TOOLS: list[ToolSpec] = [
                         "Optionaler Geschäftspartner (Lieferant), z. B. aus booking_proposal."
                     ),
                 },
+                "create_open_item": {
+                    "type": "boolean",
+                    "description": (
+                        "Standard true: auf einem Kreditoren-Sammelkonto entsteht ein offener "
+                        "Posten; false bei schon bezahlten Belegen."
+                    ),
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Fälligkeit JJJJ-MM-TT; ohne Angabe aus dem Beleg.",
+                },
+                "invoice_number": {
+                    "type": "string",
+                    "description": "Referenz des offenen Postens.",
+                },
+                "supplier_name": {
+                    "type": "string",
+                    "description": "Gegenseite des offenen Postens ohne Partner.",
+                },
+                "supplier_iban": {
+                    "type": "string",
+                    "description": "IBAN des Belegs; die IBAN im Partnerstamm geht vor.",
+                },
+                "currency_code": {
+                    "type": "string",
+                    "description": "Währung des Belegs; bei Fremdwährung kein offener Posten.",
+                },
                 **_receipt_split_properties(),
             },
             "required": [
@@ -3078,6 +3105,17 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Nur New-Booking: optionales Profitcenter.",
                 },
+                "create_open_item": {
+                    "type": "boolean",
+                    "description": (
+                        "Standard true: auf einem Kreditoren-Sammelkonto entsteht ein offener "
+                        "Posten; false bei schon bezahlten Belegen."
+                    ),
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Fälligkeit JJJJ-MM-TT; ohne Angabe aus dem Beleg.",
+                },
                 **_receipt_split_properties("Nur New-Booking: "),
             },
             "required": ["suggestion_id", "company_id"],
@@ -3106,10 +3144,62 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="recognize_partner",
+        description=(
+            "Erkennt einen Geschäftspartner aus USt-IdNr., Steuernummer, IBAN, Partnernummer "
+            "oder Name, ohne etwas zu ändern. status: unique (eindeutig, partner_id gesetzt), "
+            "uncertain oder ambiguous (candidates dem Menschen zur Bestätigung vorlegen, nie "
+            "selbst wählen), none."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "vat_id": {"type": "string", "description": "USt-IdNr."},
+                "tax_number": {"type": "string", "description": "Steuernummer."},
+                "iban": {"type": "string", "description": "IBAN."},
+                "partner_number": {
+                    "type": "string",
+                    "description": "Debitoren-/Kreditorennummer.",
+                },
+                "name": {"type": "string", "description": "Name; allein nie eindeutig."},
+                "role": {"type": "string", "enum": ["customer", "supplier"]},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/partners/recognize",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="preview_einvoice",
+        description=(
+            "Liest eine E-Rechnung ohne zu buchen: Rechnungsdaten, erkannter Lieferant "
+            "(partner_match) und Vorbelegung für create_partner (proposed_partner, IBAN und BIC "
+            "nur zur Anzeige: Bankdaten laufen über set_partner_bank_details)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "file_name": {"type": "string", "description": "Originaler XML-Dateiname."},
+                "mime_type": {"type": "string", "description": "z. B. application/xml."},
+                "content_base64": {"type": "string", "description": "XML-Inhalt als Base64."},
+            },
+            "required": ["company_id", "file_name", "content_base64"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/einvoices/preview",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="import_einvoice",
         description=(
             "Importiert eine E-Rechnung (XRechnung/ZUGFeRD XML), bucht sie und "
-            "speichert das XML als Beleg."
+            "speichert das XML als Beleg. Ein eindeutig erkannter Lieferant wird zugeordnet; "
+            "bei partner_match uncertain/ambiguous läuft die Buchung ohne Partner."
         ),
         input_schema={
             "type": "object",
@@ -3157,6 +3247,25 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Optionales Profitcenter der Aufwandszeile.",
                 },
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Bestätigter Lieferant; geht der Erkennung vor.",
+                },
+                "partner_number": {
+                    "type": "string",
+                    "description": "Alternativ zu partner_id: Kreditorennummer.",
+                },
+                "auto_partner": {
+                    "type": "boolean",
+                    "description": "Standard true: eindeutigen Treffer zuordnen.",
+                },
+                "create_open_item": {
+                    "type": "boolean",
+                    "description": (
+                        "Standard true: auf einem Kreditoren-Sammelkonto entsteht ein offener "
+                        "Posten mit der Fälligkeit der Rechnung."
+                    ),
+                },
                 "file_name": {"type": "string", "description": "Originaler XML-Dateiname."},
                 "mime_type": {
                     "type": "string",
@@ -3187,6 +3296,10 @@ TOOLS: list[ToolSpec] = [
                 "syntax": {"type": "string", "description": "ubl oder cii."},
                 "invoice_number": {"type": "string", "description": "Rechnungsnummer."},
                 "issue_date": {"type": "string", "description": "Rechnungsdatum JJJJ-MM-TT."},
+                "buyer_partner_id": {
+                    "type": "integer",
+                    "description": "Käufer aus dem Partnerstamm; leere buyer_-Felder füllt er.",
+                },
                 "buyer_name": {"type": "string", "description": "Name des Käufers."},
                 "buyer_street": {"type": "string", "description": "Straße des Käufers."},
                 "buyer_postal_code": {"type": "string", "description": "PLZ des Käufers."},
@@ -3210,7 +3323,7 @@ TOOLS: list[ToolSpec] = [
                     },
                 },
             },
-            "required": ["company_id", "invoice_number", "issue_date", "buyer_name", "lines"],
+            "required": ["company_id", "invoice_number", "issue_date", "lines"],
             "additionalProperties": False,
         },
         http_method="POST",
@@ -3494,7 +3607,10 @@ TOOLS: list[ToolSpec] = [
                         "buchen, nie direkt gegen das andere Bankkonto. booking_proposal "
                         "je offenem Umsatz: Gegenkonto, Steuercode, Kontierung und "
                         "Partner aus Regel (source=rule), Geldtransit (transfer) oder der "
-                        "letzten Buchung derselben Gegenseite (history)."
+                        "letzten Buchung derselben Gegenseite (history). partner_match: erkannter "
+                        "Partner; bei uncertain/ambiguous bestätigen lassen. "
+                        "open_item_suggestions: passende offene Posten, auszugleichen mit "
+                        "book_bank_transaction_to_open_item."
                     ),
                 },
                 "limit": {
@@ -3569,6 +3685,10 @@ TOOLS: list[ToolSpec] = [
                 "profit_center_id": {
                     "type": "integer",
                     "description": "Optionales Profitcenter.",
+                },
+                "partner_id": {
+                    "type": "integer",
+                    "description": "Optionaler Geschäftspartner, den die Regel setzt.",
                 },
             },
             "required": ["company_id", "pattern", "contra_account_id"],
@@ -3772,6 +3892,26 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/bank-transactions/{transaction_id}/match",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="book_bank_transaction_to_open_item",
+        description=(
+            "Bucht einen offenen Bankumsatz auf das Sammelkonto eines offenen Postens (mit "
+            "dessen Partner) und gleicht den Posten damit aus."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "integer", "description": "ID des Bankumsatzes."},
+                "open_item_id": {"type": "integer", "description": "ID des offenen Postens."},
+                "description": {"type": "string", "description": "Optionaler Buchungstext."},
+            },
+            "required": ["transaction_id", "open_item_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/{transaction_id}/book-open-item",
         arg_location="json",
     ),
     ToolSpec(
@@ -4588,7 +4728,9 @@ TOOLS: list[ToolSpec] = [
         name="settle_open_item",
         description=(
             "Gleicht einen offenen Posten ganz oder teilweise aus. Ohne Betrag wird der "
-            "volle offene Betrag verwendet. Bei einem Posten in Fremdwährung gilt das nur ohne "
+            "volle offene Betrag verwendet, mit Bankumsatz oder Ausgleichsbuchung höchstens deren "
+            "noch freier Rest: Eine Zahlung deckt alle Posten zusammen nur bis zu ihrem Betrag. "
+            "Bei einem Posten in Fremdwährung gilt das nur ohne "
             "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
             "Bankumsatz muss zuerst gebucht sein."
         ),
@@ -4605,7 +4747,8 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": (
                         "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
-                        "lebt der Posten um den Ausgleichsbetrag wieder auf."
+                        "lebt der Posten um den Ausgleichsbetrag wieder auf. Ohne Bankumsatz "
+                        "muss sie die Zahlung auf dem Konto des Postens buchen."
                     ),
                 },
                 "foreign_amount": {

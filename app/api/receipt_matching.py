@@ -82,6 +82,8 @@ def _suggestion_dict(
         "tax_rate": str(suggestion.tax_rate) if suggestion.tax_rate is not None else None,
         "currency_code": suggestion.currency_code,
         "supplier_vat_id": suggestion.supplier_vat_id,
+        "supplier_iban": suggestion.supplier_iban,
+        "due_date": suggestion.due_date.isoformat() if suggestion.due_date else None,
         "description": suggestion.description,
         "tip_amount": str(suggestion.tip_amount) if suggestion.tip_amount is not None else None,
         "reverse_charge": suggestion.reverse_charge,
@@ -95,6 +97,8 @@ def _suggestion_dict(
             "tax_code": tax_code.code if tax_code else None,
             "partner_id": suggestion.partner_id,
             "partner_name": partner.name if partner else None,
+            # Kandidaten zum Bestätigen; partner_id ist nur bei eindeutiger Erkennung gesetzt.
+            "partner_match": suggestion.partner_match,
             "creditor_account_id": creditor.id if creditor else None,
             "creditor_account_code": creditor.code if creditor else None,
             "creditor_account_name": creditor.name if creditor else None,
@@ -264,6 +268,11 @@ def approve_receipt_match_suggestion_via_api(suggestion_id: int):
                     if payload.get("entry_date")
                     else None
                 )
+                due_date = (
+                    date.fromisoformat(str(payload["due_date"]))
+                    if payload.get("due_date")
+                    else None
+                )
                 net_amount = parse_decimal(str(payload.get("net_amount") or "0"))
                 tax_amount = parse_decimal(str(payload.get("tax_amount") or "0"))
                 tax_splits = parse_tax_splits(payload.get("tax_lines"))
@@ -282,8 +291,13 @@ def approve_receipt_match_suggestion_via_api(suggestion_id: int):
                     cost_center_id=cost_center_id,
                     profit_center_id=profit_center_id,
                     partner_id=partner_id,
+                    # Ein ausdrückliches null heißt: bewusst ohne Partner.
+                    use_suggested_partner="partner_id" not in payload,
                     tax_splits=tax_splits,
                     tip_amount=tip_amount,
+                    create_open_item=payload.get("create_open_item", True)
+                    not in (False, "0", "false"),
+                    due_date=due_date,
                 )
         except (TypeError, ValueError) as exc:
             if isinstance(

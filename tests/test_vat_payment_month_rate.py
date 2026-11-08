@@ -2473,7 +2473,7 @@ def test_migration_keeps_reported_payments_at_the_invoice_rate(tmp_path: Path) -
 
     engine = create_engine(url)
     config = _alembic_config(engine)
-    command.downgrade(config, "20261103_0064")
+    command.downgrade(config, "20261104_0065")
     tables = inspect(engine)
     assert "vat_exchange_rate" not in tables.get_table_names()
     assert "vat_rate" not in {
@@ -2539,7 +2539,7 @@ def test_migration_also_keeps_a_reported_reversal_at_the_invoice_rate(tmp_path: 
 
     engine = create_engine(url)
     config = _alembic_config(engine)
-    command.downgrade(config, "20261103_0064")
+    command.downgrade(config, "20261104_0065")
     command.upgrade(config, "head")
     with Session(engine) as db:
         for period, tax in (("2027-02", Decimal("152.00")), ("2027-03", Decimal("-152.00"))):

@@ -5,15 +5,17 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app import create_app
 from app.auth import hash_password
+from app.services.bank_import import book_transaction
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    reverse_journal_entry,
 )
 from app.services.open_items import (
     OpenItemError,
@@ -21,7 +23,19 @@ from app.services.open_items import (
     create_open_item,
     settle_open_item,
 )
-from domain.models import Account, AuditLog, BankTransaction, Base, Company, OpenItem, Tenant, User
+from app.services.partners import create_partner
+from domain.models import (
+    Account,
+    AuditLog,
+    BankTransaction,
+    Base,
+    Company,
+    JournalEntry,
+    OpenItem,
+    OpenItemSettlement,
+    Tenant,
+    User,
+)
 
 
 @pytest.fixture()
@@ -188,6 +202,342 @@ def test_receivable_rejects_outgoing_bank_transaction(session: Session) -> None:
         )
 
 
+def _receivable(
+    session: Session,
+    company: Company,
+    account: Account,
+    reference: str,
+    partner_id: int | None = None,
+) -> OpenItem:
+    return create_open_item(
+        session=session,
+        payload=OpenItemInput(
+            company_id=company.id,
+            account_id=account.id,
+            item_type="receivable",
+            reference=reference,
+            entry_date=date(2026, 7, 1),
+            amount=Decimal("100.00"),
+            changed_by="pytest",
+            partner_id=partner_id,
+        ),
+    )
+
+
+def _incoming(session: Session, company: Company, bank: Account, amount: str) -> BankTransaction:
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        booking_date=date(2026, 7, 5),
+        amount=Decimal(amount),
+        currency_code="EUR",
+        purpose="Zahlung",
+        dedup_hash=f"opos-cap-{amount}",
+    )
+    session.add(transaction)
+    session.commit()
+    return transaction
+
+
+def _settle_with(session: Session, item: OpenItem, transaction: BankTransaction, **fields):
+    return settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        bank_transaction_id=transaction.id,
+        changed_by="pytest",
+        **fields,
+    )
+
+
+def test_bank_transaction_settles_only_up_to_its_amount(session: Session) -> None:
+    """40 EUR Zahlung auf zwei Posten über je 100 EUR: Die Posten sinken zusammen um 40 EUR."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    transaction = _incoming(session, company, bank, "40.00")
+
+    assert _settle_with(session, first, transaction).open_amount == Decimal("60.00")
+    for item in (second, first):
+        with pytest.raises(OpenItemError, match="über 40.00 EUR ist schon vollständig"):
+            _settle_with(session, item, transaction)
+        with pytest.raises(OpenItemError, match="über 40.00 EUR ist schon vollständig"):
+            _settle_with(session, item, transaction, amount=Decimal("0.01"))
+
+    session.refresh(first)
+    session.refresh(second)
+    assert (first.open_amount, second.open_amount) == (Decimal("60.00"), Decimal("100.00"))
+    assert session.execute(select(OpenItemSettlement)).scalar_one().amount == Decimal("40.00")
+
+
+def test_bank_transaction_is_shared_across_items_up_to_its_amount(session: Session) -> None:
+    """Sammelzahlung: Der Rest des Umsatzes ist die Obergrenze, mit und ohne Betrag."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    third = _receivable(session, company, receivable, "RE-C")
+    transaction = _incoming(session, company, bank, "180.00")
+
+    with pytest.raises(OpenItemError, match="noch 180.00 EUR frei"):
+        _settle_with(session, first, transaction, amount=Decimal("180.01"))
+    assert _settle_with(session, first, transaction, amount=Decimal("70.00")).open_amount == (
+        Decimal("30.00")
+    )
+    assert _settle_with(session, second, transaction).status == "settled"
+    with pytest.raises(OpenItemError, match="noch 10.00 EUR frei"):
+        _settle_with(session, third, transaction, amount=Decimal("10.01"))
+    # Ohne Betrag nimmt der Posten nur den Rest, nicht seinen ganzen offenen Betrag.
+    assert _settle_with(session, third, transaction).open_amount == Decimal("90.00")
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _settle_with(session, first, transaction)
+
+    amounts = session.execute(
+        select(OpenItemSettlement.amount).order_by(OpenItemSettlement.id)
+    ).scalars()
+    assert list(amounts) == [Decimal("70.00"), Decimal("100.00"), Decimal("10.00")]
+
+
+def test_reversed_settlement_frees_the_bank_transaction(session: Session) -> None:
+    """Wird die Buchung des Umsatzes storniert, ist sein Betrag wieder frei."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    transaction = _incoming(session, company, bank, "40.00")
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=receivable.id,
+        changed_by="pytest",
+    )
+    _settle_with(session, first, transaction)
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _settle_with(session, second, transaction)
+
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=transaction.journal_entry_id,
+        reversal_date=date(2026, 7, 10),
+        changed_by="pytest",
+    )
+    session.refresh(first)
+    assert first.open_amount == Decimal("100.00")
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=receivable.id,
+        changed_by="pytest",
+    )
+
+    assert _settle_with(session, second, transaction).open_amount == Decimal("60.00")
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _settle_with(session, first, transaction)
+    rows = session.execute(
+        select(OpenItemSettlement.open_item_id, OpenItemSettlement.reversed_on).order_by(
+            OpenItemSettlement.id
+        )
+    ).all()
+    assert rows == [(first.id, date(2026, 7, 10)), (second.id, None)]
+
+
+def _payment_entry(
+    session: Session,
+    company: Company,
+    bank: Account,
+    credits: list[tuple[Account, str, int | None]],
+):
+    """Zahlungseingang: Bank an die genannten Konten, je Zeile mit Betrag und Partner."""
+    total = sum((Decimal(amount) for _, amount, _ in credits), Decimal("0.00"))
+    return create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 5),
+            description="Zahlungseingang",
+            status="posted",
+            changed_by="pytest",
+            lines=[
+                JournalLineInput(bank.id, total, Decimal("0.00")),
+                *(
+                    JournalLineInput(
+                        account.id, Decimal("0.00"), Decimal(amount), partner_id=partner_id
+                    )
+                    for account, amount, partner_id in credits
+                ),
+            ],
+        ),
+    )
+
+
+def _settle_by_entry(session: Session, item: OpenItem, entry, **fields):
+    return settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        journal_entry_id=entry.id,
+        changed_by="pytest",
+        **fields,
+    )
+
+
+def test_journal_entry_settles_only_up_to_its_payment(session: Session) -> None:
+    """Ohne Umsatz ist die Buchung die Zahlung: 40 EUR auf 1400 decken zusammen 40 EUR."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    third = _receivable(session, company, receivable, "RE-C")
+    payment = _payment_entry(session, company, bank, [(receivable, "40.00", None)])
+
+    with pytest.raises(OpenItemError, match="noch 40.00 EUR frei"):
+        _settle_by_entry(session, first, payment, amount=Decimal("40.01"))
+    assert _settle_by_entry(session, first, payment, amount=Decimal("25.00")).open_amount == (
+        Decimal("75.00")
+    )
+    # Ohne Betrag nimmt der Posten nur den Rest der Buchung.
+    assert _settle_by_entry(session, second, payment).open_amount == Decimal("85.00")
+    for item in (third, first):
+        with pytest.raises(OpenItemError, match="mit 40.00 EUR auf Konto 1400, das ist schon"):
+            _settle_by_entry(session, item, payment)
+
+    session.refresh(third)
+    assert third.open_amount == Decimal("100.00")
+    amounts = session.execute(
+        select(OpenItemSettlement.amount).order_by(OpenItemSettlement.id)
+    ).scalars()
+    assert list(amounts) == [Decimal("25.00"), Decimal("15.00")]
+
+
+def test_journal_entry_without_payment_on_the_item_account_is_refused(
+    session: Session,
+) -> None:
+    company, bank, receivable, revenue = _seed_company(session)
+    item = _receivable(session, company, receivable, "RE-A")
+    # Eine Rechnung bucht 1400 im Soll, eine Zahlung auf Erlöse berührt 1400 gar nicht.
+    invoice = _payment_entry(session, company, receivable, [(revenue, "100.00", None)])
+    elsewhere = _payment_entry(session, company, bank, [(revenue, "100.00", None)])
+    for entry in (invoice, elsewhere):
+        with pytest.raises(OpenItemError, match="bucht auf Konto 1400 nichts im Haben"):
+            _settle_by_entry(session, item, entry)
+    session.refresh(item)
+    assert item.open_amount == Decimal("100.00")
+
+
+@pytest.mark.parametrize("bank_first", [True, False])
+def test_same_payment_counts_once_via_bank_transaction_and_its_entry(
+    session: Session, bank_first: bool
+) -> None:
+    """Gebuchter Umsatz: über ihn und über seine Buchung zusammen nur einmal 40 EUR."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    transaction = _incoming(session, company, bank, "40.00")
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=receivable.id,
+        changed_by="pytest",
+    )
+    entry = session.get(JournalEntry, transaction.journal_entry_id)
+
+    if bank_first:
+        _settle_with(session, first, transaction, amount=Decimal("30.00"))
+        with pytest.raises(OpenItemError, match="Buchung .* noch 10.00 EUR frei"):
+            _settle_by_entry(session, second, entry, amount=Decimal("10.01"))
+        assert _settle_by_entry(session, second, entry).open_amount == Decimal("90.00")
+        with pytest.raises(OpenItemError, match="Bankumsatz über 40.00 EUR ist schon"):
+            _settle_with(session, first, transaction)
+    else:
+        _settle_by_entry(session, first, entry, amount=Decimal("30.00"))
+        with pytest.raises(OpenItemError, match="Bankumsatz, von ihm sind noch 10.00"):
+            _settle_with(session, second, transaction, amount=Decimal("10.01"))
+        assert _settle_with(session, second, transaction).open_amount == Decimal("90.00")
+        with pytest.raises(OpenItemError, match="schon vollständig"):
+            _settle_by_entry(session, first, entry)
+
+    used = session.execute(select(func.sum(OpenItemSettlement.amount))).scalar()
+    assert used == Decimal("40.00")
+
+
+def test_older_settlement_known_only_by_bank_transaction_counts_for_its_entry(
+    session: Session,
+) -> None:
+    """Ältere Ausgleichszeilen kennen nur den Umsatz, nicht dessen Buchung."""
+    company, bank, receivable, _ = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    transaction = _incoming(session, company, bank, "40.00")
+    book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=receivable.id,
+        changed_by="pytest",
+    )
+    session.add(
+        OpenItemSettlement(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            open_item_id=first.id,
+            amount=Decimal("40.00"),
+            settlement_date=date(2026, 7, 5),
+            bank_transaction_id=transaction.id,
+            created_by="pytest",
+        )
+    )
+    first.open_amount = Decimal("60.00")
+    session.commit()
+
+    entry = session.get(JournalEntry, transaction.journal_entry_id)
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _settle_by_entry(session, second, entry)
+
+
+def test_collective_entry_is_limited_per_partner(session: Session) -> None:
+    """Sammelbuchung mit Partnern: Jeder Posten nimmt nur aus den Zeilen seines Partners."""
+    company, bank, receivable, _ = _seed_company(session)
+    receivable.subledger = "debtor"
+    session.commit()
+    alpha, beta = (
+        create_partner(
+            session=session, company=company, changed_by="pytest", name=name, is_customer=True
+        )
+        for name in ("Alpha", "Beta")
+    )
+    session.commit()
+    alpha_item = _receivable(session, company, receivable, "RE-A", partner_id=alpha.id)
+    beta_item = _receivable(session, company, receivable, "RE-B", partner_id=beta.id)
+    payment = _payment_entry(
+        session,
+        company,
+        bank,
+        [(receivable, "60.00", alpha.id), (receivable, "40.00", beta.id)],
+    )
+
+    with pytest.raises(OpenItemError, match="noch 60.00 EUR frei"):
+        _settle_by_entry(session, alpha_item, payment, amount=Decimal("60.01"))
+    assert _settle_by_entry(session, alpha_item, payment).open_amount == Decimal("40.00")
+    assert _settle_by_entry(session, beta_item, payment).open_amount == Decimal("60.00")
+    with pytest.raises(OpenItemError, match="schon vollständig"):
+        _settle_by_entry(session, alpha_item, payment)
+
+
+def test_entry_linked_to_two_bank_transactions_keeps_them_apart(session: Session) -> None:
+    """Die Rechnung als Ausgleichsbuchung zweier Umsätze: Jeder behält seinen eigenen Rest."""
+    company, bank, receivable, revenue = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    third = _receivable(session, company, receivable, "RE-C")
+    invoice = _payment_entry(session, company, receivable, [(revenue, "300.00", None)])
+    large = _incoming(session, company, bank, "150.00")
+    small = _incoming(session, company, bank, "80.00")
+
+    assert _settle_with(session, first, large, journal_entry_id=invoice.id).status == "settled"
+    assert _settle_with(session, second, small, journal_entry_id=invoice.id).open_amount == (
+        Decimal("20.00")
+    )
+    # Die 80 EUR des zweiten Umsatzes hängen an derselben Buchung, belegen aber nicht den ersten.
+    assert _settle_with(session, third, large, journal_entry_id=invoice.id).open_amount == (
+        Decimal("50.00")
+    )
+
+
 def _create_ui_app(tmp_path: Path):
     app = create_app(
         {
@@ -316,3 +666,55 @@ def test_open_items_api_create_list_and_settle(tmp_path: Path) -> None:
     )
     assert include_settled.status_code == 200
     assert include_settled.get_json()["open_items"][0]["status"] == "settled"
+
+
+def test_used_bank_transaction_is_refused_in_api_and_ui(tmp_path: Path) -> None:
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/api/v1/tenants", json={"tenant_name": "OPOS Cap", "company_name": "Cap GmbH"})
+    for code, name in (("1200", "Bank"), ("1400", "Forderungen")):
+        client.post(
+            "/api/v1/accounts",
+            json={"company_id": 1, "code": code, "name": name, "account_type": "asset"},
+        )
+    item_ids = [
+        client.post(
+            "/api/v1/open-items",
+            json={
+                "company_id": 1,
+                "account_id": 2,
+                "item_type": "receivable",
+                "reference": reference,
+                "entry_date": "2026-07-01",
+                "amount": "100.00",
+            },
+        ).get_json()["id"]
+        for reference in ("RE-CAP-1", "RE-CAP-2")
+    ]
+    with app.extensions["db_session_factory"]() as db_session:
+        company = db_session.get(Company, 1)
+        bank = db_session.execute(select(Account).where(Account.code == "1200")).scalar_one()
+        transaction_id = _incoming(db_session, company, bank, "40.00").id
+
+    first = client.post(
+        f"/api/v1/open-items/{item_ids[0]}/settle",
+        json={"bank_transaction_id": transaction_id},
+    )
+    assert first.status_code == 200
+    assert first.get_json()["open_amount"] == "60.00"
+    second = client.post(
+        f"/api/v1/open-items/{item_ids[1]}/settle",
+        json={"bank_transaction_id": transaction_id},
+    )
+    assert second.status_code == 422
+    assert "schon vollständig" in second.get_json()["error"]
+
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    page = client.post(
+        f"/offene-posten/{item_ids[1]}/ausgleichen",
+        data={"company_id": "1", "bank_transaction_id": str(transaction_id)},
+        follow_redirects=True,
+    )
+    assert "schon vollständig".encode() in page.data
+    with app.extensions["db_session_factory"]() as db_session:
+        assert db_session.get(OpenItem, item_ids[1]).open_amount == Decimal("100.00")

@@ -1,8 +1,8 @@
 """Umsatzsteuer-Umrechnungskurse je Monat und Umsatzsteuer zum Kurs des Zahlungsmonats.
 
-Revision ID: 20261104_0065
-Revises: 20261103_0064
-Create Date: 2026-11-04
+Revision ID: 20261108_0066
+Revises: 20261104_0065
+Create Date: 2026-11-08
 
 Neue Tabelle ``vat_exchange_rate``; am Ausgleich Geldeingang, gemeldeter Monatskurs und die
 Buchungen der Steuerdifferenz. Zahlungen aus schon festgehaltenen Zeiträumen behalten den Kurs der
@@ -14,8 +14,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20261104_0065"
-down_revision = "20261103_0064"
+revision = "20261108_0066"
+down_revision = "20261104_0065"
 branch_labels = None
 depends_on = None
 
