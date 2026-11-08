@@ -1136,6 +1136,21 @@ def _reported_periods(session: Session, item: OpenItem, on: date) -> list:
     ).all()
 
 
+def lock_cash_basis_company(session: Session, company_id: int) -> None:
+    """Festhalten, Ausgleich und Storno laufen bei Istversteuerung je Gesellschaft nacheinander.
+
+    Das Festhalten rechnet aus Zahlungen, und Ausgleich und Storno lesen die festgehaltenen
+    Zeiträume; gleichzeitig ginge eine Zahlung oder ein Storno in keiner Meldung auf. Als Erstes zu
+    nehmen, noch vor dem Umsatz. Ohne Schlüsselsperre: Neue Verweise auf die Gesellschaft warten
+    nicht.
+    """
+    session.execute(
+        select(Company.id)
+        .where(Company.id == company_id, Company.vat_cash_basis_from.is_not(None))
+        .with_for_update(key_share=True)
+    )
+
+
 def first_unreported_day(*, session: Session, item: OpenItem, on: date) -> date:
     """``on`` oder der erste Tag danach außerhalb festgehaltener Umsatzsteuer-Zeiträume."""
     day = on
@@ -1568,6 +1583,10 @@ def reverse_journal_entry(
             f"Buchung {original.posting_number} ist eine Vortragsbuchung des "
             "Jahresabschlusses und kann nicht storniert werden."
         )
+    # Nur auf oberster Ebene: Wer hier mit commit=False ankommt, hat womöglich schon ins Audit
+    # geschrieben, und die Gesellschaft kommt in der Sperrreihenfolge vor dem Audit.
+    if commit:
+        lock_cash_basis_company(session, original.company_id)
     # Die Zahlung sperren, bevor der Storno etwas anlegt, in derselben Reihenfolge wie der
     # Ausgleich offener Posten: erst die Umsätze dieser Buchung, dann sie selbst (ohne
     # Schlüsselsperre, siehe settle_open_item). Ein gleichzeitiger Ausgleich mit ihr wartet so auf
@@ -1928,9 +1947,14 @@ def _release_subledgers(
         )
         released.setdefault("open_items", []).append(item.id)
 
-    # Rechnung storniert: Was jetzt noch auf ihr steht, hat keine eigene Buchung und nichts im
-    # Hauptbuch (siehe ``_refuse_paid_cash_basis_invoice``). Es fällt mit ihr, sonst zählte es
-    # weiter.
+    # Erst hier importiert: open_items nutzt dieses Modul.
+    from app.services.open_items import close_open_item_by_cancellation
+
+    # Rechnung nach Ist storniert: Was jetzt noch auf ihr steht, hat keine eigene Buchung und nichts
+    # im Hauptbuch (siehe ``_refuse_paid_cash_basis_invoice``). Es fällt mit ihr, sonst zählte es
+    # weiter, und ihr Posten schließt, sonst bliebe er offen und ginge in die Bewertung ein. Die
+    # Ausgangsrechnung schließt ihren Posten selbst.
+    is_sales_invoice = _sales_invoice_number(session, original.id) is not None
     for item in cash_basis_invoice_items(session, original):
         for settlement in _standing_settlements(session, item):
             settlement.reversed_on = max(reversal.entry_date, settlement.settlement_date)
@@ -1941,7 +1965,18 @@ def _release_subledgers(
                 if settlement.bank_transaction_id is not None
                 else None
             )
-            if transaction is not None and transaction.status == "matched":
+            # Bleibt ein anderer Ausgleich mit diesem Umsatz stehen, bleibt er zugeordnet.
+            if (
+                transaction is not None
+                and transaction.status == "matched"
+                and session.execute(
+                    select(OpenItemSettlement.id).where(
+                        OpenItemSettlement.bank_transaction_id == transaction.id,
+                        OpenItemSettlement.reversed_on.is_(None),
+                    )
+                ).first()
+                is None
+            ):
                 transaction.status = "open"
                 if item.bank_transaction_id == transaction.id:
                     item.bank_transaction_id = None
@@ -1953,12 +1988,14 @@ def _release_subledgers(
                 payload={**link, "settlement_id": settlement.id},
             )
             released.setdefault("open_item_settlements", []).append(settlement.id)
+        if not is_sales_invoice:
+            close_open_item_by_cancellation(
+                session=session, item=item, reversal_entry=reversal, changed_by=changed_by
+            )
+            released.setdefault("cancelled_open_items", []).append(item.id)
 
     # OPOS: Mit der Eingangsrechnung entfällt ihre Schuld, sonst stünde sie weiter im Zahllauf.
     # Forderungen schließt das Storno der Ausgangsrechnung selbst.
-    # Erst hier importiert: open_items nutzt dieses Modul.
-    from app.services.open_items import close_open_item_by_cancellation
-
     invoice_items = (
         session.execute(
             select(OpenItem).where(

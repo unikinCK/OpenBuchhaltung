@@ -108,8 +108,10 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   `foreign_payments`. **Vor dem Produktiveinsatz von einem Steuerberater zu bestätigen.**
 - Istversteuerung allgemein, auch in Euro: Der Storno einer gemeldeten Zahlung oder die Neuzuordnung derselben Zahlung,
   die in einen festgehaltenen Zeitraum fielen, zählen für die UStVA am ersten Tag dahinter; der Storno einer nie
-  gemeldeten Zahlung hebt sie an ihrem Tag auf. Eine Rechnung mit gebuchter Zahlung lässt sich erst nach deren Storno
-  stornieren, ein Ausgleich ohne Buchung fällt mit ihr, und auf eine stornierte Rechnung lässt sich nichts mehr zuordnen.
+  gemeldeten Zahlung hebt sie an ihrem Tag auf. Jede Zahlung deckt einen festen Teil der Rechnung, eine rückdatierte
+  Zahlung verschiebt also keinen gemeldeten Monat mehr. Eine Direktbuchung als Rechnung mit gebuchter Zahlung lässt
+  sich erst nach deren Storno stornieren, ein Ausgleich ohne Buchung fällt mit ihr, und ihr Posten schließt. Festhalten,
+  Ausgleich und Storno laufen bei Istversteuerung je Gesellschaft nacheinander.
   `GET /api/v1/vat-annual-return` nennt jetzt auch `warnings`, `unassigned` und `foreign_payments`, und
   `POST /api/v1/vat-annual-returns` meldet Fachfehler als 422 statt als „year must be an integer“. Kursdifferenzen und
   ihre Stornos erscheinen nicht mehr als Ertrag ohne Umsatzsteuer.

@@ -1586,8 +1586,8 @@ def test_reversal_stays_free_when_the_invoice_does_not_count_on_cash_basis(
     ).first()
 
 
-def test_no_payment_goes_on_a_cancelled_invoice(session: Session) -> None:
-    """Sonst meldete der Februar 158,33 € auf eine Rechnung, die es nicht mehr gibt."""
+def test_cancelled_invoice_closes_its_item(session: Session) -> None:
+    """Keine Zahlung mehr darauf, keine Mahnung, und der Hauptbuchwert 0,00 passt zum Posten."""
     company, accounts = _seed(session)
     _monthly_rates(session, company)
     invoice, item = _direct_invoice(session, company, accounts)
@@ -1597,8 +1597,120 @@ def test_no_payment_goes_on_a_cancelled_invoice(session: Session) -> None:
         reversal_date=date(2027, 1, 20),
         changed_by="t",
     )
-    with pytest.raises(OpenItemError, match="ist storniert"):
+    session.refresh(item)
+    assert (item.status, item.open_amount, item.foreign_open_amount) == (
+        "settled",
+        ZERO,
+        ZERO,
+    )
+    with pytest.raises(OpenItemError, match="bereits ausgeglichen"):
         _pay(session, item.id, "1190.00", date(2027, 2, 10))
+    assert _balance(session, accounts["1400"]) == ZERO
+
+
+def test_invoice_reversed_after_its_payment_closes_the_item_too(session: Session) -> None:
+    """Der Weg „erst Zahlung, dann Rechnung“ endet ohne offenen Posten."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    invoice, item = _direct_invoice(session, company, accounts)
+    received = _received(session, company, accounts, "991.67", date(2027, 2, 10), "zuerst")
+    settle_open_item(
+        session=session,
+        open_item_id=item.id,
+        changed_by="t",
+        bank_transaction_id=received.id,
+        foreign_amount=Decimal("1190.00"),
+        amount=Decimal("991.67"),
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=received.journal_entry_id,
+        reversal_date=date(2027, 3, 1),
+        changed_by="t",
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=invoice.id,
+        reversal_date=date(2027, 3, 2),
+        changed_by="t",
+    )
+    session.refresh(item)
+    assert item.status == "settled"
+    assert item.open_amount == ZERO
+    assert _balance(session, accounts["1400"]) == ZERO
+
+
+@pytest.mark.parametrize(
+    ("foreign", "booked_rest"),
+    [("1190.00", ZERO), ("595.00", Decimal("476.00"))],
+    ids=["ganz bezahlt", "teilweise bezahlt"],
+)
+def test_valuation_has_no_row_for_a_cancelled_invoice(
+    session: Session, foreign: str, booked_rest: Decimal
+) -> None:
+    """Hauptbuch 1400 = 0,00: Eine Bewertung über 1.190 USD wäre ein Ertrag ohne Grund."""
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    set_exchange_rate(
+        session=session,
+        company=company,
+        currency_code="USD",
+        rate_date=date(2027, 2, 28),
+        rate="1.10",
+        changed_by="t",
+    )
+    invoice, item = _direct_invoice(session, company, accounts)
+    _pay(session, item.id, foreign, date(2027, 2, 5), bank_rate="1.20")
+    session.refresh(item)
+    assert item.open_amount == booked_rest
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=invoice.id,
+        reversal_date=date(2027, 2, 10),
+        changed_by="t",
+    )
+    assert fx_valuation_rows(session=session, company=company, as_of=date(2027, 2, 28)) == []
+    assert _balance(session, accounts["1400"]) == ZERO
+
+
+def test_third_booking_of_a_payment_stays_behind_the_second_reversal(
+    session: Session, tmp_path: Path
+) -> None:
+    """Dreimal gebucht, zweimal storniert: Februar 158,33 €, März und April je 0,00 €.
+
+    Der dritte Ausgleich läge sonst am 5.3. vor dem Storno vom 2.4., der März wäre 158,33 € zu hoch.
+    """
+    company, accounts = _seed(session)
+    _monthly_rates(session, company)
+    issued = _invoice(session, company, accounts, tmp_path)
+    terms = {
+        "open_item_id": issued.open_item_id,
+        "changed_by": "t",
+        "foreign_amount": Decimal("1190.00"),
+        "amount": Decimal("991.67"),
+    }
+    first = _manual_receipt(session, company, accounts, date(2027, 2, 10))
+    settle_open_item(session=session, journal_entry_id=first.id, **terms)
+    reverse_journal_entry(
+        session=session, journal_entry_id=first.id, reversal_date=date(2027, 3, 5), changed_by="t"
+    )
+    second = _manual_receipt(session, company, accounts, date(2027, 2, 10))
+    settle_open_item(session=session, journal_entry_id=second.id, **terms)
+    reverse_journal_entry(
+        session=session, journal_entry_id=second.id, reversal_date=date(2027, 4, 2), changed_by="t"
+    )
+    third = _manual_receipt(session, company, accounts, date(2027, 2, 10))
+    settle_open_item(session=session, journal_entry_id=third.id, **terms)
+    dates = [
+        row.settlement_date
+        for row in session.execute(
+            select(OpenItemSettlement).order_by(OpenItemSettlement.id)
+        ).scalars()
+    ]
+    assert dates == [date(2027, 2, 10), date(2027, 3, 5), date(2027, 4, 2)]
+    assert _tax(session, company, "2027-02") == Decimal("158.33")
+    assert _tax(session, company, "2027-03") == ZERO
+    assert _tax(session, company, "2027-04") == ZERO
 
 
 def test_real_revenue_on_the_fx_account_still_counts(session: Session, tmp_path: Path) -> None:

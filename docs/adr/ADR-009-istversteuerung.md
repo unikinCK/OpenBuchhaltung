@@ -18,9 +18,10 @@ Zahlung fehlte.
 2. **Berechnung statt zusätzlicher Buchungen.** Im Hauptbuch wird weiter gebucht wie bei der
    Sollversteuerung. Nur die UStVA rechnet anders: Eine Rechnung mit Umsatzsteuer und verknüpftem offenen
    Posten fällt aus der Zuordnung nach Datum heraus; stattdessen zählen ihre Zeilen, skaliert auf den im
-   Meldezeitraum bezahlten Anteil. Die Skalierung läuft über den kumulierten Anteil, sodass sich
-   Teilzahlungen ohne Rundungsrest zur Rechnung summieren. Die übrige Auswertung (Kennzahlen, Steuersätze)
-   bleibt dieselbe.
+   Meldezeitraum bezahlten Anteil. Jede Zahlung deckt einen festen Teil der Rechnung: den kumulierten Anteil
+   abzüglich der Teile, die bei ihrer Erfassung standen. So summieren sich Teilzahlungen ohne Rundungsrest zur
+   Rechnung, und eine rückdatierte Zahlung ändert keinen anderen Teil (ADR-010, Entscheidung 8). Die übrige
+   Auswertung (Kennzahlen, Steuersätze) bleibt dieselbe.
 3. **Stornierte Zahlungen** mindern im Zeitraum des Stornos. So bleibt eine bereits gemeldete Voranmeldung
    richtig, und die Korrektur erscheint dort, wo sie entsteht. Läge das Datum des Stornos in einem festgehaltenen
    Zeitraum, zählt er am ersten Tag dahinter (ADR-010, Entscheidung 8).

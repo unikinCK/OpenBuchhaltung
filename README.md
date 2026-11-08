@@ -1572,8 +1572,8 @@ Gestattung durch das Finanzamt, das prüft die App nicht. Im Zeitraum der Istver
   bleiben also richtig.
 - Fällt der Storno einer gemeldeten Zahlung oder die Neuzuordnung derselben Zahlung in einen festgehaltenen Zeitraum,
   zählt sie für die UStVA am ersten Tag dahinter. Der Storno einer nie gemeldeten Zahlung hebt sie an ihrem Tag auf.
-  Eine Rechnung, auf der eine gebuchte Zahlung steht, lässt sich erst nach deren Storno stornieren; einen Ausgleich
-  ohne Buchung nimmt ihr Storno mit. Auf eine stornierte Rechnung lässt sich nichts mehr zuordnen.
+  Eine Direktbuchung als Rechnung, auf der eine gebuchte Zahlung steht, lässt sich erst nach deren Storno stornieren;
+  einen Ausgleich ohne Buchung nimmt ihr Storno mit, und ihr Posten schließt.
 - Direkt bezahlte Umsätze (Bank an Erlöse), Vorsteuer und steuerfreie Umsätze bleiben unverändert.
 - Eine Rechnung auf einem Forderungskonto **ohne** verknüpften Posten zählt mit dem Buchungsdatum; die
   UStVA nennt sie als Warnung. Sie zeigt auch, wie viel Umsatzsteuer noch nicht fällig ist: Das

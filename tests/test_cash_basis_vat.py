@@ -386,6 +386,134 @@ def test_settlement_against_an_unbooked_transaction_falls_with_the_invoice(
     assert _kennzahlen(session, company, *march)["83"] == Decimal("-19.00")
 
 
+def test_chain_with_a_late_payment_nets_to_nothing(session: Session) -> None:
+    """Februar +19, März −19; der Storno der zu spät zugeordneten Zahlung meldet nichts mehr.
+
+    Mit dem kumulierten Anteil verschluckte die Deckelung auf 100 % die Minderung im März, und
+    gemeldet blieben 19,00 € auf einer Rechnung, auf der kein Geld steht.
+    """
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    first = _booked_receipt(session, company, accounts, "119.00", date(2027, 2, 10), "kette-a")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=first.id
+    )
+    february = save_vat_return(
+        session=session, company_id=company.id, period_label="2027-02", changed_by="t"
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=first.journal_entry_id,
+        reversal_date=date(2027, 3, 5),
+        changed_by="t",
+    )
+    late = _booked_receipt(session, company, accounts, "119.00", date(2027, 2, 12), "kette-b")
+    settle_open_item(
+        session=session, open_item_id=item.id, changed_by="t", bank_transaction_id=late.id
+    )
+    march = save_vat_return(
+        session=session, company_id=company.id, period_label="2027-03", changed_by="t"
+    )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=late.journal_entry_id,
+        reversal_date=date(2027, 4, 10),
+        changed_by="t",
+    )
+
+    def reported(vat_return) -> Decimal:
+        return next(
+            Decimal(row["amount"]) for row in vat_return.kennzahlen if row["kennziffer"] == "83"
+        )
+
+    assert reported(february) == Decimal("19.00")
+    assert reported(march) == Decimal("-19.00")
+    assert _kennzahlen(session, company, date(2027, 2, 1), date(2027, 2, 28))["83"] == Decimal(
+        "19.00"
+    )
+    assert _kennzahlen(session, company, date(2027, 3, 1), date(2027, 3, 31))["83"] == Decimal(
+        "-19.00"
+    )
+    assert _kennzahlen(session, company, date(2027, 4, 1), date(2027, 4, 30)).get(
+        "83", Decimal("0.00")
+    ) == Decimal("0.00")
+
+
+def test_backdated_reversal_does_not_move_a_cent_in_a_reported_month(session: Session) -> None:
+    """Zwei Zahlungen über je 33,33 € auf 100,00 €: Der September bleibt bei 5,33 €."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    _, item = _invoice(session, company, accounts, gross="100.00", day=date(2027, 1, 15))
+    may = _booked_receipt(session, company, accounts, "33.33", date(2027, 5, 10), "mai")
+    september = _booked_receipt(session, company, accounts, "33.33", date(2027, 9, 10), "sept")
+    for transaction in (may, september):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+    period = (date(2027, 9, 1), date(2027, 9, 30))
+    assert _kennzahlen(session, company, *period)["83"] == Decimal("5.33")
+    save_vat_return(session=session, company_id=company.id, period_label="2027-09", changed_by="t")
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=may.journal_entry_id,
+        reversal_date=date(2027, 5, 20),
+        changed_by="t",
+    )
+    assert _kennzahlen(session, company, *period)["83"] == Decimal("5.33")
+
+
+def test_shared_transaction_stays_matched_while_another_settlement_stands(
+    session: Session,
+) -> None:
+    """238,00 € auf zwei Rechnungen, eine fällt weg: Der Umsatz bleibt der anderen zugeordnet."""
+    company, accounts = _seed(session)
+    _set_cash_basis(session, company, date(2027, 1, 1))
+    first, first_item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
+    second, second_item = _invoice(
+        session, company, accounts, gross="119.00", day=date(2027, 1, 16)
+    )
+    transaction = BankTransaction(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        bank_account_id=accounts["1200"].id,
+        booking_date=date(2027, 2, 10),
+        amount=Decimal("238.00"),
+        currency_code="EUR",
+        purpose="Sammelzahlung",
+        status="open",
+        dedup_hash="sammel",
+    )
+    session.add(transaction)
+    session.commit()
+    for item in (first_item, second_item):
+        settle_open_item(
+            session=session,
+            open_item_id=item.id,
+            changed_by="t",
+            bank_transaction_id=transaction.id,
+        )
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=first.id,
+        reversal_date=date(2027, 3, 5),
+        changed_by="t",
+    )
+    session.refresh(transaction)
+    assert transaction.status == "matched"
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=second.id,
+        reversal_date=date(2027, 3, 6),
+        changed_by="t",
+    )
+    session.refresh(transaction)
+    assert transaction.status == "open"
+
+
 def test_paid_invoice_stays_until_its_payment_is_reversed(session: Session) -> None:
     company, accounts = _seed(session)
     _set_cash_basis(session, company, date(2027, 1, 1))

@@ -91,10 +91,16 @@ Nach § 244 HGB wird der Jahresabschluss in Euro aufgestellt. Fremdwährungspost
    behält ihr Datum; ist sie erst nach der Meldung zugeordnet, nennt die UStVA sie weiter (Entscheidung 5), ihre
    Differenz bucht spätestens die Jahreserklärung.
 
-   Eine Rechnung, die nach Ist zählt, lässt sich nicht stornieren, solange eine gebuchte Zahlung auf ihr steht: erst
-   die Zahlung. Ein Ausgleich ohne eigene Buchung fällt mit der Rechnung, ebenso die Zahlung auf derselben Buchung.
-   Auf eine stornierte Rechnung lässt sich keine Zahlung mehr zuordnen. Der Wechsel zurück zur Sollversteuerung ist
-   nicht möglich, wenn für Rechnungen ab diesem Datum eine gebuchte Differenz stehen bliebe.
+   Eine Direktbuchung als Rechnung, die nach Ist zählt, lässt sich nicht stornieren, solange eine gebuchte Zahlung auf
+   ihr steht: erst die Zahlung. Ein Ausgleich ohne eigene Buchung fällt mit der Rechnung, ebenso die Zahlung auf
+   derselben Buchung, und ihr Posten schließt. Ausgangsrechnungen haben ihren eigenen Stornoweg (ADR-006). Der Wechsel
+   zurück zur Sollversteuerung ist nicht möglich, wenn für Rechnungen ab diesem Datum eine gebuchte Differenz stehen
+   bliebe. Festhalten, Ausgleich und Storno laufen bei Istversteuerung je Gesellschaft nacheinander, sonst ginge eine
+   gleichzeitige Zahlung in keiner Meldung auf.
+
+   Euro und Fremdwährung rechnen gleich: Jede Zahlung deckt einen festen Teil der Rechnung, unabhängig von später
+   erfassten oder rückdatierten Zahlungen. Bisher rechnete der Euro-Pfad kumuliert nach Datum; eine rückdatierte
+   Zahlung verschob dann den Stand vor einem festgehaltenen Monat, und die Deckelung auf 100 % verschluckte einen Storno.
 
    **Fehlender Kurs:** Die Vorschau rechnet vorläufig zum Rechnungskurs und nennt Währung und Monat. Festhalten wird
    abgewiesen, wie bei jedem fehlenden Kurs (Entscheidung 3). Der Monatskurs erscheint Anfang des Folgemonats, also
