@@ -103,7 +103,7 @@ from app.services.datev_account_functions import (
     DatevAccountFunction,
     datev_account_function,
 )
-from app.services.journal_entries import fiscal_year_bounds
+from app.services.journal_entries import SOURCE_VAT_FX_DIFFERENCE, fiscal_year_bounds
 from app.services.periods import PROFIT_AND_LOSS_ACCOUNT_TYPES
 from app.services.tax_codes import (
     DEFAULT_TAX_CODES,
@@ -724,9 +724,16 @@ def _entry_bookings(
     Korrektursatz für Rundungscent) nachrechnet."""
     # Ohne passenden BU-Schlüssel (anderer Steuersatz, Sonderfunktion, KU-Konto)
     # bleibt eine Steuerzeile eigene Position.
+    # Die Steuerdifferenz zum Monatskurs ist kein Umsatz: Das Kursdifferenz-Konto darf nie als
+    # Bemessungsgrundlage gelten, auch wenn die Beträge rechnerisch dazu passen (ADR-010).
+    candidates = (
+        []
+        if entry.source == SOURCE_VAT_FX_DIFFERENCE
+        else _tax_groups(lines, tax_codes, tax_accounts, chart)
+    )
     groups = [
         group
-        for group in _tax_groups(lines, tax_codes, tax_accounts, chart)
+        for group in candidates
         if all(
             _gross_tax_key(datev_account_function(chart, base.code), group.kind, group.rate)
             is not None

@@ -38,6 +38,7 @@ from app.services.bank_import import (
     find_geldtransit_account,
 )
 from app.services.bank_rules import match_rules_for
+from app.services.journal_entries import lock_cash_basis_company
 from app.services.open_items import settle_open_item
 from app.services.partner_recognition import (
     STATUS_NONE,
@@ -330,6 +331,8 @@ def book_transaction_to_open_item(
             f"{partner.name} ist inaktiv und darf nicht bebucht werden. Bitte reaktivieren."
         )
     try:
+        # Vor dem Buchen: Es schreibt ins Audit, die Gesellschaft kommt in der Reihenfolge davor.
+        lock_cash_basis_company(session, item.company_id)
         transaction = book_transaction(
             session=session,
             transaction_id=transaction.id,

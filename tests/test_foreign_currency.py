@@ -2231,9 +2231,10 @@ def test_paid_foreign_invoice_names_euro_and_foreign_rest(session: Session, tmp_
         )
 
 
-def test_cash_basis_warns_about_the_rate_of_the_payment_month(
+def test_cash_basis_names_a_missing_rate_of_the_payment_month(
     session: Session, tmp_path: Path
 ) -> None:
+    """Die Rechnung zählt zum Monatskurs der Zahlung; ohne ihn nennt die UStVA, was fehlt."""
     company, accounts = _seed(session)
     set_company_vat_method(
         session=session,
@@ -2257,14 +2258,14 @@ def test_cash_basis_warns_about_the_rate_of_the_payment_month(
         date_from=date(2026, 3, 1),
         date_to=date(2026, 3, 31),
     )
-    assert not any("Zahlungsmonats" in warning for warning in march.warnings)
+    assert not any("USD 2026-04" in warning for warning in march.warnings)
     april = compute_vat_return_details(
         session=session,
         company_id=company.id,
         date_from=date(2026, 4, 1),
         date_to=date(2026, 4, 30),
     )
-    assert any("Zahlungsmonats" in warning for warning in april.warnings)
+    assert any("USD 2026-04" in warning for warning in april.warnings)
 
 
 def test_foreign_einvoice_is_read_correctly_and_not_booked_as_euro(

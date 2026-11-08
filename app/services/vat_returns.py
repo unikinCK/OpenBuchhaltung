@@ -62,7 +62,8 @@ Jahresabschlusses zählen nie als Umsatz.
 **Istversteuerung** (§ 20 UStG, ``Company.vat_cash_basis_from``): Rechnungen mit Umsatzsteuer und
 einem verknüpften offenen Posten zählen anteilig erst mit der Zahlung
 (``OpenItemSettlement``), siehe ``_apply_cash_basis``. Vorsteuer, steuerfreie Umsätze und direkt
-bezahlte Umsätze bleiben unverändert (ADR-009).
+bezahlte Umsätze bleiben unverändert (ADR-009). Rechnungen in Fremdwährung zählen je Zahlung zum
+Monatskurs des Geldeingangs (§ 16 Abs. 6 Satz 2 UStG, ADR-010), siehe ``_paid_entry``.
 """
 
 from __future__ import annotations
@@ -73,13 +74,31 @@ from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.services.account_chart_check import detect_company_chart
 from app.services.audit_log import log_audit_event
 from app.services.datev_account_functions import datev_account_function
-from app.services.journal_entries import CARRYFORWARD_SOURCES
+from app.services.exchange_rates import (
+    ExchangeRateError,
+    find_vat_rate,
+    format_rate_month,
+    fx_account,
+    to_company_amount,
+)
+from app.services.journal_entries import (
+    CARRYFORWARD_SOURCES,
+    SOURCE_FX_DIFFERENCE,
+    SOURCE_FX_VALUATION,
+    SOURCE_VAT_FX_DIFFERENCE,
+    JournalEntryCreationError,
+    JournalEntryInput,
+    JournalLineInput,
+    create_journal_entry,
+    first_open_posting_date,
+    lock_cash_basis_company,
+)
 from app.services.tax_codes import company_special_tax_accounts, company_tax_accounts
 from app.services.tax_period import (
     INPUT,
@@ -104,6 +123,7 @@ from domain.models import (
     TaxCode,
     VatReturn,
 )
+from domain.services.journal_entry_validation import JournalEntryValidationError
 
 
 class VatReturnError(ValueError):
@@ -259,6 +279,51 @@ def partner_vat_country(country_code: str | None, vat_id: str | None) -> str | N
 
 
 @dataclass(slots=True)
+class ForeignPaymentEvent:
+    """Eine Zahlung auf eine Fremdwährungsrechnung oder ihr Storno im Meldezeitraum."""
+
+    settlement: OpenItemSettlement
+    reference: str
+    is_reversal: bool
+    currency_code: str
+    # Monat des Geldeingangs, nach ihm richtet sich der Kurs.
+    rate_month: date
+    rate: Decimal
+    # Kein Monatskurs bekannt: Dann steht hier vorläufig der Kurs der Rechnung.
+    rate_missing: bool
+    # Vorzeichenrichtig, das Storno negativ.
+    foreign_amount: Decimal
+    tax: Decimal
+    booked_tax: Decimal
+    # Steuerkonto → Differenz „gebucht minus gemeldet“; das Storno kehrt sie um.
+    differences: dict[int, Decimal] = field(default_factory=dict)
+
+    @property
+    def is_posted(self) -> bool:
+        settlement = self.settlement
+        entry_id = (
+            settlement.vat_fx_reversal_entry_id if self.is_reversal else settlement.vat_fx_entry_id
+        )
+        return entry_id is not None
+
+
+def serialize_foreign_payment(event: ForeignPaymentEvent) -> dict[str, Any]:
+    return {
+        "reference": event.reference,
+        "kind": "reversal" if event.is_reversal else "payment",
+        "currency_code": event.currency_code,
+        "month": format_rate_month(event.rate_month),
+        "rate": str(event.rate),
+        "rate_missing": event.rate_missing,
+        "foreign_amount": str(event.foreign_amount),
+        "tax": str(event.tax),
+        "booked_tax": str(event.booked_tax),
+        "difference": str(event.booked_tax - event.tax),
+        "posted": event.is_posted,
+    }
+
+
+@dataclass(slots=True)
 class VatReturnResult:
     """UStVA-Kennzahlen mit Hinweisen und nicht zugeordneten Erträgen."""
 
@@ -266,6 +331,7 @@ class VatReturnResult:
     warnings: list[str] = field(default_factory=list)
     # Erträge ohne Umsatzsteuer auf Konten ohne UStVA-Funktion (nicht gemeldet).
     unassigned: list[dict[str, object]] = field(default_factory=list)
+    foreign_payments: list[ForeignPaymentEvent] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -296,7 +362,9 @@ def vat_entries(
     """Buchungszeilen je Buchung (ohne Saldovorträge), deren Steuer in den Zeitraum
     fallen kann: Buchungsdatum im Zeitraum oder Leistungsdatum im Zeitraum bzw. bis
     zu zwei Monate davor. Welche Teile einer Buchung zählen, entscheidet der
-    Steuerzeitpunkt (``_Entry.tax_point``)."""
+    Steuerzeitpunkt (``_Entry.tax_point``). Kursdifferenzen und die Differenzbuchung zum
+    Monatskurs sind kein Umsatz, ihre Stornos ebenso wenig."""
+    fx_original = aliased(JournalEntry)
     stmt = _vat_lines_select().where(
         JournalEntry.company_id == company_id,
         or_(
@@ -306,7 +374,23 @@ def vat_entries(
                 JournalEntry.service_date <= date_to,
             ),
         ),
-        JournalEntry.source.notin_(CARRYFORWARD_SOURCES),
+        JournalEntry.source.notin_(
+            (
+                *CARRYFORWARD_SOURCES,
+                SOURCE_VAT_FX_DIFFERENCE,
+                SOURCE_FX_DIFFERENCE,
+                SOURCE_FX_VALUATION,
+            )
+        ),
+        or_(
+            JournalEntry.reversal_of_id.is_(None),
+            JournalEntry.reversal_of_id.notin_(
+                select(fx_original.id).where(
+                    fx_original.company_id == company_id,
+                    fx_original.source.in_((SOURCE_FX_DIFFERENCE, SOURCE_FX_VALUATION)),
+                )
+            ),
+        ),
     )
     if not include_closing_entries:
         stmt = stmt.where(Period.is_closing.is_(False))
@@ -326,6 +410,8 @@ def _vat_lines_select():
             JournalEntryLine.account_id,
             JournalEntryLine.partner_id,
             JournalEntryLine.tax_code_id,
+            JournalEntryLine.foreign_currency_code,
+            JournalEntryLine.foreign_amount,
             TaxCode.rate,
             TaxCode.vat_account_id,
             TaxCode.kind.label("tax_kind"),
@@ -388,6 +474,175 @@ def _scaled(amount: Decimal, share: Decimal) -> Decimal:
     return (amount * share).quantize(ZERO, rounding=ROUND_HALF_UP)
 
 
+def _row_foreign_amount(amount: Decimal, row, currency_code: str, invoice_rate: Decimal) -> Decimal:
+    """Fremdbetrag einer Rechnungszeile: gebucht oder aus dem Eurobetrag zum Rechnungskurs."""
+    if amount == ZERO:
+        return ZERO
+    if row.foreign_currency_code == currency_code and row.foreign_amount is not None:
+        return row.foreign_amount
+    return (amount * invoice_rate).quantize(ZERO, rounding=ROUND_HALF_UP)
+
+
+def _paid_entry(
+    *,
+    session: Session,
+    company: Company,
+    invoice: _Entry,
+    settlements: list[OpenItemSettlement],
+    references: dict[int, str],
+    currency_code: str | None,
+    invoice_rate: Decimal | None,
+    total: Decimal,
+    date_from: date,
+    date_to: date,
+    vat_accounts: dict[int, str],
+) -> tuple[_Entry | None, list[ForeignPaymentEvent]]:
+    """Die Zeilen einer Rechnung, soweit im Zeitraum bezahlt.
+
+    Jede Zahlung deckt einen festen Teil der Rechnung. Ihr Storno nimmt im Zeitraum des Stornos
+    genau diesen Teil zurück. Der Teil ist der kumulierte Anteil abzüglich der Teile, die beim
+    Erfassen der Zahlung schon standen; so summieren sich die Teile ohne Rundungsrest zur Rechnung
+    und bleiben gleich, was immer später geschieht, auch eine rückdatierte Zahlung.
+
+    In Fremdwährung (``currency_code``) gilt das für die Fremdbeträge, und jeder Teil wird zum Kurs
+    des Monats umgerechnet, in dem das Geld einging (§ 16 Abs. 6 Satz 2 UStG), auch beim Storno,
+    wenn dort ein anderer Kurs gilt. Ohne Währung zählen die gebuchten Beträge.
+    """
+    ordered = sorted(settlements, key=lambda settlement: settlement.id)
+    reversal_times = dict(
+        session.execute(
+            select(JournalEntry.id, JournalEntry.created_at).where(
+                JournalEntry.id.in_(
+                    [
+                        settlement.reversal_journal_entry_id
+                        for settlement in ordered
+                        if settlement.reversal_journal_entry_id is not None
+                    ]
+                )
+            )
+        ).all()
+    )
+
+    def paid_of(settlement: OpenItemSettlement) -> Decimal:
+        return (settlement.foreign_amount or ZERO) if currency_code else settlement.amount
+
+    totals: dict[tuple[int, str], Decimal] = {}
+    events: list[ForeignPaymentEvent] = []
+    in_period = False
+    foreign_parts: dict[int, dict[tuple[int, str], Decimal]] = {}
+    booked_parts: dict[int, dict[tuple[int, str], Decimal]] = {}
+    for settlement in ordered:
+        # Was tatsächlich stand, nicht was nach den Daten stehen müsste: Das Datum einer Zahlung
+        # kann vor dem Storno einer anderen liegen, die beim Erfassen schon weg war.
+        standing = [
+            other
+            for other in ordered
+            if other.id < settlement.id
+            and (
+                other.reversal_journal_entry_id is None
+                or reversal_times[other.reversal_journal_entry_id] > settlement.created_at
+            )
+        ]
+        share = min(
+            Decimal(1),
+            (sum((paid_of(other) for other in standing), ZERO) + paid_of(settlement)) / total,
+        )
+        foreign_part: dict[tuple[int, str], Decimal] = {}
+        booked_part: dict[tuple[int, str], Decimal] = {}
+        for index, row in enumerate(invoice.rows):
+            for column in ("debit_amount", "credit_amount"):
+                key = (index, column)
+                booked = getattr(row, column)
+                booked_part[key] = _scaled(booked, share) - sum(
+                    (booked_parts[other.id][key] for other in standing), ZERO
+                )
+                if currency_code:
+                    foreign = _row_foreign_amount(booked, row, currency_code, invoice_rate)
+                    foreign_part[key] = _scaled(foreign, share) - sum(
+                        (foreign_parts[other.id][key] for other in standing), ZERO
+                    )
+        foreign_parts[settlement.id] = foreign_part
+        booked_parts[settlement.id] = booked_part
+
+        reversal_day = settlement.vat_reversal_date
+        reversal_in_period = reversal_day is not None and date_from <= reversal_day <= date_to
+        payment_in_period = date_from <= settlement.vat_payment_date <= date_to
+        if not payment_in_period and not reversal_in_period:
+            continue
+        in_period = True
+
+        rate_month = rate = rate_missing = None
+        amounts = booked_part
+        if currency_code:
+            rate_month = (settlement.received_on or settlement.settlement_date).replace(day=1)
+            rate = settlement.vat_rate
+            if rate is None:
+                found = find_vat_rate(
+                    session=session,
+                    tenant_id=company.tenant_id,
+                    currency_code=currency_code,
+                    month=rate_month,
+                )
+                rate = found.rate if found is not None else None
+            rate_missing = rate is None
+            if rate is None:
+                rate = invoice_rate
+            # Zum Kurs der Rechnung zählt, was gebucht ist; aus den Fremdbeträgen käme Rundung dazu.
+            if rate != invoice_rate:
+                amounts = {
+                    key: to_company_amount(part, rate) for key, part in foreign_part.items()
+                }
+
+        for is_reversal, happened in ((False, payment_in_period), (True, reversal_in_period)):
+            if not happened:
+                continue
+            direction = -1 if is_reversal else 1
+            for key, amount in amounts.items():
+                totals[key] = totals.get(key, ZERO) + direction * amount
+            if not currency_code:
+                continue
+            tax = booked_tax = ZERO
+            differences: dict[int, Decimal] = {}
+            for index, row in enumerate(invoice.rows):
+                if _output_tax_of_row(row, vat_accounts) == ZERO:
+                    continue
+                for column, sign in (("credit_amount", 1), ("debit_amount", -1)):
+                    amount = amounts[(index, column)]
+                    booked_slice = booked_part[(index, column)]
+                    tax += sign * amount
+                    booked_tax += sign * booked_slice
+                    differences[row.account_id] = (
+                        differences.get(row.account_id, ZERO) + sign * (booked_slice - amount)
+                    )
+            events.append(
+                ForeignPaymentEvent(
+                    settlement=settlement,
+                    reference=references[settlement.open_item_id],
+                    is_reversal=is_reversal,
+                    currency_code=currency_code,
+                    rate_month=rate_month,
+                    rate=rate,
+                    rate_missing=rate_missing,
+                    foreign_amount=direction * paid_of(settlement),
+                    tax=direction * tax,
+                    booked_tax=direction * booked_tax,
+                    differences={
+                        account_id: direction * difference
+                        for account_id, difference in differences.items()
+                    },
+                )
+            )
+    if not in_period:
+        return None, []
+    paid = _Entry(invoice.posting_number, date_to)
+    for index, row in enumerate(invoice.rows):
+        values = row._asdict()
+        for column in ("debit_amount", "credit_amount"):
+            values[column] = totals.get((index, column), ZERO)
+        paid.rows.append(SimpleNamespace(**values))
+    return paid, events
+
+
 def _apply_cash_basis(
     *,
     session: Session,
@@ -396,15 +651,14 @@ def _apply_cash_basis(
     date_from: date,
     date_to: date,
     vat_accounts: dict[int, str],
-) -> tuple[dict[Any, _Entry], list[str]]:
+) -> tuple[dict[Any, _Entry], list[str], list[ForeignPaymentEvent]]:
     """Ersetzt Rechnungen auf offene Posten durch den im Zeitraum bezahlten Anteil.
 
     Eine Rechnung mit Umsatzsteuer und verknüpftem Posten, gebucht im Zeitraum der
     Istversteuerung, zählt nicht mit dem Buchungsdatum. Stattdessen entsteht je Rechnung ein
-    Eintrag mit ihren Zeilen, skaliert auf den Anteil, der im Meldezeitraum gezahlt wurde; ein
-    storniertes Ausgleichen mindert im Zeitraum des Stornos. Gerechnet wird über den kumulierten
-    Anteil, damit sich Teilzahlungen ohne Rundungsrest zur Rechnung summieren. Der Rest wird
-    wie bisher ausgewertet, also auch die Vorsteuer und steuerfreie Umsätze.
+    Eintrag mit ihren Zeilen, soweit sie im Meldezeitraum gezahlt wurde; ein storniertes
+    Ausgleichen mindert im Zeitraum des Stornos (siehe ``_paid_entry``). Der Rest wird wie bisher
+    ausgewertet, also auch die Vorsteuer und steuerfreie Umsätze.
     """
     filters = [
         OpenItem.company_id == company.id,
@@ -419,17 +673,34 @@ def _apply_cash_basis(
             OpenItem.journal_entry_id,
             OpenItem.original_amount,
             OpenItem.foreign_currency_code,
+            OpenItem.foreign_original_amount,
+            OpenItem.exchange_rate,
+            OpenItem.reference,
         )
         .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
         .where(*filters)
     ).all()
 
     items_by_entry: dict[int, dict[int, Decimal]] = {}
-    foreign_entries: set[int] = set()
-    for item_id, entry_id, original_amount, foreign_currency_code in item_rows:
+    foreign_kinds: dict[int, set[tuple[str | None, Decimal | None]]] = {}
+    foreign_totals: dict[int, Decimal] = {}
+    references: dict[int, str] = {}
+    for (
+        item_id,
+        entry_id,
+        original_amount,
+        foreign_currency_code,
+        foreign_original_amount,
+        exchange_rate,
+        reference,
+    ) in item_rows:
         items_by_entry.setdefault(entry_id, {})[item_id] = original_amount
+        references[item_id] = reference
+        foreign_kinds.setdefault(entry_id, set()).add((foreign_currency_code, exchange_rate))
         if foreign_currency_code:
-            foreign_entries.add(entry_id)
+            foreign_totals[entry_id] = foreign_totals.get(entry_id, ZERO) + (
+                foreign_original_amount or ZERO
+            )
 
     invoices = (
         _collect_entries(
@@ -447,15 +718,17 @@ def _apply_cash_basis(
     }
 
     events_by_item: dict[int, list[tuple[date, Decimal]]] = {}
+    settlements_by_item: dict[int, list[OpenItemSettlement]] = {}
     item_ids = [item_id for entry_id in deferred for item_id in items_by_entry[entry_id]]
     if item_ids:
         for settlement in session.execute(
             select(OpenItemSettlement).where(OpenItemSettlement.open_item_id.in_(item_ids))
         ).scalars():
+            settlements_by_item.setdefault(settlement.open_item_id, []).append(settlement)
             events = events_by_item.setdefault(settlement.open_item_id, [])
-            events.append((settlement.settlement_date, settlement.amount))
-            if settlement.reversed_on is not None:
-                events.append((settlement.reversed_on, -settlement.amount))
+            events.append((settlement.vat_payment_date, settlement.amount))
+            if settlement.vat_reversal_date is not None:
+                events.append((settlement.vat_reversal_date, -settlement.amount))
 
     # Bis zum Periodenende stornierte Rechnungen werden nicht mehr fällig.
     cancelled = (
@@ -479,17 +752,16 @@ def _apply_cash_basis(
     }
 
     not_due = ZERO
-    foreign_paid: list[str] = []
-    before = date_from - timedelta(days=1)
+    mixed_foreign_paid: list[str] = []
+    foreign_events: list[ForeignPaymentEvent] = []
     for entry_id, invoice in deferred.items():
         item_amounts = items_by_entry[entry_id]
         total = sum(item_amounts.values(), ZERO)
         events = [
             event for item_id in item_amounts for event in events_by_item.get(item_id, [])
         ]
-        share_before = _paid_share(events, total, before)
-        share_after = _paid_share(events, total, date_to)
         if invoice.entry_date <= date_to and entry_id not in cancelled:
+            share_after = _paid_share(events, total, date_to)
             not_due += sum(
                 (
                     _output_tax_of_row(row, vat_accounts)
@@ -498,18 +770,31 @@ def _apply_cash_basis(
                 ),
                 ZERO,
             )
-        if share_after == share_before:
+        kinds = foreign_kinds[entry_id]
+        code, rate = next(iter(kinds))
+        is_foreign = len(kinds) == 1 and bool(code and rate and foreign_totals[entry_id])
+        paid, entry_events = _paid_entry(
+            session=session,
+            company=company,
+            invoice=invoice,
+            settlements=[
+                settlement
+                for item_id in item_amounts
+                for settlement in settlements_by_item.get(item_id, [])
+            ],
+            references=references,
+            currency_code=code if is_foreign else None,
+            invoice_rate=rate if is_foreign else None,
+            total=foreign_totals[entry_id] if is_foreign else total,
+            date_from=date_from,
+            date_to=date_to,
+            vat_accounts=vat_accounts,
+        )
+        if paid is None:
             continue
-        if entry_id in foreign_entries:
-            foreign_paid.append(invoice.posting_number)
-        paid = _Entry(invoice.posting_number, date_to)
-        for row in invoice.rows:
-            values = row._asdict()
-            for column in ("debit_amount", "credit_amount"):
-                values[column] = _scaled(values[column], share_after) - _scaled(
-                    values[column], share_before
-                )
-            paid.rows.append(SimpleNamespace(**values))
+        foreign_events.extend(entry_events)
+        if not is_foreign and any(kind_code for kind_code, _ in kinds):
+            mixed_foreign_paid.append(invoice.posting_number)
         result[f"cash-basis-{entry_id}"] = paid
 
     warnings: list[str] = []
@@ -527,15 +812,44 @@ def _apply_cash_basis(
             f"{date_to.strftime('%d.%m.%Y')} gebuchten Rechnungen sind noch nicht fällig. "
             "Das Steuerkonto enthält sie bereits, deshalb weicht sein Saldo von der Zahllast ab."
         )
-    if foreign_paid:
+    if mixed_foreign_paid:
         warnings.append(
-            "Istversteuerung: Diese Rechnungen in Fremdwährung wurden im Zeitraum bezahlt und "
-            "zählen hier zum Kurs der Rechnung. § 16 Abs. 6 UStG verlangt bei vereinnahmten "
-            "Entgelten den Durchschnittskurs des Zahlungsmonats; bitte die Steuer prüfen und "
-            "korrigieren: " + ", ".join(sorted(foreign_paid)[:10])
-            + (" …" if len(foreign_paid) > 10 else "")
+            "Istversteuerung: Auf diesen Rechnungen liegen Posten in verschiedenen Währungen oder "
+            "zu verschiedenen Kursen. Sie zählen hier zum Kurs der Rechnung, nicht zum Monatskurs "
+            "des Zahlungsmonats; bitte die Steuer prüfen und korrigieren: "
+            + ", ".join(sorted(mixed_foreign_paid)[:10])
+            + (" …" if len(mixed_foreign_paid) > 10 else "")
+        )
+    missing_rates = sorted(
+        {(event.currency_code, event.rate_month) for event in foreign_events if event.rate_missing}
+    )
+    if missing_rates:
+        warnings.append(
+            "Istversteuerung: Es fehlt der Monatskurs für "
+            + ", ".join(f"{code} {format_rate_month(month)}" for code, month in missing_rates)
+            + ". Diese Zahlungen zählen vorläufig zum Kurs der Rechnung. Festhalten lässt sich der "
+            "Zeitraum erst mit Kurs: unter Fremdwährung abrufen oder erfassen."
+        )
+    open_difference = sum(
+        (
+            event.booked_tax - event.tax
+            for event in foreign_events
+            if not event.is_posted and not event.rate_missing
+        ),
+        ZERO,
+    )
+    if open_difference != ZERO:
+        direction = "niedriger" if open_difference > ZERO else "höher"
+        warnings.append(
+            "Istversteuerung: Rechnungen in Fremdwährung zählen zum Monatskurs des Zahlungsmonats "
+            f"(§ 16 Abs. 6 Satz 2 UStG). Die Umsatzsteuer ist dadurch "
+            f"{format_amount(abs(open_difference))} € {direction} als zum Kurs der Rechnung "
+            "gebucht. Beim Festhalten wird das Steuerkonto gegen die Kursdifferenz angeglichen."
         )
     # Die Steuer entsteht mit der Zahlung; wird sie nach der Meldung zugeordnet, fehlt sie dort.
+    vat_payment_day = func.coalesce(
+        OpenItemSettlement.vat_settled_on, OpenItemSettlement.settlement_date
+    )
     late_payments = session.execute(
         select(OpenItem.reference, VatReturn.period_label)
         .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
@@ -543,8 +857,8 @@ def _apply_cash_basis(
             VatReturn,
             and_(
                 VatReturn.company_id == company.id,
-                VatReturn.date_from <= OpenItemSettlement.settlement_date,
-                VatReturn.date_to >= OpenItemSettlement.settlement_date,
+                VatReturn.date_from <= vat_payment_day,
+                VatReturn.date_to >= vat_payment_day,
                 VatReturn.created_at < OpenItemSettlement.created_at,
             ),
         )
@@ -555,8 +869,8 @@ def _apply_cash_basis(
             # sich hier nicht ersetzen, sonst stünde der Hinweis für immer da.
             or_(
                 and_(
-                    OpenItemSettlement.settlement_date >= date_from,
-                    OpenItemSettlement.settlement_date <= date_to,
+                    vat_payment_day >= date_from,
+                    vat_payment_day <= date_to,
                 ),
                 and_(
                     OpenItemSettlement.created_at
@@ -595,7 +909,7 @@ def _apply_cash_basis(
             + ", ".join(without_item[:10])
             + (" …" if len(without_item) > 10 else "")
         )
-    return result, warnings
+    return result, warnings, foreign_events
 
 
 def _floor_euro(value: Decimal) -> Decimal:
@@ -657,9 +971,10 @@ def compute_vat_return_details(
 
     entries = vat_entries(session, company_id, date_from, date_to, include_closing_entries)
     cash_basis_warnings: list[str] = []
+    foreign_payments: list[ForeignPaymentEvent] = []
     company = session.get(Company, company_id)
     if company is not None and company.vat_cash_basis_from is not None:
-        entries, cash_basis_warnings = _apply_cash_basis(
+        entries, cash_basis_warnings, foreign_payments = _apply_cash_basis(
             session=session,
             company=company,
             entries=entries,
@@ -926,7 +1241,10 @@ def compute_vat_return_details(
             "DATEV-Kontenfunktion zuordnen."
         )
     return VatReturnResult(
-        rows=rows, warnings=[*cash_basis_warnings, *warnings], unassigned=unassigned
+        rows=rows,
+        warnings=[*cash_basis_warnings, *warnings],
+        unassigned=unassigned,
+        foreign_payments=foreign_payments,
     )
 
 
@@ -948,6 +1266,86 @@ def compute_vat_return(
     ).rows
 
 
+def _post_vat_fx_difference(
+    *,
+    session: Session,
+    company: Company,
+    period_label: str,
+    date_to: date,
+    events: list[ForeignPaymentEvent],
+    changed_by: str,
+) -> JournalEntry | None:
+    """Gleicht das Steuerkonto an die gemeldete Steuer an, jede Zahlung und jedes Storno einmal.
+
+    Die Rechnung hat die Steuer zum Rechnungskurs gebucht. Die Differenz gehört zur Kursdifferenz,
+    die die Zahlung auf das Brutto festgehalten hat: Danach zeigt das Steuerkonto, was gemeldet ist,
+    und die Kursdifferenz nur noch das Entgelt. Die Buchung zählt nicht in der UStVA.
+    """
+    pending = [event for event in events if not event.is_posted]
+    by_account: dict[int, Decimal] = {}
+    for event in pending:
+        for account_id, difference in event.differences.items():
+            by_account[account_id] = by_account.get(account_id, ZERO) + difference
+    by_account = {
+        account_id: difference for account_id, difference in by_account.items() if difference
+    }
+    if not by_account:
+        return None
+
+    description = f"Umsatzsteuer-Kursdifferenz {period_label} (§ 16 Abs. 6 UStG)"
+    lines = [
+        JournalLineInput(
+            account_id=account_id,
+            debit_amount=difference if difference > ZERO else ZERO,
+            credit_amount=-difference if difference < ZERO else ZERO,
+            description=description,
+        )
+        for account_id, difference in sorted(by_account.items())
+    ]
+    gain = sum((value for value in by_account.values() if value > ZERO), ZERO)
+    loss = sum((-value for value in by_account.values() if value < ZERO), ZERO)
+    try:
+        if gain:
+            lines.append(
+                JournalLineInput(
+                    account_id=fx_account(session, company.id, gain=True).id,
+                    credit_amount=gain,
+                    description=description,
+                )
+            )
+        if loss:
+            lines.append(
+                JournalLineInput(
+                    account_id=fx_account(session, company.id, gain=False).id,
+                    debit_amount=loss,
+                    description=description,
+                )
+            )
+        entry = create_journal_entry(
+            session=session,
+            payload=JournalEntryInput(
+                company_id=company.id,
+                # Aus einem gesperrten Monat oder abgeschlossenen Jahr in den nächsten offenen.
+                entry_date=first_open_posting_date(
+                    session=session, company_id=company.id, on=date_to
+                ),
+                description=description,
+                status="posted",
+                changed_by=changed_by,
+                lines=lines,
+                source=SOURCE_VAT_FX_DIFFERENCE,
+                expand_tax_lines=False,
+            ),
+            commit=False,
+        )
+    except (ExchangeRateError, JournalEntryCreationError, JournalEntryValidationError) as exc:
+        session.rollback()
+        raise VatReturnError(
+            f"Die Steuerdifferenz zum Monatskurs ist nicht gebucht: {exc}"
+        ) from exc
+    return entry
+
+
 def save_vat_return(
     *,
     session: Session,
@@ -956,7 +1354,14 @@ def save_vat_return(
     changed_by: str,
     include_closing_entries: bool = False,
 ) -> VatReturn:
-    """Hält Umsatzsteuer-Kennziffern als unveränderlichen Snapshot fest."""
+    """Hält Umsatzsteuer-Kennziffern als unveränderlichen Snapshot fest.
+
+    Zahlungen auf Fremdwährungsrechnungen behalten dabei ihren Monatskurs, ein späterer Kurs ändert
+    den Zeitraum nicht mehr. Ohne Monatskurs wird nicht festgehalten, und die Differenz zum
+    Rechnungskurs wird auf dem Steuerkonto gebucht (ADR-010).
+    """
+    # Vor allem anderen: Was hier berechnet wird, muss beim Festhalten noch stimmen.
+    lock_cash_basis_company(session, company_id)
     company = session.get(Company, company_id)
     if company is None:
         raise VatReturnError("Gesellschaft nicht gefunden.")
@@ -975,12 +1380,34 @@ def save_vat_return(
             f"Für den Zeitraum {period_label} wurde bereits eine {display_name} festgehalten."
         )
 
-    rows = compute_vat_return(
+    details = compute_vat_return_details(
         session=session,
         company_id=company_id,
         date_from=date_from,
         date_to=date_to,
         include_closing_entries=include_closing_entries,
+    )
+    rows = details.rows
+    missing_rates = sorted(
+        {
+            (event.currency_code, event.rate_month)
+            for event in details.foreign_payments
+            if event.rate_missing
+        }
+    )
+    if missing_rates:
+        raise VatReturnError(
+            "Es fehlt der Monatskurs für "
+            + ", ".join(f"{code} {format_rate_month(month)}" for code, month in missing_rates)
+            + ". Bitte unter Fremdwährung abrufen oder erfassen, dann festhalten."
+        )
+    fx_entry = _post_vat_fx_difference(
+        session=session,
+        company=company,
+        period_label=period_label,
+        date_to=date_to,
+        events=details.foreign_payments,
+        changed_by=changed_by,
     )
     vat_return = VatReturn(
         tenant_id=company.tenant_id,
@@ -993,6 +1420,7 @@ def save_vat_return(
             for row in rows
         ],
         status="erstellt",
+        fx_journal_entry_id=fx_entry.id if fx_entry is not None else None,
         created_by=changed_by,
     )
     session.add(vat_return)
@@ -1013,8 +1441,24 @@ def save_vat_return(
             "date_to": date_to.isoformat(),
             "include_closing_entries": include_closing_entries,
             "kennzahlen": vat_return.kennzahlen,
+            "foreign_payments": [
+                serialize_foreign_payment(event) for event in details.foreign_payments
+            ],
+            "fx_journal_entry_id": vat_return.fx_journal_entry_id,
         },
     )
+    # Erst nach dem Audit-Eintrag und zusammen in einem UPDATE je Ausgleich: Ein zweites UPDATE
+    # derselben Zeile prüft in PostgreSQL alle Fremdschlüssel neu und wartet auf den Bankumsatz,
+    # den ein Storno hält, während der auf die Buchungsnummer wartet.
+    for event in details.foreign_payments:
+        settlement = event.settlement
+        if settlement.vat_rate is None:
+            settlement.vat_rate = event.rate
+        if fx_entry is not None and not event.is_posted:
+            if event.is_reversal:
+                settlement.vat_fx_reversal_entry_id = fx_entry.id
+            else:
+                settlement.vat_fx_entry_id = fx_entry.id
     session.commit()
     session.refresh(vat_return)
     return vat_return
@@ -1038,6 +1482,40 @@ def company_vat_method(company: Company, *, on: date | None = None) -> dict[str,
             company.vat_cash_basis_until.isoformat() if company.vat_cash_basis_until else None
         ),
     }
+
+
+def _refuse_switch_with_booked_differences(
+    session: Session, company: Company, valid_from: date
+) -> None:
+    """Rechnungen ab dem Wechsel zählen wieder nach Soll, ihre gebuchte Differenz bliebe stehen.
+
+    Sind Zahlung und Storno beide gebucht, heben sich ihre Differenzen genau auf.
+    """
+    reference = session.execute(
+        select(OpenItem.reference)
+        .join(OpenItemSettlement, OpenItemSettlement.open_item_id == OpenItem.id)
+        .join(JournalEntry, JournalEntry.id == OpenItem.journal_entry_id)
+        .where(
+            OpenItem.company_id == company.id,
+            JournalEntry.entry_date >= valid_from,
+            or_(
+                and_(
+                    OpenItemSettlement.vat_fx_entry_id.is_not(None),
+                    OpenItemSettlement.vat_fx_reversal_entry_id.is_(None),
+                ),
+                and_(
+                    OpenItemSettlement.vat_fx_entry_id.is_(None),
+                    OpenItemSettlement.vat_fx_reversal_entry_id.is_not(None),
+                ),
+            ),
+        )
+    ).first()
+    if reference is not None:
+        raise VatReturnError(
+            f"Für Posten {reference[0]} ist schon eine Steuerdifferenz zum Monatskurs gebucht. Ein "
+            f"Wechsel zum {valid_from.strftime('%d.%m.%Y')} ließe sie auf dem Steuerkonto stehen; "
+            "die Versteuerungsart wechselt deshalb erst nach den gemeldeten Zeiträumen."
+        )
 
 
 def set_company_vat_method(
@@ -1073,6 +1551,7 @@ def set_company_vat_method(
             raise VatReturnError("Die Gesellschaft nutzt bereits die Sollversteuerung.")
         if valid_from < company.vat_cash_basis_from:
             raise VatReturnError("Das Datum liegt vor dem Beginn der Istversteuerung.")
+        _refuse_switch_with_booked_differences(session, company, valid_from)
         if valid_from == company.vat_cash_basis_from:
             company.vat_cash_basis_from = None
             company.vat_cash_basis_until = None
