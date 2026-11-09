@@ -4731,8 +4731,8 @@ TOOLS: list[ToolSpec] = [
             "volle offene Betrag verwendet, mit Bankumsatz oder Ausgleichsbuchung höchstens deren "
             "noch freier Rest: Eine Zahlung deckt alle Posten zusammen nur bis zu ihrem Betrag. "
             "Bei einem Posten in Fremdwährung gilt das nur ohne "
-            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount', ein "
-            "Bankumsatz muss zuerst gebucht sein und deckt zusammen nur seinen Euro-Betrag."
+            "genannte Zahlung; eine Zahlung nur in Euro braucht 'foreign_amount' und 'amount' und "
+            "deckt zusammen nur ihren Euro-Betrag, ein Bankumsatz muss zuerst gebucht sein."
         ),
         input_schema={
             "type": "object",
@@ -4748,7 +4748,8 @@ TOOLS: list[ToolSpec] = [
                     "description": (
                         "Optional verknüpfte Ausgleichsbuchung; wird sie storniert, "
                         "lebt der Posten um den Ausgleichsbetrag wieder auf. Ohne Bankumsatz "
-                        "muss sie die Zahlung auf dem Konto des Postens buchen."
+                        "muss sie die Zahlung auf dem Konto des Postens buchen, bei einem Posten "
+                        "in Fremdwährung genügt eine Zahlung auf einem anderen Konto."
                     ),
                 },
                 "foreign_amount": {

@@ -8,6 +8,15 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Offene Posten in Fremdwährung: Euro-Zahlungsbuchung nur bis zu ihrem Betrag
+- **Behoben:** Eine Euro-Zahlungsbuchung ohne Bankumsatz und ohne Zeile auf dem Sammelkonto ließ sich beliebig oft
+  zum Ausgleich von Posten in Fremdwährung nutzen. Jetzt trägt sie zusammen höchstens, was sie neben dem Sammelkonto
+  als Zahlung bewegt (Eingang im Soll, Ausgang im Haben), abzüglich nicht stornierter Ausgleiche. Das gilt auch, wenn
+  mehrere Bankumsätze an der Buchung hängen und nur über sie zugeordnet wird. Gilt in UI, REST und MCP.
+- **Verhalten geändert:** Eine Buchung ohne Zahlung für den Posten, etwa die Rechnung selbst, gleicht auch einen
+  Posten in Fremdwährung nicht mehr aus; im Euro-Pfad gilt das schon. Zahlungen, die die Währung des Postens nennen,
+  begrenzt weiter ihr Fremdbetrag.
+
 ### Offene Posten in Fremdwährung: Euro-Bankumsatz nur bis zu seinem Betrag
 - **Behoben:** Ein Euro-Bankumsatz, der nicht auf das Sammelkonto des Postens gebucht ist, ließ sich beliebig oft
   zum Ausgleich von Posten in Fremdwährung nutzen. Jetzt belegt jeder nicht stornierte Ausgleich seinen gezahlten

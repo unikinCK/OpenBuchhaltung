@@ -490,7 +490,7 @@ def settle_open_item(
     settled_foreign = paid_amount = fx_difference = None
     fx_entry = None
     if item.foreign_currency_code:
-        bank_limit = _euro_bank_limit(
+        payment_limit = _euro_payment_limit(
             session,
             item=item,
             bank_transaction=bank_transaction,
@@ -506,8 +506,8 @@ def settle_open_item(
             payment_entry_id=payment_entry_id,
             settlement_date=settlement_date,
         )
-        if bank_limit is not None and paid_amount > bank_limit.left:
-            raise OpenItemError(bank_limit.exceeded)
+        if payment_limit is not None and paid_amount > payment_limit.left:
+            raise OpenItemError(payment_limit.exceeded)
         fx_difference = paid_amount - settlement_amount
         # Nur was die Zahlung auf das Sammelkonto gebracht hat, lässt dort eine Differenz stehen.
         if _payment_reaches_item_account(
@@ -722,6 +722,24 @@ def _collective_lines(session: Session, item: OpenItem, entry_id: int) -> list[J
     return list(session.execute(select(JournalEntryLine).where(*conditions)).scalars())
 
 
+def _money_lines(session: Session, item: OpenItem, entry_id: int) -> list[JournalEntryLine]:
+    """Geldseite der Zahlungsbuchung neben dem Sammelkonto: Eingang im Soll, Ausgang im Haben."""
+    side = (
+        JournalEntryLine.debit_amount
+        if item.item_type == "receivable"
+        else JournalEntryLine.credit_amount
+    )
+    return list(
+        session.execute(
+            select(JournalEntryLine).where(
+                JournalEntryLine.journal_entry_id == entry_id,
+                JournalEntryLine.account_id != item.account_id,
+                side > 0,
+            )
+        ).scalars()
+    )
+
+
 def _settlements_of_payment(
     session: Session, *, entry_id: int | None, bank_transaction_id: int | None
 ) -> list[OpenItemSettlement]:
@@ -744,6 +762,20 @@ def _active_settlements(session: Session, *payment) -> list[OpenItemSettlement]:
                 or_(*payment), OpenItemSettlement.reversed_on.is_(None)
             )
         ).scalars()
+    )
+
+
+def _settlements_on_entry(session: Session, entry_id: int) -> list[OpenItemSettlement]:
+    """Nicht stornierte Ausgleiche auf der Buchung, auch ältere, die nur ihren Umsatz kennen."""
+    return _active_settlements(
+        session,
+        OpenItemSettlement.journal_entry_id == entry_id,
+        and_(
+            OpenItemSettlement.journal_entry_id.is_(None),
+            OpenItemSettlement.bank_transaction_id.in_(
+                select(BankTransaction.id).where(BankTransaction.journal_entry_id == entry_id)
+            ),
+        ),
     )
 
 
@@ -874,21 +906,11 @@ def _foreign_payment_source(
                 and _competes_for_lines(item, row.open_item, collective)
             ]
             return _left_of_payment(collective, rows, [])
-        side = (
-            JournalEntryLine.debit_amount
-            if item.item_type == "receivable"
-            else JournalEntryLine.credit_amount
-        )
-        money = list(
-            session.execute(
-                select(JournalEntryLine).where(
-                    JournalEntryLine.journal_entry_id == entry_id,
-                    JournalEntryLine.foreign_currency_code == code,
-                    JournalEntryLine.account_id != item.account_id,
-                    side > 0,
-                )
-            ).scalars()
-        )
+        money = [
+            line
+            for line in _money_lines(session, item, entry_id)
+            if line.foreign_currency_code == code
+        ]
         if money:
             others = [row for row in earlier if row not in same_currency]
             return _left_of_payment(money, same_currency, others)
@@ -1099,18 +1121,18 @@ def _payment_limit(
     return min(limits, key=lambda limit: limit.left, default=None)
 
 
-def _euro_bank_limit(
+def _euro_payment_limit(
     session: Session,
     *,
     item: OpenItem,
     bank_transaction: BankTransaction | None,
     payment_entry_id: int | None,
 ) -> _PaymentLimit | None:
-    """Rest des Bankumsatzes in Firmenwährung, mit dem ein Posten in Fremdwährung bezahlt wird.
+    """Rest der Zahlung in Firmenwährung, mit der ein Posten in Fremdwährung bezahlt wird.
 
-    Über die Buchung des Umsatzes zugeordnet ist es derselbe Umsatz. Hängen mehrere Umsätze an
-    der Buchung, ist sie nur verknüpft und keiner von ihnen ihre Zahlung. Ein Umsatz in
-    Fremdwährung begrenzt über seinen Fremdbetrag (``_foreign_payment_source``).
+    Über die Buchung des Umsatzes zugeordnet ist es derselbe Umsatz. Ohne Umsatz oder wenn mehrere
+    an der Buchung hängen, ist keiner von ihnen ihre Zahlung, dann zählt die Buchung selbst. Ein
+    Umsatz in Fremdwährung begrenzt über seinen Fremdbetrag (``_foreign_payment_source``).
     """
     if bank_transaction is None and payment_entry_id is not None:
         booked = list(
@@ -1119,13 +1141,58 @@ def _euro_bank_limit(
             ).scalars()
         )
         bank_transaction = booked[0] if len(booked) == 1 else None
-    if bank_transaction is None or bank_transaction.currency_code != item.currency_code:
+    if bank_transaction is not None:
+        if bank_transaction.currency_code != item.currency_code:
+            return None
+        return _bank_transaction_limit(
+            session,
+            item=item,
+            bank_transaction=bank_transaction,
+            entry_ids={bank_transaction.journal_entry_id, payment_entry_id} - {None},
+        )
+    if payment_entry_id is None:
         return None
-    return _bank_transaction_limit(
-        session,
-        item=item,
-        bank_transaction=bank_transaction,
-        entry_ids={bank_transaction.journal_entry_id, payment_entry_id} - {None},
+    return _money_side_limit(session, item=item, entry_id=payment_entry_id)
+
+
+def _money_side_limit(
+    session: Session, *, item: OpenItem, entry_id: int
+) -> _PaymentLimit | None:
+    """Rest einer Euro-Zahlungsbuchung neben dem Sammelkonto: ihre Geldseite minus nicht
+    stornierte Ausgleiche. Dort kommt alles aus demselben Geld, auch andere Posten zählen.
+
+    ``None``, wenn schon das Sammelkonto (``_payment_reaches_item_account``) oder Zeilen in der
+    Währung des Postens (``_foreign_payment_source``) die Grenze setzen.
+    """
+    if _collective_lines(session, item, entry_id):
+        return None
+    lines = _money_lines(session, item, entry_id)
+    if any(line.foreign_currency_code == item.foreign_currency_code for line in lines):
+        return None
+    entry = session.get(JournalEntry, entry_id)
+    if not lines:
+        incoming = item.item_type == "receivable"
+        raise OpenItemError(
+            f"Buchung {entry.posting_number} enthält keine Zahlung für diesen Posten: Auf Konto "
+            f"{item.account.code} steht nichts im {'Haben' if incoming else 'Soll'}, auf den "
+            f"übrigen Konten nichts im {'Soll' if incoming else 'Haben'}."
+        )
+    booked = sum((line.debit_amount + line.credit_amount for line in lines), Decimal("0.00"))
+    used = sum(
+        (_paid_of(row) for row in _settlements_on_entry(session, entry_id)), Decimal("0.00")
+    )
+    left = (booked - used).quantize(Decimal("0.01"))
+    if left <= 0:
+        raise OpenItemError(
+            f"Buchung {entry.posting_number} zahlt {booked} {item.currency_code}, das ist schon "
+            "vollständig offenen Posten zugeordnet."
+        )
+    return _PaymentLimit(
+        left=left,
+        exceeded=(
+            f"Der Betrag übersteigt die Buchung {entry.posting_number}, von ihr sind noch "
+            f"{left} {item.currency_code} frei."
+        ),
     )
 
 
@@ -1172,17 +1239,9 @@ def _entry_limit(
     Umsatz kennen. Bucht sie dort nichts, ist das ohne Umsatz ein Fehler (``required``).
     """
     entry = session.get(JournalEntry, entry_id)
-    rows = _active_settlements(
-        session,
-        OpenItemSettlement.journal_entry_id == entry_id,
-        and_(
-            OpenItemSettlement.journal_entry_id.is_(None),
-            OpenItemSettlement.bank_transaction_id.in_(
-                select(BankTransaction.id).where(BankTransaction.journal_entry_id == entry_id)
-            ),
-        ),
+    usage = _entry_usage(
+        session, item=item, entry_id=entry_id, rows=_settlements_on_entry(session, entry_id)
     )
-    usage = _entry_usage(session, item=item, entry_id=entry_id, rows=rows)
     if usage is None:
         if not required:
             return None
