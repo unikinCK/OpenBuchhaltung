@@ -349,7 +349,10 @@ def test_reversal_dated_in_a_reported_month_counts_in_the_next_open_one(session:
 def test_settlement_against_an_unbooked_transaction_falls_with_the_invoice(
     session: Session,
 ) -> None:
-    """Der Umsatz ist nur zugeordnet: Kein Weg, ihn zu stornieren, und nichts im Hauptbuch."""
+    """Der Umsatz ist nur zugeordnet: Kein Weg, ihn zu stornieren, und nichts im Hauptbuch.
+
+    Er zahlt mehr als den Posten (Sammelzahlung), deshalb bucht ihn der Ausgleich nicht mit.
+    """
     company, accounts = _seed(session)
     _set_cash_basis(session, company, date(2027, 1, 1))
     entry, item = _invoice(session, company, accounts, gross="119.00", day=date(2027, 1, 15))
@@ -358,7 +361,7 @@ def test_settlement_against_an_unbooked_transaction_falls_with_the_invoice(
         company_id=company.id,
         bank_account_id=accounts["1200"].id,
         booking_date=date(2027, 2, 10),
-        amount=Decimal("119.00"),
+        amount=Decimal("150.00"),
         currency_code="EUR",
         purpose="Zahlung",
         status="open",

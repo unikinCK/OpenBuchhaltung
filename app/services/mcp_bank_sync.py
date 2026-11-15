@@ -53,7 +53,15 @@ from app.services.bank_statement import (
 )
 from app.services.mcp_client import McpToolResult
 from app.services.mcp_connections import McpConnectionError, cached_tools, server_toolbox
-from domain.models import Account, AuditLog, BankTransaction, Company, McpServer
+from domain.models import (
+    Account,
+    AuditLog,
+    BankTransaction,
+    Company,
+    FinTSConnection,
+    McpServer,
+    OpenBankingConnection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +132,12 @@ class McpBankSyncResult:
     new_rows: list[BankStatementRow] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     report: BankImportReport | None = None
+    # Position in ``new_rows`` → Code des anderen Bankkontos, auf dem der Umsatz schon steht.
+    elsewhere: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def elsewhere_accounts(self) -> list[str]:
+        return sorted(set(self.elsewhere.values()))
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -137,6 +151,9 @@ class McpBankSyncResult:
             "fetched": self.fetched,
             "already_imported": self.known,
             "errors": self.errors,
+            # Gleiche Umsätze (Datum, Betrag, Text) auf anderen Bankkonten: falsches Konto?
+            "on_other_bank_accounts": len(self.elsewhere),
+            "other_bank_account_codes": self.elsewhere_accounts,
         }
         if self.dry_run:
             body["new_rows"] = len(self.new_rows)
@@ -149,8 +166,9 @@ class McpBankSyncResult:
                     "counterparty": row.counterparty,
                     "counterparty_iban": row.counterparty_iban,
                     "bank_reference": row.bank_reference,
+                    "on_other_bank_account": self.elsewhere.get(position),
                 }
-                for row in self.new_rows[:PREVIEW_ROWS]
+                for position, row in enumerate(self.new_rows[:PREVIEW_ROWS])
             ]
             body["rows_truncated"] = len(self.new_rows) > PREVIEW_ROWS
         if self.report is not None:
@@ -422,6 +440,102 @@ def last_bank_account_id(
     return None
 
 
+def _compact(value: str | None) -> str:
+    return re.sub(r"\s+", "", value or "").upper()
+
+
+def bank_account_for_iban(session: Session, *, company_id: int, iban: str | None) -> int | None:
+    """Das Bank-Sachkonto zur IBAN einer Wallet, wenn es eindeutig ist.
+
+    Zuerst ein FinTS- oder Open-Banking-Zugang mit dieser IBAN, sonst ein aktives Bankkonto, das
+    die IBAN im Namen trägt (z. B. „Geschäftskonto (DE25 …)“). Ohne Treffer ``None``: Dann
+    entscheidet das zuletzt gewählte oder das Standard-Bankkonto, und das kann ein Sammelkonto
+    sein, auf dem die Umsätze eines Unterkontos doppelt landen würden.
+    """
+    iban = _compact(iban)
+    if not iban:
+        return None
+    linked = {
+        account_id
+        for model, column in (
+            (FinTSConnection, FinTSConnection.sepa_iban),
+            (OpenBankingConnection, OpenBankingConnection.iban),
+        )
+        for account_id, value in session.execute(
+            select(model.bank_account_id, column).where(
+                model.company_id == company_id, column.is_not(None)
+            )
+        ).all()
+        if _compact(value) == iban
+    }
+    if len(linked) == 1:
+        return linked.pop()
+    named = [
+        account.id
+        for account in session.execute(
+            select(Account).where(
+                Account.company_id == company_id,
+                Account.account_type == "asset",
+                Account.subledger.is_(None),
+                Account.is_active.is_(True),
+            )
+        ).scalars()
+        if iban in _compact(account.name)
+    ]
+    return named[0] if len(named) == 1 else None
+
+
+def _same_text(left: str | None, right: str | None) -> bool:
+    left = " ".join((left or "").split()).casefold()
+    return bool(left) and left == " ".join((right or "").split()).casefold()
+
+
+def rows_on_other_bank_accounts(
+    session: Session,
+    *,
+    company_id: int,
+    bank_account_id: int,
+    rows: list[BankStatementRow],
+) -> dict[int, str]:
+    """Neue Zeilen, die mit Datum, Betrag und Gegenpartei oder Verwendungszweck schon auf einem
+    anderen Bankkonto der Gesellschaft stehen: Position → Kontonummer.
+
+    Ein Hinweis auf das falsche Zielkonto, etwa das Sammelkonto „Bank“ statt des Unterkontos, auf
+    dem dieselben Umsätze schon aus dem Datei-Import liegen. Jeder vorhandene Umsatz deckt
+    höchstens eine neue Zeile.
+    """
+    if not rows:
+        return {}
+    candidates: dict[tuple[date, Any], list[tuple[BankTransaction, str]]] = {}
+    for transaction, code in session.execute(
+        select(BankTransaction, Account.code)
+        .join(Account, Account.id == BankTransaction.bank_account_id)
+        .where(
+            BankTransaction.company_id == company_id,
+            BankTransaction.bank_account_id != bank_account_id,
+            BankTransaction.booking_date.in_({row.booking_date for row in rows}),
+            BankTransaction.amount.in_({row.amount for row in rows}),
+        )
+        .order_by(BankTransaction.id)
+    ).all():
+        candidates.setdefault((transaction.booking_date, transaction.amount), []).append(
+            (transaction, code)
+        )
+    used: set[int] = set()
+    found: dict[int, str] = {}
+    for position, row in enumerate(rows):
+        for transaction, code in candidates.get((row.booking_date, row.amount), []):
+            if transaction.id in used:
+                continue
+            if _same_text(row.counterparty, transaction.counterparty) or _same_text(
+                row.purpose, transaction.purpose
+            ):
+                used.add(transaction.id)
+                found[position] = code
+                break
+    return found
+
+
 def default_wallet(
     wallets: list[BankWallet],
     *,
@@ -577,6 +691,9 @@ def sync_mcp_bank_transactions(
             for item in fresh
             if not isinstance(item, BankStatementRow)
         ],
+    )
+    result.elsewhere = rows_on_other_bank_accounts(
+        session, company_id=company.id, bank_account_id=account.id, rows=result.new_rows
     )
     if dry_run:
         return result

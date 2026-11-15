@@ -392,7 +392,25 @@ def settle_open_item(
     Ein Bankumsatz oder eine Zahlungsbuchung darf mehrere Posten bezahlen, zusammen aber nur bis zu
     ihrem Betrag; was stornierte Ausgleiche belegt hatten, ist wieder frei. Dieselbe Zahlung zählt
     dabei nur einmal, ob sie über den Umsatz oder über dessen Buchung zugeordnet wird.
+
+    Bezahlt ein noch nicht gebuchter Bankumsatz ohne Ausgleichsbuchung genau diesen Posten mit
+    seinem vollen Betrag, wird er zuerst auf das Sammelkonto des Postens gebucht
+    (``book_transaction_to_open_item``); sonst stünde der Posten als ausgeglichen da, während
+    Forderung oder Verbindlichkeit im Hauptbuch offen blieben. Teilt sich ein ungebuchter Umsatz
+    mehrere Posten, bleibt er zugeordnet ohne Buchung, bis ihn die Bankansicht nachbucht.
     """
+    if bank_transaction_id is not None and journal_entry_id is None:
+        booked = _settle_with_unbooked_transaction(
+            session=session,
+            open_item_id=open_item_id,
+            bank_transaction_id=bank_transaction_id,
+            amount=amount,
+            foreign_amount=foreign_amount,
+            exchange_rate=exchange_rate,
+            changed_by=changed_by,
+        )
+        if booked is not None:
+            return booked
     # Bei Istversteuerung zuerst die Gesellschaft: siehe ``lock_cash_basis_company``.
     company_id = session.execute(
         select(OpenItem.company_id).where(OpenItem.id == open_item_id)
@@ -617,6 +635,66 @@ def settle_open_item(
     session.commit()
     session.refresh(item)
     return item
+
+
+def _settle_with_unbooked_transaction(
+    *,
+    session: Session,
+    open_item_id: int,
+    bank_transaction_id: int,
+    amount: Decimal | None,
+    foreign_amount: Decimal | None,
+    exchange_rate: Decimal | None,
+    changed_by: str,
+) -> OpenItem | None:
+    """Ausgleich mit einem Bankumsatz, der noch keine Buchung hat und genau diesen Posten mit
+    seinem vollen Betrag bezahlt: erst buchen, dann ausgleichen.
+
+    ``None`` heißt: gewöhnlicher Ausgleich. So bei einem gebuchten Umsatz, bei Teilbeträgen einer
+    Sammelzahlung (der Umsatz ist danach zugeordnet, aber ungebucht; die Bankansicht bucht ihn
+    über ``book_transaction`` gegen das Sammelkonto nach) und bei Fremdwährungsposten, die einen
+    gebuchten Umsatz verlangen.
+    """
+    transaction = session.get(BankTransaction, bank_transaction_id)
+    item = session.get(OpenItem, open_item_id)
+    if (
+        transaction is None
+        or item is None
+        or transaction.company_id != item.company_id
+        or transaction.status != "open"
+        or transaction.journal_entry_id is not None
+        or item.status != "open"
+        or item.foreign_currency_code
+        or foreign_amount is not None
+        or exchange_rate is not None
+    ):
+        return None
+    paid = abs(transaction.amount)
+    if (amount is not None and amount != paid) or paid > item.open_amount:
+        return None
+
+    # Lokal: bank_proposals und bank_import importieren dieses Modul.
+    from app.services.bank_import import BankImportError, suggest_matches
+    from app.services.bank_proposals import book_transaction_to_open_item
+
+    candidates = suggest_matches(session=session, transaction=transaction)
+    if candidates:
+        # Sonst entstünde neben der vorhandenen Zahlungsbuchung eine zweite.
+        numbers = ", ".join(entry.posting_number or str(entry.id) for entry in candidates)
+        raise OpenItemError(
+            f"Der Bankumsatz ist noch nicht gebucht, passende Buchungen gibt es aber schon "
+            f"({numbers}). Bitte die Zahlungsbuchung als Ausgleichsbuchung wählen oder den "
+            "Umsatz in der Bankansicht zuordnen."
+        )
+    try:
+        return book_transaction_to_open_item(
+            session=session,
+            transaction_id=transaction.id,
+            open_item_id=item.id,
+            changed_by=changed_by,
+        )
+    except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
+        raise OpenItemError(str(exc)) from exc
 
 
 def _load_bank_transaction(

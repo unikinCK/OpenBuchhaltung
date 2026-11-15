@@ -167,6 +167,7 @@ TOOL_TITLES: dict[str, str] = {
     "reassign_bank_transaction": "Bankumsatz umhängen",
     "move_bank_transactions": "Bankumsätze umhängen",
     "match_bank_transaction": "Bankumsatz zuordnen",
+    "discard_bank_transactions": "Bankumsätze verwerfen",
     "book_bank_transaction": "Bankumsatz buchen",
     "set_company_bank_details": "Bankverbindung der Gesellschaft setzen",
     # Kassenbuch

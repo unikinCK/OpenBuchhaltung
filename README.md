@@ -761,7 +761,12 @@ im Finom-CSV-Export, bereits importierte fallen heraus. Ohne Datum beginnt der A
 7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag nach dem letzten Umsatz ohne
 UUID-Referenz (z. B. aus einem älteren CSV-Import); beim ersten Abruf ab dem Tag nach
 dem letzten vorhandenen Umsatz, sonst 90 Tage zurück. Die
-Wallet merkt sich der Abruf je Bankkonto. Grenze: Bei Kartenzahlungen in Fremdwährung
+Wallet merkt sich der Abruf je Bankkonto. Als Bank-Sachkonto schlägt er das Konto zur
+IBAN der Wallet vor (FinTS- oder Open-Banking-Zugang mit dieser IBAN, sonst ein
+Bankkonto mit der IBAN im Namen), erst danach das zuletzt gewählte oder das
+Standard-Bankkonto. Stehen neue Umsätze mit gleichem Datum, Betrag und Text schon auf
+einem anderen Bankkonto, warnen Vorschau und Ergebnis: vermutlich das falsche
+Zielkonto, etwa das Sammelkonto statt des Unterkontos. Grenze: Bei Kartenzahlungen in Fremdwährung
 fehlt der Ursprungsbetrag, den der CSV-Import im Verwendungszweck anhängt. Obi nutzt
 dafür die Werkzeuggruppe `bankabruf` und schreibt Umsätze nie selbst ab.
 
@@ -772,6 +777,20 @@ GoBD-Grundsatz unverändert — der Saldo der verbuchten Umsätze wird
 standardmäßig automatisch per Umgliederungsbuchung (altes an neues Konto)
 mitgezogen, atomar mit dem Umzug (abwählbar per Checkbox bzw.
 `reclassify=false` in API/MCP).
+
+**Irrtümlich importierte Umsätze verwerfen:** Offene Umsätze ohne Buchung und ohne
+offenen Posten, etwa Dubletten nach einem Abruf auf das falsche Bankkonto, lassen
+sich verwerfen (Bank → Buchen … → Verwerfen, `POST /api/v1/bank-transactions/discard`
+bzw. MCP `discard_bank_transactions`, je mit Pflicht-Grund). Es entsteht keine
+Buchung; der vollständige Inhalt der Zeile steht mit dem Grund im Audit-Protokoll.
+
+**Posten ausgeglichen, Umsatz nicht gebucht:** Bezahlt ein ungebuchter Umsatz unter
+Offene Posten genau einen Posten mit seinem vollen Betrag, bucht der Ausgleich ihn
+auf das Sammelkonto des Postens mit. Teilt er sich mehrere Posten, bleibt er
+zugeordnet, aber ungebucht; die Bankseite zeigt ihn als „ausgeglichen, nicht gebucht“
+und bucht ihn über **Buchen …** gegen das Sammelkonto nach (vorausgewählt, ohne
+Steuercode). Die Ausgleiche hängen danach an der Buchung; ein Storno lässt die Posten
+wieder aufleben.
 
 **Geldtransit:** Übertrage zwischen eigenen Bankkonten erkennt die Bank-Seite
 automatisch (gegenläufiger Betrag auf einem anderen Bankkonto, max. 2 Tage
@@ -1715,6 +1734,7 @@ Bank & FinTS:
 - `POST /api/v1/bank-transactions/import` — Kontoauszug (CSV/CAMT.053/MT940) hochladen
 - `POST /api/v1/bank-transactions/<id>/match` bzw. `/book` — zuordnen/verbuchen
 - `POST /api/v1/bank-transactions/reassign`, `POST /api/v1/bank-transactions/<id>/bank-account`
+- `POST /api/v1/bank-transactions/discard` — irrtümlich importierte, offene Umsätze ohne Buchung verwerfen (`company_id`, `transaction_ids`, `reason`)
   — Umsätze auf ein anderes Bankkonto umhängen
 - `GET/POST /api/v1/fints-connections`, `POST /api/v1/fints-connections/<id>/active`
 - `POST /api/v1/fints-connections/<id>/sync` — Abruf; bei TAN-Pflicht `202` mit `dialog_id`

@@ -29,6 +29,7 @@ from app.services.bank_statement import (
 )
 from app.services.mcp_bank_sync import (
     McpBankSyncError,
+    bank_account_for_iban,
     default_sync_range,
     fetch_transactions,
     sync_mcp_bank_transactions,
@@ -42,6 +43,7 @@ from domain.models import (
     Base,
     Company,
     McpServer,
+    OpenBankingConnection,
     Tenant,
 )
 
@@ -412,6 +414,115 @@ def test_sync_imports_new_rows_skips_known_ids_and_remembers_the_wallet(session)
     assert wide.known == 3 and wide.report.imported_rows == 0
 
 
+def _bank_account(session, company, code: str, name: str, **fields) -> Account:
+    account = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code=code,
+        name=name,
+        account_type="asset",
+        **fields,
+    )
+    session.add(account)
+    session.commit()
+    return account
+
+
+def test_bank_account_for_iban_prefers_connections_then_the_account_name(session):
+    """Die IBAN der Wallet findet das Unterkonto, nicht das Sammelkonto „Bank“."""
+    company, collective, _ = _seed(session)
+    named = _bank_account(session, company, "1235", "Hauptkonto (DE89 3704 0044 0532 0130 00)")
+    _bank_account(
+        session, company, "1236", "Altkonto DE89370400440532013000", is_active=False
+    )
+    iban = WALLET["iban"]
+
+    assert bank_account_for_iban(session, company_id=company.id, iban=iban) == named.id
+    assert bank_account_for_iban(session, company_id=company.id, iban=TAX_WALLET["iban"]) is None
+    assert bank_account_for_iban(session, company_id=company.id, iban=None) is None
+    assert bank_account_for_iban(session, company_id=company.id + 1, iban=iban) is None
+
+    # Zwei Konten mit derselben IBAN im Namen: nicht raten.
+    _bank_account(session, company, "1237", "Zweitname DE89 3704 0044 0532 0130 00")
+    assert bank_account_for_iban(session, company_id=company.id, iban=iban) is None
+
+    # Ein Open-Banking-Zugang mit dieser IBAN entscheidet.
+    session.add(
+        OpenBankingConnection(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            bank_account_id=collective.id,
+            name="Zugang",
+            aspsp_name="Bank",
+            aspsp_country="DE",
+            iban="de89 3704 0044 0532 0130 00",
+        )
+    )
+    session.commit()
+    assert bank_account_for_iban(session, company_id=company.id, iban=iban) == collective.id
+
+
+def test_preview_flags_rows_already_on_another_bank_account(session):
+    """Abruf auf das Sammelkonto, obwohl die Umsätze schon auf dem Unterkonto liegen: Die
+    Vorschau zeigt sie als vermutliche Dubletten; jeder vorhandene Umsatz deckt nur eine Zeile."""
+    company, bank, server = _seed(session)
+    sub = _bank_account(session, company, "1231", "Unterkonto")
+    session.add(
+        BankTransaction(
+            tenant_id=company.tenant_id,
+            company_id=company.id,
+            bank_account_id=sub.id,
+            booking_date=date(2026, 11, 3),
+            amount=Decimal("-5.00"),
+            currency_code="EUR",
+            purpose="RECHNUNG  42",
+            counterparty="anderer Name",
+            dedup_hash=uuid.uuid4().hex,
+        )
+    )
+    session.commit()
+    fake = FakeFinom(
+        [
+            _tx("2026-11-03T08:00:00", 5.0),
+            _tx("2026-11-03T09:00:00", 5.0),
+            _tx("2026-11-03T10:00:00", 6.0),
+        ]
+    )
+
+    preview = sync_mcp_bank_transactions(
+        session=session,
+        caller=_caller(fake),
+        company=company,
+        server=server,
+        bank_account_id=bank.id,
+        wallet_id=WALLET["id"],
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 15),
+        dry_run=True,
+        changed_by="test",
+    )
+
+    assert preview.elsewhere == {0: "1231"}
+    body = preview.to_dict()
+    assert (body["on_other_bank_accounts"], body["other_bank_account_codes"]) == (1, ["1231"])
+    assert [row["on_other_bank_account"] for row in body["rows"]] == ["1231", None, None]
+
+    # Auf dem Unterkonto selbst ist nichts doppelt.
+    on_sub = sync_mcp_bank_transactions(
+        session=session,
+        caller=_caller(fake),
+        company=company,
+        server=server,
+        bank_account_id=sub.id,
+        wallet_id=WALLET["id"],
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 15),
+        dry_run=True,
+        changed_by="test",
+    )
+    assert on_sub.elsewhere == {}
+
+
 def test_sync_rejects_foreign_accounts_and_unknown_wallets(session):
     company, bank, server = _seed(session)
     receivables = Account(
@@ -475,9 +586,18 @@ def bank_app(tmp_path, monkeypatch):
             tools_cache=FINOM_TOOLS,
             created_by="test",
         )
-        db.add_all([bank, server])
+        iban_account = Account(
+            tenant_id=tenant_id, company_id=company_id, code="1235",
+            name="Hauptkonto (DE89 3704 0044 0532 0130 00)", account_type="asset",
+        )
+        db.add_all([bank, iban_account, server])
         db.commit()
-        ids = {"company": company_id, "bank": bank.id, "server": server.id}
+        ids = {
+            "company": company_id,
+            "bank": bank.id,
+            "server": server.id,
+            "iban_account": iban_account.id,
+        }
     fake = FakeFinom(
         [
             _tx("2026-11-03T08:00:00", 100.0, "Incoming", name="Kunde AG"),
@@ -516,6 +636,11 @@ def test_api_lists_sources_wallets_previews_and_imports(bank_app):
     body = wallets.get_json()
     assert [wallet["id"] for wallet in body["wallets"]] == [WALLET["id"], TAX_WALLET["id"]]
     assert body["suggested_wallet_id"] == WALLET["id"]
+    # Je Wallet das Bankkonto zur IBAN; ohne Treffer und ohne früheren Abruf keins.
+    assert [wallet["suggested_bank_account_id"] for wallet in body["wallets"]] == [
+        ids["iban_account"],
+        None,
+    ]
     assert used[-1]["user"]["username"] == "anna"
 
     preview = client.get(
@@ -593,6 +718,8 @@ def test_web_page_shows_wallets_preview_and_imports(bank_app):
         "/bank/mcp-abruf", query_string={"company_id": ids["company"]}
     ).get_data(as_text=True)
     assert "Hauptkonto" in page and "Steuerrücklage" in page
+    # Die IBAN der Wallet im Kontonamen schlägt das Standard-Bankkonto vor.
+    assert f'<option value="{ids["iban_account"]}" selected>' in page
 
     preview = client.get(
         "/bank/mcp-abruf",

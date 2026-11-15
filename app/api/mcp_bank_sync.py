@@ -22,10 +22,12 @@ from app.auth import current_api_user
 from app.services.mcp_bank_sync import (
     McpBankSyncError,
     ServerCaller,
+    bank_account_for_iban,
     bank_adapter,
     bank_sync_servers,
     default_sync_range,
     default_wallet,
+    last_bank_account_id,
     list_wallets,
     resolve_bank_account,
     resolve_server,
@@ -108,7 +110,22 @@ def list_mcp_bank_wallets(server_id: int):
         body = {
             "server_id": server.id,
             "server": server.name,
-            "wallets": [wallet.to_dict() for wallet in wallets],
+            # Vorschlag je Wallet: Bankkonto zur IBAN, sonst das zuletzt gewählte.
+            "wallets": [
+                {
+                    **wallet.to_dict(),
+                    "suggested_bank_account_id": (
+                        bank_account_for_iban(session, company_id=company.id, iban=wallet.iban)
+                        or last_bank_account_id(
+                            session,
+                            company_id=company.id,
+                            server_id=server.id,
+                            wallet_id=wallet.id,
+                        )
+                    ),
+                }
+                for wallet in wallets
+            ],
         }
         if account is not None:
             suggested = default_wallet(

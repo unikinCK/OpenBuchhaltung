@@ -37,6 +37,7 @@ from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    lock_cash_basis_company,
 )
 from app.services.partner_identifiers import clean_iban
 from app.services.push import notify_bank_transactions
@@ -47,6 +48,8 @@ from domain.models import (
     Company,
     JournalEntry,
     JournalEntryLine,
+    OpenItem,
+    OpenItemSettlement,
     TaxCode,
 )
 
@@ -1187,7 +1190,23 @@ def book_transaction(
     Ein Umsatz in Fremdwährung wird zum ``exchange_rate`` oder zum Tageskurs umgerechnet; der
     Fremdbetrag steht auf der Bankzeile (ADR-010). Mit ``commit=False`` committet der Aufrufer,
     etwa zusammen mit dem Ausgleich eines offenen Postens.
+
+    Hat der Umsatz offene Posten ausgeglichen, ohne gebucht zu sein (Status ``matched`` ohne
+    Buchung, siehe ``settle_open_item``), holt das hier die Zahlungsbuchung nach: nur gegen das
+    Sammelkonto dieser Posten, ohne Steuercode; die Ausgleiche hängen danach an der Buchung, ein
+    Storno lässt die Posten wieder aufleben.
     """
+    # Bei Istversteuerung zuerst die Gesellschaft, wenn Ausgleiche an die Buchung gehängt werden
+    # (siehe ``lock_cash_basis_company``); erst danach den Umsatz.
+    peek = session.execute(
+        select(
+            BankTransaction.company_id,
+            BankTransaction.status,
+            BankTransaction.journal_entry_id,
+        ).where(BankTransaction.id == transaction_id)
+    ).first()
+    if peek is not None and peek.status == "matched" and peek.journal_entry_id is None:
+        lock_cash_basis_company(session, peek.company_id)
     # Den Umsatz sperren, bevor die Buchung (und mit ihr der Eintrag im Audit-Protokoll) entsteht,
     # wie beim Ausgleich offener Posten (settle_open_item). Sonst warteten ein gleichzeitiger
     # Ausgleich mit diesem Umsatz und das Buchen aufeinander.
@@ -1199,12 +1218,22 @@ def book_transaction(
     ).scalar_one_or_none()
     if transaction is None:
         raise BankImportError("Bankumsatz nicht gefunden.")
-    if transaction.status != "open":
+    settlements: list[OpenItemSettlement] = []
+    if transaction.status == "matched" and transaction.journal_entry_id is None:
+        settlements = _unbooked_settlements(session, transaction)
+    if transaction.status != "open" and not settlements:
         raise BankImportError("Der Bankumsatz ist bereits zugeordnet.")
 
     contra_account = session.get(Account, contra_account_id)
     if contra_account is None or contra_account.company_id != transaction.company_id:
         raise BankImportError("Gegenkonto nicht gefunden.")
+    if settlements:
+        partner_id = _check_settlement_booking(
+            settlements,
+            contra_account=contra_account,
+            tax_code_id=tax_code_id,
+            partner_id=partner_id,
+        )
 
     company = session.get(Company, transaction.company_id)
     foreign_fields: dict[str, object] = {}
@@ -1301,7 +1330,21 @@ def book_transaction(
 
     transaction.journal_entry_id = entry.id
     transaction.status = "booked"
+    for settlement in settlements:
+        # Wie beim Ausgleich mit Buchung: Ein Storno der Buchung lässt den Posten wieder aufleben.
+        settlement.journal_entry_id = entry.id
+        settlement.open_item.settlement_journal_entry_id = entry.id
+        settlement.open_item.settlement_amount = settlement.amount
 
+    payload: dict[str, object] = {
+        "journal_entry_id": entry.id,
+        "posting_number": entry.posting_number,
+        "cost_center_id": cost_center_id,
+        "profit_center_id": profit_center_id,
+        "partner_id": partner_id,
+    }
+    if settlements:
+        payload["open_item_settlement_ids"] = [settlement.id for settlement in settlements]
     log_audit_event(
         session=session,
         tenant_id=transaction.tenant_id,
@@ -1310,13 +1353,7 @@ def book_transaction(
         entity_id=str(transaction.id),
         action="booked",
         changed_by=changed_by,
-        payload={
-            "journal_entry_id": entry.id,
-            "posting_number": entry.posting_number,
-            "cost_center_id": cost_center_id,
-            "profit_center_id": profit_center_id,
-            "partner_id": partner_id,
-        },
+        payload=payload,
     )
     if commit:
         session.commit()
@@ -1324,6 +1361,219 @@ def book_transaction(
     else:
         session.flush()
     return transaction
+
+
+def _unbooked_settlements(
+    session: Session, transaction: BankTransaction
+) -> list[OpenItemSettlement]:
+    """Ausgleiche offener Posten mit diesem Umsatz, die keine Buchung haben.
+
+    Sperrt die Posten nach ID, bevor die Buchung ins Audit-Protokoll schreibt
+    (Reihenfolge Umsatz → Posten → Audit).
+    """
+    settlements = list(
+        session.execute(
+            select(OpenItemSettlement)
+            .where(
+                OpenItemSettlement.bank_transaction_id == transaction.id,
+                OpenItemSettlement.journal_entry_id.is_(None),
+            )
+            .order_by(OpenItemSettlement.id)
+        ).scalars()
+    )
+    item_ids = sorted({settlement.open_item_id for settlement in settlements})
+    if item_ids:
+        session.execute(
+            select(OpenItem)
+            .where(OpenItem.id.in_(item_ids))
+            .order_by(OpenItem.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    return settlements
+
+
+def _check_settlement_booking(
+    settlements: Sequence[OpenItemSettlement],
+    *,
+    contra_account: Account,
+    tax_code_id: int | None,
+    partner_id: int | None,
+) -> int | None:
+    """Prüft das Nachbuchen eines Umsatzes, der Posten ohne Buchung ausgeglichen hat.
+
+    Gebucht wird gegen das Sammelkonto der Posten (sonst stünden sie im Hauptbuch weiter offen);
+    ohne Angabe mit deren Partner, wenn alle denselben haben.
+    """
+    items = {settlement.open_item.id: settlement.open_item for settlement in settlements}
+    references = ", ".join(item.reference for item in items.values())
+    if {item.account_id for item in items.values()} != {contra_account.id}:
+        raise BankImportError(
+            f"Der Umsatz hat die Posten {references} ausgeglichen. Bitte gegen deren "
+            "Sammelkonto buchen, sonst stehen sie im Hauptbuch weiter offen."
+        )
+    if tax_code_id is not None:
+        raise BankImportError(
+            f"Der Umsatz zahlt die Posten {references}: Die Zahlung wird ohne Steuercode gebucht."
+        )
+    if partner_id is None:
+        partners = {item.partner_id for item in items.values()}
+        if len(partners) == 1:
+            partner_id = partners.pop()
+    return partner_id
+
+
+def unbooked_settled_items(
+    *, session: Session, transactions: Sequence[BankTransaction]
+) -> dict[int, list[OpenItem]]:
+    """Je Umsatz die Posten, die er ohne Buchung ausgeglichen hat (Status ``matched`` ohne
+    Buchung): Diese Umsätze müssen noch gegen das Sammelkonto der Posten gebucht werden."""
+    ids = [
+        transaction.id
+        for transaction in transactions
+        if transaction.status == "matched" and transaction.journal_entry_id is None
+    ]
+    if not ids:
+        return {}
+    found: dict[int, list[OpenItem]] = {}
+    for transaction_id, item in session.execute(
+        select(OpenItemSettlement.bank_transaction_id, OpenItem)
+        .join(OpenItem, OpenItem.id == OpenItemSettlement.open_item_id)
+        .where(
+            OpenItemSettlement.bank_transaction_id.in_(ids),
+            OpenItemSettlement.journal_entry_id.is_(None),
+        )
+        .order_by(OpenItem.id)
+    ).all():
+        items = found.setdefault(transaction_id, [])
+        if item not in items:
+            items.append(item)
+    return found
+
+
+DISCARD_REASON_MAX_LENGTH = 500
+
+
+@dataclass(slots=True)
+class DiscardedBankTransaction:
+    """Inhalt eines verworfenen Bankumsatzes, wie er im Audit-Protokoll steht."""
+
+    id: int
+    bank_account_id: int
+    booking_date: date
+    amount: Decimal
+    currency_code: str | None
+    purpose: str
+    counterparty: str | None
+    counterparty_iban: str | None
+    bank_reference: str | None
+    imported_at: datetime | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "bank_account_id": self.bank_account_id,
+            "booking_date": self.booking_date.isoformat(),
+            "amount": str(self.amount),
+            "currency_code": self.currency_code,
+            "purpose": self.purpose,
+            "counterparty": self.counterparty,
+            "counterparty_iban": self.counterparty_iban,
+            "bank_reference": self.bank_reference,
+            "imported_at": self.imported_at.isoformat() if self.imported_at else None,
+        }
+
+
+def discard_bank_transactions(
+    *,
+    session: Session,
+    company_id: int,
+    transaction_ids: Sequence[int],
+    reason: str | None,
+    changed_by: str,
+) -> list[DiscardedBankTransaction]:
+    """Verwirft irrtümlich importierte Bankumsätze, etwa Dubletten nach einem Abruf auf das
+    falsche Bankkonto.
+
+    Erlaubt nur für offene Umsätze ohne Buchung und ohne Bezug zu einem offenen Posten: Sie
+    haben das Hauptbuch nie berührt, Buchungen entstehen beim Verwerfen keine. Der vollständige
+    Inhalt jeder Zeile steht mit dem Grund im Audit-Protokoll. Entweder alle oder keiner.
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise BankImportError("Bitte einen Grund für das Verwerfen angeben.")
+    if len(reason) > DISCARD_REASON_MAX_LENGTH:
+        raise BankImportError(
+            f"Der Grund darf höchstens {DISCARD_REASON_MAX_LENGTH} Zeichen lang sein."
+        )
+    ids = sorted({int(value) for value in transaction_ids})
+    if not ids:
+        raise BankImportError("Keine Bankumsätze angegeben.")
+
+    # Erst alle Umsätze sperren (nach ID), dann ins Audit-Protokoll schreiben.
+    transactions = list(
+        session.execute(
+            select(BankTransaction)
+            .where(BankTransaction.id.in_(ids), BankTransaction.company_id == company_id)
+            .order_by(BankTransaction.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+    )
+    found = {transaction.id for transaction in transactions}
+    missing = [value for value in ids if value not in found]
+    if missing:
+        raise BankImportError(f"Bankumsatz {missing[0]} nicht gefunden.")
+    for transaction in transactions:
+        if transaction.status != "open" or transaction.journal_entry_id is not None:
+            raise BankImportError(
+                f"Bankumsatz {transaction.id} ({transaction.booking_date:%d.%m.%Y}, "
+                f"{transaction.amount}) ist zugeordnet oder gebucht und lässt sich nicht "
+                "verwerfen."
+            )
+    referenced = session.execute(
+        select(OpenItem.bank_transaction_id)
+        .where(OpenItem.bank_transaction_id.in_(ids))
+        .union(
+            select(OpenItemSettlement.bank_transaction_id).where(
+                OpenItemSettlement.bank_transaction_id.in_(ids)
+            )
+        )
+    ).scalars().first()
+    if referenced is not None:
+        raise BankImportError(
+            f"Bankumsatz {referenced} gehört zu einem offenen Posten und lässt sich nicht "
+            "verwerfen."
+        )
+
+    discarded: list[DiscardedBankTransaction] = []
+    for transaction in transactions:
+        snapshot = DiscardedBankTransaction(
+            id=transaction.id,
+            bank_account_id=transaction.bank_account_id,
+            booking_date=transaction.booking_date,
+            amount=transaction.amount,
+            currency_code=transaction.currency_code,
+            purpose=transaction.purpose,
+            counterparty=transaction.counterparty,
+            counterparty_iban=transaction.counterparty_iban,
+            bank_reference=transaction.bank_reference,
+            imported_at=transaction.imported_at,
+        )
+        log_audit_event(
+            session=session,
+            tenant_id=transaction.tenant_id,
+            company_id=transaction.company_id,
+            entity_type="bank_transaction",
+            entity_id=str(transaction.id),
+            action="discarded",
+            changed_by=changed_by,
+            payload={**snapshot.to_dict(), "reason": reason},
+        )
+        discarded.append(snapshot)
+        session.delete(transaction)
+    session.commit()
+    return discarded
 
 
 def _sniff_delimiter(csv_stream: TextIO) -> str:
