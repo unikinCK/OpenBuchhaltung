@@ -337,7 +337,8 @@ UI, REST-API und MCP angeboten und gepflegt.
 - [x] Umsatzabruf über den MCP-Server der Bank, z. B. Finom *(2026-11-15: ohne KI über
       `transactions__listWallets`/`listTransactions` mit dem Zugang des Benutzers; Blättern
       über das Zeitfenster [10 je Aufruf, kein Cursor], nur Completed, Buchungstag in
-      Europe/Berlin, Transaktions-ID als Bankreferenz und Vorab-Dedup; Wallet je Bankkonto
+      Europe/Berlin, Transaktions-ID als Bankreferenz und Vorab-Dedup; Überlappung nur nach
+      einem früheren MCP-Abruf; Wallet je Bankkonto
       über das Audit-Log gemerkt; Vorschau und Import in UI/API/MCP, im Chat als Gruppe
       `bankabruf`; offen: Ursprungsbetrag bei Kartenzahlungen in Fremdwährung)*
 - [x] Komfort & Robustheit *(Sprint 2026-08-30: Dashboard-Kacheln „Offene

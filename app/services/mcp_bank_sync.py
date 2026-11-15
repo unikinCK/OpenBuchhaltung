@@ -21,9 +21,9 @@ Besonderheiten von Finom:
 Dedup: Umsätze, deren Transaktions-ID am Bankkonto schon als Bankreferenz steht, werden
 vorab aussortiert – die Pipeline vergleicht Referenz *und* Text, und der Text kann sich
 zwischen CSV-Export und MCP unterscheiden. Ohne Von-Datum beginnt der Abruf 7 Tage vor
-dem letzten Umsatz mit Finom-Referenz, nie aber vor dem Tag nach dem letzten Umsatz ohne
-solche Referenz (Altbestand aus CSV oder Handerfassung lässt sich nicht sicher
-entdoppeln); ohne Bestand 90 Tage zurück.
+dem Ende des letzten MCP-Abrufs, nie aber vor dem Tag nach dem letzten Umsatz ohne
+UUID-Referenz (Altbestand aus CSV oder Handerfassung lässt sich nicht sicher
+entdoppeln); beim ersten Abruf ab dem Tag nach dem letzten Umsatz, ohne Bestand 90 Tage.
 
 Welche Wallet zu welchem Bankkonto gehört, merkt sich der Abruf im Audit-Log
 (``bank_mcp_sync``) und schlägt sie beim nächsten Mal vor.
@@ -43,7 +43,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
-from app.services.bank_import import BankImportReport, import_bank_items
+from app.services.bank_import import BankImportError, BankImportReport, import_bank_items
 from app.services.bank_statement import (
     BOOKING_TIMEZONE,
     BankStatementRow,
@@ -330,9 +330,30 @@ def fetch_transactions(
 # ---------------------------------------------------------------------------
 
 
+def _last_sync_to(session: Session, *, company_id: int, bank_account_id: int) -> date | None:
+    payload = session.execute(
+        select(AuditLog.payload)
+        .where(
+            AuditLog.company_id == company_id,
+            AuditLog.entity_type == AUDIT_ENTITY,
+            AuditLog.entity_id == str(bank_account_id),
+        )
+        .order_by(AuditLog.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    try:
+        return date.fromisoformat(payload["to_date"]) if isinstance(payload, dict) else None
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def default_sync_range(
     session: Session, *, company_id: int, bank_account_id: int, today: date | None = None
 ) -> tuple[date, date]:
+    """Standard-Zeitraum: nach einem früheren MCP-Abruf mit 7 Tagen Überlappung, aber nie
+    vor dem Tag nach dem letzten Umsatz ohne UUID-Referenz; beim ersten Abruf ab dem Tag
+    nach dem letzten vorhandenen Umsatz (andere Quellen tragen andere Referenzen), sonst
+    90 Tage zurück."""
     to_date = today or datetime.now(BOOKING_TIMEZONE).date()
     rows = session.execute(
         select(BankTransaction.booking_date, BankTransaction.bank_reference)
@@ -343,20 +364,19 @@ def default_sync_range(
         .order_by(BankTransaction.booking_date.desc(), BankTransaction.id.desc())
         .limit(_RANGE_SCAN_ROWS)
     ).all()
-    newest_finom = next(
-        (day for day, reference in rows if reference and _UUID.match(reference)), None
-    )
+    newest_any = rows[0][0] if rows else None
     newest_other = next(
         (day for day, reference in rows if not (reference and _UUID.match(reference))), None
     )
-    if newest_finom is not None:
-        from_date = newest_finom - timedelta(days=RESYNC_OVERLAP_DAYS)
-    elif newest_other is not None:
-        from_date = newest_other + timedelta(days=1)
+    last_to = _last_sync_to(session, company_id=company_id, bank_account_id=bank_account_id)
+    if last_to is not None:
+        from_date = last_to - timedelta(days=RESYNC_OVERLAP_DAYS)
+        if newest_other is not None:
+            from_date = max(from_date, newest_other + timedelta(days=1))
+    elif newest_any is not None:
+        from_date = newest_any + timedelta(days=1)
     else:
         from_date = to_date - timedelta(days=DEFAULT_FIRST_SYNC_DAYS)
-    if newest_other is not None:
-        from_date = max(from_date, newest_other + timedelta(days=1))
     return min(from_date, to_date), to_date
 
 
@@ -518,7 +538,10 @@ def sync_mcp_bank_transactions(
         caller, wallet_id=wallet.id, from_date=from_date, to_date=to_date
     )
     # Älteste zuerst, wie in einem Kontoauszug.
-    transactions.sort(key=lambda item: str(item.get("executed") or item.get("created") or ""))
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    transactions.sort(
+        key=lambda item: parse_utc_timestamp(item.get("executed") or item.get("created")) or epoch
+    )
     items: list[StatementItem] = [
         row_from_finom_mcp_transaction(position, item)
         for position, item in enumerate(transactions, start=1)
@@ -558,14 +581,17 @@ def sync_mcp_bank_transactions(
     if dry_run:
         return result
 
-    result.report = import_bank_items(
-        session=session,
-        company_id=company.id,
-        bank_account_id=account.id,
-        items=fresh,
-        changed_by=changed_by,
-        source=f"mcp_{bank_adapter(server)}",
-    )
+    try:
+        result.report = import_bank_items(
+            session=session,
+            company_id=company.id,
+            bank_account_id=account.id,
+            items=fresh,
+            changed_by=changed_by,
+            source=f"mcp_{bank_adapter(server)}",
+        )
+    except BankImportError as exc:
+        raise McpBankSyncError(str(exc)) from exc
     log_audit_event(
         session=session,
         tenant_id=company.tenant_id,

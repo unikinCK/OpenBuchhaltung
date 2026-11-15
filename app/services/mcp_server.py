@@ -4561,8 +4561,9 @@ TOOLS: list[ToolSpec] = [
             "Ruft abgeschlossene Umsätze einer Wallet über den Bank-MCP-Server ab und "
             "importiert sie in das Bank-Sachkonto – ohne KI, mit Dedup über die "
             "Transaktions-ID und die Import-Pipeline. Ohne wallet_id die zuletzt genutzte "
-            "Wallet. Ohne Datum ab 7 Tage vor dem letzten Finom-Umsatz, nie vor dem Tag nach "
-            "dem letzten Umsatz ohne Finom-Referenz (sonst 90 Tage). Vorher mit "
+            "Wallet. Ohne Datum ab 7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag "
+            "nach dem letzten Umsatz ohne UUID-Referenz; beim ersten Abruf ab dem Tag nach dem "
+            "letzten Umsatz, sonst 90 Tage. Vorher mit "
             "preview_mcp_bank_transactions zeigen. Umsätze nie selbst abschreiben oder über "
             "import_bank_transactions einspielen, sondern dieses Tool nutzen."
         ),

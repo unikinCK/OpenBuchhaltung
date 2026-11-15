@@ -304,10 +304,22 @@ def test_default_range_respects_rows_that_cannot_be_deduplicated(session):
     _existing(session, company, bank, date(2026, 10, 9), None)
     assert default_sync_range(session, **kwargs) == (date(2026, 10, 10), today)
 
+    # UUID-Referenzen anderer Quellen (z. B. Open Banking) lösen beim ersten Abruf keine
+    # Überlappung aus: Erst ein früherer MCP-Abruf erlaubt sie.
     _existing(session, company, bank, date(2026, 11, 1), str(uuid.uuid4()))
+    assert default_sync_range(session, **kwargs) == (date(2026, 11, 2), today)
+
+    from app.services.audit_log import log_audit_event
+
+    log_audit_event(
+        session=session, tenant_id=company.tenant_id, company_id=company.id,
+        entity_type="bank_mcp_sync", entity_id=str(bank.id), action="synced",
+        changed_by="test", payload={"server_id": 1, "wallet_id": "w", "to_date": "2026-11-01"},
+    )
+    session.commit()
     assert default_sync_range(session, **kwargs) == (date(2026, 10, 25), today)
 
-    # Ein späterer Umsatz ohne Finom-Referenz (z. B. CAMT) begrenzt die Überlappung.
+    # Ein späterer Umsatz ohne UUID-Referenz (z. B. CAMT) begrenzt die Überlappung.
     _existing(session, company, bank, date(2026, 10, 28), "CAMT-REF-1")
     assert default_sync_range(session, **kwargs) == (date(2026, 10, 29), today)
 
@@ -383,8 +395,21 @@ def test_sync_imports_new_rows_skips_known_ids_and_remembers_the_wallet(session)
         changed_by="test",
     )
     assert again.wallet.id == WALLET["id"]
-    assert again.report.imported_rows == 0 and again.known == 3
-    assert again.from_date == date(2026, 10, 28)
+    # 7 Tage vor dem Ende des letzten Abrufs (15.11.).
+    assert again.from_date == date(2026, 11, 8)
+    assert again.report.imported_rows == 0
+
+    wide = sync_mcp_bank_transactions(
+        session=session,
+        caller=_caller(fake),
+        company=company,
+        server=server,
+        bank_account_id=bank.id,
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 15),
+        changed_by="test",
+    )
+    assert wide.known == 3 and wide.report.imported_rows == 0
 
 
 def test_sync_rejects_foreign_accounts_and_unknown_wallets(session):

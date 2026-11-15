@@ -12,8 +12,9 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 - **Neu:** Unter Bank → Online-Abruf → Bank-MCP-Server zeigt OpenBuchhaltung die Wallets beim Anbieter und
   übernimmt deren abgeschlossene Umsätze in ein Bank-Sachkonto, mit Vorschau. Der Abruf nutzt den Zugang des
   Benutzers aus den Obi-Verbindungen und läuft ohne KI. Gibt die Transaktions-ID als Bankreferenz weiter, sortiert
-  bereits importierte vorab aus und merkt sich die Wallet je Bankkonto. Ohne Datum beginnt er 7 Tage vor dem letzten
-  Umsatz mit Finom-Referenz, nie vor dem Tag nach dem letzten Umsatz ohne Referenz. Gilt in UI, REST
+  bereits importierte vorab aus und merkt sich die Wallet je Bankkonto. Ohne Datum beginnt er 7 Tage vor dem Ende des
+  letzten Abrufs, nie vor dem Tag nach dem letzten Umsatz ohne UUID-Referenz, beim ersten Mal nach dem letzten
+  vorhandenen Umsatz. Gilt in UI, REST
   (`/api/v1/mcp-bank-sources`, `/api/v1/mcp-servers/<id>/bank-wallets`, `/api/v1/bank-accounts/<id>/mcp-sync`) und
   MCP; Obi bekommt die Werkzeuge als Gruppe `bankabruf`, statt Umsätze selbst abzuschreiben.
 

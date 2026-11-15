@@ -758,8 +758,9 @@ Wallet Bank-Sachkonto und Zeitraum wählen, **Vorschau** zeigt die neuen Umsätz
 höchstens 10 Umsätze je Aufruf, geblättert wird über das Zeitfenster), übernimmt nur
 abgeschlossene Umsätze und nutzt die Transaktions-ID als Bankreferenz – dieselbe wie
 im Finom-CSV-Export, bereits importierte fallen heraus. Ohne Datum beginnt der Abruf
-7 Tage vor dem letzten Umsatz mit Finom-Referenz, nie vor dem Tag nach dem letzten
-Umsatz ohne Referenz (z. B. aus einem älteren CSV-Import), sonst 90 Tage zurück. Die
+7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag nach dem letzten Umsatz ohne
+UUID-Referenz (z. B. aus einem älteren CSV-Import); beim ersten Abruf ab dem Tag nach
+dem letzten vorhandenen Umsatz, sonst 90 Tage zurück. Die
 Wallet merkt sich der Abruf je Bankkonto. Grenze: Bei Kartenzahlungen in Fremdwährung
 fehlt der Ursprungsbetrag, den der CSV-Import im Verwendungszweck anhängt. Obi nutzt
 dafür die Werkzeuggruppe `bankabruf` und schreibt Umsätze nie selbst ab.

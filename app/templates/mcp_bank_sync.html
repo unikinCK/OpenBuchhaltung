@@ -56,7 +56,7 @@
                       <input type="hidden" name="server_id" value="{{ server.id }}" />
                       <input type="hidden" name="wallet_id" value="{{ wallet.id }}" />
                       <select name="bank_account_id" aria-label="Bank-Sachkonto" required>
-                        {{ account_options(default.bank_account_id) }}
+                        {{ account_options(preview.bank_account_id if preview and preview.wallet.id == wallet.id else default.bank_account_id) }}
                       </select>
                       <input name="from_date" type="date" aria-label="Von-Datum" title="Von (leer: ab letztem Umsatz des Kontos)" />
                       <input name="to_date" type="date" aria-label="Bis-Datum" title="Bis (leer: heute)" />
