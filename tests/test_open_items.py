@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import create_app
 from app.auth import hash_password
-from app.services.bank_import import book_transaction
+from app.services.bank_import import BankImportError, book_transaction
 from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
@@ -295,6 +296,112 @@ def test_bank_transaction_is_shared_across_items_up_to_its_amount(session: Sessi
         select(OpenItemSettlement.amount).order_by(OpenItemSettlement.id)
     ).scalars()
     assert list(amounts) == [Decimal("70.00"), Decimal("100.00"), Decimal("10.00")]
+
+
+def test_unbooked_transaction_paying_the_item_in_full_is_booked_first(session: Session) -> None:
+    """Bezahlt ein ungebuchter Umsatz genau diesen Posten, bucht der Ausgleich ihn mit: Sonst
+    stünde der Posten als ausgeglichen da, die Forderung im Hauptbuch aber weiter offen."""
+    company, bank, receivable, _ = _seed_company(session)
+    receivable.subledger = "debtor"
+    customer = create_partner(
+        session=session, company=company, changed_by="pytest", name="Kunde", is_customer=True
+    )
+    session.commit()
+    item = _receivable(session, company, receivable, "RE-VOLL", partner_id=customer.id)
+    transaction = _incoming(session, company, bank, "100.00")
+
+    settled = _settle_with(session, item, transaction)
+
+    assert settled.status == "settled"
+    session.refresh(transaction)
+    assert transaction.status == "booked"
+    entry = session.get(JournalEntry, transaction.journal_entry_id)
+    assert {
+        (line.account_id, line.debit_amount, line.credit_amount, line.partner_id)
+        for line in entry.lines
+    } == {
+        (bank.id, Decimal("100.00"), Decimal("0.00"), customer.id),
+        (receivable.id, Decimal("0.00"), Decimal("100.00"), customer.id),
+    }
+    assert settled.settlement_journal_entry_id == entry.id
+    assert session.execute(select(OpenItemSettlement)).scalar_one().journal_entry_id == entry.id
+
+
+def test_unbooked_transaction_with_existing_payment_entry_is_refused(session: Session) -> None:
+    """Gibt es die Zahlungsbuchung schon, entstünde sonst eine zweite: Der Ausgleich verweist
+    auf sie, statt den Umsatz noch einmal zu buchen."""
+    company, bank, receivable, _ = _seed_company(session)
+    item = _receivable(session, company, receivable, "RE-DOPPELT")
+    transaction = _incoming(session, company, bank, "100.00")
+    payment = _payment_entry(session, company, bank, [(receivable, "100.00", None)])
+
+    with pytest.raises(OpenItemError, match=f"passende Buchungen.*{payment.posting_number}"):
+        _settle_with(session, item, transaction)
+
+    session.refresh(transaction)
+    session.refresh(item)
+    assert (transaction.status, transaction.journal_entry_id) == ("open", None)
+    assert item.open_amount == Decimal("100.00")
+    assert session.execute(select(func.count(JournalEntry.id))).scalar_one() == 1
+
+
+def test_settled_but_unbooked_transaction_is_booked_against_the_item_account(
+    session: Session,
+) -> None:
+    """Sammelzahlung ohne Buchung: Die Bankansicht bucht den Umsatz gegen das Sammelkonto nach.
+    Die Ausgleiche hängen danach an der Buchung, ein Storno lässt die Posten wieder aufleben."""
+    company, bank, receivable, revenue = _seed_company(session)
+    first = _receivable(session, company, receivable, "RE-A")
+    second = _receivable(session, company, receivable, "RE-B")
+    transaction = _incoming(session, company, bank, "150.00")
+    _settle_with(session, first, transaction)
+    _settle_with(session, second, transaction)
+    session.refresh(transaction)
+    assert (transaction.status, transaction.journal_entry_id) == ("matched", None)
+
+    with pytest.raises(BankImportError, match="RE-A, RE-B ausgeglichen.*Sammelkonto"):
+        book_transaction(
+            session=session,
+            transaction_id=transaction.id,
+            contra_account_id=revenue.id,
+            changed_by="pytest",
+        )
+    session.rollback()
+
+    booked = book_transaction(
+        session=session,
+        transaction_id=transaction.id,
+        contra_account_id=receivable.id,
+        changed_by="pytest",
+    )
+
+    assert booked.status == "booked"
+    entry_id = booked.journal_entry_id
+    settlements = session.execute(
+        select(OpenItemSettlement).order_by(OpenItemSettlement.id)
+    ).scalars()
+    assert [(s.amount, s.journal_entry_id) for s in settlements] == [
+        (Decimal("100.00"), entry_id),
+        (Decimal("50.00"), entry_id),
+    ]
+    session.refresh(first)
+    session.refresh(second)
+    assert first.settlement_journal_entry_id == second.settlement_journal_entry_id == entry_id
+    audit = session.execute(
+        select(AuditLog.payload)
+        .where(AuditLog.entity_type == "bank_transaction", AuditLog.action == "booked")
+    ).scalar_one()
+    assert len(audit["open_item_settlement_ids"]) == 2
+
+    reverse_journal_entry(
+        session=session,
+        journal_entry_id=entry_id,
+        reversal_date=date(2026, 7, 10),
+        changed_by="pytest",
+    )
+    session.refresh(first)
+    session.refresh(second)
+    assert (first.open_amount, second.open_amount) == (Decimal("100.00"), Decimal("100.00"))
 
 
 def test_reversed_settlement_frees_the_bank_transaction(session: Session) -> None:
@@ -718,3 +825,56 @@ def test_used_bank_transaction_is_refused_in_api_and_ui(tmp_path: Path) -> None:
     assert "schon vollständig".encode() in page.data
     with app.extensions["db_session_factory"]() as db_session:
         assert db_session.get(OpenItem, item_ids[1]).open_amount == Decimal("100.00")
+
+
+def test_bank_page_books_a_settled_but_unbooked_transaction(tmp_path: Path) -> None:
+    """Die Bankseite zeigt „ausgeglichen, nicht gebucht“ und bucht gegen das Sammelkonto nach."""
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/api/v1/tenants", json={"tenant_name": "OPOS Nach", "company_name": "Nach GmbH"})
+    for code, name in (("1200", "Bank"), ("1400", "Forderungen")):
+        client.post(
+            "/api/v1/accounts",
+            json={"company_id": 1, "code": code, "name": name, "account_type": "asset"},
+        )
+    item_id = client.post(
+        "/api/v1/open-items",
+        json={
+            "company_id": 1,
+            "account_id": 2,
+            "item_type": "receivable",
+            "reference": "RE-NACH-1",
+            "entry_date": "2026-07-01",
+            "amount": "100.00",
+        },
+    ).get_json()["id"]
+    with app.extensions["db_session_factory"]() as db_session:
+        company = db_session.get(Company, 1)
+        bank = db_session.execute(select(Account).where(Account.code == "1200")).scalar_one()
+        transaction_id = _incoming(db_session, company, bank, "100.00").id
+
+    # Ein Teilbetrag: Der Umsatz bleibt zugeordnet, aber ungebucht.
+    partial = client.post(
+        f"/api/v1/open-items/{item_id}/settle",
+        json={"bank_transaction_id": transaction_id, "amount": "60.00"},
+    )
+    assert partial.status_code == 200
+
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    page = client.get("/bank", query_string={"company_id": 1})
+    assert "ausgeglichen, nicht gebucht".encode() in page.data
+    assert "RE-NACH-1 ausgeglichen, ist aber nicht gebucht".encode() in page.data
+    # Gegenkonto vorausgewählt: das Sammelkonto des Postens.
+    assert re.search(rb'<option value="2"\s+selected>1400', page.data)
+
+    booked = client.post(
+        f"/bank/{transaction_id}/buchen",
+        data={"company_id": "1", "contra_account_id": "2"},
+        follow_redirects=True,
+    )
+    assert "Bankumsatz wurde verbucht".encode() in booked.data
+    with app.extensions["db_session_factory"]() as db_session:
+        transaction = db_session.get(BankTransaction, transaction_id)
+        settlement = db_session.execute(select(OpenItemSettlement)).scalar_one()
+        assert transaction.status == "booked"
+        assert settlement.journal_entry_id == transaction.journal_entry_id

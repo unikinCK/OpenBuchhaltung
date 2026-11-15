@@ -82,6 +82,9 @@
       {% if preview.errors %}
         <ul class="error">{% for message in preview.errors %}<li>{{ message }}</li>{% endfor %}</ul>
       {% endif %}
+      {% if preview.elsewhere %}
+        <p class="callout callout-warning">{{ preview.elsewhere | length }} der neuen Umsätze stehen mit gleichem Datum, Betrag und Text schon auf Konto {{ preview.elsewhere_accounts | join(", ") }}. Falsches Bankkonto gewählt? Dann oben das richtige Konto wählen und die Vorschau neu laden.</p>
+      {% endif %}
       {% if preview.new_rows %}
         <div class="table-scroll">
           <table class="data">
@@ -94,7 +97,7 @@
                   <td>{{ row.booking_date | datum }}</td>
                   <td class="num">{{ row.amount | betrag }}{% if row.currency_code and row.currency_code != company.currency_code %} {{ row.currency_code }}{% endif %}</td>
                   <td>{{ row.counterparty or "–" }}</td>
-                  <td>{{ row.purpose }}</td>
+                  <td>{{ row.purpose }}{% if loop.index0 in preview.elsewhere %} <span class="badge badge-warning">schon auf {{ preview.elsewhere[loop.index0] }}</span>{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>

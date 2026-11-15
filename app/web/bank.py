@@ -13,12 +13,14 @@ from app.services.bank_import import (
     bank_reconciliation,
     book_transaction,
     detect_transfer_counterparts,
+    discard_bank_transactions,
     find_geldtransit_account,
     import_bank_statement,
     match_transaction,
     move_bank_transactions,
     reassign_bank_transactions,
     suggest_matches_for,
+    unbooked_settled_items,
 )
 from app.services.bank_proposals import (
     book_transaction_to_open_item,
@@ -61,6 +63,7 @@ from app.services.open_items import OpenItemError
 from app.services.scoping import scoped_select
 from app.services.standard_accounts import BANK, standard_account_id
 from app.web.blueprint import main_bp
+from app.web.formatting import format_amount
 from app.web.helpers import (
     changed_by,
     company_context,
@@ -131,6 +134,7 @@ def bank_page():
         open_banking_connections = []
         mcp_bank_sources = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
+        unbooked_items_by_tx: dict[int, list] = {}
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
         reconciliation = []
@@ -229,6 +233,9 @@ def bank_page():
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             suggestions_by_tx = suggest_matches_for(session=session, transactions=transactions)
+            unbooked_items_by_tx = unbooked_settled_items(
+                session=session, transactions=transactions
+            )
             transfer_by_tx = detect_transfer_counterparts(
                 session=session, transactions=transactions
             )
@@ -309,6 +316,7 @@ def bank_page():
         ),
         sort=sort,
         suggestions_by_tx=suggestions_by_tx,
+        unbooked_items_by_tx=unbooked_items_by_tx,
         transfer_by_tx=transfer_by_tx,
         geldtransit_account=geldtransit_account,
         reconciliation=reconciliation,
@@ -492,6 +500,36 @@ def bank_move_action():
     flash(
         f"{len(result.transactions)} Bankumsätze umgehängt.{reclass_note}",
         "success" if result else "warning",
+    )
+    return redirect(url_for("main.bank_page", company_id=company_id))
+
+
+@main_bp.post("/bank/<int:transaction_id>/verwerfen")
+def bank_discard_action(transaction_id: int):
+    company_id = request.form.get("company_id", type=int)
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        transaction = session.get(BankTransaction, transaction_id)
+        if transaction is None:
+            abort(404)
+        require_company_access(session, transaction.company_id)
+        try:
+            (discarded,) = discard_bank_transactions(
+                session=session,
+                company_id=transaction.company_id,
+                transaction_ids=[transaction_id],
+                reason=request.form.get("reason"),
+                changed_by=changed_by(),
+            )
+        except BankImportError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("main.bank_page", company_id=company_id))
+
+    flash(
+        f"Bankumsatz vom {discarded.booking_date:%d.%m.%Y} über "
+        f"{format_amount(discarded.amount)} verworfen. Inhalt und Grund stehen im "
+        "Audit-Protokoll.",
+        "success",
     )
     return redirect(url_for("main.bank_page", company_id=company_id))
 

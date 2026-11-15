@@ -3879,6 +3879,36 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="discard_bank_transactions",
+        description=(
+            "Verwirft irrtümlich importierte Bankumsätze, z. B. Dubletten nach einem Abruf auf "
+            "das falsche Bankkonto. Nur offene Umsätze ohne Buchung und ohne offenen Posten; "
+            "es entsteht keine Buchung. Inhalt und Grund stehen danach im Audit-Protokoll. "
+            "Entweder alle oder keiner. Vorher prüfen, dass jeder Umsatz wirklich doppelt "
+            "oder falsch ist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "transaction_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "IDs der zu verwerfenden Bankumsätze.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Grund (Pflicht, höchstens 500 Zeichen).",
+                },
+            },
+            "required": ["company_id", "transaction_ids", "reason"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-transactions/discard",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="match_bank_transaction",
         description="Ordnet einen offenen Bankumsatz einer bestehenden Buchung zu.",
         input_schema={
@@ -3918,7 +3948,10 @@ TOOLS: list[ToolSpec] = [
         name="book_bank_transaction",
         description=(
             "Verbucht einen offenen Bankumsatz gegen ein Gegenkonto, optional mit dem "
-            "Geschäftspartner der Buchung (Bank- und Gegenkontozeile)."
+            "Geschäftspartner der Buchung (Bank- und Gegenkontozeile). Auch für einen Umsatz, "
+            "der offene Posten ausgeglichen hat, ohne gebucht zu sein (Status matched ohne "
+            "journal_entry_id): dann gegen das Sammelkonto der Posten, ohne Steuercode; ohne "
+            "partner_id mit dem Partner der Posten."
         ),
         input_schema={
             "type": "object",
@@ -4507,8 +4540,10 @@ TOOLS: list[ToolSpec] = [
         name="list_mcp_bank_wallets",
         description=(
             "Listet die Wallets (Konten) beim Anbieter eines Bank-MCP-Servers mit IBAN und "
-            "Währung, mit dem Zugang des Benutzers. Mit bank_account_id zusätzlich die "
-            "zuletzt für dieses Bankkonto genutzte Wallet und den Standard-Zeitraum."
+            "Währung, mit dem Zugang des Benutzers. Je Wallet suggested_bank_account_id: das "
+            "Bank-Sachkonto zur IBAN, sonst das zuletzt genutzte – dieses Konto nehmen, nicht "
+            "das Sammelkonto „Bank“. Mit bank_account_id zusätzlich die zuletzt für dieses "
+            "Bankkonto genutzte Wallet und den Standard-Zeitraum."
         ),
         input_schema={
             "type": "object",
@@ -4533,7 +4568,9 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Zeigt, welche Umsätze sync_mcp_bank_transactions importieren würde (abgeschlossene "
             "Umsätze der Wallet, ohne bereits importierte), ohne etwas zu schreiben. Parameter "
-            "und Standard-Zeitraum wie dort."
+            "und Standard-Zeitraum wie dort. on_other_bank_accounts > 0 heißt: Diese Umsätze "
+            "stehen schon auf einem anderen Bankkonto (other_bank_account_codes) – vermutlich "
+            "das falsche Zielkonto, dann nicht importieren."
         ),
         input_schema={
             "type": "object",

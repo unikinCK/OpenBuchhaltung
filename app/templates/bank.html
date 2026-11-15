@@ -135,6 +135,8 @@
                   <td class="nowrap">
                     {% if tx.status == 'open' %}
                       <span class="badge badge-warning">offen</span>
+                    {% elif tx.status == 'matched' and tx.id in unbooked_items_by_tx %}
+                      <span class="badge badge-warning" title="Hat offene Posten ausgeglichen, ist aber nicht gebucht">ausgeglichen, nicht gebucht</span>
                     {% elif tx.status == 'matched' %}
                       <span class="badge badge-info">zugeordnet</span>
                     {% else %}
@@ -146,7 +148,7 @@
                     {% endif %}
                   </td>
                   <td class="actions">
-                    {% if tx.status == 'open' %}
+                    {% if tx.status == 'open' or tx.id in unbooked_items_by_tx %}
                       <button type="button" class="primary btn-sm" popovertarget="tx-panel-{{ tx.id }}">Buchen …</button>
                     {% elif bank_accounts | length > 1 %}
                       <button type="button" class="secondary btn-sm" popovertarget="tx-panel-{{ tx.id }}" title="Auf anderes Bankkonto umhängen">Konto …</button>
@@ -160,7 +162,8 @@
         {{ pagination('main.bank_page', transactions_total, limit, offset, selected_company_id,
                       extra=dict(filter_args, **sort.url_args)) }}
 
-        {% for tx in transactions if tx.status == 'open' or bank_accounts | length > 1 %}
+        {% for tx in transactions if tx.status == 'open' or tx.id in unbooked_items_by_tx or bank_accounts | length > 1 %}
+          {% set unbooked_items = unbooked_items_by_tx.get(tx.id, []) %}
           {% set rule = rule_by_tx.get(tx.id) %}
           {% set transfer = transfer_by_tx.get(tx.id) %}
           {% set proposal = proposal_by_tx.get(tx.id) %}
@@ -168,7 +171,7 @@
           {% set match = partner_match_by_tx.get(tx.id) %}
           {% set item_suggestions = open_items_by_tx.get(tx.id, []) %}
           {# Vorbelegt wird nur Eindeutiges: Regel, gewählter Partner der letzten Buchung, IBAN-Treffer. #}
-          {% set preselected_partner_id = (proposal.partner_id if proposal and proposal.partner_id else (match.partner.id if match and match.partner else none)) %}
+          {% set preselected_partner_id = (unbooked_items[0].partner_id if unbooked_items else (proposal.partner_id if proposal and proposal.partner_id else (match.partner.id if match and match.partner else none))) %}
           <div popover id="tx-panel-{{ tx.id }}" class="panel">
             <div class="panel-header">
               <div>
@@ -178,7 +181,16 @@
               <button type="button" class="panel-close" popovertarget="tx-panel-{{ tx.id }}" popovertargetaction="hide" aria-label="Schließen">×</button>
             </div>
 
-            {% if tx.status == 'open' %}
+            {% if unbooked_items %}
+              <p class="callout callout-warning">
+                Der Umsatz hat {{ "den Posten" if unbooked_items | length == 1 else "die Posten" }}
+                {{ unbooked_items | map(attribute="reference") | join(", ") }} ausgeglichen, ist aber nicht gebucht:
+                Im Hauptbuch {{ "steht er" if unbooked_items | length == 1 else "stehen sie" }} noch offen. Bitte gegen das
+                Sammelkonto des Postens buchen (vorausgewählt), ohne Steuercode.
+              </p>
+            {% endif %}
+
+            {% if tx.status == 'open' or unbooked_items %}
               {% if transfer %}
                 <p class="callout">
                   Eigenübertrag? Gegenstück am {{ transfer.booking_date | datum }} auf
@@ -244,7 +256,7 @@
                         <option value="">Gegenkonto wählen</option>
                         {% for account in contra_accounts if account.is_active %}
                           <option value="{{ account.id }}"
-                            {% if proposal and account.id == proposal.contra_account.id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                            {% if (unbooked_items and account.id == unbooked_items[0].account_id) or (not unbooked_items and proposal and account.id == proposal.contra_account.id) %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
                         {% endfor %}
                       </select>
                     </div>
@@ -325,6 +337,19 @@
                     {{ bank_account_options(tx.bank_account_id) }}
                   </select>
                   <button type="submit" class="secondary">Umhängen</button>
+                </form>
+              </div>
+            {% endif %}
+
+            {% if tx.status == 'open' %}
+              <div class="panel-section">
+                <h4>Verwerfen</h4>
+                <p class="hint">Nur für irrtümlich importierte Umsätze, etwa Dubletten nach einem Abruf auf das falsche Bankkonto. Es entsteht keine Buchung; Inhalt und Grund stehen im Audit-Protokoll.</p>
+                <form method="post" action="{{ url_for('main.bank_discard_action', transaction_id=tx.id) }}" class="inline-form">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                  <input name="reason" required maxlength="500" placeholder="Grund, z. B. Dublette" aria-label="Grund für das Verwerfen" />
+                  <button type="submit" class="danger" data-confirm="Bankumsatz vom {{ tx.booking_date | datum }} über {{ tx.amount | betrag }} verwerfen?">Verwerfen</button>
                 </form>
               </div>
             {% endif %}

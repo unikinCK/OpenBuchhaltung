@@ -28,6 +28,7 @@ from app.services.bank_import import (
     bank_reconciliation,
     book_transaction,
     detect_transfer_counterparts,
+    discard_bank_transactions,
     find_geldtransit_account,
     import_bank_statement,
     match_transaction,
@@ -723,6 +724,48 @@ def set_bank_transaction_account_via_api(transaction_id: int):
             {"id": entry.id, "posting_number": entry.posting_number} if entry else None
         )
         return jsonify(transaction_payload), 200
+
+
+@api_bp.post("/bank-transactions/discard")
+def discard_bank_transactions_via_api():
+    """Verwirft irrtümlich importierte, offene Umsätze ohne Buchung (z. B. Dubletten)."""
+    if not api_can_write():
+        return forbidden()
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+        transaction_ids = [int(value) for value in payload.get("transaction_ids") or []]
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id and transaction_ids are required."}), 400
+    if not transaction_ids:
+        return jsonify({"error": "transaction_ids must not be empty."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            discarded = discard_bank_transactions(
+                session=session,
+                company_id=company.id,
+                transaction_ids=transaction_ids,
+                reason=payload.get("reason"),
+                changed_by=_api_changed_by(),
+            )
+        except BankImportError as exc:
+            return jsonify({"error": str(exc)}), 422
+        return (
+            jsonify(
+                {
+                    "company_id": company.id,
+                    "discarded_count": len(discarded),
+                    "transactions": [item.to_dict() for item in discarded],
+                }
+            ),
+            200,
+        )
 
 
 @api_bp.post("/bank-transactions/<int:transaction_id>/match")

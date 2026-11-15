@@ -7,7 +7,7 @@ from io import BytesIO, StringIO
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app import create_app
@@ -15,6 +15,7 @@ from app.auth import hash_password
 from app.services.bank_import import (
     BankImportError,
     book_transaction,
+    discard_bank_transactions,
     import_bank_csv,
     match_transaction,
     move_bank_transactions,
@@ -37,6 +38,7 @@ from domain.models import (
     Company,
     ControllingUnit,
     JournalEntryLine,
+    OpenItem,
     TaxCode,
     Tenant,
     User,
@@ -1251,3 +1253,189 @@ def test_bank_page_shows_and_changes_bank_account(tmp_path):
     )
     assert back.status_code == 200
     assert "umgehängt".encode() in back.data
+
+
+def _imported(session: Session) -> tuple[Company, Account, Account, list[BankTransaction]]:
+    company, bank, rent = _seed_company(session)
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    transactions = list(
+        session.execute(select(BankTransaction).order_by(BankTransaction.id)).scalars()
+    )
+    return company, bank, rent, transactions
+
+
+def test_discard_bank_transactions_keeps_content_and_reason_in_audit_log(
+    session: Session,
+) -> None:
+    """Dubletten nach einem Import auf das falsche Konto lassen sich verwerfen: ohne Buchung,
+    mit vollständigem Inhalt und Grund im Audit-Protokoll."""
+    company, bank, _, (income, rent_payment, fees) = _imported(session)
+
+    discarded = discard_bank_transactions(
+        session=session,
+        company_id=company.id,
+        transaction_ids=[fees.id, income.id],
+        reason="  Dublette: liegt schon auf dem Unterkonto  ",
+        changed_by="tester",
+    )
+
+    assert [item.id for item in discarded] == [income.id, fees.id]
+    remaining = session.execute(select(BankTransaction.id)).scalars().all()
+    assert remaining == [rent_payment.id]
+    entries = session.execute(
+        select(AuditLog)
+        .where(AuditLog.entity_type == "bank_transaction", AuditLog.action == "discarded")
+        .order_by(AuditLog.id)
+    ).scalars().all()
+    assert [entry.entity_id for entry in entries] == [str(income.id), str(fees.id)]
+    assert entries[0].payload == {
+        "id": income.id,
+        "bank_account_id": bank.id,
+        "booking_date": "2026-07-05",
+        "amount": "1190.00",
+        "currency_code": income.currency_code,
+        "purpose": "Zahlungseingang RE-1001",
+        "counterparty": "Kunde AG",
+        "counterparty_iban": None,
+        "bank_reference": None,
+        "imported_at": discarded[0].imported_at.isoformat(),
+        "reason": "Dublette: liegt schon auf dem Unterkonto",
+    }
+    assert session.execute(select(func.count(JournalEntryLine.id))).scalar_one() == 0
+
+
+def test_discard_bank_transactions_refuses_booked_referenced_or_unexplained(
+    session: Session,
+) -> None:
+    """Nur offene Umsätze ohne Buchung und ohne Posten, nur mit Grund – und alle oder keiner."""
+    company, _, rent, (income, rent_payment, fees) = _imported(session)
+    book_transaction(
+        session=session,
+        transaction_id=rent_payment.id,
+        contra_account_id=rent.id,
+        changed_by="tester",
+    )
+    item = OpenItem(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        account_id=rent.id,
+        item_type="receivable",
+        reference="RE-1001",
+        entry_date=date(2026, 7, 1),
+        original_amount=Decimal("1190.00"),
+        open_amount=Decimal("1190.00"),
+        currency_code="EUR",
+        status="open",
+        bank_transaction_id=income.id,
+    )
+    session.add(item)
+    session.commit()
+
+    with pytest.raises(BankImportError, match="Grund"):
+        discard_bank_transactions(
+            session=session,
+            company_id=company.id,
+            transaction_ids=[fees.id],
+            reason="  ",
+            changed_by="tester",
+        )
+    with pytest.raises(BankImportError, match=f"Bankumsatz {rent_payment.id} .*gebucht"):
+        discard_bank_transactions(
+            session=session,
+            company_id=company.id,
+            transaction_ids=[fees.id, rent_payment.id],
+            reason="Dublette",
+            changed_by="tester",
+        )
+    session.rollback()
+    with pytest.raises(BankImportError, match="offenen Posten"):
+        discard_bank_transactions(
+            session=session,
+            company_id=company.id,
+            transaction_ids=[income.id],
+            reason="Dublette",
+            changed_by="tester",
+        )
+    session.rollback()
+    with pytest.raises(BankImportError, match="nicht gefunden"):
+        discard_bank_transactions(
+            session=session,
+            company_id=company.id + 1,
+            transaction_ids=[fees.id],
+            reason="Dublette",
+            changed_by="tester",
+        )
+    session.rollback()
+
+    assert session.execute(select(func.count(BankTransaction.id))).scalar_one() == 3
+    assert not session.execute(
+        select(AuditLog.id).where(AuditLog.action == "discarded")
+    ).first()
+
+
+def test_discard_bank_transactions_via_api_and_ui(tmp_path):
+    app = _create_ui_app(tmp_path)
+    client = app.test_client()
+    client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    client.post("/tenants", data={"tenant_name": "B Mandant", "company_name": "B GmbH"})
+    client.post(
+        "/accounts",
+        data={"company_id": "1", "code": "1200", "name": "Bank", "account_type": "asset"},
+    )
+    client.post(
+        "/bank/import",
+        data={
+            "company_id": "1",
+            "bank_account_id": "1",
+            "bank_csv": (BytesIO(GERMAN_CSV.encode("utf-8")), "umsaetze.csv"),
+        },
+        content_type="multipart/form-data",
+    )
+    ids = [
+        tx["id"]
+        for tx in client.get(
+            "/api/v1/bank-transactions", query_string={"company_id": 1}
+        ).get_json()["transactions"]
+    ]
+
+    page = client.get("/bank", query_string={"company_id": 1})
+    assert f'action="/bank/{ids[0]}/verwerfen"'.encode() in page.data
+
+    missing_reason = client.post(
+        "/api/v1/bank-transactions/discard",
+        json={"company_id": 1, "transaction_ids": [ids[0]]},
+    )
+    assert missing_reason.status_code == 422
+    assert client.post(
+        "/api/v1/bank-transactions/discard", json={"company_id": 1, "transaction_ids": []}
+    ).status_code == 400
+    assert client.post(
+        "/api/v1/bank-transactions/discard",
+        json={"company_id": 99, "transaction_ids": [ids[0]], "reason": "Dublette"},
+    ).status_code == 404
+
+    via_api = client.post(
+        "/api/v1/bank-transactions/discard",
+        json={"company_id": 1, "transaction_ids": ids[:2], "reason": "Dublette"},
+    )
+    assert via_api.status_code == 200
+    body = via_api.get_json()
+    assert body["discarded_count"] == 2
+    assert {item["id"] for item in body["transactions"]} == set(ids[:2])
+
+    via_ui = client.post(
+        f"/bank/{ids[2]}/verwerfen",
+        data={"company_id": "1", "reason": "Dublette"},
+        follow_redirects=True,
+    )
+    assert via_ui.status_code == 200
+    assert "verworfen. Inhalt und Grund stehen im Audit-Protokoll".encode() in via_ui.data
+    assert client.get(
+        "/api/v1/bank-transactions", query_string={"company_id": 1}
+    ).get_json()["transactions"] == []

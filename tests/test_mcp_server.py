@@ -152,6 +152,7 @@ EXPECTED_TOOL_NAMES = {
     "import_bank_transactions",
     "reassign_bank_transaction",
     "move_bank_transactions",
+    "discard_bank_transactions",
     "match_bank_transaction",
     "book_bank_transaction",
     "list_cash_books",

@@ -16,6 +16,7 @@ from app.auth import current_user
 from app.services.mcp_bank_sync import (
     McpBankSyncError,
     ServerCaller,
+    bank_account_for_iban,
     bank_sync_servers,
     default_sync_range,
     last_bank_account_id,
@@ -103,8 +104,11 @@ def mcp_bank_sync_page():
                 error = str(exc)
             fallback = standard_account_id(bank_accounts, BANK)
             for wallet in wallets:
+                # Die IBAN der Wallet schlägt das zuletzt gewählte Konto: Ein Abruf auf das
+                # Sammelkonto „Bank“ soll sich nicht als Vorschlag festsetzen.
                 account_id = (
-                    last_bank_account_id(
+                    bank_account_for_iban(session, company_id=company.id, iban=wallet.iban)
+                    or last_bank_account_id(
                         session, company_id=company.id, server_id=server.id, wallet_id=wallet.id
                     )
                     or fallback
@@ -170,6 +174,13 @@ def mcp_bank_sync_action():
         f"{result.known + report.duplicate_rows} schon vorhanden, {report.error_rows} Fehler.",
         "success" if report.error_rows == 0 else "error",
     )
+    if result.elsewhere:
+        flash(
+            f"{len(result.elsewhere)} der neuen Umsätze stehen mit gleichem Datum, Betrag und Text "
+            f"schon auf Konto {', '.join(result.elsewhere_accounts)}. Falsches Bankkonto gewählt? "
+            "Dann die neuen Umsätze verwerfen (Bankseite → Buchen … → Verwerfen).",
+            "warning",
+        )
     return redirect(
         url_for("main.bank_page", company_id=company_id, bank_account_id=bank_account_id)
     )

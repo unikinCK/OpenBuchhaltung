@@ -8,6 +8,30 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Bankabruf auf das falsche Konto: Vorschlag nach IBAN, Dublettenwarnung, Verwerfen
+- **Behoben:** Der Bank-MCP-Abruf schlug beim ersten Mal das Standard-Bankkonto vor, oft das Sammelkonto „Bank“,
+  und merkte sich diese Wahl. Lagen dieselben Umsätze schon aus dem Datei-Import auf dem Unterkonto, standen sie danach
+  doppelt da. Jetzt kommt zuerst das Konto zur IBAN der Wallet (FinTS- oder Open-Banking-Zugang mit dieser IBAN, sonst
+  ein Bankkonto mit der IBAN im Namen); REST und MCP liefern es je Wallet als `suggested_bank_account_id`.
+- **Neu:** Vorschau und Ergebnis des Abrufs warnen, wenn neue Umsätze mit gleichem Datum, Betrag und Gegenpartei oder
+  Verwendungszweck schon auf einem anderen Bankkonto stehen (`on_other_bank_accounts`, je Zeile
+  `on_other_bank_account`).
+- **Neu:** Irrtümlich importierte Umsätze lassen sich verwerfen: nur offene ohne Buchung und ohne offenen Posten, mit
+  Pflicht-Grund, alle oder keiner. Es entsteht keine Buchung; Inhalt und Grund stehen im Audit-Protokoll. Gilt in UI
+  (Bank → Buchen … → Verwerfen), REST (`POST /api/v1/bank-transactions/discard`) und MCP
+  (`discard_bank_transactions`).
+
+### Offene Posten: Ausgleich mit ungebuchtem Bankumsatz bucht die Zahlung
+- **Behoben:** Wurde ein Posten unter Offene Posten mit einem noch nicht gebuchten Bankumsatz ausgeglichen, stand er als
+  ausgeglichen da, die Zahlung kam aber nie ins Hauptbuch: Forderung oder Verbindlichkeit blieben offen, der Umsatz
+  hing als „zugeordnet“ ohne Buchung fest und ließ sich nicht mehr buchen. Bezahlt der Umsatz genau diesen Posten mit
+  seinem vollen Betrag, bucht der Ausgleich ihn jetzt auf das Sammelkonto des Postens mit (wie „Offenen Posten
+  ausgleichen“ in der Bankansicht). Gibt es schon eine passende Zahlungsbuchung, verweist die Meldung auf sie.
+- **Neu:** Ein Umsatz, der Posten ohne Buchung ausgeglichen hat (etwa Teilbeträge einer Sammelzahlung oder Altfälle),
+  erscheint in der Bankansicht als „ausgeglichen, nicht gebucht“ und lässt sich gegen das Sammelkonto der Posten
+  nachbuchen (vorausgewählt, ohne Steuercode, mit deren Partner). Die Ausgleiche hängen danach an der Buchung, ein
+  Storno lässt die Posten wieder aufleben. Gilt in UI, REST (`/bank-transactions/<id>/book`) und MCP.
+
 ### Bankumsätze über den MCP-Server der Bank abrufen (z. B. Finom)
 - **Neu:** Unter Bank → Online-Abruf → Bank-MCP-Server zeigt OpenBuchhaltung die Wallets beim Anbieter und
   übernimmt deren abgeschlossene Umsätze in ein Bank-Sachkonto, mit Vorschau. Der Abruf nutzt den Zugang des
