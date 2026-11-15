@@ -8,6 +8,12 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Obi-MCP-Server: eigener User-Agent für ausgehende Anfragen
+- **Behoben:** MCP-Server hinter Cloudflare, die den urllib-Standard `Python-urllib/…` sperren (Error 1010), ließen
+  sich nicht anbinden: Die OAuth-Metadaten kamen nicht an, die Client-Registrierung lief deshalb an eine geratene
+  Adresse und scheiterte mit HTTP 403. Discovery, Registrierung, Token-Abruf und Werkzeugaufrufe schicken jetzt
+  `OpenBuchhaltung/<Version> (MCP-Client; +https://openbuchhaltung.de)`.
+
 ### Offene Posten in Fremdwährung: Euro-Zahlungsbuchung nur bis zu ihrem Betrag
 - **Behoben:** Eine Euro-Zahlungsbuchung ohne Bankumsatz und ohne Zeile auf dem Sammelkonto ließ sich beliebig oft
   zum Ausgleich von Posten in Fremdwährung nutzen. Jetzt trägt sie zusammen höchstens, was sie neben dem Sammelkonto

@@ -38,6 +38,7 @@ from app.services.mcp_oauth import (
     McpOAuthError,
     checked_endpoint,
     discover,
+    register_client,
     resource_matches,
 )
 from app.services.mcp_server import TOOLS
@@ -87,6 +88,7 @@ def _initial_state() -> dict:
         "valid_refresh": None,
         "expires_in": 3600,
         "registrations": [],
+        "user_agents": [],
         # Varianten für Fehlerfälle
         "forbid_tool": None,
         "expire_on_notification": False,
@@ -121,7 +123,18 @@ class _FakeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _bot_filter(self) -> bool:
+        """Wie Cloudflare bei manchen Diensten (Error 1010): urllib-Standard abweisen."""
+        agent = self.headers.get("User-Agent") or ""
+        self.state["user_agents"].append(agent)
+        if agent.startswith("Python-urllib"):
+            self._send(403, {"title": "Error 1010: Access denied"})
+            return True
+        return False
+
     def do_GET(self):
+        if self._bot_filter():
+            return None
         if self.path == "/.well-known/oauth-protected-resource/mcp":
             return self._send(
                 200,
@@ -148,11 +161,15 @@ class _FakeHandler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not_found"})
 
     def do_DELETE(self):
+        if self._bot_filter():
+            return None
         self.state["deleted_sessions"].append(self.headers.get("Mcp-Session-Id"))
         self._send(200)
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self._bot_filter():
+            return None
         if self.path == "/as/register":
             payload = json.loads(raw)
             self.state["registrations"].append(payload)
@@ -493,6 +510,27 @@ def test_discover_follows_resource_metadata(fake_mcp):
     assert server.registration_endpoint == f"{fake_mcp.base_url}/as/register"
     assert server.resource == f"{fake_mcp.base_url}/mcp"
     assert server.scopes == ("docs.read",)
+
+
+def test_outbound_requests_send_own_user_agent(fake_mcp):
+    """Cloudflare sperrt ``Python-urllib`` (z. B. bei Finom): Discovery, Registrierung und
+    MCP-Aufrufe müssen mit eigener Kennung durchkommen."""
+    challenge = (
+        f'Bearer resource_metadata="{fake_mcp.base_url}/.well-known/oauth-protected-resource/mcp"'
+    )
+    server = discover(f"{fake_mcp.base_url}/mcp", www_authenticate=challenge)
+    registration = register_client(
+        server, redirect_uri="https://obh.example.com/callback", client_name="Obi"
+    )
+    session = McpSession(f"{fake_mcp.base_url}/mcp", timeout=5)
+    session.list_tools()
+    session.close()
+
+    assert server.registration_endpoint == f"{fake_mcp.base_url}/as/register"
+    assert registration["client_id"] == "client-1"
+    agents = set(fake_mcp.state["user_agents"])
+    assert agents == {mcp_client.user_agent()}
+    assert mcp_client.user_agent().startswith("OpenBuchhaltung/")
 
 
 def test_discover_falls_back_to_legacy_endpoints():
