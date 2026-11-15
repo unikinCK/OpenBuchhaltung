@@ -747,6 +747,24 @@ gespeichert und beim Deaktivieren des Zugangs widerrufen. Hinweis: Der kostenlos
 Modus von Enable Banking deckt laut deren AGB nur private Konten ab — für
 Geschäftskonten ist ein Vertrag mit Enable Banking nötig.
 
+**Bank-MCP-Server (z. B. Finom):** Banken mit eigenem MCP-Server lassen sich ohne
+Enable-Banking-Vertrag abrufen. Ein Administrator legt den Server unter
+**Verwaltung → MCP-Server** an (Finom: `https://app.finom.co/mcp`, OAuth, Zugang je
+Benutzer), jeder Benutzer meldet sich unter **Obi-Verbindungen** an. Unter
+**Bank → Online-Abruf → Bank-MCP-Server** erscheinen die Wallets beim Anbieter; je
+Wallet Bank-Sachkonto und Zeitraum wählen, **Vorschau** zeigt die neuen Umsätze,
+**Übernehmen** importiert sie. Der Abruf läuft ohne KI: OpenBuchhaltung ruft
+`transactions__listWallets`/`transactions__listTransactions` selbst auf (Finom liefert
+höchstens 10 Umsätze je Aufruf, geblättert wird über das Zeitfenster), übernimmt nur
+abgeschlossene Umsätze und nutzt die Transaktions-ID als Bankreferenz – dieselbe wie
+im Finom-CSV-Export, bereits importierte fallen heraus. Ohne Datum beginnt der Abruf
+7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag nach dem letzten Umsatz ohne
+UUID-Referenz (z. B. aus einem älteren CSV-Import); beim ersten Abruf ab dem Tag nach
+dem letzten vorhandenen Umsatz, sonst 90 Tage zurück. Die
+Wallet merkt sich der Abruf je Bankkonto. Grenze: Bei Kartenzahlungen in Fremdwährung
+fehlt der Ursprungsbetrag, den der CSV-Import im Verwendungszweck anhängt. Obi nutzt
+dafür die Werkzeuggruppe `bankabruf` und schreibt Umsätze nie selbst ab.
+
 **Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
 (Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein
 anderes Bankkonto umhängen; bereits erzeugte Buchungen bleiben dabei nach dem
@@ -1706,6 +1724,10 @@ Bank & FinTS:
 - `POST /api/v1/open-banking-connections/<id>/authorize` — liefert `authorization_url` für die Bank-Zustimmung
 - `POST /api/v1/open-banking/complete` — Zustimmung mit `redirect_url` bzw. `code`/`state` abschließen
 - `POST /api/v1/open-banking-connections/<id>/sync` — gebuchte Umsätze per PSD2 abrufen
+- `GET /api/v1/mcp-bank-sources?company_id=…` — MCP-Server mit Umsatzabruf (z. B. Finom)
+- `GET /api/v1/mcp-servers/<id>/bank-wallets?company_id=…[&bank_account_id=…]` — Wallets beim Anbieter, mit Bankkonto zusätzlich Wallet- und Zeitraumvorschlag
+- `GET /api/v1/bank-accounts/<id>/mcp-sync/preview?server_id=…[&wallet_id&from_date&to_date]` — neue Umsätze anzeigen, ohne zu schreiben
+- `POST /api/v1/bank-accounts/<id>/mcp-sync` — Umsätze über den Bank-MCP-Server abrufen und importieren
 
 Die Report-Endpunkte akzeptieren einen **Zeitraum**: GuV und Summen-/Saldenliste
 werten Buchungen mit `entry_date` in `[date_from, date_to]` aus, die Bilanz als

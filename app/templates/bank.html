@@ -366,8 +366,8 @@
       {% endif %}
     </details>
 
-    <details class="card" id="online-abruf"{% if fints_connections or open_banking_connections %} open{% endif %}>
-      <summary>Online-Abruf <span class="summary-hint">FinTS-Direktabruf und Open Banking (PSD2){% if fints_connections or open_banking_connections %} · {{ (fints_connections | length) + (open_banking_connections | length) }} Zugang/Zugänge{% endif %}</span></summary>
+    <details class="card" id="online-abruf"{% if fints_connections or open_banking_connections or mcp_bank_sources %} open{% endif %}>
+      <summary>Online-Abruf <span class="summary-hint">FinTS-Direktabruf, Open Banking (PSD2) und Bank-MCP-Server{% if fints_connections or open_banking_connections or mcp_bank_sources %} · {{ (fints_connections | length) + (open_banking_connections | length) + (mcp_bank_sources | length) }} Zugang/Zugänge{% endif %}</span></summary>
 
       <h3 class="form-section-title">FinTS-Direktabruf</h3>
       {% if not fints_configured %}
@@ -469,6 +469,18 @@
             </div>
           </form>
         </details>
+      {% endif %}
+
+      <h3 class="form-section-title" style="margin-top:1.5rem;">Bank-MCP-Server</h3>
+      <p class="hint">Banken mit eigenem MCP-Server (z. B. Finom): Umsätze kommen mit deinem Zugang aus den Obi-Verbindungen, ohne KI und ohne Enable-Banking-Vertrag.</p>
+      {% if mcp_bank_sources %}
+        <ul>
+          {% for source in mcp_bank_sources %}
+            <li><a href="{{ url_for('main.mcp_bank_sync_page', company_id=selected_company_id, server_id=source.id) }}">Umsätze von {{ source.name }} abrufen</a></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">Kein MCP-Server mit Umsatzabruf eingerichtet (Verwaltung → MCP-Server, z. B. <code>https://app.finom.co/mcp</code>).</p>
       {% endif %}
 
       <h3 class="form-section-title" style="margin-top:1.5rem;">Open Banking (PSD2)</h3>

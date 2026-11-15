@@ -4485,6 +4485,109 @@ TOOLS: list[ToolSpec] = [
         arg_location="json",
     ),
     ToolSpec(
+        name="list_mcp_bank_sources",
+        description=(
+            "Listet die MCP-Server, über die sich Bankumsätze der Gesellschaft ohne KI "
+            "abrufen lassen (derzeit Finom). Danach list_mcp_bank_wallets und "
+            "sync_mcp_bank_transactions."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/mcp-bank-sources",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="list_mcp_bank_wallets",
+        description=(
+            "Listet die Wallets (Konten) beim Anbieter eines Bank-MCP-Servers mit IBAN und "
+            "Währung, mit dem Zugang des Benutzers. Mit bank_account_id zusätzlich die "
+            "zuletzt für dieses Bankkonto genutzte Wallet und den Standard-Zeitraum."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_bank_sources."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "bank_account_id": {
+                    "type": "integer",
+                    "description": "Optional: Bank-Sachkonto für Wallet- und Zeitraumvorschlag.",
+                },
+            },
+            "required": ["server_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/mcp-servers/{server_id}/bank-wallets",
+        arg_location="query",
+        timeout=60,
+    ),
+    ToolSpec(
+        name="preview_mcp_bank_transactions",
+        description=(
+            "Zeigt, welche Umsätze sync_mcp_bank_transactions importieren würde (abgeschlossene "
+            "Umsätze der Wallet, ohne bereits importierte), ohne etwas zu schreiben. Parameter "
+            "und Standard-Zeitraum wie dort."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bank_account_id": {"type": "integer", "description": "ID des Bank-Sachkontos."},
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_bank_sources."},
+                "wallet_id": {
+                    "type": "string",
+                    "description": "Optional: Wallet-ID aus list_mcp_bank_wallets.",
+                },
+                "from_date": {"type": "string", "description": "Optional: Beginn (YYYY-MM-DD)."},
+                "to_date": {"type": "string", "description": "Optional: Ende (YYYY-MM-DD)."},
+            },
+            "required": ["bank_account_id", "server_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-accounts/{bank_account_id}/mcp-sync/preview",
+        arg_location="query",
+        timeout=300,
+    ),
+    ToolSpec(
+        name="sync_mcp_bank_transactions",
+        description=(
+            "Ruft abgeschlossene Umsätze einer Wallet über den Bank-MCP-Server ab und "
+            "importiert sie in das Bank-Sachkonto – ohne KI, mit Dedup über die "
+            "Transaktions-ID und die Import-Pipeline. Ohne wallet_id die zuletzt genutzte "
+            "Wallet. Ohne Datum ab 7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag "
+            "nach dem letzten Umsatz ohne UUID-Referenz; beim ersten Abruf ab dem Tag nach dem "
+            "letzten Umsatz, sonst 90 Tage. Vorher mit "
+            "preview_mcp_bank_transactions zeigen. Umsätze nie selbst abschreiben oder über "
+            "import_bank_transactions einspielen, sondern dieses Tool nutzen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bank_account_id": {"type": "integer", "description": "ID des Bank-Sachkontos."},
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_bank_sources."},
+                "wallet_id": {
+                    "type": "string",
+                    "description": "Optional: Wallet-ID aus list_mcp_bank_wallets.",
+                },
+                "from_date": {"type": "string", "description": "Optional: Beginn (YYYY-MM-DD)."},
+                "to_date": {"type": "string", "description": "Optional: Ende (YYYY-MM-DD)."},
+            },
+            "required": ["bank_account_id", "server_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-accounts/{bank_account_id}/mcp-sync",
+        arg_location="json",
+        timeout=300,
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener "

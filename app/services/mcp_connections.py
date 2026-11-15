@@ -104,6 +104,8 @@ PROXY_LABELS = {
 
 CHANNEL_CHAT = "chat"
 CHANNEL_MCP = "mcp"
+# Fachlicher Abruf ohne KI, z. B. Bankumsätze über den MCP-Server der Bank.
+CHANNEL_BANK_SYNC = "bank_sync"
 # Hinweise aus tools/list, die beim Durchreichen an MCP-Clients erhalten bleiben.
 _PASSED_ANNOTATIONS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
@@ -1584,6 +1586,27 @@ class ExternalTools:
         self._record(server, tool, arguments, is_error=result.is_error, reached=True)
         return result
 
+    def call_remote(
+        self, server_id: int, remote_name: str, arguments: dict[str, Any]
+    ) -> McpToolResult:
+        """Wie :meth:`call`, das Werkzeug aber über seinen Namen beim Server bestimmt."""
+        name = next(
+            (
+                tool.chat_name
+                for server in self._servers
+                if server.id == server_id
+                for tool in server.tools
+                if tool.remote_name == remote_name
+            ),
+            None,
+        )
+        if name is None:
+            raise McpConnectionError(
+                f"Das Werkzeug {remote_name} ist beim MCP-Server nicht verfügbar oder nicht "
+                "freigegeben."
+            )
+        return self.call(name, arguments)
+
     def execute(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
         """Ruft ein externes Werkzeug auf; liefert ``(text, is_error)`` wie die Chat-Tools."""
         try:
@@ -1801,6 +1824,41 @@ def load_external_tools(
         company_id=company_id,
         actor=(user or {}).get("username") or "api-token",
         channel=CHANNEL_MCP if proxy else CHANNEL_CHAT,
+    )
+
+
+def server_toolbox(
+    *,
+    session_factory,
+    server_id: int,
+    tenant_id: int | None,
+    company_id: int | None,
+    user: dict | None,
+) -> ExternalTools:
+    """Werkzeuge eines einzelnen Servers für einen fachlichen Abruf ohne KI.
+
+    Gilt wie im Chat: aktiver Server des Mandanten, wirksamer Zugang des Benutzers
+    (zentral oder persönlich), nur freigegebene Werkzeuge. Fehlt etwas, wirft die
+    Funktion :class:`McpConnectionError` mit dem Hinweis, der sonst im Chat erschiene.
+    """
+    with session_factory() as session:
+        server = session.get(McpServer, server_id)
+        if (
+            server is None
+            or not server.is_active
+            or (server.tenant_id is not None and server.tenant_id != tenant_id)
+        ):
+            raise McpConnectionError("Der MCP-Server ist nicht (mehr) verfügbar.")
+        handle, note = _server_handle(session, server, user)
+    if handle is None:
+        raise McpConnectionError(note or f"{server.name} ist derzeit nicht nutzbar.")
+    return ExternalTools(
+        session_factory=session_factory,
+        servers=[handle],
+        tenant_id=tenant_id,
+        company_id=company_id,
+        actor=(user or {}).get("username") or "api-token",
+        channel=CHANNEL_BANK_SYNC,
     )
 
 
