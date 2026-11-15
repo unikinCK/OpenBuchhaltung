@@ -200,6 +200,16 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "export_audit_package",
         ),
     ),
+    "bankabruf": (
+        "Bankumsätze über den MCP-Server der Bank (z. B. Finom) importieren – nie selbst "
+        "abschreiben",
+        (
+            "list_mcp_bank_sources",
+            "list_mcp_bank_wallets",
+            "preview_mcp_bank_transactions",
+            "sync_mcp_bank_transactions",
+        ),
+    ),
     "partnererkennung": (
         "Partner erkennen, E-Rechnung prüfen, Umsatz auf offenen Posten buchen",
         (

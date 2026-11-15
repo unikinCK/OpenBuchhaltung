@@ -26,6 +26,7 @@ from app.web import (  # noqa: F401
     income_taxes,
     journal,
     knowledge,
+    mcp_bank_sync,
     mcp_servers,
     open_banking,
     open_items,

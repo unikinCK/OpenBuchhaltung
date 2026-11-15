@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Bank-MCP-Abruf – OpenBuchhaltung{% endblock %}
+
+{% macro account_options(selected_id) -%}
+  {% for account in bank_accounts %}
+    <option value="{{ account.id }}" {% if account.id == selected_id %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+  {% endfor %}
+{%- endmacro %}
+
+{% block content %}
+  <section class="card">
+    <h1>Bankumsätze über MCP-Server abrufen</h1>
+    <p class="muted">{{ company.name }} · Umsätze kommen direkt vom MCP-Server der Bank (z. B. Finom), mit deinem Zugang aus den <a href="{{ url_for('main.obi_connections_page') }}">Obi-Verbindungen</a>. Die KI ist daran nicht beteiligt; übernommen werden nur abgeschlossene Umsätze, bereits importierte (gleiche Transaktions-ID) fallen heraus.</p>
+
+    {% if not servers %}
+      <p>Kein MCP-Server mit Umsatzabruf eingerichtet. Ein Administrator legt ihn unter <a href="{{ url_for('main.mcp_servers_page') }}">Verwaltung → MCP-Server</a> an (z. B. Finom: <code>https://app.finom.co/mcp</code>).</p>
+    {% else %}
+      {% if servers | length > 1 %}
+        <form method="get" action="{{ url_for('main.mcp_bank_sync_page') }}" class="inline-form">
+          <input type="hidden" name="company_id" value="{{ company.id }}" />
+          <label for="mbs_server">MCP-Server</label>
+          <select id="mbs_server" name="server_id">
+            {% for item in servers %}
+              <option value="{{ item.id }}" {% if server and item.id == server.id %}selected{% endif %}>{{ item.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="secondary">Wechseln</button>
+        </form>
+      {% endif %}
+
+      {% if error %}
+        <p class="error">{{ error }}</p>
+        <p class="hint">Fehlt die Anmeldung, unter <a href="{{ url_for('main.obi_connections_page') }}">Obi-Verbindungen</a> bei {{ server.name }} anmelden.</p>
+      {% endif %}
+
+      {% if wallets %}
+        <h2 class="form-section-title">Wallets bei {{ server.name }}</h2>
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Wallet</th>
+                <th>IBAN</th>
+                <th>Bank-Sachkonto und Zeitraum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for wallet in wallets %}
+                {% set default = defaults.get(wallet.id, {}) %}
+                <tr>
+                  <td>{{ wallet.name or "Wallet" }}{% if wallet.currency %} <span class="muted">({{ wallet.currency }})</span>{% endif %}{% if wallet.is_closed %} <span class="muted">· geschlossen</span>{% endif %}</td>
+                  <td>{{ wallet.iban or "–" }}</td>
+                  <td>
+                    <form method="get" action="{{ url_for('main.mcp_bank_sync_page') }}" class="inline-form">
+                      <input type="hidden" name="company_id" value="{{ company.id }}" />
+                      <input type="hidden" name="server_id" value="{{ server.id }}" />
+                      <input type="hidden" name="wallet_id" value="{{ wallet.id }}" />
+                      <select name="bank_account_id" aria-label="Bank-Sachkonto" required>
+                        {{ account_options(default.bank_account_id) }}
+                      </select>
+                      <input name="from_date" type="date" aria-label="Von-Datum" title="Von (leer: ab letztem Umsatz des Kontos)" />
+                      <input name="to_date" type="date" aria-label="Bis-Datum" title="Bis (leer: heute)" />
+                      <button type="submit" class="secondary">Vorschau</button>
+                    </form>
+                    {% if default.from_date %}<span class="muted small">Standard: {{ default.from_date | datum }} bis {{ default.to_date | datum }}</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% elif not error %}
+        <p class="muted">Keine Wallets gefunden.</p>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  {% if preview %}
+    <section class="card">
+      <h2>Vorschau: {{ preview.wallet.name or "Wallet" }} → {% for account in bank_accounts if account.id == preview.bank_account_id %}{{ account.code }} – {{ account.name }}{% endfor %}</h2>
+      <p>{{ preview.from_date | datum }} bis {{ preview.to_date | datum }}: {{ preview.fetched }} abgeschlossene Umsätze, davon {{ preview.known }} schon importiert, <strong>{{ preview.new_rows | length }} neu</strong>{% if preview.errors %}, {{ preview.errors | length }} nicht übernehmbar{% endif %}.</p>
+      {% if preview.errors %}
+        <ul class="error">{% for message in preview.errors %}<li>{{ message }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if preview.new_rows %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr><th>Datum</th><th class="num">Betrag</th><th>Gegenpartei</th><th>Verwendungszweck</th></tr>
+            </thead>
+            <tbody>
+              {% for row in preview.new_rows %}
+                <tr>
+                  <td>{{ row.booking_date | datum }}</td>
+                  <td class="num">{{ row.amount | betrag }}{% if row.currency_code and row.currency_code != company.currency_code %} {{ row.currency_code }}{% endif %}</td>
+                  <td>{{ row.counterparty or "–" }}</td>
+                  <td>{{ row.purpose }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <form method="post" action="{{ url_for('main.mcp_bank_sync_action') }}" class="form-actions">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ company.id }}" />
+          <input type="hidden" name="server_id" value="{{ preview.server_id }}" />
+          <input type="hidden" name="wallet_id" value="{{ preview.wallet.id }}" />
+          <input type="hidden" name="bank_account_id" value="{{ preview.bank_account_id }}" />
+          <input type="hidden" name="from_date" value="{{ preview.from_date.isoformat() }}" />
+          <input type="hidden" name="to_date" value="{{ preview.to_date.isoformat() }}" />
+          <button type="submit">{{ preview.new_rows | length }} Umsätze übernehmen</button>
+        </form>
+        <p class="hint">Gleich aussehende Umsätze aus früheren Datei-Importen erkennt der Import zusätzlich über Datum, Betrag und Text und überspringt sie.</p>
+      {% else %}
+        <p class="muted">Nichts Neues zu übernehmen.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <p><a href="{{ url_for('main.bank_page', company_id=company.id) }}">Zurück zur Bankseite</a></p>
+{% endblock %}

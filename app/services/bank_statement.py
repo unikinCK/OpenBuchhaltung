@@ -12,10 +12,11 @@ Bibliothek, die python-fints für den Direktabruf nutzt.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Iterator
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 import mt940
 
@@ -23,6 +24,9 @@ from app.services.partner_identifiers import clean_iban, leading_iban
 
 MAX_TEXT_LENGTH = 255
 MAX_REFERENCE_LENGTH = 64
+
+# Buchungstag von Umsätzen, die nur einen UTC-Zeitpunkt tragen (Finom-MCP).
+BOOKING_TIMEZONE = ZoneInfo("Europe/Berlin")
 
 # Übliche Platzhalter der Banken für "keine Referenz vorhanden".
 _REFERENCE_PLACEHOLDERS = {"NONREF", "NOTPROVIDED"}
@@ -394,4 +398,71 @@ def row_from_open_banking_transaction(position: int, data: dict) -> StatementIte
         currency_code=(amount_obj.get("currency") or "").upper() or None,
         bank_reference=bank_reference,
         counterparty_iban=clean_iban(account.get("iban")),
+    )
+
+
+def parse_utc_timestamp(value: object) -> datetime | None:
+    """ISO-Zeitpunkt; ohne Zonenangabe gilt UTC (so liefert ihn der Finom-MCP-Server)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def row_from_finom_mcp_transaction(position: int, data: dict) -> StatementItem:
+    """Übersetzt einen Umsatz aus ``transactions__listTransactions`` (Finom-MCP) in eine Zeile.
+
+    Finom liefert Beträge vorzeichenlos, die Richtung steht in ``direction``
+    (``Outgoing`` = Ausgang). Der Zeitpunkt der Ausführung (``executed``) ist UTC; der
+    Buchungstag ist sein Datum in Europe/Berlin. Verwendungszweck und Gegenpartei bildet
+    die Funktion wie der Finom-CSV-Import: Kartenzahlungen als „Kartenzahlung
+    {Empfänger}“, sonst die Beschreibung, ohne sie Zahlungsart und Gegenpartei. Die
+    Transaktions-ID wird zur Bankreferenz – dieselbe wie im CSV-Export.
+    """
+    status = str(data.get("status") or "")
+    if status.lower() != "completed":
+        return BankStatementRowError(position, f"Umsatz nicht abgeschlossen (Status {status}).")
+    try:
+        amount = abs(Decimal(str(data.get("amount"))).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError):
+        return BankStatementRowError(position, "Betrag fehlt oder ist ungültig.")
+    direction = str(data.get("direction") or "").lower()
+    if direction == "outgoing":
+        amount = -amount
+    elif direction != "incoming":
+        return BankStatementRowError(position, "Zahlungsrichtung fehlt oder ist unbekannt.")
+
+    executed = parse_utc_timestamp(data.get("executed")) or parse_utc_timestamp(
+        data.get("created")
+    )
+    if executed is None:
+        return BankStatementRowError(position, "Ausführungszeitpunkt fehlt oder ist ungültig.")
+    booking_date = executed.astimezone(BOOKING_TIMEZONE).date()
+
+    counterparty = _clip(data.get("participantName"))
+    payment_type = _clip(data.get("paymentType"))
+    if (payment_type or "").lower() == "cardpayment":
+        purpose = _clip(f"Kartenzahlung {counterparty or ''}")
+    else:
+        purpose = _clip(data.get("description")) or _clip(
+            " ".join(part for part in (payment_type, counterparty) if part)
+        )
+
+    return BankStatementRow(
+        position=position,
+        booking_date=booking_date,
+        amount=amount,
+        purpose=purpose or "(kein Verwendungszweck)",
+        counterparty=counterparty,
+        currency_code=(str(data.get("currency") or "").upper() or None),
+        bank_reference=_clean_reference(data.get("id")),
+        counterparty_iban=clean_iban(data.get("participantIban")),
     )

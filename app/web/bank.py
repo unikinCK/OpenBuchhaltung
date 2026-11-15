@@ -51,6 +51,7 @@ from app.services.fints_sync import (
     submit_fints_tan,
 )
 from app.services.journal_entries import JournalEntryCreationError, parse_decimal
+from app.services.mcp_bank_sync import bank_sync_servers
 from app.services.open_banking import (
     connection_status,
     list_open_banking_connections,
@@ -76,6 +77,7 @@ from domain.models import (
     BankBookingRule,
     BankTransaction,
     BusinessPartner,
+    Company,
     ControllingUnit,
     FinTSConnection,
     FinTSPendingDialog,
@@ -127,6 +129,7 @@ def bank_page():
         profit_centers = []
         fints_connections = []
         open_banking_connections = []
+        mcp_bank_sources = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
@@ -144,6 +147,10 @@ def bank_page():
             )
             open_banking_connections = list_open_banking_connections(
                 session=session, company_id=selected_company_id
+            )
+            selected_company = session.get(Company, selected_company_id)
+            mcp_bank_sources = bank_sync_servers(
+                session, tenant_id=selected_company.tenant_id if selected_company else None
             )
             accounts = (
                 session.execute(
@@ -319,6 +326,7 @@ def bank_page():
         open_banking_connections=open_banking_connections,
         open_banking_configured=open_banking_configured(current_app.config),
         open_banking_status=connection_status,
+        mcp_bank_sources=mcp_bank_sources,
         partners=partners,
         open_count=open_count,
         entry_info=entry_info,

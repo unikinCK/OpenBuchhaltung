@@ -195,6 +195,10 @@ TOOL_TITLES: dict[str, str] = {
     "start_open_banking_authorization": "Open-Banking-Freigabe starten",
     "complete_open_banking_authorization": "Open-Banking-Freigabe abschließen",
     "sync_open_banking_transactions": "Umsätze per Open Banking abrufen",
+    "list_mcp_bank_sources": "Bank-MCP-Server auflisten",
+    "list_mcp_bank_wallets": "Wallets beim Bank-MCP-Server auflisten",
+    "preview_mcp_bank_transactions": "Umsätze vom Bank-MCP-Server ansehen",
+    "sync_mcp_bank_transactions": "Umsätze über Bank-MCP-Server abrufen",
     # Offene Posten, Zahlungen, Mahnungen
     "list_open_items": "Offene Posten auflisten",
     "list_payment_run_proposals": "Zahlvorschläge auflisten",
