@@ -18,6 +18,9 @@ Schutz bei fremden Servern (gilt auch für die OAuth-Aufrufe):
   Lesevorgang, dazu eine Größengrenze; ein Server, der tröpfchenweise sendet, hält den
   Chat also nicht unbegrenzt fest.
 
+Jede Anfrage trägt einen eigenen ``User-Agent`` (:func:`user_agent`): Cloudflare sperrt
+den urllib-Standard ``Python-urllib/…`` bei manchen Diensten pauschal (Error 1010).
+
 Nicht unterstützt: der alte HTTP+SSE-Transport (2024-11-05), Anfragen des Servers an
 den Client (Sampling, Elicitation, Roots) sowie Ressourcen und Prompts – Obi nutzt nur
 Werkzeuge (``tools/list``, ``tools/call``).
@@ -95,6 +98,11 @@ class _NoRedirects(HTTPRedirectHandler):
 _OPENER = build_opener(_NoRedirects)
 
 
+def user_agent() -> str:
+    """Kennung für ausgehende Anfragen an MCP- und Autorisierungsserver."""
+    return f"OpenBuchhaltung/{get_version()} (MCP-Client; +https://openbuchhaltung.de)"
+
+
 def origin(url: str) -> str:
     """Schema, Host und Port einer URL – für Logs und Anzeigen ohne Pfad/Query, in denen
     gehostete MCP-Server oft ihren Schlüssel tragen."""
@@ -157,6 +165,8 @@ def is_internal_url(url: str) -> bool | None:
 def open_url(request: Request, *, timeout: float):
     """Öffnet eine Anfrage nach Prüfung der Zieladresse, ohne Weiterleitungen."""
     check_outbound_url(request.full_url)
+    if not request.has_header("User-agent"):
+        request.add_header("User-Agent", user_agent())
     return _OPENER.open(request, timeout=timeout)
 
 
