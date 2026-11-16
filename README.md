@@ -854,7 +854,16 @@ API: `POST /api/v1/bank-transactions/<id>/book-open-item`; MCP:
 (Soll − Haben aller Buchungszeilen) neben der Summe der importierten
 Kontoauszugszeilen samt Differenz — ein schief hängendes Konto fällt so
 sofort auf (API: `GET /api/v1/bank-reconciliation`, MCP:
-`get_bank_reconciliation`).
+`get_bank_reconciliation`). Konten, die früher Bankumsätze trugen (umgehängt oder verworfen), erscheinen
+mit Restsaldo als „keine Auszüge mehr“ (`has_statements=false`), etwa ein Sammelkonto „Bank“ nach dem Umzug
+auf ein Unterkonto.
+
+**Vorab auf das Sammelkonto gebucht:** Wurde eine Zahlung vor dem Kontoauszug auf einem übergeordneten oder
+ehemaligen Bankkonto gebucht (z. B. ein Beleg auf „Bank“, der Umsatz kommt später auf „Bank Geschäftskonto“), schlägt die
+Bankansicht diese Buchung zum Zuordnen vor (API: `reclassifies: true`). Das Zuordnen gliedert den gebuchten
+Betrag automatisch auf das Bankkonto des Umsatzes um, datiert auf die Buchung; Meldung, API und MCP nennen die
+Umgliederung (`reclassification_entry`). Bebucht die Buchung gar kein Bankkonto, wird die Zuordnung abgelehnt.
+Beim Umhängen verbuchter Umsätze wird ebenfalls der gebuchte Betrag umgegliedert, nicht der Umsatzbetrag.
 
 ## Kassenbuch
 

@@ -134,6 +134,8 @@ def bank_page():
         open_banking_connections = []
         mcp_bank_sources = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
+        # (Umsatz, Buchung): Vorschlag auf einem Sammelkonto, Zuordnen gliedert um.
+        reclassifying_suggestions: set[tuple[int, int]] = set()
         unbooked_items_by_tx: dict[int, list] = {}
         transfer_by_tx: dict[int, BankTransaction] = {}
         geldtransit_account = None
@@ -233,6 +235,12 @@ def bank_page():
             cost_centers = [u for u in controlling_units if u.unit_type == "cost_center"]
             profit_centers = [u for u in controlling_units if u.unit_type == "profit_center"]
             suggestions_by_tx = suggest_matches_for(session=session, transactions=transactions)
+            reclassifying_suggestions = {
+                (tx.id, entry.id)
+                for tx in transactions
+                for entry in suggestions_by_tx.get(tx.id, [])
+                if tx.bank_account_id not in {line.account_id for line in entry.lines}
+            }
             unbooked_items_by_tx = unbooked_settled_items(
                 session=session, transactions=transactions
             )
@@ -316,6 +324,7 @@ def bank_page():
         ),
         sort=sort,
         suggestions_by_tx=suggestions_by_tx,
+        reclassifying_suggestions=reclassifying_suggestions,
         unbooked_items_by_tx=unbooked_items_by_tx,
         transfer_by_tx=transfer_by_tx,
         geldtransit_account=geldtransit_account,
@@ -408,17 +417,24 @@ def bank_match_action(transaction_id: int):
             abort(404)
         require_company_access(session, transaction.company_id)
         try:
-            transaction = match_transaction(
+            result = match_transaction(
                 session=session,
                 transaction_id=transaction_id,
                 journal_entry_id=journal_entry_id,
                 changed_by=changed_by(),
             )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        entry = result.reclassification_entry
+        reclass_note = (
+            f" Die Buchung lag auf einem anderen Bankkonto: Umgliederungsbuchung "
+            f"{entry.posting_number} erstellt."
+            if entry
+            else ""
+        )
 
-    flash("Bankumsatz wurde der Buchung zugeordnet.", "success")
+    flash(f"Bankumsatz wurde der Buchung zugeordnet.{reclass_note}", "success")
     return redirect(url_for("main.bank_page", company_id=company_id))
 
 

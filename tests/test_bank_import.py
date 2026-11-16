@@ -272,14 +272,17 @@ def test_suggest_and_match_transaction(session: Session) -> None:
     suggestions = suggest_matches(session=session, transaction=incoming)
     assert [suggestion.id for suggestion in suggestions] == [entry.id]
 
-    matched = match_transaction(
+    result = match_transaction(
         session=session,
         transaction_id=incoming.id,
         journal_entry_id=entry.id,
         changed_by="tester",
     )
+    matched = result.transaction
     assert matched.status == "matched"
     assert matched.journal_entry_id == entry.id
+    # Die Buchung bebucht das Bankkonto des Umsatzes: keine Umgliederung.
+    assert result.reclassification_entry is None
 
     # Bereits verknüpfte Buchungen werden nicht mehr vorgeschlagen
     assert suggest_matches(session=session, transaction=incoming) == []
@@ -700,6 +703,281 @@ def test_bank_reconciliation_reports_book_vs_statement_balance(session: Session)
     assert row.book_balance == Decimal("-595.00")
     assert row.statement_total == Decimal("585.10")
     assert row.difference == Decimal("-1180.10")
+    assert row.has_statements is True
+
+
+def _account_balance(session: Session, account: Account) -> Decimal:
+    rows = session.execute(
+        select(JournalEntryLine.debit_amount, JournalEntryLine.credit_amount).where(
+            JournalEntryLine.account_id == account.id
+        )
+    ).all()
+    return sum((debit - credit for debit, credit in rows), Decimal("0.00"))
+
+
+def _rent_payment(
+    session: Session, company: Company, bank: Account, rent: Account, amount: str
+) -> int:
+    """Mietzahlung, gebucht auf ``bank``, bevor der Kontoauszug da ist."""
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 6),
+            description="Miete Juli",
+            status="posted",
+            lines=[
+                JournalLineInput(rent.id, Decimal(amount), Decimal("0.00")),
+                JournalLineInput(bank.id, Decimal("0.00"), Decimal(amount)),
+            ],
+        ),
+    )
+    return entry.id
+
+
+def test_bank_reconciliation_shows_former_bank_account_with_residual(session: Session) -> None:
+    from app.services.bank_import import bank_reconciliation
+
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    book_transaction(
+        session=session, transaction_id=outgoing.id, contra_account_id=rent.id, changed_by="t"
+    )
+    # Alle Umsätze umhängen, aber ohne Umgliederung: Die Buchung bleibt auf 1200 stehen.
+    move_bank_transactions(
+        session=session,
+        company_id=company.id,
+        source_bank_account_id=bank.id,
+        target_bank_account_id=target.id,
+        changed_by="tester",
+        reclassify=False,
+    )
+
+    rows = {
+        row.account_code: row
+        for row in bank_reconciliation(session=session, company_id=company.id)
+    }
+    assert set(rows) == {"1200", "1230"}
+    former = rows["1200"]
+    assert former.has_statements is False
+    assert former.book_balance == Decimal("-595.00")
+    assert former.statement_total == Decimal("0.00")
+    assert former.difference == Decimal("-595.00")
+    assert rows["1230"].has_statements is True
+
+    # Ist der Restsaldo umgegliedert, verschwindet das Konto wieder aus dem Abgleich.
+    create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 31),
+            description="Umgliederung Restsaldo",
+            status="posted",
+            lines=[
+                JournalLineInput(bank.id, Decimal("595.00"), Decimal("0.00")),
+                JournalLineInput(target.id, Decimal("0.00"), Decimal("595.00")),
+            ],
+        ),
+    )
+    rows = bank_reconciliation(session=session, company_id=company.id)
+    assert [row.account_code for row in rows] == ["1230"]
+
+
+def test_match_to_entry_on_other_bank_account_reclassifies(session: Session) -> None:
+    from app.services.bank_import import bank_reconciliation
+
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    entry_id = _rent_payment(session, company, bank, rent, "595.00")
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=target.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+
+    result = match_transaction(
+        session=session, transaction_id=outgoing.id, journal_entry_id=entry_id, changed_by="t"
+    )
+    assert result.transaction.status == "matched"
+    reclass = result.reclassification_entry
+    assert reclass is not None
+    # Datiert auf die Buchung, damit das Sammelkonto auch unterjährig glatt bleibt.
+    assert reclass.entry_date == date(2026, 7, 6)
+    assert "1230" in reclass.description and "1200" in reclass.description
+    assert _account_balance(session, bank) == Decimal("0.00")
+    assert _account_balance(session, target) == Decimal("-595.00")
+    audit = session.execute(
+        select(AuditLog)
+        .where(AuditLog.entity_type == "bank_transaction", AuditLog.action == "matched")
+        .order_by(AuditLog.id.desc())
+    ).scalars().first()
+    assert audit.payload["reclassification_entry_id"] == reclass.id
+
+    rows = {
+        row.account_code: row
+        for row in bank_reconciliation(session=session, company_id=company.id)
+    }
+    assert set(rows) == {"1230"}
+    assert rows["1230"].book_balance == Decimal("-595.00")
+
+
+def test_suggestions_include_payments_on_parent_collecting_account(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    target.parent_account_id = bank.id
+    unrelated = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1210",
+        name="Andere Bank",
+        account_type="asset",
+    )
+    session.add(unrelated)
+    session.commit()
+    on_collecting = _rent_payment(session, company, bank, rent, "595.00")
+    _rent_payment(session, company, unrelated, rent, "595.00")
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=target.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+
+    # Nur das übergeordnete Sammelkonto zählt, nicht jedes andere Bankkonto.
+    assert [entry.id for entry in suggest_matches(session=session, transaction=outgoing)] == [
+        on_collecting
+    ]
+
+
+def test_match_rejects_entry_without_bank_line(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    revenue = session.execute(
+        select(Account).where(Account.company_id == company.id, Account.code == "8400")
+    ).scalar_one()
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 6),
+            description="Umbuchung ohne Bank",
+            status="posted",
+            lines=[
+                JournalLineInput(rent.id, Decimal("595.00"), Decimal("0.00")),
+                JournalLineInput(revenue.id, Decimal("0.00"), Decimal("595.00")),
+            ],
+        ),
+    )
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+
+    with pytest.raises(BankImportError, match="bildet die Zahlung"):
+        match_transaction(
+            session=session, transaction_id=outgoing.id, journal_entry_id=entry.id, changed_by="t"
+        )
+    session.refresh(outgoing)
+    assert outgoing.status == "open"
+    assert outgoing.journal_entry_id is None
+
+
+def test_match_rejects_entry_on_several_other_bank_accounts(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    third = Account(
+        tenant_id=company.tenant_id,
+        company_id=company.id,
+        code="1210",
+        name="Drittbank",
+        account_type="asset",
+    )
+    session.add(third)
+    session.commit()
+    entry = create_journal_entry(
+        session=session,
+        payload=JournalEntryInput(
+            company_id=company.id,
+            entry_date=date(2026, 7, 6),
+            description="Miete aus zwei Konten",
+            status="posted",
+            lines=[
+                JournalLineInput(rent.id, Decimal("595.00"), Decimal("0.00")),
+                JournalLineInput(bank.id, Decimal("0.00"), Decimal("300.00")),
+                JournalLineInput(third.id, Decimal("0.00"), Decimal("295.00")),
+            ],
+        ),
+    )
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=target.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+
+    with pytest.raises(BankImportError, match="mehrere andere Bankkonten"):
+        match_transaction(
+            session=session, transaction_id=outgoing.id, journal_entry_id=entry.id, changed_by="t"
+        )
+
+
+def test_reassign_reclassifies_booked_amount_not_statement_amount(session: Session) -> None:
+    company, bank, rent = _seed_company(session)
+    target = _second_bank_account(session, company)
+    # Gebucht 590, abgebucht 595 (z. B. Trinkgeld fehlt in der Buchung).
+    entry_id = _rent_payment(session, company, bank, rent, "590.00")
+    import_bank_csv(
+        session=session,
+        company_id=company.id,
+        bank_account_id=bank.id,
+        csv_stream=StringIO(GERMAN_CSV),
+        changed_by="tester",
+    )
+    outgoing = session.execute(
+        select(BankTransaction).where(BankTransaction.amount == Decimal("-595.00"))
+    ).scalar_one()
+    match_transaction(
+        session=session, transaction_id=outgoing.id, journal_entry_id=entry_id, changed_by="t"
+    )
+
+    result = reassign_bank_transactions(
+        session=session,
+        transaction_ids=[outgoing.id],
+        bank_account_id=target.id,
+        changed_by="tester",
+    )
+    assert result.reclassification_entry is not None
+    # Das alte Konto wird glatt; die 5,00 Differenz zeigt sich beim Kontoauszug auf 1230.
+    assert _account_balance(session, bank) == Decimal("0.00")
+    assert _account_balance(session, target) == Decimal("-590.00")
 
 
 def test_move_bank_transactions_filters_by_status(session: Session) -> None:
@@ -1091,6 +1369,7 @@ def test_bank_api_import_list_match_and_book_flow(tmp_path):
     )
     assert match_response.status_code == 200
     assert match_response.get_json()["status"] == "matched"
+    assert match_response.get_json()["reclassification_entry"] is None
 
     landlord = client.post(
         "/api/v1/partners",

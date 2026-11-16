@@ -3600,7 +3600,9 @@ TOOLS: list[ToolSpec] = [
                 "include_suggestions": {
                     "type": "boolean",
                     "description": (
-                        "Optional: passende Buchungen für offene Umsätze liefern; "
+                        "Optional: passende Buchungen für offene Umsätze liefern "
+                        "(suggestions; reclassifies=true: auf dem Sammelkonto gebucht, "
+                        "match_bank_transaction gliedert dann automatisch um); "
                         "erkennt außerdem Übertrage zwischen eigenen Bankkonten "
                         "(transfer_counterpart_id) und liefert das Geldtransit-Konto "
                         "(geldtransit_account_id) — solche Übertrage gegen Geldtransit "
@@ -3743,7 +3745,9 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Saldenabgleich je Bankkonto: Buchsaldo (Soll − Haben aller "
             "Buchungszeilen) gegen die Summe der importierten Kontoauszugszeilen; "
-            "macht schief hängende Bankkonten sichtbar."
+            "macht schief hängende Bankkonten sichtbar. Konten mit has_statements=false "
+            "haben keine Auszugszeilen mehr, trugen aber früher Bankumsätze (umgehängt "
+            "oder verworfen): Ihr Buchsaldo ist ein Restsaldo, der geklärt gehört."
         ),
         input_schema={
             "type": "object",
@@ -3910,7 +3914,13 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="match_bank_transaction",
-        description="Ordnet einen offenen Bankumsatz einer bestehenden Buchung zu.",
+        description=(
+            "Ordnet einen offenen Bankumsatz einer bestehenden Buchung zu. Bebucht die "
+            "Buchung die Zahlung auf einem anderen Bankkonto (z. B. Sammelkonto „Bank“), "
+            "entsteht automatisch eine Umgliederung auf das Bankkonto des Umsatzes "
+            "(reclassification_entry). Bebucht sie gar kein Bankkonto, wird die Zuordnung "
+            "abgelehnt: dann den Umsatz buchen."
+        ),
         input_schema={
             "type": "object",
             "properties": {

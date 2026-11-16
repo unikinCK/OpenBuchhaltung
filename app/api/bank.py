@@ -351,7 +351,12 @@ def list_bank_transactions_via_api():
             transaction_payload = _transaction_dict(transaction)
             if include_suggestions and transaction.status == "open":
                 transaction_payload["suggestions"] = [
-                    _journal_entry_suggestion_dict(entry)
+                    {
+                        **_journal_entry_suggestion_dict(entry),
+                        # Auf einem Sammelkonto gebucht: Zuordnen gliedert auf dieses Konto um.
+                        "reclassifies": transaction.bank_account_id
+                        not in {line.account_id for line in entry.lines},
+                    }
                     for entry in suggestions_by_tx.get(transaction.id, [])
                 ]
                 counterpart = transfer_by_tx.get(transaction.id)
@@ -524,6 +529,7 @@ def bank_reconciliation_via_api():
                             "book_balance": str(row.book_balance),
                             "statement_total": str(row.statement_total),
                             "difference": str(row.difference),
+                            "has_statements": row.has_statements,
                         }
                         for row in rows
                     ],
@@ -785,15 +791,20 @@ def match_bank_transaction_via_api(transaction_id: int):
         if transaction is None or api_scoped_company(session, transaction.company_id) is None:
             return jsonify({"error": "Bank transaction not found."}), 404
         try:
-            transaction = match_transaction(
+            result = match_transaction(
                 session=session,
                 transaction_id=transaction.id,
                 journal_entry_id=journal_entry_id,
                 changed_by=_api_changed_by(),
             )
-        except BankImportError as exc:
+        except (BankImportError, JournalEntryCreationError, JournalEntryValidationError) as exc:
             return jsonify({"error": str(exc)}), 422
-        return jsonify(_transaction_dict(transaction)), 200
+        entry = result.reclassification_entry
+        transaction_payload = _transaction_dict(result.transaction)
+        transaction_payload["reclassification_entry"] = (
+            {"id": entry.id, "posting_number": entry.posting_number} if entry else None
+        )
+        return jsonify(transaction_payload), 200
 
 
 @api_bp.post("/bank-transactions/<int:transaction_id>/book-open-item")
