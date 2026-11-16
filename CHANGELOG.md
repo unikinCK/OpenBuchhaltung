@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Restsalden auf ehemaligen Bankkonten: Saldenabgleich, Zuordnen, Umhängen
+- **Behoben:** Der Saldenabgleich zeigte nur Konten mit Kontoauszugszeilen. Wurden die Umsätze eines Sammelkontos
+  „Bank“ umgehängt oder verworfen, verschwand es aus dem Abgleich, auch wenn dort noch ein Saldo stand. Konten, die
+  früher Bankumsätze trugen (Geldseite einer zugeordneten Buchung), erscheinen jetzt mit Restsaldo als „keine Auszüge
+  mehr“; REST und MCP liefern dazu `has_statements=false`. Konten ohne je einen Umsatz (z. B. Festgeld) bleiben
+  außen vor.
+- **Behoben:** Beim Zuordnen eines Umsatzes zu einer Buchung, die die Zahlung auf einem anderen Bankkonto erfasst hat
+  (etwa ein Beleg, der vor dem Kontoauszug auf das Sammelkonto gebucht wurde), blieb der Betrag dort stehen. Jetzt
+  gliedert eine automatische Buchung ihn auf das Bankkonto des Umsatzes um, datiert auf die Buchung (bzw. den ersten
+  offenen Tag danach); UI-Meldung, REST und MCP nennen sie (`reclassification_entry`). Bebucht die Buchung gar kein
+  Bankkonto oder mehrere andere, wird die Zuordnung abgelehnt.
+- **Neu:** Die Zuordnungsvorschläge enthalten auch Buchungen auf einem übergeordneten oder ehemaligen Bankkonto ohne
+  eigene Auszüge (z. B. Sammelkonto „Bank“ über „Bank Geschäftskonto“), gekennzeichnet in der UI und per `reclassifies` in
+  REST/MCP. Bisher ließen sich solche Belegbuchungen nur über API oder Chat zuordnen.
+- **Behoben:** Die Umgliederung beim Umhängen verbuchter Umsätze nahm den Umsatzbetrag statt des gebuchten Betrags.
+  Wich die Buchung ab (z. B. Trinkgeld nicht mitgebucht), blieb die Differenz auf dem alten Konto hängen. Jetzt wird
+  der gebuchte Betrag umgegliedert; das alte Konto wird glatt, die Differenz zeigt sich beim Kontoauszug.
+
 ### Bankabruf auf das falsche Konto: Vorschlag nach IBAN, Dublettenwarnung, Verwerfen
 - **Behoben:** Der Bank-MCP-Abruf schlug beim ersten Mal das Standard-Bankkonto vor, oft das Sammelkonto „Bank“,
   und merkte sich diese Wahl. Lagen dieselben Umsätze schon aus dem Datei-Import auf dem Unterkonto, standen sie danach

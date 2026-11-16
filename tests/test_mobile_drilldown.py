@@ -150,6 +150,8 @@ def test_dashboard_lists_all_posted_money_accounts(tmp_path):
     assert [(row["account_code"], row["book_balance"]) for row in reconciliation] == [
         ("1200", "3880.00")
     ]
+    # Tagesgeld ohne Auszüge war nie Bankkonto eines Umsatzes: kein Restsaldo-Eintrag.
+    assert reconciliation[0]["has_statements"] is True
 
 
 def test_dashboard_without_known_chart_lists_only_imported_accounts(tmp_path):

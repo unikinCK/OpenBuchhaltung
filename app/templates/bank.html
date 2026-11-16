@@ -229,7 +229,7 @@
                     <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
                     <select name="journal_entry_id" required aria-label="Buchung">
                       {% for entry in suggestions %}
-                        <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}</option>
+                        <option value="{{ entry.id }}">{{ entry.posting_number }} – {{ entry.description }}{% if (tx.id, entry.id) in reclassifying_suggestions %} (auf Sammelkonto gebucht, wird umgegliedert){% endif %}</option>
                       {% endfor %}
                     </select>
                     <button type="submit" class="secondary">Zuordnen</button>
@@ -785,7 +785,13 @@
                 <tr>
                   <td>{{ account_link(row.account_id, row.account_code, row.account_name) }}</td>
                   <td class="num">{{ row.book_balance | betrag }}</td>
-                  <td class="num">{{ row.statement_total | betrag }}</td>
+                  <td class="num">
+                    {% if row.has_statements %}
+                      {{ row.statement_total | betrag }}
+                    {% else %}
+                      <span class="badge badge-warning" title="Das Konto trug früher Bankumsätze, die umgehängt oder verworfen wurden.">keine Auszüge mehr</span>
+                    {% endif %}
+                  </td>
                   <td class="num">
                     {% if row.difference == 0 %}
                       <span class="badge badge-success">0,00</span>
@@ -793,7 +799,7 @@
                       <strong class="negative">{{ row.difference | betrag }}</strong>
                     {% endif %}
                   </td>
-                  <td><a href="{{ url_for('main.bank_page', company_id=selected_company_id, bank_account_id=row.account_id) }}">Umsätze</a></td>
+                  <td>{% if row.has_statements %}<a href="{{ url_for('main.bank_page', company_id=selected_company_id, bank_account_id=row.account_id) }}">Umsätze</a>{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -803,7 +809,9 @@
           (ohne Saldovorträge, die nur die Vorjahre wiederholen);
           Summe Umsätze = alle importierten Kontoauszugszeilen. Eine Differenz ist nicht
           zwingend ein Fehler (z. B. Eröffnungsbuchungen oder noch unverbuchte Umsätze),
-          zeigt aber sofort, wo ein Konto schief hängt.</p>
+          zeigt aber sofort, wo ein Konto schief hängt. Konten mit „keine Auszüge mehr“
+          trugen früher Bankumsätze, die umgehängt oder verworfen wurden; ihr Restsaldo
+          gehört auf das richtige Bankkonto umgegliedert oder geklärt.</p>
       </details>
     {% endif %}
   {% endif %}

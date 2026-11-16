@@ -10,7 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TextIO
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,7 @@ from app.services.journal_entries import (
     JournalEntryInput,
     JournalLineInput,
     create_journal_entry,
+    first_open_posting_date,
     lock_cash_basis_company,
 )
 from app.services.partner_identifiers import clean_iban
@@ -45,6 +46,7 @@ from app.services.standard_accounts import GELDTRANSIT, find_standard_account
 from domain.models import (
     Account,
     BankTransaction,
+    CashBook,
     Company,
     JournalEntry,
     JournalEntryLine,
@@ -522,12 +524,16 @@ def suggest_matches_for(
     already_linked = select(BankTransaction.journal_entry_id).where(
         BankTransaction.journal_entry_id.is_not(None)
     )
+    sources = _collecting_accounts(session, open_transactions)
+    account_ids = {t.bank_account_id for t in open_transactions}
+    for extra in sources.values():
+        account_ids |= extra
     rows = session.execute(
         select(JournalEntry, JournalEntryLine)
         .join(JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id)
         .where(
             JournalEntry.company_id.in_({t.company_id for t in open_transactions}),
-            JournalEntryLine.account_id.in_({t.bank_account_id for t in open_transactions}),
+            JournalEntryLine.account_id.in_(account_ids),
             or_(*amount_filters),
             JournalEntry.id.not_in(already_linked),
             JournalEntry.id.not_in(
@@ -536,28 +542,90 @@ def suggest_matches_for(
         )
         .order_by(JournalEntry.entry_date.desc())
     ).all()
+    accounts_by_entry: dict[int, set[int]] = {}
+    for entry, line in rows:
+        accounts_by_entry.setdefault(entry.id, set()).add(line.account_id)
 
     for transaction in open_transactions:
         matches: list[JournalEntry] = []
         seen: set[int] = set()
-        for entry, line in rows:
-            if (
-                entry.company_id != transaction.company_id
-                or line.account_id != transaction.bank_account_id
-                or entry.id in seen
-            ):
-                continue
-            if transaction.amount > 0:
-                fits = line.debit_amount == transaction.amount
-            else:
-                fits = line.credit_amount == -transaction.amount
-            if fits:
-                seen.add(entry.id)
-                matches.append(entry)
-                if len(matches) >= limit:
-                    break
+        extra = sources.get(transaction.bank_account_id, set())
+        # Erst Buchungen auf dem Bankkonto selbst, dann solche auf einem Sammelkonto, die beim
+        # Zuordnen umgegliedert werden (siehe match_transaction).
+        for own in (True, False):
+            for entry, line in rows:
+                if (
+                    entry.company_id != transaction.company_id
+                    or entry.id in seen
+                    or len(matches) >= limit
+                ):
+                    continue
+                if own and line.account_id != transaction.bank_account_id:
+                    continue
+                if not own and (
+                    line.account_id not in extra
+                    or transaction.bank_account_id in accounts_by_entry[entry.id]
+                ):
+                    continue
+                if transaction.amount > 0:
+                    fits = line.debit_amount == transaction.amount
+                else:
+                    fits = line.credit_amount == -transaction.amount
+                if fits:
+                    seen.add(entry.id)
+                    matches.append(entry)
         suggestions[transaction.id] = matches
     return suggestions
+
+
+def _collecting_accounts(
+    session: Session, transactions: Sequence[BankTransaction]
+) -> dict[int, set[int]]:
+    """Je Bankkonto der Umsätze die Konten, auf denen Zahlungen dafür vorab gebucht sein können.
+
+    Das sind übergeordnete Konten (etwa das Sammelkonto „Bank“ über „Bank Geschäftskonto“) und
+    ehemalige Bankkonten (siehe ``_former_bank_account_ids``), jeweils ohne eigene Auszugszeilen
+    und ohne Kasse und Geldtransit. Eine dort gebuchte Zahlung gliedert ``match_transaction`` beim
+    Zuordnen um.
+    """
+    result: dict[int, set[int]] = {}
+    for company_id in {t.company_id for t in transactions}:
+        with_statements = set(
+            session.execute(
+                select(BankTransaction.bank_account_id)
+                .where(BankTransaction.company_id == company_id)
+                .distinct()
+            ).scalars()
+        )
+        excluded = with_statements | set(
+            session.execute(
+                select(CashBook.account_id).where(CashBook.company_id == company_id)
+            ).scalars()
+        )
+        geldtransit = find_geldtransit_account(session=session, company_id=company_id)
+        if geldtransit is not None:
+            excluded.add(geldtransit.id)
+        former = _former_bank_account_ids(session, company_id, exclude=excluded)
+        bank_account_ids = {t.bank_account_id for t in transactions if t.company_id == company_id}
+        for bank_account_id in bank_account_ids:
+            extra = set(former)
+            account = session.get(Account, bank_account_id)
+            visited: set[int] = set()
+            while account is not None and account.parent_account_id is not None:
+                if account.parent_account_id in visited:
+                    break
+                visited.add(account.parent_account_id)
+                account = session.get(Account, account.parent_account_id)
+                if (
+                    account is not None
+                    and account.account_type == "asset"
+                    and account.subledger is None
+                    and account.id not in excluded
+                ):
+                    extra.add(account.id)
+            extra.discard(bank_account_id)
+            result[bank_account_id] = extra
+    return result
 
 
 @dataclass(slots=True)
@@ -569,10 +637,48 @@ class BankReconciliationRow:
     account_name: str
     book_balance: Decimal
     statement_total: Decimal
+    # False: Konto ohne eigene Auszugszeilen, das früher Bankumsätze trug (siehe
+    # bank_reconciliation); sein Buchsaldo ist ein Restsaldo, der geklärt gehört.
+    has_statements: bool = True
 
     @property
     def difference(self) -> Decimal:
         return self.book_balance - self.statement_total
+
+
+def _payment_side(amount_column) -> object:
+    """Bedingung für die Geldseite einer Buchungszeile zu einem Umsatz: Soll bei Eingängen,
+    Haben bei Ausgängen."""
+    return or_(
+        and_(amount_column > 0, JournalEntryLine.debit_amount > 0),
+        and_(amount_column < 0, JournalEntryLine.credit_amount > 0),
+    )
+
+
+def _former_bank_account_ids(
+    session: Session, company_id: int, exclude: Iterable[int]
+) -> set[int]:
+    """Konten ohne eigene Auszugszeilen, auf denen eine einem Umsatz zugeordnete Buchung ihre
+    Geldseite hat: Sie haben als Bankkonto gedient, etwa ein Sammelkonto „Bank“, dessen Umsätze
+    umgehängt oder verworfen wurden. Bleibt dort ein Saldo stehen, sieht ihn sonst niemand."""
+    return set(
+        session.execute(
+            select(JournalEntryLine.account_id)
+            .join(
+                BankTransaction,
+                BankTransaction.journal_entry_id == JournalEntryLine.journal_entry_id,
+            )
+            .join(Account, Account.id == JournalEntryLine.account_id)
+            .where(
+                BankTransaction.company_id == company_id,
+                Account.account_type == "asset",
+                Account.subledger.is_(None),
+                JournalEntryLine.account_id.not_in(list(exclude)),
+                _payment_side(BankTransaction.amount),
+            )
+            .distinct()
+        ).scalars()
+    )
 
 
 def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconciliationRow]:
@@ -583,6 +689,10 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
     dem ersten Import), macht ein „schiefes“ Konto aber sofort sichtbar.
     Saldovorträge zählen nicht mit: Sie wiederholen nur die Vorjahre, deren
     Buchungen ohnehin in der Summe stehen.
+
+    Dazu kommen Konten ohne eigene Auszugszeilen, die früher Bankumsätze trugen
+    (umgehängt oder verworfen) und noch einen Buchsaldo haben
+    (``has_statements=False``): Ohne Auszüge müsste dort null stehen.
     """
     zero = Decimal("0.00")
     # Fremdwährungsumsätze lassen sich nicht gegen den Buchsaldo in Firmenwährung summieren.
@@ -600,8 +710,10 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
             .group_by(BankTransaction.bank_account_id)
         ).all()
     )
-    if not statement_totals:
+    former_ids = _former_bank_account_ids(session, company_id, exclude=statement_totals)
+    if not statement_totals and not former_ids:
         return []
+    account_ids = {*statement_totals, *former_ids}
 
     book_rows = session.execute(
         select(
@@ -613,7 +725,7 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
         .where(
             JournalEntry.company_id == company_id,
             JournalEntry.source != SOURCE_CARRYFORWARD,
-            JournalEntryLine.account_id.in_(statement_totals),
+            JournalEntryLine.account_id.in_(account_ids),
             # Fremdwährung fehlt auf der Auszugsseite, also auch hier. Eine Zeile, die nur den
             # Fremdbetrag nennt, aber zu einem Umsatz in Firmenwährung gehört, zählt.
             or_(
@@ -637,7 +749,7 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
     accounts = (
         session.execute(
             select(Account)
-            .where(Account.id.in_(statement_totals))
+            .where(Account.id.in_(account_ids))
             .order_by(Account.code)
         )
         .scalars()
@@ -649,9 +761,12 @@ def bank_reconciliation(*, session: Session, company_id: int) -> list[BankReconc
             account_code=account.code,
             account_name=account.name,
             book_balance=book_balances.get(account.id, zero).quantize(zero),
-            statement_total=Decimal(statement_totals[account.id]).quantize(zero),
+            statement_total=Decimal(statement_totals.get(account.id, zero)).quantize(zero),
+            has_statements=account.id in statement_totals,
         )
         for account in accounts
+        # Ehemalige Bankkonten nur, solange dort noch etwas steht.
+        if account.id in statement_totals or book_balances.get(account.id, zero) != zero
     ]
 
 
@@ -726,10 +841,93 @@ def detect_transfer_counterparts(
     return matches
 
 
+@dataclass
+class MatchResult:
+    """Ergebnis einer Zuordnung: der Umsatz plus ggf. die automatische Umgliederung."""
+
+    transaction: BankTransaction
+    reclassification_entry: JournalEntry | None = None
+
+
+def _entry_source_bank_account(
+    session: Session, *, transaction: BankTransaction, entry: JournalEntry
+) -> Account | None:
+    """Das andere Bankkonto, auf dem die Buchung die Zahlung des Umsatzes erfasst hat.
+
+    None, wenn die Buchung das Bankkonto des Umsatzes selbst bebucht. Sonst zählen Zeilen auf
+    der Geldseite (Soll bei Eingängen, Haben bei Ausgängen) auf Aktivkonten ohne Nebenbuch,
+    außer Kasse (Kassenbuch) und Geldtransit: Genau eines muss es sein. Ohne ein solches Konto
+    bildet die Buchung die Zahlung gar nicht ab; mehrere sind nicht eindeutig.
+    """
+    account_ids = set(
+        session.execute(
+            select(JournalEntryLine.account_id).where(
+                JournalEntryLine.journal_entry_id == entry.id
+            )
+        ).scalars()
+    )
+    if transaction.bank_account_id in account_ids:
+        return None
+
+    excluded = set(
+        session.execute(
+            select(CashBook.account_id).where(CashBook.company_id == transaction.company_id)
+        ).scalars()
+    )
+    geldtransit = find_geldtransit_account(session=session, company_id=transaction.company_id)
+    if geldtransit is not None:
+        excluded.add(geldtransit.id)
+    candidates = (
+        session.execute(
+            select(Account)
+            .join(JournalEntryLine, JournalEntryLine.account_id == Account.id)
+            .where(
+                JournalEntryLine.journal_entry_id == entry.id,
+                Account.account_type == "asset",
+                Account.subledger.is_(None),
+                Account.id.not_in(list(excluded)),
+                _payment_side(transaction.amount),
+            )
+            .distinct()
+            .order_by(Account.code)
+        )
+        .scalars()
+        .all()
+    )
+    bank = session.get(Account, transaction.bank_account_id)
+    if not candidates:
+        raise BankImportError(
+            f"Buchung {entry.posting_number} bebucht weder das Bankkonto {bank.code} des "
+            "Umsatzes noch ein anderes Bankkonto und bildet die Zahlung damit nicht ab. "
+            "Bitte den Umsatz buchen statt zuordnen."
+        )
+    if len(candidates) > 1:
+        codes = ", ".join(account.code for account in candidates)
+        raise BankImportError(
+            f"Buchung {entry.posting_number} bebucht mehrere andere Bankkonten ({codes}); "
+            f"welche Zeile den Umsatz auf {bank.code} trägt, ist nicht eindeutig."
+        )
+    return candidates[0]
+
+
 def match_transaction(
     *, session: Session, transaction_id: int, journal_entry_id: int, changed_by: str
-) -> BankTransaction:
-    transaction = session.get(BankTransaction, transaction_id)
+) -> MatchResult:
+    """Ordnet einen offenen Umsatz einer bestehenden Buchung zu.
+
+    Erfasst die Buchung die Zahlung auf einem anderen Bankkonto als dem des Umsatzes (etwa ein
+    Beleg, der vor dem Kontoauszug auf ein Sammelkonto „Bank“ gebucht wurde), gliedert eine
+    automatische Buchung den gebuchten Betrag auf das Bankkonto des Umsatzes um, datiert auf
+    die Buchung (bzw. den ersten offenen Tag danach). Sonst bliebe der Betrag auf dem anderen
+    Konto stehen, obwohl der Kontoauszug ihn auf diesem zeigt.
+    """
+    # Den Umsatz sperren, bevor die Umgliederung den ersten Audit-Eintrag schreibt.
+    transaction = session.execute(
+        select(BankTransaction)
+        .where(BankTransaction.id == transaction_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     if transaction is None:
         raise BankImportError("Bankumsatz nicht gefunden.")
     if transaction.status != "open":
@@ -755,8 +953,36 @@ def match_transaction(
     if already_linked is not None:
         raise BankImportError("Die Buchung ist bereits einem anderen Bankumsatz zugeordnet.")
 
+    source = _entry_source_bank_account(session, transaction=transaction, entry=entry)
     transaction.journal_entry_id = entry.id
     transaction.status = "matched"
+
+    reclassification = None
+    if source is not None:
+        net = _booked_net(session, transaction, source.id)
+        currencies = _company_currencies(session, [transaction])
+        target = session.get(Account, transaction.bank_account_id)
+        foreign = _is_foreign(transaction, currencies)
+        reclassification = _create_reclassification_entry(
+            session=session,
+            company_id=transaction.company_id,
+            target=target,
+            booked_net_by_source={} if foreign else {source.id: net},
+            foreign_net_by_source=(
+                {(source.id, transaction.currency_code): (net, transaction.amount)}
+                if foreign
+                else {}
+            ),
+            changed_by=changed_by,
+            entry_date=first_open_posting_date(
+                session=session, company_id=transaction.company_id, on=entry.entry_date
+            ),
+            description=(
+                f"Umgliederung zu Buchung {entry.posting_number}: Bankumsatz vom "
+                f"{transaction.booking_date:%d.%m.%Y} liegt auf {target.code}, "
+                f"gebucht war {source.code}"
+            ),
+        )
 
     log_audit_event(
         session=session,
@@ -766,11 +992,19 @@ def match_transaction(
         entity_id=str(transaction.id),
         action="matched",
         changed_by=changed_by,
-        payload={"journal_entry_id": entry.id, "posting_number": entry.posting_number},
+        payload={
+            "journal_entry_id": entry.id,
+            "posting_number": entry.posting_number,
+            **(
+                {"reclassification_entry_id": reclassification.id}
+                if reclassification is not None
+                else {}
+            ),
+        },
     )
     session.commit()
     session.refresh(transaction)
-    return transaction
+    return MatchResult(transaction=transaction, reclassification_entry=reclassification)
 
 
 @dataclass
@@ -957,10 +1191,12 @@ def _reassign(
                     foreign + transaction.amount,
                 )
             else:
-                booked_net_by_source[previous_bank_account_id] = (
-                    booked_net_by_source.get(previous_bank_account_id, Decimal("0.00"))
-                    + transaction.amount
-                )
+                # Gebuchter Betrag statt Umsatzbetrag: Weicht die Buchung ab (z. B. Trinkgeld
+                # nicht mitgebucht), wird das alte Konto trotzdem glatt, und die Differenz
+                # zeigt sich dort, wo der Kontoauszug jetzt liegt.
+                booked_net_by_source[previous_bank_account_id] = booked_net_by_source.get(
+                    previous_bank_account_id, Decimal("0.00")
+                ) + _booked_net(session, transaction, previous_bank_account_id)
 
         log_audit_event(
             session=session,
@@ -1000,11 +1236,11 @@ def _reassign(
 
 
 def _booked_net(session: Session, transaction: BankTransaction, account_id: int) -> Decimal:
-    """Eurobetrag eines Umsatzes in Fremdwährung: aus der Bankzeile seiner Buchung.
+    """Gebuchter Eurobetrag eines Umsatzes: aus der Bankzeile seiner Buchung.
 
-    Die steht nach dem ersten Umhängen auf einem anderen Konto als der Umsatz. Nennt die Buchung
-    den Fremdbetrag nicht, zählt, was sie auf dem bisherigen Konto bewegt hat, und nach einem
-    früheren Umhängen ihre Geldzeile.
+    Die steht nach dem ersten Umhängen auf einem anderen Konto als der Umsatz. Bei Fremdwährung
+    zählt die Zeile mit passendem Fremdbetrag. Sonst zählt, was die Buchung auf dem bisherigen
+    Konto bewegt hat, und nach einem früheren Umhängen ihre Geldzeile.
     """
     side = (
         JournalEntryLine.debit_amount if transaction.amount > 0 else JournalEntryLine.credit_amount
@@ -1047,6 +1283,8 @@ def _create_reclassification_entry(
     booked_net_by_source: dict[int, Decimal],
     foreign_net_by_source: dict[tuple[int, str], tuple[Decimal, Decimal]],
     changed_by: str,
+    entry_date: date | None = None,
+    description: str | None = None,
 ) -> JournalEntry | None:
     """Umgliederungsbuchung für umgehängte, bereits verbuchte Umsätze.
 
@@ -1054,7 +1292,8 @@ def _create_reclassification_entry(
     Umsätze, gegengebucht auf dem Zielkonto — damit zeigen altes wie neues
     Bankkonto nach dem Umzug wieder den echten Banksaldo. Fremdwährung läuft in
     eigenen Zeilen mit Fremdbetrag, damit der Saldenabgleich sie weiter auslässt.
-    Kein eigener Commit: läuft atomar mit dem Umzug.
+    Kein eigener Commit: läuft atomar mit dem Umzug. Ohne ``entry_date`` gilt
+    heute, ohne ``description`` der Standardtext des Umzugs.
     """
     zero = Decimal("0.00")
     sources = {
@@ -1124,10 +1363,9 @@ def _create_reclassification_entry(
         session=session,
         payload=JournalEntryInput(
             company_id=company_id,
-            entry_date=date.today(),
-            description=(
-                f"Umgliederung Bankumsätze {', '.join(source_codes)} → {target.code}"
-            ),
+            entry_date=entry_date or date.today(),
+            description=description
+            or f"Umgliederung Bankumsätze {', '.join(source_codes)} → {target.code}",
             status="posted",
             changed_by=changed_by,
             lines=lines,
