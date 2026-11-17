@@ -488,6 +488,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `DEMO_UPSTREAM`, `DEMO_NETWORK` | `obh-demo-app-1:8000`, `obh-demo_default` | App-Container der Demo und Netz ihres Compose-Projekts, dem nginx beitritt. |
 | `DEMO_MCP_UPSTREAM` | `obh-demo-mcp-1:8090` | MCP-Container der Demo (Profil `mcp` im Demo-Stack), an den nginx `https://<DEMO_DOMAIN>/mcp` weiterleitet. |
 | `INSTANCE_PROXY_DOMAIN`, `INSTANCE_PROXY_PROJECT` | – | Domain und Compose-Projektname einer weiteren Instanz auf demselben Host im Instanz-Proxy-Overlay `docker-compose.instance-proxy.yml` (nginx dieser Instanz, eigenes Zertifikat; Weiterleitung an `<Projekt>-app-1:8000`, `/mcp` an `<Projekt>-mcp-1:8090`). |
+| `TAILNET_FORWARD_HOST`, `TAILNET_FORWARD_PORT` | – | Tailnet-Dienst auf demselben Host (Name und Port, z. B. mcp-imap hinter Tailscale Serve), den das Overlay `docker-compose.tailnet-forward.yml` für App und MCP-Server erreichbar macht; siehe [Belege per Link](#belege-per-link-source_url). |
 | `COMPOSE_FILE`, `BACKUP_DIR`, `BACKUP_KEEP`, `POSTGRES_USER`, `POSTGRES_DB` | `docker-compose.production.yml`, `./backups`, `14`, `openbuchhaltung` | Parameter von `redeploy.sh`/`backup.sh`; `COMPOSE_FILE` auch aus der `.env`, mehrere Dateien mit `:` getrennt. |
 
 ## Login & Benutzer
@@ -1906,6 +1907,26 @@ Scheitert der Abruf, antwortet die API mit einer Meldung, die den Grund nennt, u
 liefert `not_found`; das Modell holt dann einen neuen Link oder sendet die Datei als
 Base64. Das Audit-Log vermerkt beim Upload `source_host` (ohne Pfad, der Link kann
 ein Token enthalten).
+
+### Dienst auf demselben Host hinter Tailscale Serve
+
+Liegt die Quelle (z. B. mcp-imap) auf demselben Host hinter Tailscale Serve, erreicht
+die App sie seit Tailscale 1.104 nicht mehr direkt: Serve bindet seine Listener an das
+Interface `tailscale0` und weist Verbindungen aus Docker-Netzen ab (`unreachable`,
+„Connection refused“), vom Host selbst klappt es. Das Overlay
+`docker-compose.tailnet-forward.yml` leitet genau diesen Host:Port weiter: Ein nginx
+im Host-Netz verbindet zu Tailscale Serve, ein zweiter im Compose-Netz trägt den
+Tailnet-Namen als Alias; beide sind über einen Unix-Socket verbunden. Nur App und
+MCP-Server dieses Compose-Projekts sehen den Alias, TLS bleibt Ende-zu-Ende.
+
+```bash
+# .env
+COMPOSE_FILE=docker-compose.production.yml:docker-compose.tailnet-forward.yml
+TAILNET_FORWARD_HOST=mail-mcp.example.ts.net
+TAILNET_FORWARD_PORT=10000
+
+docker compose up -d --no-deps tailnet-forward-host tailnet-forward
+```
 
 ## Dateien per Download-Link
 

@@ -1,0 +1,17 @@
+# Netz-Seite des Tailnet-Forwarders (docker-compose.tailnet-forward.yml): trägt im
+# Compose-Netz den Tailnet-Namen als Alias und reicht TCP an den Unix-Socket der
+# Host-Seite weiter. TLS bleibt durchgehend (SNI und Zertifikat von Tailscale Serve).
+worker_processes 1;
+error_log /dev/stderr warn;
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 256;
+}
+
+stream {
+    server {
+        listen ${TAILNET_FORWARD_PORT};
+        proxy_pass unix:/run/tailnet-forward/forward.sock;
+    }
+}

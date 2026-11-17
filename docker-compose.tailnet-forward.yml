@@ -1,0 +1,61 @@
+# Overlay: einen Tailnet-Dienst auf demselben Host für App und MCP-Server erreichbar
+# machen, z. B. mcp-imap hinter Tailscale Serve für Belege per Link (source_url).
+#
+# Seit Tailscale 1.104 binden die Listener von Tailscale Serve an das Interface
+# tailscale0. Vom Host selbst klappt die Verbindung zur eigenen Tailnet-Adresse, aus
+# einem Docker-Netz kommt sofort „Connection refused“ (Abruf scheitert mit
+# fetch_failed). Dieses Overlay leitet genau einen Host:Port weiter:
+#
+#   App/MCP ──TCP──> tailnet-forward (Compose-Netz, Alias TAILNET_FORWARD_HOST)
+#           ──Unix-Socket──> tailnet-forward-host (Host-Netz) ──TCP──> Tailscale Serve
+#
+# Den Alias sehen nur die Container dieses Compose-Projekts; andere Container auf dem
+# Host erreichen den Dienst darüber nicht. TLS bleibt Ende-zu-Ende: SNI und Zertifikat
+# kommen weiter von Tailscale Serve, der Name in source_url bleibt gleich. Andere Ports
+# unter TAILNET_FORWARD_HOST sind aus App und MCP-Server damit nicht erreichbar.
+#
+# Einrichtung:
+#   1. .env:  COMPOSE_FILE=docker-compose.production.yml:docker-compose.tailnet-forward.yml
+#             TAILNET_FORWARD_HOST=host.tailnet.ts.net
+#             TAILNET_FORWARD_PORT=10000
+#   2. docker compose up -d --no-deps tailnet-forward-host tailnet-forward
+#      (App und MCP-Server laufen ungestört weiter; der Alias greift ab der nächsten
+#      Namensauflösung.)
+services:
+  tailnet-forward-host:
+    image: nginx:1.28-alpine
+    network_mode: host
+    restart: unless-stopped
+    # Ein Socket aus einem abgebrochenen Lauf bliebe liegen und blockierte den Start.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - rm -f /run/tailnet-forward/forward.sock && exec /docker-entrypoint.sh nginx -g 'daemon off;'
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      NGINX_ENVSUBST_FILTER: ^(TAILNET_FORWARD_HOST|TAILNET_FORWARD_PORT)$$
+      TAILNET_FORWARD_HOST: ${TAILNET_FORWARD_HOST:?TAILNET_FORWARD_HOST must be set}
+      TAILNET_FORWARD_PORT: ${TAILNET_FORWARD_PORT:?TAILNET_FORWARD_PORT must be set}
+    volumes:
+      - ./deploy/tailnet-forward/host.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - tailnet_forward_socket:/run/tailnet-forward
+
+  tailnet-forward:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      - tailnet-forward-host
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      NGINX_ENVSUBST_FILTER: ^(TAILNET_FORWARD_PORT)$$
+      TAILNET_FORWARD_PORT: ${TAILNET_FORWARD_PORT:?TAILNET_FORWARD_PORT must be set}
+    volumes:
+      - ./deploy/tailnet-forward/network.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - tailnet_forward_socket:/run/tailnet-forward
+    networks:
+      default:
+        aliases:
+          - ${TAILNET_FORWARD_HOST:?TAILNET_FORWARD_HOST must be set}
+
+volumes:
+  tailnet_forward_socket:
