@@ -8,6 +8,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Belege per Link von einem Tailnet-Dienst auf demselben Host
+- **Behoben:** Seit Tailscale 1.104 bindet Tailscale Serve seine Listener an `tailscale0` und weist Verbindungen aus
+  Docker-Netzen ab. Liegt die Quelle von `source_url` (z. B. mcp-imap) auf demselben Host hinter Tailscale Serve,
+  scheiterte der Abruf mit `unreachable`. Das neue Overlay `docker-compose.tailnet-forward.yml` leitet genau einen
+  Host:Port über einen nginx im Host-Netz weiter; der Tailnet-Name bleibt gleich (Netzwerk-Alias, TLS Ende-zu-Ende),
+  nur App und MCP-Server des Compose-Projekts sehen ihn (`TAILNET_FORWARD_HOST`, `TAILNET_FORWARD_PORT`).
+
 ### Restsalden auf ehemaligen Bankkonten: Saldenabgleich, Zuordnen, Umhängen
 - **Behoben:** Der Saldenabgleich zeigte nur Konten mit Kontoauszugszeilen. Wurden die Umsätze eines Sammelkontos
   „Bank“ umgehängt oder verworfen, verschwand es aus dem Abgleich, auch wenn dort noch ein Saldo stand. Konten, die

@@ -1,0 +1,17 @@
+# Host-Seite des Tailnet-Forwarders (docker-compose.tailnet-forward.yml): läuft im
+# Host-Netz, nimmt Verbindungen über den Unix-Socket an und verbindet zum Tailnet-Dienst.
+# Vom Host selbst aus nimmt Tailscale Serve Verbindungen an, aus Docker-Netzen nicht.
+worker_processes 1;
+error_log /dev/stderr warn;
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 256;
+}
+
+stream {
+    server {
+        listen unix:/run/tailnet-forward/forward.sock;
+        proxy_pass ${TAILNET_FORWARD_HOST}:${TAILNET_FORWARD_PORT};
+    }
+}
