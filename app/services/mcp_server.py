@@ -4607,7 +4607,9 @@ TOOLS: list[ToolSpec] = [
         description=(
             "Ruft abgeschlossene Umsätze einer Wallet über den Bank-MCP-Server ab und "
             "importiert sie in das Bank-Sachkonto – ohne KI, mit Dedup über die "
-            "Transaktions-ID und die Import-Pipeline. Ohne wallet_id die zuletzt genutzte "
+            "Transaktions-ID und die Import-Pipeline. Umsätze über 0,00 € (etwa "
+            "Kartenprüfungen) werden übersprungen (skipped_zero_amount), nicht als Fehler "
+            "gezählt. Ohne wallet_id die zuletzt genutzte "
             "Wallet. Ohne Datum ab 7 Tage vor dem Ende des letzten Abrufs, nie vor dem Tag "
             "nach dem letzten Umsatz ohne UUID-Referenz; beim ersten Abruf ab dem Tag nach dem "
             "letzten Umsatz, sonst 90 Tage. Vorher mit "

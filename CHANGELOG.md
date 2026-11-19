@@ -8,6 +8,13 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Bankabruf per MCP: Umsätze über 0,00 € überspringen
+- **Behoben:** Finom liefert Kartenprüfungen als abgeschlossene Umsätze über 0,00 €. Der Abruf meldete sie als
+  Importfehler („Betrag darf nicht 0 sein“) – bei jedem Lauf wieder, weil sie nie importiert werden. Sie werden jetzt
+  übersprungen und getrennt gezählt (Vorschau, Meldung, REST/MCP `skipped_zero_amount`, Audit-Eintrag).
+- **Geändert:** Die Meldung nach dem Abruf nennt bei Importfehlern Zeile und Grund; REST und MCP liefern sie unter
+  `report.row_errors`.
+
 ### Belege per Link von einem Tailnet-Dienst auf demselben Host
 - **Behoben:** Seit Tailscale 1.104 bindet Tailscale Serve seine Listener an `tailscale0` und weist Verbindungen aus
   Docker-Netzen ab. Liegt die Quelle von `source_url` (z. B. mcp-imap) auf demselben Host hinter Tailscale Serve,

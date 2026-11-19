@@ -414,6 +414,40 @@ def test_sync_imports_new_rows_skips_known_ids_and_remembers_the_wallet(session)
     assert wide.known == 3 and wide.report.imported_rows == 0
 
 
+def test_sync_skips_zero_amount_rows_instead_of_reporting_errors(session):
+    # Finom meldet Kartenprüfungen als abgeschlossene Umsätze über 0,00 €: kein Geldfluss,
+    # nichts zu buchen – und bei jedem Abruf wieder dabei. Kein Fehler, nur übersprungen.
+    company, bank, server = _seed(session)
+    fake = FakeFinom(
+        [
+            _tx("2026-11-03T08:00:00", 100.0, "Incoming", name="Kunde AG"),
+            _tx("2026-11-04T08:00:00", 0.0, payment_type="CardPayment", name="Händler"),
+        ]
+    )
+    kwargs = dict(
+        session=session,
+        caller=_caller(fake),
+        company=company,
+        server=server,
+        bank_account_id=bank.id,
+        wallet_id=WALLET["id"],
+        from_date=date(2026, 11, 1),
+        to_date=date(2026, 11, 15),
+        changed_by="test",
+    )
+
+    preview = sync_mcp_bank_transactions(**kwargs, dry_run=True)
+    assert (preview.fetched, preview.known, preview.zero_amount) == (2, 0, 1)
+    assert len(preview.new_rows) == 1 and preview.errors == []
+    assert preview.to_dict()["skipped_zero_amount"] == 1
+
+    for _ in range(2):
+        result = sync_mcp_bank_transactions(**kwargs)
+        assert result.zero_amount == 1 and result.report.error_rows == 0
+    assert result.known == 1
+    assert len(session.execute(select(BankTransaction)).scalars().all()) == 1
+
+
 def _bank_account(session, company, code: str, name: str, **fields) -> Account:
     account = Account(
         tenant_id=company.tenant_id,
