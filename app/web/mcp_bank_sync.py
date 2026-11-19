@@ -168,10 +168,15 @@ def mcp_bank_sync_action():
                 url_for("main.mcp_bank_sync_page", company_id=company_id, server_id=server_id)
             )
     report = result.report
+    zero_amount = (
+        f", {result.zero_amount} über 0,00 € übersprungen" if result.zero_amount else ""
+    )
+    reasons = "".join(f" Zeile {error.line_number}: {error.message}" for error in report.errors)
     flash(
         f"{result.server_name}: {result.fetched} Umsätze abgerufen "
         f"({result.from_date:%d.%m.%Y}–{result.to_date:%d.%m.%Y}), {report.imported_rows} neu, "
-        f"{result.known + report.duplicate_rows} schon vorhanden, {report.error_rows} Fehler.",
+        f"{result.known + report.duplicate_rows} schon vorhanden{zero_amount}, "
+        f"{report.error_rows} Fehler.{reasons}",
         "success" if report.error_rows == 0 else "error",
     )
     if result.elsewhere:

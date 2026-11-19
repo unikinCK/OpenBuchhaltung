@@ -129,6 +129,9 @@ class McpBankSyncResult:
     dry_run: bool
     fetched: int = 0
     known: int = 0
+    # Abgeschlossene Umsätze über 0,00 € (etwa Kartenprüfungen): kein Geldfluss, nichts zu
+    # buchen. Sie kommen bei jedem Abruf wieder und zählen daher nicht als Fehler.
+    zero_amount: int = 0
     new_rows: list[BankStatementRow] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     report: BankImportReport | None = None
@@ -150,6 +153,7 @@ class McpBankSyncResult:
             "to_date": self.to_date.isoformat(),
             "fetched": self.fetched,
             "already_imported": self.known,
+            "skipped_zero_amount": self.zero_amount,
             "errors": self.errors,
             # Gleiche Umsätze (Datum, Betrag, Text) auf anderen Bankkonten: falsches Konto?
             "on_other_bank_accounts": len(self.elsewhere),
@@ -177,6 +181,10 @@ class McpBankSyncResult:
                 "imported_rows": self.report.imported_rows,
                 "duplicate_rows": self.report.duplicate_rows,
                 "error_rows": self.report.error_rows,
+                "row_errors": [
+                    {"position": error.line_number, "message": error.message}
+                    for error in self.report.errors
+                ],
             }
         return body
 
@@ -675,6 +683,12 @@ def sync_mcp_bank_transactions(
         for item in items
         if not (isinstance(item, BankStatementRow) and item.bank_reference in known)
     ]
+    zero_amount = [
+        item for item in fresh if isinstance(item, BankStatementRow) and item.amount == 0
+    ]
+    fresh = [
+        item for item in fresh if not (isinstance(item, BankStatementRow) and item.amount == 0)
+    ]
     result = McpBankSyncResult(
         server_id=server.id,
         server_name=server.name,
@@ -684,7 +698,8 @@ def sync_mcp_bank_transactions(
         to_date=to_date,
         dry_run=dry_run,
         fetched=len(items),
-        known=len(items) - len(fresh),
+        known=len(items) - len(fresh) - len(zero_amount),
+        zero_amount=len(zero_amount),
         new_rows=[item for item in fresh if isinstance(item, BankStatementRow)],
         errors=[
             f"Umsatz {item.position}: {item.message}"
@@ -726,6 +741,7 @@ def sync_mcp_bank_transactions(
             "to_date": to_date.isoformat(),
             "fetched": result.fetched,
             "already_imported": result.known,
+            "skipped_zero_amount": result.zero_amount,
             "imported": result.report.imported_rows,
             "duplicates": result.report.duplicate_rows,
             "errors": result.report.error_rows,

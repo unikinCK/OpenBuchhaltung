@@ -78,7 +78,7 @@
   {% if preview %}
     <section class="card">
       <h2>Vorschau: {{ preview.wallet.name or "Wallet" }} → {% for account in bank_accounts if account.id == preview.bank_account_id %}{{ account.code }} – {{ account.name }}{% endfor %}</h2>
-      <p>{{ preview.from_date | datum }} bis {{ preview.to_date | datum }}: {{ preview.fetched }} abgeschlossene Umsätze, davon {{ preview.known }} schon importiert, <strong>{{ preview.new_rows | length }} neu</strong>{% if preview.errors %}, {{ preview.errors | length }} nicht übernehmbar{% endif %}.</p>
+      <p>{{ preview.from_date | datum }} bis {{ preview.to_date | datum }}: {{ preview.fetched }} abgeschlossene Umsätze, davon {{ preview.known }} schon importiert{% if preview.zero_amount %}, {{ preview.zero_amount }} über 0,00 € (übersprungen){% endif %}, <strong>{{ preview.new_rows | length }} neu</strong>{% if preview.errors %}, {{ preview.errors | length }} nicht übernehmbar{% endif %}.</p>
       {% if preview.errors %}
         <ul class="error">{% for message in preview.errors %}<li>{{ message }}</li>{% endfor %}</ul>
       {% endif %}
