@@ -23,7 +23,7 @@
 #      Namensauflösung.)
 services:
   tailnet-forward-host:
-    image: nginx:1.28-alpine
+    image: nginx:1.30-alpine
     network_mode: host
     restart: unless-stopped
     # Ein Socket aus einem abgebrochenen Lauf bliebe liegen und blockierte den Start.
@@ -41,7 +41,7 @@ services:
       - tailnet_forward_socket:/run/tailnet-forward
 
   tailnet-forward:
-    image: nginx:1.28-alpine
+    image: nginx:1.30-alpine
     restart: unless-stopped
     depends_on:
       - tailnet-forward-host

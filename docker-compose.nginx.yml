@@ -21,7 +21,7 @@
 # Sofort versuchen:  docker compose exec certbot sh /opt/certbot.sh obtain
 services:
   nginx:
-    image: nginx:1.28-alpine
+    image: nginx:1.30-alpine
     restart: unless-stopped
     depends_on:
       app:
