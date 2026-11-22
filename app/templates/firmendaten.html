@@ -56,6 +56,10 @@
             <label for="tax_number">Steuernummer</label>
             <input id="tax_number" name="tax_number" maxlength="30" value="{{ company.tax_number or '' }}" />
           </div>
+          <div class="field">
+            <label for="tax_office_number">Bundesfinanzamtsnummer</label>
+            <input id="tax_office_number" name="tax_office_number" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="4 Ziffern, für ELSTER" value="{{ company.tax_office_number or '' }}" />
+          </div>
           <div class="field field-wide">
             <label class="check"><input type="checkbox" name="is_small_business" value="1"{% if company.is_small_business %} checked{% endif %} /> Kleinunternehmer nach § 19 UStG (Rechnungen ohne Umsatzsteuer)</label>
           </div>

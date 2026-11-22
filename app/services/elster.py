@@ -1,9 +1,9 @@
 """ELSTER-Grundlage: Payloads, Transportkante und Übermittlungsprotokolle.
 
-Der erste Transport ist bewusst ein deterministischer Mock für die Testumgebung.
-Die ERiC-Anbindung läuft über einen konfigurierbaren lokalen Command-Runner,
-damit die amtliche ERiC-Bibliothek außerhalb der App-Prozesse gekapselt werden
-kann.
+Der Mock-Transport ist deterministisch und nur für die Testumgebung. Der ERiC-Transport übergibt
+den amtlichen ElsterXML-Datensatz (``app.services.elster_xml``) an einen eigenen Prozess – den
+integrierten Runner ``app.services.eric_runner`` oder einen Befehl aus ``ELSTER_ERIC_COMMAND`` –,
+damit die ERiC-Bibliothek außerhalb der Webprozesse läuft (ADR-011).
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,12 +24,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.elster_xml import (
+    ElsterXmlError,
+    ElsterXmlOptions,
+    build_ustva_elster_xml,
+    ustva_datenart_version,
+    ustva_period,
+)
 from app.services.push import notify_elster_submission
 from app.services.vat_returns import (
     VAT_RETURN_KIND_ANNUAL,
     vat_return_display_name,
     vat_return_kind_from_label,
 )
+from app.version import get_version
 from domain.models import ElsterSubmission, VatReturn
 
 ELSTER_ENVIRONMENTS = {"test", "production"}
@@ -38,6 +47,8 @@ ELSTER_PROCEDURE_USTVA = "ustva"
 ELSTER_PROCEDURE_VAT_ANNUAL = "ust_jahreserklaerung"
 ELSTER_STATUSES = {"created", "transmitted", "failed"}
 ELSTER_TRANSPORTS = {"mock", "eric"}
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BUILTIN_ERIC_RUNNER = "app.services.eric_runner"
 
 
 class ElsterError(ValueError):
@@ -94,6 +105,8 @@ class EricElsterTransport:
     certificate_alias: str | None = None
     eric_command: str | None = None
     timeout_seconds: int = 60
+    certificate_pin: str | None = None
+    log_dir: str | None = None
     name: str = "eric"
 
     def transmit(
@@ -103,7 +116,46 @@ class EricElsterTransport:
             raise ElsterError("ERiC library is not configured.")
         if not self.certificate_path or not Path(self.certificate_path).exists():
             raise ElsterError("ELSTER certificate is not configured.")
-        if not self.eric_command or not Path(self.eric_command).exists():
+        response = self.run(
+            payload_xml=payload_xml,
+            payload_hash=payload_hash,
+            vat_return=vat_return,
+            mode="send",
+        )
+        status = str(response.get("status") or "transmitted")
+        transfer_ticket = str(response.get("transfer_ticket") or "").strip()
+        if status not in {"transmitted", "failed"}:
+            raise ElsterError("ERiC command returned invalid status.")
+        if status == "transmitted" and not transfer_ticket:
+            raise ElsterError("ERiC command returned no transfer ticket.")
+        return ElsterTransportResult(
+            status=status,
+            transfer_ticket=transfer_ticket,
+            response_protocol=str(response.get("response_protocol") or "ERiC command completed."),
+        )
+
+    def validate(
+        self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn
+    ) -> dict[str, object]:
+        """Prüft den Datensatz lokal mit ERiC, ohne zu senden."""
+        return self.run(
+            payload_xml=payload_xml,
+            payload_hash=payload_hash,
+            vat_return=vat_return,
+            mode="validate",
+        )
+
+    def command(self) -> list[str]:
+        if self.eric_command:
+            return [self.eric_command]
+        return [sys.executable, "-m", BUILTIN_ERIC_RUNNER]
+
+    def run(
+        self, *, payload_xml: str, payload_hash: str, vat_return: VatReturn, mode: str
+    ) -> dict[str, object]:
+        if not self.eric_library_path or not Path(self.eric_library_path).exists():
+            raise ElsterError("ERiC library is not configured.")
+        if self.eric_command and not Path(self.eric_command).exists():
             raise ElsterError("ERiC command is not configured.")
 
         with tempfile.TemporaryDirectory(prefix="openbuchhaltung-elster-") as tmp_dir:
@@ -117,16 +169,24 @@ class EricElsterTransport:
                     "ELSTER_PAYLOAD_XML": str(payload_path),
                     "ELSTER_RESPONSE_JSON": str(response_path),
                     "ELSTER_PAYLOAD_SHA256": payload_hash,
+                    "ELSTER_ERIC_MODE": mode,
+                    "ELSTER_DATENART_VERSION": _datenart_version(vat_return),
                     "ELSTER_ERIC_LIBRARY_PATH": self.eric_library_path,
-                    "ELSTER_CERTIFICATE_PATH": self.certificate_path,
+                    "ELSTER_ERIC_LOG_DIR": self.log_dir or tmp_dir,
+                    "ELSTER_CERTIFICATE_PATH": self.certificate_path or "",
+                    "ELSTER_CERTIFICATE_PIN": self.certificate_pin or "",
                     "ELSTER_CERTIFICATE_ALIAS": self.certificate_alias or "",
                     "ELSTER_VAT_RETURN_ID": str(vat_return.id),
                     "ELSTER_PERIOD_LABEL": vat_return.period_label,
                 }
             )
+            if not self.eric_command:
+                env["PYTHONPATH"] = os.pathsep.join(
+                    filter(None, [str(PROJECT_ROOT), env.get("PYTHONPATH")])
+                )
             try:
                 completed = subprocess.run(
-                    [self.eric_command],
+                    self.command(),
                     cwd=tmp_dir,
                     env=env,
                     capture_output=True,
@@ -150,38 +210,44 @@ class EricElsterTransport:
                 response = json.loads(response_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 raise ElsterError("ERiC command produced invalid JSON.") from exc
+        if not isinstance(response, dict):
+            raise ElsterError("ERiC command produced invalid JSON.")
+        if not response.get("response_protocol") and completed.stdout:
+            response["response_protocol"] = completed.stdout
+        return response
 
-        status = str(response.get("status") or "transmitted")
-        transfer_ticket = str(response.get("transfer_ticket") or "").strip()
-        if status not in {"transmitted", "failed"}:
-            raise ElsterError("ERiC command returned invalid status.")
-        if status == "transmitted" and not transfer_ticket:
-            raise ElsterError("ERiC command returned no transfer ticket.")
 
-        response_protocol = str(
-            response.get("response_protocol") or completed.stdout or "ERiC command completed."
-        )
-        return ElsterTransportResult(
-            status=status,
-            transfer_ticket=transfer_ticket,
-            response_protocol=response_protocol,
-        )
+def _datenart_version(vat_return: VatReturn) -> str:
+    try:
+        return ustva_datenart_version(ustva_period(vat_return.period_label).year)
+    except ElsterXmlError:
+        return ""
 
 
 def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
     environment = str(config.get("ELSTER_ENVIRONMENT") or "test").strip().lower()
+    hersteller_id = str(config.get("ELSTER_HERSTELLER_ID") or "").strip()
     eric_library_path = str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "").strip()
     certificate_path = str(config.get("ELSTER_CERTIFICATE_PATH") or "").strip()
+    certificate_pin_set = bool(str(config.get("ELSTER_CERTIFICATE_PIN") or ""))
     certificate_alias = str(config.get("ELSTER_CERTIFICATE_ALIAS") or "").strip()
     eric_command = str(config.get("ELSTER_ERIC_COMMAND") or "").strip()
 
+    hersteller_id_ok = len(hersteller_id) == 5 and hersteller_id.isdigit()
     eric_library_exists = bool(eric_library_path and Path(eric_library_path).exists())
     certificate_exists = bool(certificate_path and Path(certificate_path).exists())
+    # Ohne ELSTER_ERIC_COMMAND läuft der integrierte Runner (python -m app.services.eric_runner).
     eric_command_exists = bool(eric_command and Path(eric_command).exists())
-    eric_configured = eric_library_exists and certificate_exists and eric_command_exists
+    eric_runner_ok = eric_command_exists if eric_command else True
+    eric_validation_available = eric_library_exists and eric_runner_ok and hersteller_id_ok
+    eric_configured = eric_validation_available and certificate_exists
     warnings: list[str] = []
     if environment not in ELSTER_ENVIRONMENTS:
         warnings.append("ELSTER_ENVIRONMENT must be 'test' or 'production'.")
+    if not hersteller_id:
+        warnings.append("ELSTER_HERSTELLER_ID is not configured.")
+    elif not hersteller_id_ok:
+        warnings.append("ELSTER_HERSTELLER_ID must have five digits.")
     if not eric_library_path:
         warnings.append("ELSTER_ERIC_LIBRARY_PATH is not configured.")
     elif not eric_library_exists:
@@ -190,20 +256,26 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         warnings.append("ELSTER_CERTIFICATE_PATH is not configured.")
     elif not certificate_exists:
         warnings.append("ELSTER_CERTIFICATE_PATH does not exist.")
-    if not eric_command:
-        warnings.append("ELSTER_ERIC_COMMAND is not configured.")
-    elif not eric_command_exists:
+    if eric_command and not eric_command_exists:
         warnings.append("ELSTER_ERIC_COMMAND does not exist.")
     if environment == "production" and not eric_configured:
-        warnings.append("Production ELSTER requires ERiC library, certificate and command.")
+        warnings.append(
+            "Production ELSTER requires Hersteller-ID, ERiC library and certificate."
+        )
+    if environment == "production" and not certificate_pin_set:
+        warnings.append("ELSTER_CERTIFICATE_PIN is not configured.")
     missing_production_requirements = []
     if environment != "production":
         missing_production_requirements.append("ELSTER_ENVIRONMENT=production")
+    if not hersteller_id_ok:
+        missing_production_requirements.append("ELSTER_HERSTELLER_ID")
     if not eric_library_exists:
         missing_production_requirements.append("ELSTER_ERIC_LIBRARY_PATH")
     if not certificate_exists:
         missing_production_requirements.append("ELSTER_CERTIFICATE_PATH")
-    if not eric_command_exists:
+    if not certificate_pin_set:
+        missing_production_requirements.append("ELSTER_CERTIFICATE_PIN")
+    if not eric_runner_ok:
         missing_production_requirements.append("ELSTER_ERIC_COMMAND")
     checks = [
         {
@@ -221,6 +293,13 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
             "detail": "available for test submissions",
         },
         {
+            "id": "hersteller_id",
+            "label": "Hersteller-ID",
+            "ok": hersteller_id_ok,
+            "required_for_production": True,
+            "detail": hersteller_id or "not configured",
+        },
+        {
             "id": "eric_library",
             "label": "ERiC library",
             "ok": eric_library_exists,
@@ -235,11 +314,19 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
             "detail": certificate_path or "not configured",
         },
         {
+            "id": "certificate_pin",
+            "label": "Certificate PIN",
+            "ok": certificate_pin_set,
+            "required_for_production": True,
+            # Die PIN selbst wird nie ausgegeben.
+            "detail": "configured" if certificate_pin_set else "not configured",
+        },
+        {
             "id": "eric_command",
             "label": "ERiC command runner",
-            "ok": eric_command_exists,
+            "ok": eric_runner_ok,
             "required_for_production": True,
-            "detail": eric_command or "not configured",
+            "detail": eric_command or f"built-in ({BUILTIN_ERIC_RUNNER})",
         },
         {
             "id": "certificate_alias",
@@ -254,13 +341,18 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         "environment": environment,
         "mock_transport_available": True,
         "eric_transport_available": eric_configured,
-        "production_ready": environment == "production" and eric_configured,
+        "eric_validation_available": eric_validation_available,
+        "production_ready": environment == "production"
+        and eric_configured
+        and certificate_pin_set,
         "checks": checks,
         "missing_production_requirements": missing_production_requirements,
+        "hersteller_id": hersteller_id or None,
         "eric_library_path": eric_library_path or None,
         "eric_library_exists": eric_library_exists,
         "certificate_path": certificate_path or None,
         "certificate_exists": certificate_exists,
+        "certificate_pin_configured": certificate_pin_set,
         "certificate_alias": certificate_alias or None,
         "eric_command": eric_command or None,
         "eric_command_exists": eric_command_exists,
@@ -311,6 +403,31 @@ def build_ustva_payload(vat_return: VatReturn) -> str:
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
+def elster_xml_options(*, environment: str, config: Mapping[str, object]) -> ElsterXmlOptions:
+    return ElsterXmlOptions(
+        hersteller_id=str(config.get("ELSTER_HERSTELLER_ID") or "").strip(),
+        test=environment != "production",
+        product_version=get_version(),
+    )
+
+
+def build_submission_payload(
+    vat_return: VatReturn, *, environment: str, transport: str, config: Mapping[str, object]
+) -> str:
+    """Interne Nutzlast für den Mock, amtlicher ElsterXML-Datensatz für ERiC."""
+    if transport != "eric":
+        return build_ustva_payload(vat_return)
+    if vat_return_elster_procedure(vat_return) != ELSTER_PROCEDURE_USTVA:
+        raise ElsterXmlError(
+            "Die USt-Jahreserklärung kann noch nicht über ERiC übermittelt werden."
+        )
+    return build_ustva_elster_xml(
+        vat_return=vat_return,
+        company=vat_return.company,
+        options=elster_xml_options(environment=environment, config=config),
+    )
+
+
 def submit_vat_return(
     *,
     session: Session,
@@ -335,7 +452,15 @@ def submit_vat_return(
     if vat_return is None:
         raise ElsterError("VAT return not found.")
 
-    payload_xml = build_ustva_payload(vat_return)
+    payload_error: str | None = None
+    try:
+        payload_xml = build_submission_payload(
+            vat_return, environment=environment, transport=transport, config=config
+        )
+    except ElsterXmlError as exc:
+        # Protokolliert wird der Snapshot, der nicht in einen Datensatz übersetzt werden konnte.
+        payload_error = str(exc)
+        payload_xml = build_ustva_payload(vat_return)
     payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
     effective_certificate_alias = (
         certificate_alias or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "") or None
@@ -344,6 +469,8 @@ def submit_vat_return(
         transport=transport, certificate_alias=effective_certificate_alias, config=config
     )
     try:
+        if payload_error is not None:
+            raise ElsterError(payload_error)
         result = transport_adapter.transmit(
             payload_xml=payload_xml, payload_hash=payload_hash, vat_return=vat_return
         )
@@ -475,6 +602,17 @@ def preflight_vat_return(
         errors.append("ELSTER payload must contain Kennzahl 83.")
     if max_payload_bytes and len(payload_bytes) > max_payload_bytes:
         errors.append("ELSTER payload exceeds ELSTER_MAX_PAYLOAD_BYTES.")
+    elster_xml_info: dict[str, object] | None = None
+    eric_validation: dict[str, object] | None = None
+    if transport == "eric":
+        elster_xml_info, eric_validation = _preflight_elster_xml(
+            vat_return=vat_return,
+            environment=environment,
+            certificate_alias=certificate_alias,
+            readiness=readiness,
+            config=config or {},
+            errors=errors,
+        )
 
     return {
         "ok": not errors,
@@ -491,7 +629,60 @@ def preflight_vat_return(
         "period_label": vat_return.period_label,
         "declaration_type": vat_return_kind_from_label(vat_return.period_label),
         "readiness": readiness,
+        "elster_xml": elster_xml_info,
+        "eric_validation": eric_validation,
     }
+
+
+def _preflight_elster_xml(
+    *,
+    vat_return: VatReturn,
+    environment: str,
+    certificate_alias: str | None,
+    readiness: Mapping[str, object],
+    config: Mapping[str, object],
+    errors: list[str],
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    """Baut den ElsterXML-Datensatz und prüft ihn – falls ERiC eingebunden ist – lokal."""
+    try:
+        elster_xml = build_submission_payload(
+            vat_return, environment=environment, transport="eric", config=config
+        )
+    except ElsterXmlError as exc:
+        errors.append(str(exc))
+        return {"ok": False, "error": str(exc)}, None
+    elster_bytes = elster_xml.encode("utf-8")
+    elster_hash = hashlib.sha256(elster_bytes).hexdigest()
+    info: dict[str, object] = {
+        "ok": True,
+        "datenart_version": _datenart_version(vat_return),
+        "testmerker": environment != "production",
+        "payload_hash": elster_hash,
+        "payload_size": len(elster_bytes),
+    }
+    if not readiness.get("eric_validation_available"):
+        return info, None
+    adapter = _transport_adapter(
+        transport="eric", certificate_alias=certificate_alias, config=config
+    )
+    try:
+        response = adapter.validate(
+            payload_xml=elster_xml, payload_hash=elster_hash, vat_return=vat_return
+        )
+    except ElsterError as exc:
+        errors.append(f"ERiC-Prüfung nicht möglich: {exc}")
+        return info, {"status": "error", "response_protocol": str(exc), "findings": []}
+    findings = [str(item) for item in response.get("findings") or []]
+    validation = {
+        "status": str(response.get("status") or ""),
+        "eric_code": response.get("eric_code"),
+        "response_protocol": str(response.get("response_protocol") or ""),
+        "findings": findings,
+    }
+    if validation["status"] != "validated":
+        detail = "; ".join(findings) or validation["response_protocol"]
+        errors.append(f"ERiC-Prüfung fehlgeschlagen: {detail}")
+    return info, validation
 
 
 def retry_elster_submission(
@@ -690,6 +881,8 @@ def _transport_adapter(
     return EricElsterTransport(
         eric_library_path=str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "") or None,
         certificate_path=str(config.get("ELSTER_CERTIFICATE_PATH") or "") or None,
+        certificate_pin=str(config.get("ELSTER_CERTIFICATE_PIN") or "") or None,
+        log_dir=str(config.get("ELSTER_ERIC_LOG_DIR") or "") or None,
         certificate_alias=certificate_alias
         or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "")
         or None,

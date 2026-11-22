@@ -39,6 +39,7 @@ UPDATABLE_FIELDS = (
     *TEXT_FIELD_LIMITS,
     "country_code",
     "vat_id",
+    "tax_office_number",
     "email",
     "invoice_prefix",
     "is_small_business",
@@ -47,6 +48,7 @@ UPDATABLE_FIELDS = (
 _COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PREFIX_RE = re.compile(r"^[A-Za-z0-9]{1,10}$")
+_TAX_OFFICE_RE = re.compile(r"^[0-9]{4}$")
 
 
 class CompanyMasterDataError(ValueError):
@@ -64,6 +66,7 @@ def serialize_company_master_data(company: Company) -> dict[str, Any]:
         "country_code": company.country_code,
         "vat_id": company.vat_id,
         "tax_number": company.tax_number,
+        "tax_office_number": company.tax_office_number,
         "phone": company.phone,
         "email": company.email,
         "website": company.website,
@@ -120,6 +123,16 @@ def _email(value: Any) -> str | None:
     return email
 
 
+def _tax_office_number(value: Any) -> str | None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str) or not _TAX_OFFICE_RE.match(value.strip()):
+        raise CompanyMasterDataError(
+            "tax_office_number muss die vierstellige Bundesfinanzamtsnummer sein."
+        )
+    return value.strip()
+
+
 def _invoice_prefix(value: Any) -> str:
     if value is None or (isinstance(value, str) and not value.strip()):
         return DEFAULT_INVOICE_PREFIX
@@ -151,6 +164,8 @@ def update_company_master_data(
         company.country_code = _country_code(changes["country_code"])
     if "vat_id" in changes:
         company.vat_id = _vat_id(changes["vat_id"])
+    if "tax_office_number" in changes:
+        company.tax_office_number = _tax_office_number(changes["tax_office_number"])
     if "email" in changes:
         company.email = _email(changes["email"])
     if "invoice_prefix" in changes:

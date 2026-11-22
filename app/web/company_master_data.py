@@ -19,7 +19,14 @@ from app.web.helpers import (
 )
 from domain.models import Company
 
-_FORM_FIELDS = (*TEXT_FIELD_LIMITS, "country_code", "vat_id", "email", "invoice_prefix")
+_FORM_FIELDS = (
+    *TEXT_FIELD_LIMITS,
+    "country_code",
+    "vat_id",
+    "tax_office_number",
+    "email",
+    "invoice_prefix",
+)
 
 
 @main_bp.get("/verwaltung/firmendaten")
