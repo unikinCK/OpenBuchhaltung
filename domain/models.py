@@ -90,6 +90,9 @@ class Company(Base):
     country_code: Mapped[str | None] = mapped_column(String(2))
     vat_id: Mapped[str | None] = mapped_column(String(20))
     tax_number: Mapped[str | None] = mapped_column(String(30))
+    # Vierstellige Bundesfinanzamtsnummer: Empfänger und Präfix der
+    # ELSTER-Steuernummer (ADR-011).
+    tax_office_number: Mapped[str | None] = mapped_column(String(4))
     phone: Mapped[str | None] = mapped_column(String(50))
     email: Mapped[str | None] = mapped_column(String(255))
     website: Mapped[str | None] = mapped_column(String(255))

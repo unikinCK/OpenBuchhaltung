@@ -211,10 +211,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         SELLER_CITY=os.environ.get("SELLER_CITY", ""),
         SELLER_COUNTRY_CODE=os.environ.get("SELLER_COUNTRY_CODE", "DE"),
         SELLER_VAT_ID=os.environ.get("SELLER_VAT_ID", ""),
-        # ELSTER-Bridge (ERiC-Runner) – optional, siehe app/services/elster.py.
+        # ELSTER über ERiC – optional, siehe app/services/elster.py und ADR-011.
         ELSTER_ENVIRONMENT=os.environ.get("ELSTER_ENVIRONMENT", "test"),
+        ELSTER_HERSTELLER_ID=os.environ.get("ELSTER_HERSTELLER_ID"),
         ELSTER_ERIC_LIBRARY_PATH=os.environ.get("ELSTER_ERIC_LIBRARY_PATH"),
+        ELSTER_ERIC_LOG_DIR=os.environ.get("ELSTER_ERIC_LOG_DIR"),
         ELSTER_CERTIFICATE_PATH=os.environ.get("ELSTER_CERTIFICATE_PATH"),
+        ELSTER_CERTIFICATE_PIN=os.environ.get("ELSTER_CERTIFICATE_PIN"),
         ELSTER_CERTIFICATE_ALIAS=os.environ.get("ELSTER_CERTIFICATE_ALIAS"),
         ELSTER_ERIC_COMMAND=os.environ.get("ELSTER_ERIC_COMMAND"),
         ELSTER_ERIC_TIMEOUT_SECONDS=int(os.environ.get("ELSTER_ERIC_TIMEOUT_SECONDS", "60")),

@@ -3507,6 +3507,7 @@ TOOLS: list[ToolSpec] = [
                         "country_code",
                         "vat_id",
                         "tax_number",
+                        "tax_office_number",
                         "phone",
                         "email",
                         "website",

@@ -8,6 +8,19 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### ELSTER: UStVA als amtlicher Datensatz über ERiC
+- **Neu:** Der ERiC-Transport übermittelt die UStVA als ElsterXML-Datensatz nach amtlichem Schema (Schnittstelle
+  Version 11, Datenart `UStVA_<Jahr>`) statt der internen Nutzlast; gespeichert und gehasht wird genau dieser
+  Datensatz. Bemessungsgrundlagen in vollen Euro, Steuerbeträge auf Cent, Testmerker in der Testumgebung (ADR-011).
+- **Neu:** ERiC wird per `ctypes` in einem eigenen Prozess geladen (`python -m app.services.eric_runner`);
+  `ELSTER_ERIC_COMMAND` ist nicht mehr nötig. Der Preflight prüft den Datensatz mit ERiC und meldet Fehler
+  feldgenau (REST/MCP `elster_xml`, `eric_validation`).
+- **Neu:** Firmendaten um die Bundesfinanzamtsnummer ergänzt (UI, REST, MCP; Migration 0068). Daraus und aus der
+  Steuernummer laut Bescheid entsteht die 13-stellige ELSTER-Steuernummer.
+- **Neu:** `ELSTER_HERSTELLER_ID`, `ELSTER_CERTIFICATE_PIN`, `ELSTER_ERIC_LOG_DIR`; die Bereitschaftsprüfung zeigt
+  Hersteller-ID und PIN (ohne Wert).
+- **Geändert:** Die USt-Jahreserklärung wird über ERiC abgewiesen, bis ihr Datensatz gebaut ist; der Mock bleibt.
+
 ### Täglicher automatischer Bankabruf
 - **Neu:** Eingerichtete Bankzugänge lassen sich täglich automatisch abrufen – FinTS, Open Banking und Wallets eines
   Bank-MCP-Servers (z. B. Finom). Eingeschaltet wird je Zugang auf der Bankseite (FinTS mit PIN, Open Banking nach der

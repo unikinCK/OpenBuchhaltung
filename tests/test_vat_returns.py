@@ -68,7 +68,16 @@ def session() -> Session:
 
 def _seed(session: Session) -> Company:
     tenant = Tenant(name="UStVA Tenant")
-    company = Company(tenant=tenant, name="UStVA GmbH", currency_code="EUR")
+    company = Company(
+        tenant=tenant,
+        name="UStVA GmbH",
+        currency_code="EUR",
+        street="Teststraße 1",
+        postal_code="12345",
+        city="Teststadt",
+        # Teststeuernummer aus der ERiC-Dokumentation (Testfinanzamt).
+        tax_number="1096081508187",
+    )
     session.add_all([tenant, company])
     session.flush()
 
@@ -157,6 +166,8 @@ def _make_eric_config(tmp_path: Path, *, status: str = "transmitted") -> dict[st
         "import json\n"
         "import os\n"
         f"status = {status!r}\n"
+        "if os.environ['ELSTER_ERIC_MODE'] == 'validate':\n"
+        "    status = 'validated' if status == 'transmitted' else status\n"
         "ticket = 'ERIC-' + os.environ['ELSTER_PAYLOAD_SHA256'][:12].upper()\n"
         "response = {\n"
         "    'status': status,\n"
@@ -171,8 +182,10 @@ def _make_eric_config(tmp_path: Path, *, status: str = "transmitted") -> dict[st
     command.chmod(0o755)
     return {
         "ELSTER_ENVIRONMENT": "production",
+        "ELSTER_HERSTELLER_ID": "12345",
         "ELSTER_ERIC_LIBRARY_PATH": str(eric_library),
         "ELSTER_CERTIFICATE_PATH": str(certificate),
+        "ELSTER_CERTIFICATE_PIN": "123456",
         "ELSTER_CERTIFICATE_ALIAS": "prod-cert",
         "ELSTER_ERIC_COMMAND": str(command),
     }
@@ -661,7 +674,7 @@ def test_elster_failed_submission_is_recorded(session: Session) -> None:
     assert failed.status == "failed"
     assert failed.transport == "eric"
     assert failed.submitted_at is None
-    assert "ERiC library" in failed.response_protocol
+    assert "Hersteller-ID" in failed.response_protocol
     assert "<Period>2026-05</Period>" in failed.payload_xml
     assert list_elster_submissions(
         session=session,
@@ -733,6 +746,10 @@ def test_elster_eric_command_transport_records_transmission(
     )
     assert preflight["ok"] is True
     assert preflight["readiness"]["eric_command_exists"] is True
+    assert preflight["elster_xml"]["ok"] is True
+    assert preflight["elster_xml"]["datenart_version"] == "UStVA_2026"
+    assert preflight["elster_xml"]["testmerker"] is False
+    assert preflight["eric_validation"]["status"] == "validated"
 
     submission = submit_vat_return(
         session=session,
@@ -750,6 +767,66 @@ def test_elster_eric_command_transport_records_transmission(
     assert submission.transfer_ticket.startswith("ERIC-")
     assert submission.response_protocol == "ERiC runner transmitted 2026-05"
     assert session.get(VatReturn, vat_return.id).status == "uebermittelt"
+    # Übermittelt und protokolliert wird der amtliche ElsterXML-Datensatz.
+    assert submission.payload_xml.startswith('<?xml version="1.0" encoding="UTF-8"?>\n<Elster ')
+    assert "<Zeitraum>05</Zeitraum>" in submission.payload_xml
+    assert "<Steuernummer>1096081508187</Steuernummer>" in submission.payload_xml
+    assert "Testmerker" not in submission.payload_xml
+
+
+def test_elster_eric_preflight_reports_validation_errors(
+    session: Session, tmp_path: Path
+) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026-05", changed_by="pytest"
+    )
+    config = {**_make_eric_config(tmp_path, status="failed"), "ELSTER_ENVIRONMENT": "test"}
+
+    preflight = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="eric",
+        config=config,
+    )
+    assert preflight["ok"] is False
+    assert preflight["elster_xml"]["testmerker"] is True
+    assert preflight["eric_validation"]["status"] == "failed"
+    assert any(error.startswith("ERiC-Prüfung fehlgeschlagen") for error in preflight["errors"])
+
+    company.tax_number = None
+    session.flush()
+    missing = preflight_vat_return(
+        session=session,
+        vat_return_id=vat_return.id,
+        environment="test",
+        transport="eric",
+        config=config,
+    )
+    assert missing["elster_xml"] == {
+        "ok": False,
+        "error": "Für ELSTER fehlt die Steuernummer der Gesellschaft.",
+    }
+    assert missing["eric_validation"] is None
+
+
+def test_elster_eric_rejects_annual_return_for_now(session: Session, tmp_path: Path) -> None:
+    company = _seed(session)
+    _seed_bookings(session, company)
+    vat_return = save_vat_return(
+        session=session, company_id=company.id, period_label="2026", changed_by="pytest"
+    )
+    with pytest.raises(ElsterError, match="Jahreserklärung kann noch nicht"):
+        submit_vat_return(
+            session=session,
+            vat_return_id=vat_return.id,
+            environment="production",
+            transport="eric",
+            changed_by="pytest",
+            config=_make_eric_config(tmp_path),
+        )
 
 
 def test_elster_eric_failed_result_keeps_vat_return_open(
@@ -1058,7 +1135,7 @@ def test_elster_submission_history_is_visible_on_ustva_page(tmp_path: Path) -> N
     assert "ELSTER mock transport accepted UStVA 2026-05" in html
     assert html.count("MOCK-USTVA-2026-05-") == 3
     assert "Produktions-Checkliste" in html
-    assert "ELSTER_ERIC_COMMAND" in html
+    assert "ELSTER_HERSTELLER_ID" in html
     assert "Hash ok" in html
     assert "Payload-XML" in html
     assert "Preflight" in html
@@ -1160,11 +1237,15 @@ def test_elster_readiness_api(tmp_path: Path) -> None:
     payload = response.get_json()
     assert payload["environment"] == "production"
     assert payload["production_ready"] is False
-    assert "ELSTER_ERIC_COMMAND" in payload["missing_production_requirements"]
-    assert any(item["id"] == "eric_command" for item in payload["checks"])
-    assert "ELSTER_ERIC_COMMAND is not configured." in payload["warnings"]
+    assert "ELSTER_HERSTELLER_ID" in payload["missing_production_requirements"]
+    assert "ELSTER_CERTIFICATE_PIN" in payload["missing_production_requirements"]
+    # Ohne eigenen Befehl läuft der integrierte Runner.
+    assert "ELSTER_ERIC_COMMAND" not in payload["missing_production_requirements"]
+    runner = next(item for item in payload["checks"] if item["id"] == "eric_command")
+    assert runner["ok"] is True
+    assert "ELSTER_HERSTELLER_ID is not configured." in payload["warnings"]
     assert (
-        "Production ELSTER requires ERiC library, certificate and command."
+        "Production ELSTER requires Hersteller-ID, ERiC library and certificate."
         in payload["warnings"]
     )
 

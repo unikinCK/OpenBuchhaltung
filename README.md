@@ -99,10 +99,11 @@ Wichtig zur Einordnung:
 - DATEV-Export ist kompatibel angelegt, aber nicht DATEV-zertifiziert.
 - GoBD-Funktionen sind als technische Basis umgesetzt, aber keine formale
   GoBD-/IDW-PS-880-Zertifizierung.
-- ELSTER ist app-seitig mit Testtransport, Submission-Historie,
-  Preflight/Readiness-Diagnose und ERiC-Runner-Bridge vorbereitet; produktive
-  Übermittlung benötigt eine lokale ERiC-Bibliothek, ein ELSTER-Zertifikat und
-  einen passenden Runner.
+- ELSTER: Die UStVA wird als amtlicher ElsterXML-Datensatz erzeugt und über
+  die ERiC-Bibliothek der Finanzverwaltung geprüft und übermittelt (ADR-011).
+  ERiC ist nicht enthalten: Betreiber laden sie im ELSTER-Entwicklerbereich
+  und binden sie per `ELSTER_ERIC_LIBRARY_PATH` ein; dazu kommen Hersteller-ID,
+  ELSTER-Zertifikat und PIN. Die USt-Jahreserklärung geht noch nicht über ERiC.
 - Lohnbuchhaltung ist als technisches MVP umgesetzt; amtliche Lohnsteuer-/
   Sozialversicherungsmeldungen, ELStAM und DEÜV sind noch nicht enthalten. Für
   die Lohnsteuerberechnung kann ein lokaler `PAYROLL_PAP_COMMAND`-Runner
@@ -407,8 +408,12 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `ENABLE_BANKING_API_URL` | `https://api.enablebanking.com` | API-Basis-URL von Enable Banking. |
 | `DATEV_CONSULTANT_NUMBER`, `DATEV_CLIENT_NUMBER` | `1000`, – | Berater-/Mandantennummer im DATEV-Export. |
 | `SELLER_STREET`, `SELLER_POSTAL_CODE`, `SELLER_CITY`, `SELLER_COUNTRY_CODE`, `SELLER_VAT_ID` | leer, `DE` | Rückfallwerte für leere Felder der Firmendaten (Rechnungen, E-Rechnungs-Export, Mahnschreiben). |
-| `ELSTER_ENVIRONMENT` | `test` | `test` oder `production`. |
-| `ELSTER_ERIC_LIBRARY_PATH`, `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_ALIAS`, `ELSTER_ERIC_COMMAND` | – | Lokaler ERiC-Runner für die ELSTER-Übermittlung. |
+| `ELSTER_ENVIRONMENT` | `test` | `test` (Datensatz mit Testmerker) oder `production`. |
+| `ELSTER_HERSTELLER_ID` | – | Fünfstellige Hersteller-ID aus dem ELSTER-Entwicklerbereich (auch für Testfälle Pflicht). |
+| `ELSTER_ERIC_LIBRARY_PATH` | – | ERiC-`lib`-Verzeichnis (oder `libericapi`) für Prüfung und Übermittlung; nicht im Image enthalten. |
+| `ELSTER_ERIC_LOG_DIR` | temporär | Verzeichnis für die ERiC-Protokolldatei `eric.log`; ohne Angabe wird sie nach jedem Aufruf verworfen. |
+| `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_PIN`, `ELSTER_CERTIFICATE_ALIAS` | – | ELSTER-Zertifikat (.pfx), seine PIN (Geheimnis) und ein Anzeigename. |
+| `ELSTER_ERIC_COMMAND` | integrierter Runner | Eigener Befehl statt `python -m app.services.eric_runner` (gleicher Vertrag). |
 | `ELSTER_ERIC_TIMEOUT_SECONDS` | `60` | Timeout des ERiC-Runners. |
 | `PAYROLL_PAP_COMMAND` | – | Externer Lohnsteuer-PAP-Runner (ohne Runner: manuelle Abzugsraten). |
 | `PAYROLL_PAP_TIMEOUT_SECONDS` | `30` | Timeout des PAP-Runners. |
