@@ -27,6 +27,10 @@ from app.services.elster import (
     retry_elster_submission,
     submit_vat_return,
 )
+from app.services.elster_certificates import (
+    get_company_elster_certificate,
+    serialize_company_elster_certificate,
+)
 from app.services.vat_returns import (
     VatReturnError,
     company_vat_method,
@@ -90,10 +94,15 @@ def vat_returns_page():
         elster_filter_error = None
         elster_filters = _selected_elster_filters()
         elster_summary = None
+        company_certificate = None
         vat_method = None
         date_from = date_to = None
         if selected_company_id:
             company = require_company_access(session, selected_company_id)
+            company_certificate = serialize_company_elster_certificate(
+                get_company_elster_certificate(session, selected_company_id),
+                company_id=selected_company_id,
+            )
             vat_method = {
                 **company_vat_method(company),
                 "from_date": company.vat_cash_basis_from,
@@ -181,7 +190,7 @@ def vat_returns_page():
         zm=zm,
         saved_returns=saved_views,
         current_year=date.today().year,
-        elster_readiness=elster_readiness(current_app.config),
+        elster_readiness=elster_readiness(current_app.config, company_certificate),
         elster_summary=elster_summary,
         elster_filters=elster_filters,
         elster_filter_error=elster_filter_error,

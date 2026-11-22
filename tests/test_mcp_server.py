@@ -92,6 +92,9 @@ EXPECTED_TOOL_NAMES = {
     "preflight_vat_return_elster",
     "preflight_vat_annual_return_elster",
     "get_elster_readiness",
+    "get_company_elster_certificate",
+    "set_company_elster_certificate",
+    "clear_company_elster_certificate",
     "submit_vat_return_elster",
     "submit_vat_annual_return_elster",
     "get_payroll_readiness",
@@ -923,7 +926,45 @@ def test_elster_tools_forward_arguments() -> None:
             "params": {"name": "get_elster_readiness", "arguments": {}},
         }
     )
-    assert http.calls[-1] == ("GET", "/elster/readiness", None, None)
+    assert http.calls[-1] == ("GET", "/elster/readiness", {}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3221,
+            "method": "tools/call",
+            "params": {"name": "get_elster_readiness", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("GET", "/elster/readiness", {"company_id": 7}, None)
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3222,
+            "method": "tools/call",
+            "params": {
+                "name": "set_company_elster_certificate",
+                "arguments": {"company_id": 7, "content_base64": "AA==", "pin": "1"},
+            },
+        }
+    )
+    assert http.calls[-1] == (
+        "POST",
+        "/companies/7/elster-certificate",
+        None,
+        {"content_base64": "AA==", "pin": "1"},
+    )
+
+    server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3223,
+            "method": "tools/call",
+            "params": {"name": "clear_company_elster_certificate", "arguments": {"company_id": 7}},
+        }
+    )
+    assert http.calls[-1] == ("POST", "/companies/7/elster-certificate/delete", None, None)
 
     server.handle(
         {

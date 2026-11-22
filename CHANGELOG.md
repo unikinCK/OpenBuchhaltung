@@ -8,6 +8,16 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### ELSTER-Zertifikat je Gesellschaft
+- **Neu:** Jede Gesellschaft kann ihr ELSTER-Zertifikat (.pfx) mit PIN in den Firmendaten hinterlegen (UI, REST
+  `GET/POST /companies/<id>/elster-certificate`, `POST …/elster-certificate/delete`, MCP
+  `get_/set_/clear_company_elster_certificate`; im KI-Chat gesperrt). Falsche PIN, unlesbare oder abgelaufene
+  Dateien werden beim Hochladen abgewiesen. Datei und PIN liegen verschlüsselt vor (Schlüssel aus `SECRET_KEY`) und
+  werden nie ausgegeben; das Audit-Log hält Inhaber, Gültigkeit und Fingerabdruck fest (Migration 0069, ADR-011).
+- **Geändert:** ERiC-Übermittlung und Bereitschaftsprüfung nutzen das Zertifikat der Gesellschaft vor dem der Instanz
+  (`ELSTER_CERTIFICATE_PATH`/`ELSTER_CERTIFICATE_PIN` bleiben Rückfall). `GET /elster/readiness` und das MCP-Tool
+  nehmen optional `company_id`; die UStVA-Seite zeigt die Bereitschaft der gewählten Gesellschaft.
+
 ### ELSTER: UStVA als amtlicher Datensatz über ERiC
 - **Neu:** Der ERiC-Transport übermittelt die UStVA als ElsterXML-Datensatz nach amtlichem Schema (Schnittstelle
   Version 11, Datenart `UStVA_<Jahr>`) statt der internen Nutzlast; gespeichert und gehasht wird genau dieser

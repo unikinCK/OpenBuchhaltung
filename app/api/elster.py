@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+
 from flask import current_app, jsonify, make_response, request
 
 from app.api.blueprint import api_bp
@@ -19,6 +22,14 @@ from app.services.elster import (
     preflight_vat_return,
     retry_elster_submission,
     submit_vat_return,
+)
+from app.services.elster_certificates import (
+    MAX_CERTIFICATE_BYTES,
+    ElsterCertificateError,
+    clear_company_elster_certificate,
+    get_company_elster_certificate,
+    serialize_company_elster_certificate,
+    set_company_elster_certificate,
 )
 from app.services.vat_returns import VAT_RETURN_KIND_ANNUAL, vat_return_kind_from_label
 from domain.models import ElsterSubmission, VatReturn
@@ -141,7 +152,16 @@ def _preflight_vat_return_elster_response(*, require_annual: bool = False):
 
 @api_bp.get("/elster/readiness")
 def get_elster_readiness_via_api():
-    return jsonify(elster_readiness(current_app.config)), 200
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify(elster_readiness(current_app.config)), 200
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        certificate = get_company_elster_certificate(session, company_id)
+        status = serialize_company_elster_certificate(certificate, company_id=company_id)
+        return jsonify(elster_readiness(current_app.config, status)), 200
 
 
 @api_bp.get("/elster/submissions")
@@ -280,3 +300,88 @@ def submit_vat_annual_return_elster_via_api():
 @api_bp.post("/elster/ust-jahreserklaerung/preflight")
 def preflight_vat_annual_return_elster_via_api():
     return _preflight_vat_return_elster_response(require_annual=True)
+
+
+# --- Zertifikat und PIN je Gesellschaft -------------------------------------------
+
+
+def _certificate_upload_from_request() -> (
+    tuple[bytes | None, str, str | None, str | None, str | None]
+):
+    """Datei, PIN, Anzeigename, Dateiname aus multipart (``file``) oder JSON; plus Fehler."""
+    if request.files.get("file") is not None:
+        upload = request.files["file"]
+        content = upload.read(MAX_CERTIFICATE_BYTES + 1)
+        form = request.form
+        return content, form.get("pin") or "", form.get("alias"), upload.filename, None
+    payload = request.get_json(silent=True) or {}
+    encoded = str(payload.get("content_base64") or "").strip()
+    if not encoded:
+        return None, "", None, None, "Provide file (multipart) or content_base64."
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return None, "", None, None, "content_base64 must be valid base64."
+    return (
+        content,
+        str(payload.get("pin") or ""),
+        payload.get("alias"),
+        payload.get("file_name"),
+        None,
+    )
+
+
+@api_bp.get("/companies/<int:company_id>/elster-certificate")
+def get_company_elster_certificate_via_api(company_id: int):
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        certificate = get_company_elster_certificate(session, company_id)
+        return jsonify(serialize_company_elster_certificate(certificate, company_id=company_id))
+
+
+@api_bp.post("/companies/<int:company_id>/elster-certificate")
+def set_company_elster_certificate_via_api(company_id: int):
+    if not api_can_write():
+        return forbidden()
+    content, pin, alias, file_name, error = _certificate_upload_from_request()
+    if error:
+        return jsonify({"error": error}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            certificate = set_company_elster_certificate(
+                session=session,
+                company=company,
+                content=content or b"",
+                pin=pin,
+                alias=alias if isinstance(alias, str) else None,
+                file_name=file_name if isinstance(file_name, str) else None,
+                changed_by=_api_changed_by(),
+                secret_key=current_app.config.get("SECRET_KEY"),
+            )
+        except ElsterCertificateError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 422
+        session.commit()
+        return jsonify(serialize_company_elster_certificate(certificate)), 200
+
+
+@api_bp.post("/companies/<int:company_id>/elster-certificate/delete")
+def clear_company_elster_certificate_via_api(company_id: int):
+    if not api_can_write():
+        return forbidden()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        company = api_scoped_company(session, company_id)
+        if company is None:
+            return jsonify({"error": "Company not found."}), 404
+        deleted = clear_company_elster_certificate(
+            session=session, company=company, changed_by=_api_changed_by()
+        )
+        session.commit()
+        return jsonify({"company_id": company_id, "configured": False, "deleted": deleted})

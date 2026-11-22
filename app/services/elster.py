@@ -24,6 +24,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.audit_log import log_audit_event
+from app.services.elster_certificates import (
+    CertificateMaterial,
+    ElsterCertificateError,
+    company_certificate_material,
+    get_company_elster_certificate,
+    serialize_company_elster_certificate,
+)
 from app.services.elster_xml import (
     ElsterXmlError,
     ElsterXmlOptions,
@@ -107,6 +114,8 @@ class EricElsterTransport:
     timeout_seconds: int = 60
     certificate_pin: str | None = None
     log_dir: str | None = None
+    # Zertifikat der Gesellschaft (entschlüsselt); hat Vorrang vor ``certificate_path``.
+    certificate_content: bytes | None = None
     name: str = "eric"
 
     def transmit(
@@ -114,7 +123,9 @@ class EricElsterTransport:
     ) -> ElsterTransportResult:
         if not self.eric_library_path or not Path(self.eric_library_path).exists():
             raise ElsterError("ERiC library is not configured.")
-        if not self.certificate_path or not Path(self.certificate_path).exists():
+        if not self.certificate_content and (
+            not self.certificate_path or not Path(self.certificate_path).exists()
+        ):
             raise ElsterError("ELSTER certificate is not configured.")
         response = self.run(
             payload_xml=payload_xml,
@@ -162,6 +173,13 @@ class EricElsterTransport:
             payload_path = Path(tmp_dir) / "payload.xml"
             response_path = Path(tmp_dir) / "response.json"
             payload_path.write_text(payload_xml, encoding="utf-8")
+            certificate_path = self.certificate_path or ""
+            if self.certificate_content and mode == "send":
+                certificate_file = Path(tmp_dir) / "certificate.pfx"
+                descriptor = os.open(certificate_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(self.certificate_content)
+                certificate_path = str(certificate_file)
 
             env = os.environ.copy()
             env.update(
@@ -173,7 +191,7 @@ class EricElsterTransport:
                     "ELSTER_DATENART_VERSION": _datenart_version(vat_return),
                     "ELSTER_ERIC_LIBRARY_PATH": self.eric_library_path,
                     "ELSTER_ERIC_LOG_DIR": self.log_dir or tmp_dir,
-                    "ELSTER_CERTIFICATE_PATH": self.certificate_path or "",
+                    "ELSTER_CERTIFICATE_PATH": certificate_path,
                     "ELSTER_CERTIFICATE_PIN": self.certificate_pin or "",
                     "ELSTER_CERTIFICATE_ALIAS": self.certificate_alias or "",
                     "ELSTER_VAT_RETURN_ID": str(vat_return.id),
@@ -224,7 +242,12 @@ def _datenart_version(vat_return: VatReturn) -> str:
         return ""
 
 
-def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
+def elster_readiness(
+    config: Mapping[str, object],
+    company_certificate: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Bereitschaft der Instanz; mit ``company_certificate`` (Status ohne Geheimnisse) zählt das
+    Zertifikat der Gesellschaft vor dem Instanz-Zertifikat aus der Umgebung."""
     environment = str(config.get("ELSTER_ENVIRONMENT") or "test").strip().lower()
     hersteller_id = str(config.get("ELSTER_HERSTELLER_ID") or "").strip()
     eric_library_path = str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "").strip()
@@ -236,6 +259,20 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
     hersteller_id_ok = len(hersteller_id) == 5 and hersteller_id.isdigit()
     eric_library_exists = bool(eric_library_path and Path(eric_library_path).exists())
     certificate_exists = bool(certificate_path and Path(certificate_path).exists())
+    certificate_detail = certificate_path or "not configured"
+    certificate_source = "instance" if certificate_exists else None
+    if company_certificate and company_certificate.get("configured"):
+        # Das Zertifikat der Gesellschaft bringt seine PIN mit.
+        expired = bool(company_certificate.get("expired"))
+        certificate_exists = not expired
+        certificate_pin_set = True
+        certificate_alias = str(company_certificate.get("display_name") or "")
+        valid_until = str(company_certificate.get("valid_until") or "")[:10]
+        certificate_detail = (
+            f"company: {certificate_alias} "
+            f"({'expired' if expired else 'valid until'} {valid_until})"
+        )
+        certificate_source = "company"
     # Ohne ELSTER_ERIC_COMMAND läuft der integrierte Runner (python -m app.services.eric_runner).
     eric_command_exists = bool(eric_command and Path(eric_command).exists())
     eric_runner_ok = eric_command_exists if eric_command else True
@@ -252,7 +289,10 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         warnings.append("ELSTER_ERIC_LIBRARY_PATH is not configured.")
     elif not eric_library_exists:
         warnings.append("ELSTER_ERIC_LIBRARY_PATH does not exist.")
-    if not certificate_path:
+    if certificate_source == "company":
+        if not certificate_exists:
+            warnings.append("The company's ELSTER certificate has expired.")
+    elif not certificate_path:
         warnings.append("ELSTER_CERTIFICATE_PATH is not configured.")
     elif not certificate_exists:
         warnings.append("ELSTER_CERTIFICATE_PATH does not exist.")
@@ -311,7 +351,7 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
             "label": "ELSTER certificate",
             "ok": certificate_exists,
             "required_for_production": True,
-            "detail": certificate_path or "not configured",
+            "detail": certificate_detail,
         },
         {
             "id": "certificate_pin",
@@ -352,6 +392,8 @@ def elster_readiness(config: Mapping[str, object]) -> dict[str, object]:
         "eric_library_exists": eric_library_exists,
         "certificate_path": certificate_path or None,
         "certificate_exists": certificate_exists,
+        "certificate_source": certificate_source,
+        "company_certificate": dict(company_certificate) if company_certificate else None,
         "certificate_pin_configured": certificate_pin_set,
         "certificate_alias": certificate_alias or None,
         "eric_command": eric_command or None,
@@ -428,6 +470,29 @@ def build_submission_payload(
     )
 
 
+def _company_certificate_status(session: Session, company_id: int) -> dict[str, object]:
+    return serialize_company_elster_certificate(
+        get_company_elster_certificate(session, company_id), company_id=company_id
+    )
+
+
+def _company_certificate_material(
+    session: Session, company_id: int, config: Mapping[str, object]
+) -> CertificateMaterial | None:
+    """Entschlüsseltes Gesellschafts-Zertifikat; ``None`` ohne (dann gilt das der Instanz)."""
+    certificate = get_company_elster_certificate(session, company_id)
+    if certificate is None:
+        return None
+    status = serialize_company_elster_certificate(certificate)
+    if status["expired"]:
+        raise ElsterError("The company's ELSTER certificate has expired.")
+    secret_key = str(config.get("SECRET_KEY") or "") or None
+    try:
+        return company_certificate_material(certificate, secret_key=secret_key)
+    except ElsterCertificateError as exc:
+        raise ElsterError(str(exc)) from exc
+
+
 def submit_vat_return(
     *,
     session: Session,
@@ -462,11 +527,23 @@ def submit_vat_return(
         payload_error = str(exc)
         payload_xml = build_ustva_payload(vat_return)
     payload_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
+    certificate: CertificateMaterial | None = None
+    if transport == "eric" and payload_error is None:
+        try:
+            certificate = _company_certificate_material(session, vat_return.company_id, config)
+        except ElsterError as exc:
+            payload_error = str(exc)
     effective_certificate_alias = (
-        certificate_alias or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "") or None
+        certificate_alias
+        or (certificate.alias if certificate else None)
+        or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "")
+        or None
     )
     transport_adapter = _transport_adapter(
-        transport=transport, certificate_alias=effective_certificate_alias, config=config
+        transport=transport,
+        certificate_alias=effective_certificate_alias,
+        config=config,
+        certificate=certificate,
     )
     try:
         if payload_error is not None:
@@ -572,7 +649,9 @@ def preflight_vat_return(
     payload_xml = build_ustva_payload(vat_return)
     payload_bytes = payload_xml.encode("utf-8")
     payload = _payload_diagnostics(payload_xml)
-    readiness = elster_readiness(config or {})
+    readiness = elster_readiness(
+        config or {}, _company_certificate_status(session, vat_return.company_id)
+    )
     warnings = list(readiness["warnings"])
     max_payload_bytes = int((config or {}).get("ELSTER_MAX_PAYLOAD_BYTES") or 0)
     if transport == "eric" and not readiness["eric_transport_available"]:
@@ -874,14 +953,21 @@ def _payload_diagnostics(payload_xml: str) -> dict[str, object]:
 
 
 def _transport_adapter(
-    *, transport: str, certificate_alias: str | None, config: Mapping[str, object]
+    *,
+    transport: str,
+    certificate_alias: str | None,
+    config: Mapping[str, object],
+    certificate: CertificateMaterial | None = None,
 ) -> ElsterTransport:
     if transport == "mock":
         return MockElsterTransport()
     return EricElsterTransport(
         eric_library_path=str(config.get("ELSTER_ERIC_LIBRARY_PATH") or "") or None,
         certificate_path=str(config.get("ELSTER_CERTIFICATE_PATH") or "") or None,
-        certificate_pin=str(config.get("ELSTER_CERTIFICATE_PIN") or "") or None,
+        certificate_pin=certificate.pin
+        if certificate
+        else str(config.get("ELSTER_CERTIFICATE_PIN") or "") or None,
+        certificate_content=certificate.content if certificate else None,
         log_dir=str(config.get("ELSTER_ERIC_LOG_DIR") or "") or None,
         certificate_alias=certificate_alias
         or str(config.get("ELSTER_CERTIFICATE_ALIAS") or "")

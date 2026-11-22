@@ -5831,12 +5831,69 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="get_elster_readiness",
         description=(
-            "Prüft ELSTER-Umgebung, Mock-Transport, ERiC-Bibliothek, Zertifikat "
-            "und lokalen ERiC-Command."
+            "Prüft ELSTER-Umgebung, Hersteller-ID, ERiC-Bibliothek, Zertifikat mit PIN und "
+            "ERiC-Runner. Mit company_id zählt das Zertifikat der Gesellschaft vor dem der Instanz."
         ),
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {
+                    "type": "integer",
+                    "description": "Optional: Gesellschaft, deren Zertifikat geprüft wird.",
+                },
+            },
+            "additionalProperties": False,
+        },
         http_method="GET",
         path="/elster/readiness",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_company_elster_certificate",
+        description=(
+            "Zeigt das ELSTER-Zertifikat einer Gesellschaft: Name, Inhaber, Gültigkeit, "
+            "Fingerabdruck (nie Datei oder PIN). configured false, wenn keines hinterlegt ist."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/companies/{company_id}/elster-certificate",
+        arg_location="none",
+    ),
+    ToolSpec(
+        name="set_company_elster_certificate",
+        description=(
+            "Hinterlegt das ELSTER-Zertifikat (.pfx, Base64) einer Gesellschaft mit PIN; ein "
+            "vorhandenes wird ersetzt. Datei und PIN werden geprüft (falsche PIN, abgelaufen) "
+            "und verschlüsselt gespeichert, nie ausgegeben. Im KI-Chat gesperrt."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "content_base64": {
+                    "type": "string",
+                    "description": "Zertifikatsdatei (.pfx) als Base64.",
+                },
+                "pin": {"type": "string", "description": "PIN des Zertifikats."},
+                "alias": {"type": "string", "description": "Optional: Anzeigename."},
+                "file_name": {"type": "string", "description": "Optional: Dateiname."},
+            },
+            "required": ["company_id", "content_base64", "pin"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/companies/{company_id}/elster-certificate",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="clear_company_elster_certificate",
+        description=(
+            "Löscht ELSTER-Zertifikat und PIN einer Gesellschaft; danach gilt das Zertifikat "
+            "der Instanz, falls eingerichtet."
+        ),
+        input_schema=_company_id_schema(),
+        http_method="POST",
+        path="/companies/{company_id}/elster-certificate/delete",
         arg_location="none",
     ),
     ToolSpec(

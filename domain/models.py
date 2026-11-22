@@ -1562,6 +1562,42 @@ class VatReturn(Base):
     )
 
 
+class CompanyElsterCertificate(Base):
+    """ELSTER-Zertifikat (Soft-PSE, .pfx) einer Gesellschaft mit PIN (ADR-011).
+
+    Datei und PIN liegen nur Fernet-verschlüsselt vor (Schlüssel aus ``SECRET_KEY``) und werden
+    nie ausgegeben; lesbar sind nur Anzeigename, Inhaber, Gültigkeit und Fingerabdruck. Je
+    Gesellschaft höchstens ein Zertifikat; ohne eines gilt das Instanz-Zertifikat aus der
+    Umgebung (``ELSTER_CERTIFICATE_PATH``/``ELSTER_CERTIFICATE_PIN``).
+    """
+
+    __tablename__ = "company_elster_certificate"
+    __table_args__ = (
+        UniqueConstraint("company_id", name="uq_company_elster_certificate_company"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    certificate_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    pin_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    alias: Mapped[str | None] = mapped_column(String(120))
+    file_name: Mapped[str | None] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    issuer: Mapped[str | None] = mapped_column(String(255))
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fingerprint_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    uploaded_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+
 class ElsterSubmission(Base):
     """Protokollierte ELSTER-Übermittlung bzw. Testübermittlung."""
 

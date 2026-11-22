@@ -60,21 +60,29 @@ Datensätze nach amtlichem Schema prüft (Schema- und Plausibilitätsprüfung), 
 6. **Preflight prüft mit ERiC.** Ist ERiC eingebunden, prüft der Preflight den Datensatz lokal (ohne Senden) und
    meldet Fehler der Plausibilitätsprüfung feldgenau. Dafür reichen Hersteller-ID und Bibliothek; zum Senden
    braucht es zusätzlich Zertifikat und PIN (`ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_PIN`).
-7. **Erst die UStVA.** Die USt-Jahreserklärung (Verfahren `ElsterErklaerung`) wird über ERiC abgewiesen, bis ihr
+7. **Zertifikat und PIN je Gesellschaft** (Migration 0069). Jede Gesellschaft hinterlegt ihr Soft-PSE (.pfx) mit
+   PIN in den Firmendaten (UI, REST, MCP; im KI-Chat gesperrt). Beim Hochladen wird die Datei mit der PIN
+   geöffnet; eine falsche PIN, eine unlesbare oder abgelaufene Datei wird sofort abgewiesen. Datei und PIN liegen
+   Fernet-verschlüsselt in der Datenbank (Schlüssel aus `SECRET_KEY`), lesbar sind nur Name, Inhaber, Gültigkeit
+   und Fingerabdruck. Nur zum Senden wird die Datei entschlüsselt in das temporäre Verzeichnis des Aufrufs
+   geschrieben (Rechte 0600) und mit ihm gelöscht. Ohne Zertifikat der Gesellschaft gilt das der Instanz
+   (`ELSTER_CERTIFICATE_PATH`/`ELSTER_CERTIFICATE_PIN`). Ein geänderter `SECRET_KEY` macht hinterlegte Zertifikate
+   unlesbar; sie müssen dann neu hochgeladen werden.
+8. **Erst die UStVA.** Die USt-Jahreserklärung (Verfahren `ElsterErklaerung`) wird über ERiC abgewiesen, bis ihr
    Datensatz gebaut ist.
 
 ## Konsequenzen
 - Positiv: Der Datensatz ist gegen das echte ERiC geprüft – lokal mit der macOS-Bibliothek, im Preflight mit der
   eingebundenen. Fehler zeigt OpenBuchhaltung vor der Übermittlung feldgenau an. Ohne ERiC-Bibliothek laufen alle
   Tests weiter; der Integrationstest läuft nur mit `OBH_TEST_ERIC_LIBRARY`.
-- Negativ: Jede Prüfung startet einen Prozess und initialisiert ERiC (etwa eine Sekunde). Zertifikat und PIN
-  gelten je Instanz, nicht je Gesellschaft. Jedes November-Release verlangt neue Prüfmodule und eine Anpassung
-  der unterstützten Jahre (`USTVA_MAX_YEAR`).
+- Negativ: Jede Prüfung startet einen Prozess und initialisiert ERiC (etwa eine Sekunde). Jedes November-Release verlangt neue Prüfmodule und eine Anpassung
+  der unterstützten Jahre (`USTVA_MAX_YEAR`). Die PIN liegt verschlüsselt auf dem Server, damit Übermittlungen
+  ohne erneute Eingabe laufen; wer `SECRET_KEY` und Datenbank hat, kann sie entschlüsseln.
 - Offene Punkte:
   - Hersteller-ID: Zuteilung abwarten, dann Testübermittlung mit Testzertifikat und Testmerker.
   - ERiC 45 (November-Release) für die UStVA 2027 einbinden, sobald freigegeben.
   - Hinweise an Nutzer aus dem Lizenzvertrag (Datenschutz mit Bestätigung, Protokolldateien) in UI, REST und MCP.
-  - Zertifikat und PIN je Gesellschaft, verschlüsselt gespeichert, statt je Instanz.
+  - Erinnerung vor Ablauf des Zertifikats (Gültigkeit wird schon angezeigt).
   - Übermittlungsprotokoll als PDF (`ERIC_DRUCKE`) ablegen.
   - USt-Jahreserklärung, Zusammenfassende Meldung, Lohnsteuer-Anmeldung.
   - ERiC-Image für den Produktionsbetrieb (Linux x86_64) und Prüfung im Container.
