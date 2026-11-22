@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Zahlungsavise – OpenBuchhaltung{% endblock %}
+{% block head_extra %}{% if running %}<meta http-equiv="refresh" content="10" />{% endif %}{% endblock %}
+
+{% macro light_badge(light) -%}
+  {%- if light == 'green' -%}<span class="badge badge-success">grün</span>
+  {%- elif light == 'yellow' -%}<span class="badge badge-warning">gelb</span>
+  {%- elif light == 'red' -%}<span class="badge badge-danger">rot</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Zahlungsavise</h1>
+      <p class="page-subtitle">Avise von Kunden auslesen, den offenen Posten zuordnen und Skonto und Abzüge erklären</p>
+    </div>
+  </div>
+
+  {% if not selected_company_id %}
+    <section class="card">
+      <p class="muted">Bitte zuerst unter <a href="{{ url_for('main.admin_page') }}">Verwaltung</a> eine Gesellschaft anlegen.</p>
+    </section>
+  {% else %}
+    <details class="card card-primary" id="avis-auswerten"{% if not advices %} open{% endif %}>
+      <summary>Avis auswerten</summary>
+      <p class="muted">
+        Die KI schreibt die Positionen des Avis wörtlich ab, das Programm prüft die Abschrift, ordnet sie den offenen
+        Forderungen zu und erklärt die Abzüge. Ergebnis ist ein Vorschlag mit Ampel; gebucht wird erst nach Freigabe.
+      </p>
+      <form method="post" action="{{ url_for('main.start_payment_advice_action') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <div class="form-grid">
+          <div class="field field-wide">
+            <label for="advice_file">Avis hochladen (PDF oder Bild; Scans brauchen einen OCR-fähigen KI-Zugang)</label>
+            <input id="advice_file" name="advice_file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
+          </div>
+          {% if documents %}
+            <div class="field field-wide">
+              <label for="document_id">… oder vorhandenen Beleg wählen</label>
+              <select id="document_id" name="document_id">
+                <option value="">– Datei oben hochladen –</option>
+                {% for document in documents %}
+                  <option value="{{ document.id }}">{{ document.file_name }} ({{ document.uploaded_at | datum }})</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Auslesen und zuordnen</button>
+        </div>
+      </form>
+    </details>
+
+    <section class="card">
+      <h2>Avise</h2>
+      {% if advices %}
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Datei</th>
+              <th>Zahler</th>
+              <th>Zahldatum</th>
+              <th class="num">Betrag</th>
+              <th>Ampel</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for advice in advices %}
+              <tr>
+                <td><a href="{{ url_for('main.payment_advice_detail_page', advice_id=advice.id, company_id=selected_company_id) }}">{{ advice.id }}</a></td>
+                <td>{{ advice.document.file_name }}</td>
+                <td>{{ advice.payer or '' }}{% if advice.partner %} <span class="muted">({{ advice.partner.name }})</span>{% endif %}</td>
+                <td>{{ advice.payment_date | datum }}</td>
+                <td class="num">{{ advice.total_amount | betrag }}</td>
+                <td>{{ light_badge(advice.traffic_light) }}</td>
+                <td>
+                  {% if advice.status == 'running' %}wird ausgelesen …
+                  {% elif advice.status == 'failed' %}<span class="badge badge-danger">fehlgeschlagen</span>
+                  {% elif advice.status == 'applied' %}<span class="badge badge-info">ausgeglichen</span>
+                  {% else %}Vorschlag{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Avise ausgewertet.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+{% endblock %}

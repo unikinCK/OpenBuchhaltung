@@ -377,6 +377,7 @@ def settle_open_item(
     settlement_date: date | None = None,
     foreign_amount: Decimal | None = None,
     exchange_rate: Decimal | None = None,
+    commit: bool = True,
 ) -> OpenItem:
     """Gleicht einen Posten aus. Das Zahlungsdatum ist ``settlement_date``, sonst das Datum der
     Buchung, des Bankumsatzes oder heute; es bestimmt bei Istversteuerung den Meldezeitraum.
@@ -632,6 +633,9 @@ def settle_open_item(
             "journal_entry_id": linked_entry.id if linked_entry else None,
         },
     )
+    if not commit:
+        session.flush()
+        return item
     session.commit()
     session.refresh(item)
     return item

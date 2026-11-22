@@ -8,6 +8,18 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Zahlungsavise
+- **Neu:** Zahlungsavise von Kunden und Zentralregulierern auswerten (Bank & OPOS → Zahlungsavise): Die KI schreibt
+  die Positionen je Seite wörtlich ab, das Programm prüft die Abschrift gegen den Seitentext (zweiter Versuch mit
+  den Fehlern), ordnet die Positionen offenen Forderungen zu, erklärt Skonto, Delkredere, Bonus,
+  Konventionalstrafe, Reklamation und Gebühren und vergibt eine Ampel (ADR-012). Läuft im Hintergrund.
+- **Neu:** Ausgleich mit einem Klick: eine Buchung Bank an die Forderungen, Skonto mit Umsatzsteuerkorrektur über
+  den Steuercode, übrige Abzüge auf ein wählbares Konto; die Posten sind danach ausgeglichen, das Avis ist als Beleg
+  verknüpft, ein Storno lässt alles wieder aufleben.
+- **Neu:** REST `/api/v1/payment-advices` (anlegen, listen, abrufen, neu zuordnen, ausgleichen, löschen) und
+  MCP-Tools `start_payment_advice`, `list_payment_advices`, `get_payment_advice`, `rematch_payment_advice`,
+  `apply_payment_advice`, `delete_payment_advice`; für Obi als Werkzeuggruppe „zahlungsavise“. Migration 0070.
+- **Neu:** Standardkonto „Gewährte Skonti“ (SKR03 8736/8730, SKR04 4736/4730) als Vorbelegung.
 ### ELSTER-Zertifikat je Gesellschaft
 - **Neu:** Jede Gesellschaft kann ihr ELSTER-Zertifikat (.pfx) mit PIN in den Firmendaten hinterlegen (UI, REST
   `GET/POST /companies/<id>/elster-certificate`, `POST …/elster-certificate/delete`, MCP

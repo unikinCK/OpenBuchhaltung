@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Zahlungsavis {{ advice.id }} – OpenBuchhaltung{% endblock %}
+{% block head_extra %}{% if advice.status == 'running' %}<meta http-equiv="refresh" content="10" />{% endif %}{% endblock %}
+
+{% macro light_badge(light) -%}
+  {%- if light == 'green' -%}<span class="badge badge-success">grün</span>
+  {%- elif light == 'yellow' -%}<span class="badge badge-warning">gelb</span>
+  {%- elif light == 'red' -%}<span class="badge badge-danger">rot</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Zahlungsavis {{ advice.advice_number or advice.id }} {{ light_badge(advice.traffic_light) }}</h1>
+      <p class="page-subtitle">
+        {{ advice.document.file_name }}
+        {% if advice.payer %} · {{ advice.payer }}{% endif %}
+        {% if advice.partner %} · Partner {{ advice.partner.name }}{% endif %}
+        {% if advice.payment_date %} · gezahlt {{ advice.payment_date | datum }}{% endif %}
+        {% if advice.total_amount is not none %} · {{ advice.total_amount | betrag }} {{ advice.currency_code or '' }}{% endif %}
+      </p>
+    </div>
+    <div class="page-actions">
+      <a class="button-secondary" href="{{ url_for('main.payment_advices_page', company_id=selected_company_id) }}">Alle Avise</a>
+    </div>
+  </div>
+
+  {% if advice.status == 'running' %}
+    <section class="card"><p>Das Avis wird ausgelesen … Die Seite aktualisiert sich selbst.</p></section>
+  {% elif advice.status == 'failed' %}
+    <section class="card"><p class="error">Auslesen fehlgeschlagen: {{ advice.error }}</p></section>
+  {% endif %}
+
+  {% if advice.status == 'applied' and advice.journal_entry %}
+    <section class="card">
+      <p>
+        Ausgeglichen von {{ advice.applied_by }} am {{ advice.applied_at | datum }} mit Buchung
+        <a href="{{ url_for('main.journal_entry_detail_page', journal_entry_id=advice.journal_entry_id) }}">{{ advice.journal_entry.posting_number }}</a>{% if advice.journal_entry.reversed_by %} (storniert){% endif %}.
+      </p>
+    </section>
+  {% endif %}
+
+  {% if result.reasons %}
+    <section class="card">
+      <h2>Zu prüfen</h2>
+      <ul>
+        {% for reason in result.reasons %}
+          <li>{{ light_badge(reason.light) }} {{ reason.text }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% elif result %}
+    <section class="card"><p>{{ light_badge('green') }} Alle Positionen sind zugeordnet und erklärt.</p></section>
+  {% endif %}
+
+  {% if result.lines %}
+    <section class="card">
+      <h2>Positionen</h2>
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Art</th>
+            <th>Beleg</th>
+            <th>Datum</th>
+            <th class="num">Rechnung</th>
+            <th class="num">Zahlung</th>
+            <th>Offener Posten</th>
+            <th class="num">Offen</th>
+            <th>Abzüge</th>
+            <th>Ampel</th>
+            <th>Hinweise</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in result.lines %}
+            <tr>
+              <td>{{ {'rechnung': 'Rechnung', 'gutschrift': 'Gutschrift', 'abzug': 'Abzug', 'gebuehr': 'Gebühr'}.get(line.kind, line.kind) }}</td>
+              <td>{{ line.reference }}{% if line.customer_reference %} <span class="muted">{{ line.customer_reference }}</span>{% endif %}{% if line.text %}<br /><span class="muted">{{ line.text }}</span>{% endif %}</td>
+              <td>{{ line.date }}</td>
+              <td class="num">{{ line.gross | betrag }}</td>
+              <td class="num">{{ (line.paid_amount or line.paid) | betrag }}</td>
+              <td>{{ line.open_item_reference or '' }}{% if line.match == 'amount' %} <span class="muted">(Betrag)</span>{% endif %}</td>
+              <td class="num">{{ line.open_amount | betrag }}</td>
+              <td>
+                {% for component in line.components %}
+                  {{ component.label }} {{ component.amount | betrag }}{% if not loop.last %}<br />{% endif %}
+                {% endfor %}
+              </td>
+              <td>{{ light_badge(line.light) }}</td>
+              <td>{{ line.notes | join(' ') }}</td>
+            </tr>
+          {% endfor %}
+          {% for row in result.summary_deductions %}
+            <tr>
+              <td>Summenabzug</td>
+              <td colspan="6">{{ row.label }}</td>
+              <td>{{ row.category_label }} {{ row.amount | betrag }}</td>
+              <td>{{ light_badge(row.light) }}</td>
+              <td></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if result.checks %}
+        <p class="muted">
+          Summenprüfung: Zahlungen {{ result.checks.invoices_paid | betrag }}
+          − Gutschriften {{ result.checks.credit_notes | betrag }}
+          − Abzüge {{ result.checks.deductions | betrag }}
+          − Summenabzüge {{ result.checks.summary_deductions | betrag }}
+          = {{ result.checks.positions_total | betrag }}; überwiesen {{ result.checks.total_amount | betrag }}
+          {% if result.checks.ok %}✓{% else %}✗{% endif %}
+        </p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  {% if result and can_apply %}
+    <section class="card card-primary">
+      <h2>Ausgleichen</h2>
+      <p class="muted">
+        Eine Buchung: Bank {{ advice.total_amount | betrag }} an die Forderungen der zugeordneten Posten
+        ({{ result.booking.settled_total | betrag }}), Skonto {{ result.booking.discount_total | betrag }}
+        und übrige Abzüge {{ result.booking.other_deductions_total | betrag }} im Soll. Danach sind die Posten
+        ausgeglichen; ein Storno der Buchung lässt sie wieder aufleben.
+      </p>
+      {% if advice.traffic_light == 'red' %}
+        <p class="error">Rote Avise lassen sich nicht ausgleichen. Bitte die Hinweise klären und neu zuordnen.</p>
+      {% elif not result.bank_candidates %}
+        <p class="muted">Kein offener Zahlungseingang über {{ advice.total_amount | betrag }} gefunden. Bitte zuerst die Bankumsätze abrufen und dann neu zuordnen.</p>
+      {% else %}
+        <form method="post" action="{{ url_for('main.apply_payment_advice_action', advice_id=advice.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <div class="form-grid">
+            <div class="field field-wide">
+              <label for="bank_transaction_id">Zahlungseingang</label>
+              <select id="bank_transaction_id" name="bank_transaction_id" required>
+                {% for transaction in result.bank_candidates %}
+                  <option value="{{ transaction.id }}">{{ transaction.booking_date | datum }} · {{ transaction.amount | betrag }} · {{ transaction.counterparty or '' }} · {{ transaction.purpose }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% if result.booking.discount_total and result.booking.discount_total != '0.00' %}
+              <div class="field">
+                <label for="discount_account_id">Skontokonto</label>
+                <select id="discount_account_id" name="discount_account_id" required>
+                  <option value="">– wählen –</option>
+                  {% for account in booking_accounts %}
+                    <option value="{{ account.id }}"{% if account.id == default_discount_account_id %} selected{% endif %}>{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="discount_tax_code_id">Steuercode Skonto (USt-Korrektur)</label>
+                <select id="discount_tax_code_id" name="discount_tax_code_id">
+                  <option value="">ohne</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }}{% if tax_code.description %} – {{ tax_code.description }}{% endif %} ({{ tax_code.rate | satz }} %)</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% endif %}
+            {% if result.booking.other_deductions_total and result.booking.other_deductions_total != '0.00' %}
+              <div class="field">
+                <label for="deduction_account_id">Konto für übrige Abzüge</label>
+                <select id="deduction_account_id" name="deduction_account_id" required>
+                  <option value="">– wählen –</option>
+                  {% for account in booking_accounts %}
+                    <option value="{{ account.id }}">{{ account.code }} – {{ account.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label for="deduction_tax_code_id">Steuercode übrige Abzüge</label>
+                <select id="deduction_tax_code_id" name="deduction_tax_code_id">
+                  <option value="">ohne</option>
+                  {% for tax_code in tax_codes %}
+                    <option value="{{ tax_code.id }}">{{ tax_code.code }}{% if tax_code.description %} – {{ tax_code.description }}{% endif %} ({{ tax_code.rate | satz }} %)</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% endif %}
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Ausgleichen und buchen</button>
+          </div>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="form-actions">
+      {% if advice.status == 'ready' %}
+        <form method="post" action="{{ url_for('main.rematch_payment_advice_action', advice_id=advice.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <button type="submit" class="button-secondary">Neu zuordnen</button>
+        </form>
+      {% endif %}
+      {% if advice.status != 'running' and can_apply or advice.status == 'failed' %}
+        <form method="post" action="{{ url_for('main.delete_payment_advice_action', advice_id=advice.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+          <button type="submit" class="danger">Avis löschen</button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}
