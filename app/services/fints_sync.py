@@ -225,6 +225,13 @@ def set_fints_connection_active(
         changed_by=changed_by,
         payload={"name": connection.name},
     )
+    if not is_active:
+        # Lokaler Import: bank_auto_sync baut auf diesem Modul auf.
+        from app.services.bank_auto_sync import deactivate_for_connection
+
+        deactivate_for_connection(
+            session, fints_connection_id=connection.id, changed_by=changed_by
+        )
     session.commit()
     session.refresh(connection)
     return connection

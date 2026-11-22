@@ -180,6 +180,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         # Direktabruf. Sie ist an den Betreiber gebunden und gehört nur in die
         # .env der Instanz, nie ins Repository.
         FINTS_PRODUCT_ID=os.environ.get("FINTS_PRODUCT_ID"),
+        # Uhrzeit (Europe/Berlin), ab der `flask bank-auto-sync --loop` täglich abruft.
+        BANK_AUTO_SYNC_TIME=os.environ.get("BANK_AUTO_SYNC_TIME", "06:00"),
         # Open Banking (PSD2) über Enable Banking für Banken ohne FinTS: ID und
         # privater Schlüssel der dort registrierten Anwendung; die Redirect-URL
         # muss in der Anwendung hinterlegt sein (Default: Callback dieser Instanz).

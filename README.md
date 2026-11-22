@@ -401,6 +401,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | Variable | Default | Wirkung |
 |---|---|---|
 | `FINTS_PRODUCT_ID` | – | FinTS-Registrierungsnummer der DK, genau 25 Zeichen (Pflicht für den Direktabruf). |
+| `BANK_AUTO_SYNC_TIME` | `06:00` | Uhrzeit (Europe/Berlin) des täglichen automatischen Bankabrufs durch `flask bank-auto-sync --loop` (Compose-Dienst `bank-sync`). |
 | `ENABLE_BANKING_APP_ID`, `ENABLE_BANKING_KEY_FILE` | – | Open Banking (PSD2) über Enable Banking: Anwendungs-ID und Pfad zum privaten RSA-Schlüssel (PEM). |
 | `ENABLE_BANKING_REDIRECT_URL` | Callback der Instanz | Rücksprung-URL nach der Bank-Zustimmung (in der Enable-Banking-Anwendung hinterlegen, https). |
 | `ENABLE_BANKING_API_URL` | `https://api.enablebanking.com` | API-Basis-URL von Enable Banking. |
@@ -686,8 +687,8 @@ mit Referenz als Duplikat. Beispiel-CSV: `data/demo/bank_demo.csv`.
 
 **FinTS/HBCI-Direktabruf:** Je Gesellschaft lassen sich Bankzugänge (BLZ, Login,
 FinTS-URL, optional IBAN bei Mehrkonten-Zugängen) hinterlegen und Umsätze direkt
-abrufen. PIN und TAN werden **nie gespeichert** — die PIN wird bei jedem Abruf
-eingegeben. Verlangt die Bank eine TAN (PSD2), wird der Dialog eingefroren und
+abrufen. PIN und TAN werden **nicht gespeichert** — die PIN wird bei jedem Abruf
+eingegeben (Ausnahme: der ausdrücklich eingeschaltete tägliche Abruf, siehe unten). Verlangt die Bank eine TAN (PSD2), wird der Dialog eingefroren und
 nach TAN-Eingabe fortgesetzt; auch entkoppelte Verfahren (pushTAN-Freigabe in
 der Banking-App) werden unterstützt. Eingefrorene Dialoge verfallen nach
 15 Minuten. Voraussetzung ist eine registrierte Produktkennung der Deutschen
@@ -770,6 +771,26 @@ einem anderen Bankkonto, warnen Vorschau und Ergebnis: vermutlich das falsche
 Zielkonto, etwa das Sammelkonto statt des Unterkontos. Grenze: Bei Kartenzahlungen in Fremdwährung
 fehlt der Ursprungsbetrag, den der CSV-Import im Verwendungszweck anhängt. Obi nutzt
 dafür die Werkzeuggruppe `bankabruf` und schreibt Umsätze nie selbst ab.
+
+**Täglicher automatischer Abruf:** Eingerichtete Zugänge – FinTS, Open Banking und
+Wallets eines Bank-MCP-Servers – lassen sich unter **Bank → Online-Abruf** einzeln auf
+„Täglich abrufen“ stellen (FinTS mit PIN, Open Banking nach der Bank-Zustimmung, MCP auf
+der Abrufseite der Wallet mit Ziel-Bankkonto). Der Compose-Dienst `bank-sync`
+(`flask bank-auto-sync --loop`) ruft ab `BANK_AUTO_SYNC_TIME` (Standard 06:00,
+Europe/Berlin) einmal täglich ab; nach einem Neustart holt er einen verpassten Lauf nach,
+und ein neu eingeschalteter Zugang läuft (nach dieser Uhrzeit) beim nächsten
+Prüfintervall von 5 Minuten zum ersten Mal. Die Umsätze laufen durch dieselbe Import-Pipeline wie der Handabruf (Dedup,
+Audit-Log mit „<Benutzer> (automatisch)“, Push-Mitteilung). Die Bankseite zeigt je Zugang
+Zeitpunkt, Ergebnis und Meldung des letzten Laufs, „Jetzt abrufen“ und „Ausschalten“.
+FinTS braucht dafür die PIN: Sie wird nur hier und nur Fernet-verschlüsselt gespeichert
+(Schlüssel aus `SECRET_KEY` abgeleitet; ändert er sich, muss die PIN neu hinterlegt
+werden) und nie ausgegeben. Verlangt die Bank eine TAN oder meldet sie einen Fehler, hält
+der Abruf sofort an, damit wiederholte Fehlversuche den Zugang nicht sperren und kein
+täglicher pushTAN-Auftrag ins Leere läuft; ein erfolgreicher Handabruf setzt ihn fort und
+übernimmt die dabei eingegebene PIN. Ist die Bank nur nicht erreichbar, versucht er es
+beim nächsten Lauf wieder. Open Banking meldet eine abgelaufene Zustimmung, bis sie
+erneuert ist; MCP-Wallets nutzen den Zugang des Benutzers, der den Abruf eingeschaltet
+hat. Ausschalten oder Deaktivieren des Zugangs löscht eine gespeicherte PIN.
 
 **Mehrere Bankkonten:** Eine Gesellschaft kann beliebig viele Bankkonten
 (Kontoart `asset`) führen. Umsätze lassen sich einzeln oder kontoweise auf ein
@@ -1749,6 +1770,11 @@ Bank & FinTS:
 - `GET/POST /api/v1/fints-connections`, `POST /api/v1/fints-connections/<id>/active`
 - `POST /api/v1/fints-connections/<id>/sync` — Abruf; bei TAN-Pflicht `202` mit `dialog_id`
 - `POST /api/v1/fints-dialogs/<id>/tan` — TAN bestätigen bzw. pushTAN-Freigabe prüfen
+- `GET /api/v1/bank-auto-syncs?company_id=…` — Zugänge mit täglichem automatischem Abruf samt letztem Lauf
+- `POST /api/v1/fints-connections/<id>/auto-sync` (`pin`), `POST /api/v1/open-banking-connections/<id>/auto-sync`,
+  `POST /api/v1/bank-accounts/<id>/mcp-auto-sync` (`server_id`, `wallet_id`) — täglichen Abruf einschalten
+- `POST /api/v1/bank-auto-syncs/<id>/disable` — ausschalten (löscht eine gespeicherte PIN);
+  `POST /api/v1/bank-auto-syncs/run` (`company_id`, optional `auto_sync_id`) — sofort abrufen
 - `GET /api/v1/open-banking/institutes?country=DE&q=…` — Bankenliste von Enable Banking
 - `GET/POST /api/v1/open-banking-connections`, `POST /api/v1/open-banking-connections/<id>/active`
 - `POST /api/v1/open-banking-connections/<id>/authorize` — liefert `authorization_url` für die Bank-Zustimmung

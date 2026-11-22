@@ -200,6 +200,12 @@ TOOL_TITLES: dict[str, str] = {
     "list_mcp_bank_wallets": "Wallets beim Bank-MCP-Server auflisten",
     "preview_mcp_bank_transactions": "Umsätze vom Bank-MCP-Server ansehen",
     "sync_mcp_bank_transactions": "Umsätze über Bank-MCP-Server abrufen",
+    "list_bank_auto_syncs": "Automatische Bankabrufe anzeigen",
+    "enable_fints_auto_sync": "Automatischen FinTS-Abruf einschalten",
+    "enable_open_banking_auto_sync": "Automatischen Open-Banking-Abruf einschalten",
+    "enable_mcp_bank_auto_sync": "Automatischen MCP-Bankabruf einschalten",
+    "disable_bank_auto_sync": "Automatischen Bankabruf ausschalten",
+    "run_bank_auto_sync": "Automatische Bankabrufe jetzt ausführen",
     # Offene Posten, Zahlungen, Mahnungen
     "list_open_items": "Offene Posten auflisten",
     "list_payment_run_proposals": "Zahlvorschläge auflisten",

@@ -8,6 +8,13 @@ from flask import abort, current_app, flash, jsonify, redirect, render_template,
 from flask import session as flask_session
 from sqlalchemy import func, select
 
+from app.services.bank_auto_sync import (
+    BankAutoSyncError,
+    after_manual_fints_sync,
+    list_bank_auto_syncs,
+    serialize_auto_sync,
+    sync_time,
+)
 from app.services.bank_import import (
     BankImportError,
     bank_reconciliation,
@@ -133,6 +140,7 @@ def bank_page():
         fints_connections = []
         open_banking_connections = []
         mcp_bank_sources = []
+        auto_syncs: list[dict] = []
         suggestions_by_tx: dict[int, list[JournalEntry]] = {}
         # (Umsatz, Buchung): Vorschlag auf einem Sammelkonto, Zuordnen gliedert um.
         reclassifying_suggestions: set[tuple[int, int]] = set()
@@ -154,6 +162,10 @@ def bank_page():
             open_banking_connections = list_open_banking_connections(
                 session=session, company_id=selected_company_id
             )
+            auto_syncs = [
+                serialize_auto_sync(entry)
+                for entry in list_bank_auto_syncs(session, company_id=selected_company_id)
+            ]
             selected_company = session.get(Company, selected_company_id)
             mcp_bank_sources = bank_sync_servers(
                 session, tenant_id=selected_company.tenant_id if selected_company else None
@@ -344,6 +356,16 @@ def bank_page():
         open_banking_configured=open_banking_configured(current_app.config),
         open_banking_status=connection_status,
         mcp_bank_sources=mcp_bank_sources,
+        auto_syncs=auto_syncs,
+        auto_sync_by_fints={
+            item["fints_connection_id"]: item for item in auto_syncs if item["fints_connection_id"]
+        },
+        auto_sync_by_open_banking={
+            item["open_banking_connection_id"]: item
+            for item in auto_syncs
+            if item["open_banking_connection_id"]
+        },
+        auto_sync_time=_auto_sync_time(),
         partners=partners,
         open_count=open_count,
         entry_info=entry_info,
@@ -594,6 +616,27 @@ def bank_book_action(transaction_id: int):
     return redirect(url_for("main.bank_page", company_id=company_id))
 
 
+def _auto_sync_time() -> str:
+    try:
+        return f"{sync_time(current_app.config):%H:%M}"
+    except BankAutoSyncError:
+        return str(current_app.config.get("BANK_AUTO_SYNC_TIME"))
+
+
+def _after_manual_fints_sync(session, result: FinTSSyncResult, connection_id: int) -> None:
+    """Ein gelungener Handabruf setzt einen angehaltenen automatischen Abruf fort."""
+    if result.report is None:
+        return
+    if after_manual_fints_sync(
+        session,
+        connection_id=connection_id,
+        pin=request.form.get("pin") or "",
+        secret_key=current_app.config.get("SECRET_KEY"),
+        changed_by=changed_by(),
+    ):
+        flash("Der tägliche automatische Abruf läuft wieder.", "info")
+
+
 def _handle_fints_result(result: FinTSSyncResult, company_id: int | None):
     if result.challenge is not None:
         # company_id bindet die TAN-Karte an die richtige Gesellschaft —
@@ -704,6 +747,7 @@ def fints_sync_action(connection_id: int):
         except FinTSSyncError as exc:
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        _after_manual_fints_sync(session, result, connection_id)
 
     return _handle_fints_result(result, company_id)
 
@@ -725,6 +769,7 @@ def fints_tan_action():
             return redirect(url_for("main.bank_page", company_id=company_id))
         require_company_access(session, pending.company_id)
         company_id = pending.company_id
+        connection_id = pending.connection_id
         try:
             result = submit_fints_tan(
                 session=session,
@@ -738,6 +783,7 @@ def fints_tan_action():
             flask_session.pop("fints_challenge", None)
             flash(str(exc), "error")
             return redirect(url_for("main.bank_page", company_id=company_id))
+        _after_manual_fints_sync(session, result, connection_id)
 
     return _handle_fints_result(result, company_id)
 

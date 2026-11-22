@@ -13,6 +13,7 @@ from datetime import date
 from flask import flash, redirect, render_template, request, url_for
 
 from app.auth import current_user
+from app.services.bank_auto_sync import list_bank_auto_syncs, serialize_auto_sync
 from app.services.mcp_bank_sync import (
     McpBankSyncError,
     ServerCaller,
@@ -83,6 +84,13 @@ def mcp_bank_sync_page():
         error = None
         preview = None
         defaults: dict[str, dict] = {}
+        auto_by_wallet: dict[str, dict] = {}
+        if server is not None:
+            auto_by_wallet = {
+                entry.mcp_wallet_id: serialize_auto_sync(entry)
+                for entry in list_bank_auto_syncs(session, company_id=company.id)
+                if entry.mcp_server_id == server.id
+            }
         if server is not None:
             try:
                 with _caller(session_factory, server.id, company) as caller:
@@ -133,6 +141,7 @@ def mcp_bank_sync_page():
             bank_accounts=bank_accounts,
             preview=preview,
             error=error,
+            auto_by_wallet=auto_by_wallet,
         )
 
 

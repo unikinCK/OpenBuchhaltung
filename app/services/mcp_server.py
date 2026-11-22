@@ -4637,6 +4637,143 @@ TOOLS: list[ToolSpec] = [
         timeout=300,
     ),
     ToolSpec(
+        name="list_bank_auto_syncs",
+        description=(
+            "Listet die Bankzugänge einer Gesellschaft mit täglichem automatischem "
+            "Umsatzabruf (FinTS, Open Banking, Bank-MCP-Server): Uhrzeit des Laufs, Stand und "
+            "Meldung des letzten Abrufs, ob er angehalten ist (z. B. weil die Bank eine TAN "
+            "verlangt). Die gespeicherte FinTS-PIN wird nie ausgegeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_inactive": {
+                    "type": "boolean",
+                    "description": "Auch ausgeschaltete Abrufe einschließen.",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/bank-auto-syncs",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="enable_fints_auto_sync",
+        description=(
+            "Schaltet den täglichen automatischen Umsatzabruf eines FinTS-Bankzugangs ein. "
+            "Dafür wird die PIN verschlüsselt gespeichert (nur hierfür, nie ausgegeben). "
+            "Verlangt die Bank eine TAN oder meldet sie einen Fehler, hält der Abruf an, bis "
+            "ein Handabruf (sync_fints_transactions) gelingt; disable_bank_auto_sync löscht "
+            "die PIN wieder."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "integer", "description": "ID des FinTS-Zugangs."},
+                "pin": {"type": "string", "description": "Online-Banking-PIN."},
+            },
+            "required": ["connection_id", "pin"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/fints-connections/{connection_id}/auto-sync",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="enable_open_banking_auto_sync",
+        description=(
+            "Schaltet den täglichen automatischen Umsatzabruf eines Open-Banking-Zugangs ein "
+            "(nutzt die erteilte Bank-Zustimmung; läuft sie ab, meldet der Abruf das)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "connection_id": {
+                    "type": "integer",
+                    "description": "ID des Open-Banking-Zugangs.",
+                },
+            },
+            "required": ["connection_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/open-banking-connections/{connection_id}/auto-sync",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="enable_mcp_bank_auto_sync",
+        description=(
+            "Schaltet den täglichen automatischen Abruf einer Wallet eines Bank-MCP-Servers "
+            "(z. B. Finom) in ein Bank-Sachkonto ein. Der Abruf nutzt den Zugang des "
+            "aufrufenden Benutzers zum MCP-Server; die Wallet wird dabei geprüft."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bank_account_id": {"type": "integer", "description": "ID des Bank-Sachkontos."},
+                "server_id": {"type": "integer", "description": "ID aus list_mcp_bank_sources."},
+                "wallet_id": {
+                    "type": "string",
+                    "description": "Wallet-ID aus list_mcp_bank_wallets.",
+                },
+            },
+            "required": ["bank_account_id", "server_id", "wallet_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-accounts/{bank_account_id}/mcp-auto-sync",
+        arg_location="json",
+        timeout=120,
+    ),
+    ToolSpec(
+        name="disable_bank_auto_sync",
+        description=(
+            "Schaltet einen täglichen automatischen Bankabruf aus; eine gespeicherte "
+            "FinTS-PIN wird dabei gelöscht."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "auto_sync_id": {
+                    "type": "integer",
+                    "description": "ID aus list_bank_auto_syncs.",
+                },
+            },
+            "required": ["auto_sync_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-auto-syncs/{auto_sync_id}/disable",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="run_bank_auto_sync",
+        description=(
+            "Ruft die Bankzugänge mit eingeschaltetem automatischem Abruf sofort ab, statt "
+            "auf den täglichen Lauf zu warten – alle der Gesellschaft oder einen "
+            "(auto_sync_id). Angehaltene Abrufe bleiben außen vor."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "auto_sync_id": {
+                    "type": "integer",
+                    "description": "Optional: nur dieser Abruf (ID aus list_bank_auto_syncs).",
+                },
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/bank-auto-syncs/run",
+        arg_location="json",
+        timeout=600,
+    ),
+    ToolSpec(
         name="list_open_items",
         description=(
             "Listet offene Posten einer Gesellschaft; optional inklusive ausgeglichener "

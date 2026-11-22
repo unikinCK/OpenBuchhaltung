@@ -54,6 +54,10 @@ services:
       db:
         condition: service_healthy
 
+  # Die Demo hat keine Bankverbindungen: kein automatischer Bankabruf.
+  bank-sync:
+    profiles: ["bank-sync"]
+
   mcp:
     environment:
       # Kein Server-Token: Der Eingangstoken MCP_HTTP_AUTH_TOKEN öffnet so keinen

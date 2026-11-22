@@ -10,6 +10,7 @@ from app.web import (  # noqa: F401
     admin,
     audit_log,
     bank,
+    bank_auto_sync,
     cash_book,
     chat,
     company_knowledge,

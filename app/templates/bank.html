@@ -392,9 +392,67 @@
     </details>
 
     <details class="card" id="online-abruf"{% if fints_connections or open_banking_connections or mcp_bank_sources %} open{% endif %}>
-      <summary>Online-Abruf <span class="summary-hint">FinTS-Direktabruf, Open Banking (PSD2) und Bank-MCP-Server{% if fints_connections or open_banking_connections or mcp_bank_sources %} · {{ (fints_connections | length) + (open_banking_connections | length) + (mcp_bank_sources | length) }} Zugang/Zugänge{% endif %}</span></summary>
+      <summary>Online-Abruf <span class="summary-hint">FinTS-Direktabruf, Open Banking (PSD2) und Bank-MCP-Server{% if fints_connections or open_banking_connections or mcp_bank_sources %} · {{ (fints_connections | length) + (open_banking_connections | length) + (mcp_bank_sources | length) }} Zugang/Zugänge{% endif %}{% if auto_syncs %} · {{ auto_syncs | length }} automatisch{% endif %}</span></summary>
 
-      <h3 class="form-section-title">FinTS-Direktabruf</h3>
+      <h3 class="form-section-title">Täglicher automatischer Abruf</h3>
+      <p class="hint">Eingeschaltete Zugänge ruft der Dienst <code>bank-sync</code> täglich ab {{ auto_sync_time }} Uhr ab (danach verpasste Läufe holt er nach); neue Umsätze erscheinen hier als offen. Einschalten je Zugang unten: FinTS mit PIN, Open Banking nach der Bank-Zustimmung, Bank-MCP-Server auf der Abrufseite der Wallet.</p>
+      {% if auto_syncs %}
+        <div class="table-scroll">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Zugang</th>
+                <th>Bankkonto</th>
+                <th>Letzter Abruf</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in auto_syncs %}
+                <tr>
+                  <td>{{ item.name }} <span class="muted small">({{ item.source_label }}{% if item.user %}, eingeschaltet von {{ item.user }}{% endif %})</span></td>
+                  <td>{{ item.bank_account or "–" }}</td>
+                  <td>
+                    {% if item.paused %}<span class="badge badge-warning">angehalten: {{ item.paused_label }}</span><br />{% endif %}
+                    {% if item.last_run_at %}
+                      {{ item.last_run_at | datum_zeit }} · {% if item.last_status == "ok" %}{{ item.last_status_label }}{% else %}<strong>{{ item.last_status_label }}</strong>{% endif %}
+                      {% if item.last_message %}<br /><span class="muted small">{{ item.last_message }}</span>{% endif %}
+                    {% else %}
+                      <span class="muted">noch nicht gelaufen</span>
+                    {% endif %}
+                  </td>
+                  <td class="actions">
+                    {% if not item.paused %}
+                      <form method="post" action="{{ url_for('main.bank_auto_sync_run_action') }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+                        <input type="hidden" name="auto_sync_id" value="{{ item.id }}" />
+                        <button type="submit" class="secondary btn-sm">Jetzt abrufen</button>
+                      </form>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('main.bank_auto_sync_disable_action', auto_sync_id=item.id) }}">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="secondary btn-sm">Ausschalten</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if auto_syncs | length > 1 %}
+          <form method="post" action="{{ url_for('main.bank_auto_sync_run_action') }}" class="form-actions">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <button type="submit" class="secondary">Alle jetzt abrufen</button>
+          </form>
+        {% endif %}
+      {% else %}
+        <p class="muted">Für keinen Zugang eingeschaltet.</p>
+      {% endif %}
+
+      <h3 class="form-section-title" style="margin-top:1.5rem;">FinTS-Direktabruf</h3>
+
       {% if not fints_configured %}
         <p class="hint">Hinweis: Die Umgebungsvariable <code>FINTS_PRODUCT_ID</code> ist nicht gesetzt
           (Produktregistrierung der Deutschen Kreditwirtschaft) — der Abruf ist erst danach möglich.</p>
@@ -409,11 +467,13 @@
                 <th>Login</th>
                 <th>IBAN</th>
                 <th>Abruf</th>
+                <th>Automatisch</th>
                 <th class="actions"></th>
               </tr>
             </thead>
             <tbody>
               {% for conn in fints_connections %}
+                {% set auto = auto_sync_by_fints.get(conn.id) %}
                 <tr>
                   <td>{{ conn.name }}</td>
                   <td>{{ conn.blz }}</td>
@@ -428,6 +488,18 @@
                       <input name="to_date" type="date" title="Bis (Standard: heute)" aria-label="Bis-Datum" />
                       <button type="submit" class="secondary">Umsätze abrufen</button>
                     </form>
+                  </td>
+                  <td>
+                    {% if auto and not auto.paused %}
+                      täglich ab {{ auto_sync_time }}
+                    {% else %}
+                      {% if auto %}<strong>angehalten:</strong> {{ auto.paused_label }}{% endif %}
+                      <form method="post" action="{{ url_for('main.fints_auto_sync_enable_action', connection_id=conn.id) }}" class="inline-form">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input name="pin" type="password" placeholder="PIN" aria-label="PIN für den automatischen Abruf" autocomplete="off" required style="width:7rem;" />
+                        <button type="submit" class="secondary btn-sm" title="Speichert die PIN verschlüsselt, damit der Abruf ohne dich laufen kann">{% if auto %}PIN hinterlegen, fortsetzen{% else %}Täglich abrufen{% endif %}</button>
+                      </form>
+                    {% endif %}
                   </td>
                   <td class="actions">
                     <form method="post" action="{{ url_for('main.fints_connection_deactivate_action', connection_id=conn.id) }}">
@@ -488,7 +560,7 @@
                 </select>
               </div>
             </div>
-            <p class="hint">PIN und TAN werden nie gespeichert — die PIN wird bei jedem Abruf eingegeben.</p>
+            <p class="hint">PIN und TAN werden nicht gespeichert — die PIN wird bei jedem Abruf eingegeben. Nur wer den täglichen automatischen Abruf einschaltet, hinterlegt dafür die PIN (verschlüsselt); verlangt die Bank eine TAN oder meldet sie einen Fehler, hält der Abruf an, bis ein Handabruf gelingt.</p>
             <div class="form-actions">
               <button type="submit">Bankzugang anlegen</button>
             </div>
@@ -523,6 +595,7 @@
                 <th>IBAN</th>
                 <th>Zustimmung</th>
                 <th>Abruf</th>
+                <th>Automatisch</th>
                 <th class="actions"></th>
               </tr>
             </thead>
@@ -555,6 +628,19 @@
                         <button type="submit" class="secondary">Umsätze abrufen</button>
                       </form>
                       {% if conn.last_synced_to %}<span class="muted small">zuletzt bis {{ conn.last_synced_to | datum }}</span>{% endif %}
+                    {% else %}
+                      <span class="muted">erst nach Zustimmung</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% set auto = auto_sync_by_open_banking.get(conn.id) %}
+                    {% if auto %}
+                      täglich ab {{ auto_sync_time }}
+                    {% elif status == "authorized" %}
+                      <form method="post" action="{{ url_for('main.open_banking_auto_sync_enable_action', connection_id=conn.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <button type="submit" class="secondary btn-sm">Täglich abrufen</button>
+                      </form>
                     {% else %}
                       <span class="muted">erst nach Zustimmung</span>
                     {% endif %}
