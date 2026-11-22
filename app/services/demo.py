@@ -125,6 +125,8 @@ _DEMO_BLOCKED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^/(verwaltung/mcp-server|obi-verbindungen)(/|$)", "Externe MCP-Server"),
         (r"^/api/v1/elster/.*(submit|retry)$", "ELSTER-Übermittlung"),
         (r"^/ustva/.*(elster-test|retry)$", "ELSTER-Übermittlung"),
+        (r"^/api/v1/companies/\d+/elster-certificate(/|$)", "ELSTER-Zertifikat"),
+        (r"^/verwaltung/firmendaten/elster-zertifikat(/|$)", "ELSTER-Zertifikat"),
     )
 )
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}

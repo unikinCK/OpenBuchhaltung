@@ -102,8 +102,8 @@ Wichtig zur Einordnung:
 - ELSTER: Die UStVA wird als amtlicher ElsterXML-Datensatz erzeugt und über
   die ERiC-Bibliothek der Finanzverwaltung geprüft und übermittelt (ADR-011).
   ERiC ist nicht enthalten: Betreiber laden sie im ELSTER-Entwicklerbereich
-  und binden sie per `ELSTER_ERIC_LIBRARY_PATH` ein; dazu kommen Hersteller-ID,
-  ELSTER-Zertifikat und PIN. Die USt-Jahreserklärung geht noch nicht über ERiC.
+  und binden sie per `ELSTER_ERIC_LIBRARY_PATH` ein; dazu kommen Hersteller-ID
+  und je Gesellschaft ELSTER-Zertifikat und PIN (Firmendaten, verschlüsselt). Die USt-Jahreserklärung geht noch nicht über ERiC.
 - Lohnbuchhaltung ist als technisches MVP umgesetzt; amtliche Lohnsteuer-/
   Sozialversicherungsmeldungen, ELStAM und DEÜV sind noch nicht enthalten. Für
   die Lohnsteuerberechnung kann ein lokaler `PAYROLL_PAP_COMMAND`-Runner
@@ -412,7 +412,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `ELSTER_HERSTELLER_ID` | – | Fünfstellige Hersteller-ID aus dem ELSTER-Entwicklerbereich (auch für Testfälle Pflicht). |
 | `ELSTER_ERIC_LIBRARY_PATH` | – | ERiC-`lib`-Verzeichnis (oder `libericapi`) für Prüfung und Übermittlung; nicht im Image enthalten. |
 | `ELSTER_ERIC_LOG_DIR` | temporär | Verzeichnis für die ERiC-Protokolldatei `eric.log`; ohne Angabe wird sie nach jedem Aufruf verworfen. |
-| `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_PIN`, `ELSTER_CERTIFICATE_ALIAS` | – | ELSTER-Zertifikat (.pfx), seine PIN (Geheimnis) und ein Anzeigename. |
+| `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_PIN`, `ELSTER_CERTIFICATE_ALIAS` | – | Instanz-Zertifikat (.pfx), seine PIN (Geheimnis) und ein Anzeigename; Rückfall für Gesellschaften ohne eigenes Zertifikat in den Firmendaten. |
 | `ELSTER_ERIC_COMMAND` | integrierter Runner | Eigener Befehl statt `python -m app.services.eric_runner` (gleicher Vertrag). |
 | `ELSTER_ERIC_TIMEOUT_SECONDS` | `60` | Timeout des ERiC-Runners. |
 | `PAYROLL_PAP_COMMAND` | – | Externer Lohnsteuer-PAP-Runner (ohne Runner: manuelle Abzugsraten). |

@@ -479,8 +479,9 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       Bundesfinanzamtsnummer an der Gesellschaft [Migration 0068], ERiC per
       `ctypes` im eigenen Runner-Prozess, lokale ERiC-Prüfung im Preflight,
       Testmerker nach Umgebung. Gegen ERiC 44 unter macOS und Linux geprüft.
-      Offen: Hersteller-ID [beantragt], Testübermittlung, Nutzerhinweise aus
-      dem ERiC-Lizenzvertrag, Zertifikat je Gesellschaft, USt-Jahreserklärung.)*
+      Zertifikat und PIN je Gesellschaft verschlüsselt in den Firmendaten
+      [Migration 0069]. Offen: Hersteller-ID [beantragt], Testübermittlung,
+      Nutzerhinweise aus dem ERiC-Lizenzvertrag, USt-Jahreserklärung.)*
 - [x] **Gewerbesteuer** *(Sprint AC: GewSt-Erklärung und
       Vorauszahlungsanpassung als festhaltbare Ertragsteuer-Snapshots.
       Berechnung startet beim GuV-Jahresergebnis, nimmt strukturierte
