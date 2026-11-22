@@ -3006,6 +3006,155 @@ TOOLS: list[ToolSpec] = [
         arg_location="query",
     ),
     ToolSpec(
+        name="start_payment_advice",
+        description=(
+            "Wertet einen hochgeladenen Beleg als Zahlungsavis eines Kunden aus: Die KI schreibt "
+            "die Positionen je Seite wörtlich ab, das Programm prüft die Abschrift, ordnet die "
+            "Positionen den offenen Forderungen zu und erklärt Skonto, Delkredere und Abzüge "
+            "(Ampel grün/gelb/rot). Läuft im Hintergrund und kehrt sofort mit status running "
+            "zurück; den Stand liefert get_payment_advice. Den Beleg vorher mit upload_document "
+            "hochladen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "document_id": {"type": "integer", "description": "ID des Avis-Belegs."},
+            },
+            "required": ["company_id", "document_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payment-advices",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_payment_advices",
+        description=(
+            "Zahlungsavise einer Gesellschaft mit Status (running, ready, failed, applied), "
+            "Ampel, Zahler, Betrag und Ausgleichsbuchung; Positionen liefert get_payment_advice."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "limit": {"type": "integer", "description": "Höchstzahl (Standard 50)."},
+            },
+            "required": ["company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/payment-advices",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="get_payment_advice",
+        description=(
+            "Ein Zahlungsavis mit Ergebnis der Zuordnung: result.lines (je Position offener "
+            "Posten, Abzüge mit Kategorie, Ampel, Hinweise), result.checks (Summenprüfung), "
+            "result.reasons (Gründe für gelb/rot), result.booking (Beträge der "
+            "Ausgleichsbuchung) und result.bank_candidates (passende Zahlungseingänge). Ampel "
+            "und Hinweise unverändert an den Benutzer weitergeben."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "advice_id": {"type": "integer", "description": "ID des Avis."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "include_extraction": {
+                    "type": "boolean",
+                    "description": "Auch die wörtliche KI-Abschrift je Seite liefern.",
+                },
+            },
+            "required": ["advice_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/payment-advices/{advice_id}",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="rematch_payment_advice",
+        description=(
+            "Ordnet ein ausgelesenes Zahlungsavis erneut zu, etwa nach neuen offenen Posten "
+            "oder Bankumsätzen; die KI liest dabei nicht neu."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "advice_id": {"type": "integer", "description": "ID des Avis."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["advice_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payment-advices/{advice_id}/rematch",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="apply_payment_advice",
+        description=(
+            "Gleicht ein grünes oder gelbes Zahlungsavis mit einem Zahlungseingang aus: eine "
+            "Buchung Bank an die Forderungen der zugeordneten Posten, Skonto auf "
+            "discount_account_id (Steuercode discount_tax_code_id korrigiert die Umsatzsteuer), "
+            "übrige Abzüge auf deduction_account_id; danach sind die Posten ausgeglichen und der "
+            "Beleg verknüpft. Ein Storno der Buchung lässt die Posten wieder aufleben. Rote "
+            "Avise und Avise mit Gutschriften werden abgewiesen."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "advice_id": {"type": "integer", "description": "ID des Avis."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "bank_transaction_id": {
+                    "type": "integer",
+                    "description": "Offener Zahlungseingang über den Avis-Betrag.",
+                },
+                "discount_account_id": {
+                    "type": "integer",
+                    "description": "Konto für gewährte Skonti (Pflicht, wenn Skonto anfällt).",
+                },
+                "discount_tax_code_id": {
+                    "type": "integer",
+                    "description": "Steuercode der Skonti (Umsatzsteuerkorrektur).",
+                },
+                "deduction_account_id": {
+                    "type": "integer",
+                    "description": "Konto für übrige Abzüge (Pflicht, wenn welche anfallen).",
+                },
+                "deduction_tax_code_id": {
+                    "type": "integer",
+                    "description": "Steuercode der übrigen Abzüge.",
+                },
+            },
+            "required": ["advice_id", "company_id", "bank_transaction_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payment-advices/{advice_id}/apply",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="delete_payment_advice",
+        description=(
+            "Löscht ein Zahlungsavis (der Beleg bleibt). Ausgeglichene Avise erst nach Storno "
+            "der Ausgleichsbuchung."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "advice_id": {"type": "integer", "description": "ID des Avis."},
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+            },
+            "required": ["advice_id", "company_id"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payment-advices/{advice_id}/delete",
+        arg_location="json",
+    ),
+    ToolSpec(
         name="list_receipt_match_suggestions",
         description=(
             "Listet Belegabgleich-Vorschläge einer Gesellschaft, optional nach Status "

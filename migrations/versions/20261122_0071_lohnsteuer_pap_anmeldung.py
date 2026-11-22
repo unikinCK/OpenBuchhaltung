@@ -1,7 +1,7 @@
 """Lohnsteuer nach amtlichem PAP und Lohnsteuer-Anmeldung.
 
-Revision ID: 20261122_0070
-Revises: 20261122_0069
+Revision ID: 20261122_0071
+Revises: 20261122_0070
 Create Date: 2026-11-22
 
 Mitarbeiter bekommen die Merkmale, die der Programmablaufplan (PAP) des BMF braucht
@@ -17,8 +17,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20261122_0070"
-down_revision = "20261122_0069"
+revision = "20261122_0071"
+down_revision = "20261122_0070"
 branch_labels = None
 depends_on = None
 

@@ -11,7 +11,7 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 ### Lohnsteuer nach amtlichem PAP und Lohnsteuer-Anmeldung
 - **Neu:** Lohnsteuer, Solidaritätszuschlag und Kirchensteuer für laufenden Monatslohn nach dem amtlichen
   Programmablaufplan (PAP) 2026 des BMF. `tools/pap_codegen.py` erzeugt das Rechenmodul aus dem veröffentlichten
-  XML (`data/pap/Lohnsteuer2026.xml`); 207 Prüfwerte der BMF-Schnittstelle stimmen auf den Cent (ADR-012).
+  XML (`data/pap/Lohnsteuer2026.xml`); 207 Prüfwerte der BMF-Schnittstelle stimmen auf den Cent (ADR-013).
   Kirchensteuer 8 % (BY, BW) bzw. 9 % der Bemessungsgrundlage des PAP.
 - **Neu:** Mitarbeiter mit Berechnungsart (`pap`/`manual`) und PAP-Merkmalen: Kirchensteuermerkmal, KV-Zusatzbeitrag,
   PKV, Kinder für die Pflegeversicherung, RV-/ALV-Pflicht, Frei- und Hinzurechnungsbetrag, Faktor. Mitarbeiter lassen
@@ -24,8 +24,20 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
   Berichtigung (Kz 10). REST `GET /payroll/wage-tax-returns/preview`, `POST|GET /payroll/wage-tax-returns`, MCP
   `preview_wage_tax_return`, `create_wage_tax_return`, `list_wage_tax_returns`; Prüferexport-Tabelle
   `wage_tax_returns`. Noch ohne ELSTER-Übermittlung.
-- Migration `20261122_0070` (Spalten an `payroll_employee` und `payroll_run_line`, Tabelle `wage_tax_return`).
+- Migration `20261122_0071` (Spalten an `payroll_employee` und `payroll_run_line`, Tabelle `wage_tax_return`).
 
+### Zahlungsavise
+- **Neu:** Zahlungsavise von Kunden und Zentralregulierern auswerten (Bank & OPOS → Zahlungsavise): Die KI schreibt
+  die Positionen je Seite wörtlich ab, das Programm prüft die Abschrift gegen den Seitentext (zweiter Versuch mit
+  den Fehlern), ordnet die Positionen offenen Forderungen zu, erklärt Skonto, Delkredere, Bonus,
+  Konventionalstrafe, Reklamation und Gebühren und vergibt eine Ampel (ADR-012). Läuft im Hintergrund.
+- **Neu:** Ausgleich mit einem Klick: eine Buchung Bank an die Forderungen, Skonto mit Umsatzsteuerkorrektur über
+  den Steuercode, übrige Abzüge auf ein wählbares Konto; die Posten sind danach ausgeglichen, das Avis ist als Beleg
+  verknüpft, ein Storno lässt alles wieder aufleben.
+- **Neu:** REST `/api/v1/payment-advices` (anlegen, listen, abrufen, neu zuordnen, ausgleichen, löschen) und
+  MCP-Tools `start_payment_advice`, `list_payment_advices`, `get_payment_advice`, `rematch_payment_advice`,
+  `apply_payment_advice`, `delete_payment_advice`; für Obi als Werkzeuggruppe „zahlungsavise“. Migration 0070.
+- **Neu:** Standardkonto „Gewährte Skonti“ (SKR03 8736/8730, SKR04 4736/4730) als Vorbelegung.
 ### ELSTER-Zertifikat je Gesellschaft
 - **Neu:** Jede Gesellschaft kann ihr ELSTER-Zertifikat (.pfx) mit PIN in den Firmendaten hinterlegen (UI, REST
   `GET/POST /companies/<id>/elster-certificate`, `POST …/elster-certificate/delete`, MCP

@@ -33,6 +33,7 @@ from app.web import (  # noqa: F401
     open_items,
     opening_balance,
     partners,
+    payment_advices,
     payment_run,
     payroll,
     periods,

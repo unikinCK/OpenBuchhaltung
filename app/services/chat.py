@@ -228,6 +228,17 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "book_bank_transaction_to_open_item",
         ),
     ),
+    "zahlungsavise": (
+        "Zahlungsavise von Kunden auslesen, offenen Posten zuordnen und ausgleichen",
+        (
+            "start_payment_advice",
+            "list_payment_advices",
+            "get_payment_advice",
+            "rematch_payment_advice",
+            "apply_payment_advice",
+            "delete_payment_advice",
+        ),
+    ),
     "rechnungen": (
         "Ausgangsrechnungen schreiben, ausstellen und stornieren",
         (

@@ -105,6 +105,15 @@ VERBINDLICHKEITEN_LUL = StandardAccount(
     code_account_types=frozenset({"liability"}),
 )
 
+# Gewährte Skonti (Erlösschmälerung): SKR03 8736/8730, SKR04 4736/4730. SKR03 4730
+# (Ausgangsfrachten) ist ein Aufwandskonto, deshalb genügt die Nummer nur bei Erlöskonten.
+GEWAEHRTE_SKONTI = StandardAccount(
+    label="Gewährte Skonti",
+    codes=("4736", "8736", "4730", "8730"),
+    name_keyword="gewährte skonti",
+    code_account_types=frozenset({"income", "revenue"}),
+)
+
 
 # Kursdifferenzen (ADR-010); die Bezeichnung trennt Ertrag und Aufwand.
 KURSERTRAG = StandardAccount(

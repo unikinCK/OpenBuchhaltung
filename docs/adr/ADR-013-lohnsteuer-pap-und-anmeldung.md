@@ -1,4 +1,4 @@
-# ADR-012: Lohnsteuer nach amtlichem PAP und Lohnsteuer-Anmeldung
+# ADR-013: Lohnsteuer nach amtlichem PAP und Lohnsteuer-Anmeldung
 
 - **Status:** Angenommen
 - **Datum:** 2026-11-22
@@ -28,7 +28,7 @@ Jahr und Folgejahr auf; Kz 48 ist 41 + 42 + 44 − 33 − 45, Kz 83 die Summe au
 2. **Maßgebend ist das Jahr des Lohnmonats** (§ 38a Abs. 1 Satz 2 EStG). Für Jahre ohne PAP rechnet ein Mitarbeiter
    mit Berechnungsart `pap` nicht, statt still auf Raten zurückzufallen.
 3. **Berechnungsart je Mitarbeiter.** `tax_calculation = pap` rechnet nach dem integrierten PAP, `manual` nach den
-   Raten. Bestehende Mitarbeiter bleiben bei `manual` (Migration `20261122_0070`), neue in der Oberfläche starten mit
+   Raten. Bestehende Mitarbeiter bleiben bei `manual` (Migration `20261122_0071`), neue in der Oberfläche starten mit
    `pap`. Ein konfigurierter `PAYROLL_PAP_COMMAND` hat weiter Vorrang.
 4. **PAP-Merkmale im Mitarbeiterstamm:** Kirchensteuermerkmal (ELStAM-Kürzel), KV-Zusatzbeitrag, PKV mit Beitrag
    und Arbeitgeberzuschuss, Kinderzahl für die Pflegeversicherung (Zuschlag für Kinderlose ab 23, Abschläge ab dem

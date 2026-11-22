@@ -37,6 +37,7 @@ from app.api import (  # noqa: F401
     open_banking,
     open_items,
     partners,
+    payment_advices,
     payment_runs,
     payroll,
     periods,
