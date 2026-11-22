@@ -261,6 +261,11 @@ TOOL_TITLES: dict[str, str] = {
     "create_payroll_run": "Lohnlauf erstellen",
     "list_payroll_runs": "Lohnläufe auflisten",
     "post_payroll_run": "Lohnlauf buchen",
+    "update_payroll_employee": "Mitarbeiter ändern",
+    "calculate_wage_tax": "Lohnsteuer berechnen",
+    "preview_wage_tax_return": "LSt-Anmeldung berechnen",
+    "create_wage_tax_return": "LSt-Anmeldung festhalten",
+    "list_wage_tax_returns": "LSt-Anmeldungen auflisten",
     # Anlagen
     "create_fixed_asset": "Anlagegut anlegen",
     "list_fixed_assets": "Anlagegüter auflisten",

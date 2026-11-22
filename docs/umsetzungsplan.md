@@ -506,9 +506,15 @@ Zertifikats-/Authentifizierungshandling, Testmerker-/Produktionsbetrieb.
       kann Lohnsteuer/Kirchensteuer/Soli per JSON berechnen und überschreibt die
       manuellen Steuer-Raten; Payroll-Readiness zeigt fehlende PAP-, ELStAM- und
       DEÜV/SV-Runner transparent in API/UI/MCP.)*
-- [ ] **Lohnsteuer**: LSt-Anmeldung (Voranmeldungszeitraum) + jährliche
-      LSt-Bescheinigungen *(setzt amtliche Lohnsteuerberechnung und ELSTER-
-      Verfahren auf dem Lohnbuchhaltung-MVP voraus)*
+- [x] **Lohnsteuer nach amtlichem PAP** *(2026-11-22, ADR-013: PAP-Modul aus dem
+      BMF-XML erzeugt, 207 BMF-Prüfwerte, Kirchensteuer nach Land, PAP-Merkmale und
+      Bearbeiten im Mitarbeiterstamm, Lohnsteuer-Rechner; UI/API/MCP)*
+- [x] **Lohnsteuer-Anmeldung – Berechnung und Festhalten** *(2026-11-22: Kennzahlen aus
+      gebuchten Lohnläufen nach Zahlungsdatum mit Einzelaufstellung nach Jahren,
+      Fälligkeit, Abgleich, Berichtigung; UI/API/MCP, Prüferexport)*
+- [ ] **Lohnsteuer – ELSTER**: LStA-Datensatz und Übermittlung über ERiC *(setzt
+      ADR-011 und die Hersteller-ID voraus)*, jährliche LSt-Bescheinigungen
+      (ElsterLohn2), ELStAM-Abruf, PAP 2027
 
 ## Phase 4 – Internes Rechnungswesen (Backlog)
 

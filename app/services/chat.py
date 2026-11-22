@@ -134,6 +134,7 @@ CHAT_BLOCKED_TOOL_NAMES = {
 # POST-Tools ohne Schreibwirkung, die wie lesende Tools sofort laufen dürfen.
 CHAT_READ_ONLY_POST_TOOLS = {
     "preview_income_tax_return",
+    "calculate_wage_tax",
     "recognize_partner",
     "preview_einvoice",
 }
@@ -152,6 +153,11 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "create_payroll_run",
             "list_payroll_runs",
             "post_payroll_run",
+            "update_payroll_employee",
+            "calculate_wage_tax",
+            "preview_wage_tax_return",
+            "create_wage_tax_return",
+            "list_wage_tax_returns",
         ),
     ),
     "anlagen": (

@@ -17,18 +17,72 @@ from app.api.helpers import (
 )
 from app.auth import current_api_user
 from app.services.payroll import (
+    UPDATABLE_EMPLOYEE_FIELDS,
     PayrollEmployeeInput,
     PayrollError,
     PayrollRunInput,
+    calculate_wage_tax_preview,
     create_payroll_employee,
     create_payroll_run,
     decimal_from_payload,
     list_payroll_employees,
     list_payroll_runs,
     post_payroll_run,
+    update_payroll_employee,
 )
 from app.services.payroll_pap import payroll_compliance_readiness
-from domain.models import PayrollRun
+from app.services.wage_tax_returns import (
+    WageTaxReturnError,
+    compute_wage_tax_return,
+    elster_period_code,
+    list_wage_tax_returns,
+    save_wage_tax_return,
+    serialize_rows,
+)
+from domain.models import PayrollEmployee, PayrollRun, WageTaxReturn
+
+_DATE_FIELDS = {"employment_start", "employment_end", "birth_date"}
+_DECIMAL_FIELDS = {
+    "child_allowances",
+    "gross_monthly_salary",
+    "wage_tax_rate",
+    "church_tax_rate",
+    "solidarity_surcharge_rate",
+    "employee_social_security_rate",
+    "employer_social_security_rate",
+    "health_insurance_additional_rate",
+    "private_health_premium",
+    "private_health_employer_subsidy",
+    "monthly_tax_allowance",
+    "monthly_tax_addition",
+    "tax_factor",
+}
+_BOOL_FIELDS = {
+    "main_employment",
+    "private_health_insurance",
+    "pension_insurance_compulsory",
+    "unemployment_insurance_compulsory",
+}
+_INT_FIELDS = {"tax_class", "care_insurance_children"}
+
+
+def _payload_value(field: str, value: object) -> object:
+    """JSON-Wert eines Mitarbeiterfelds in den Python-Typ des Service."""
+    if value in (None, ""):
+        if field in _BOOL_FIELDS:
+            return False
+        return None
+    if field in _DATE_FIELDS:
+        return date.fromisoformat(str(value))
+    if field in _DECIMAL_FIELDS:
+        return decimal_from_payload(value)
+    if field in _BOOL_FIELDS:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "ja", "yes", "on"}
+        return bool(value)
+    if field in _INT_FIELDS:
+        return int(value)  # type: ignore[call-overload]
+    return value
 
 
 def _api_changed_by() -> str:
@@ -71,6 +125,37 @@ def _employee_dict(employee) -> dict[str, object]:
         ),
         "cost_center_id": employee.cost_center_id,
         "profit_center_id": employee.profit_center_id,
+        "tax_calculation": employee.tax_calculation,
+        "church_denomination": employee.church_denomination,
+        "health_insurance_additional_rate": str(employee.health_insurance_additional_rate),
+        "private_health_insurance": employee.private_health_insurance,
+        "private_health_premium": str(employee.private_health_premium),
+        "private_health_employer_subsidy": str(employee.private_health_employer_subsidy),
+        "care_insurance_children": employee.care_insurance_children,
+        "pension_insurance_compulsory": employee.pension_insurance_compulsory,
+        "unemployment_insurance_compulsory": employee.unemployment_insurance_compulsory,
+        "monthly_tax_allowance": str(employee.monthly_tax_allowance),
+        "monthly_tax_addition": str(employee.monthly_tax_addition),
+        "tax_factor": str(employee.tax_factor) if employee.tax_factor is not None else None,
+    }
+
+
+def _wage_tax_return_dict(item: WageTaxReturn) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "company_id": item.company_id,
+        "period_label": item.period_label,
+        "elster_period": elster_period_code(item.period_label),
+        "date_from": item.date_from.isoformat(),
+        "date_to": item.date_to.isoformat(),
+        "correction_number": item.correction_number,
+        "is_correction": item.correction_number > 0,
+        "employee_count": item.employee_count,
+        "kennzahlen": item.kennzahlen,
+        "payroll_run_ids": item.payroll_run_ids,
+        "status": item.status,
+        "created_at": item.created_at.isoformat(),
+        "created_by": item.created_by,
     }
 
 
@@ -106,6 +191,7 @@ def _run_dict(run: PayrollRun) -> dict[str, object]:
                 "employer_social_security": str(line.employer_social_security),
                 "net_pay": str(line.net_pay),
                 "employer_total": str(line.employer_total),
+                "church_denomination": line.church_denomination,
                 "calculation": line.calculation,
             }
             for line in run.lines
@@ -174,6 +260,28 @@ def create_payroll_employee_via_api():
             ),
             cost_center_id=payload.get("cost_center_id"),
             profit_center_id=payload.get("profit_center_id"),
+            tax_calculation=(payload.get("tax_calculation") or "manual"),
+            church_denomination=payload.get("church_denomination"),
+            health_insurance_additional_rate=decimal_from_payload(
+                payload.get("health_insurance_additional_rate"), "2.90"
+            ),
+            private_health_insurance=bool(
+                _payload_value("private_health_insurance", payload.get("private_health_insurance"))
+            ),
+            private_health_premium=decimal_from_payload(payload.get("private_health_premium")),
+            private_health_employer_subsidy=decimal_from_payload(
+                payload.get("private_health_employer_subsidy")
+            ),
+            care_insurance_children=int(payload.get("care_insurance_children") or 0),
+            pension_insurance_compulsory=bool(payload.get("pension_insurance_compulsory", True)),
+            unemployment_insurance_compulsory=bool(
+                payload.get("unemployment_insurance_compulsory", True)
+            ),
+            monthly_tax_allowance=decimal_from_payload(payload.get("monthly_tax_allowance")),
+            monthly_tax_addition=decimal_from_payload(payload.get("monthly_tax_addition")),
+            tax_factor=(
+                decimal_from_payload(payload["tax_factor"]) if payload.get("tax_factor") else None
+            ),
             changed_by=_api_changed_by(),
         )
     except (TypeError, ValueError):
@@ -291,3 +399,148 @@ def post_payroll_run_via_api(payroll_run_id: int):
         except PayrollError as exc:
             return validation_error(str(exc))
         return jsonify(_run_dict(posted)), 200
+
+
+@api_bp.patch("/payroll/employees/<int:employee_id>")
+def update_payroll_employee_via_api(employee_id: int):
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    fields = {key: value for key, value in payload.items() if key != "employee_id"}
+    unknown = sorted(set(fields) - set(UPDATABLE_EMPLOYEE_FIELDS))
+    if unknown:
+        return validation_error(f"Unbekannte Felder: {', '.join(unknown)}.")
+    if not fields:
+        return validation_error("Keine Änderungen übergeben.")
+    try:
+        changes = {key: _payload_value(key, value) for key, value in fields.items()}
+    except (TypeError, ValueError):
+        return jsonify({"error": "valid employee payroll payload is required."}), 400
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        employee = session.get(PayrollEmployee, employee_id)
+        if employee is None or api_scoped_company(session, employee.company_id) is None:
+            return jsonify({"error": "Employee not found."}), 404
+        try:
+            updated = update_payroll_employee(
+                session=session,
+                employee_id=employee_id,
+                changes=changes,
+                changed_by=_api_changed_by(),
+            )
+        except PayrollError as exc:
+            session.rollback()
+            return validation_error(str(exc))
+        return jsonify(_employee_dict(updated)), 200
+
+
+@api_bp.post("/payroll/wage-tax/calculate")
+def calculate_wage_tax_via_api():
+    """Lohnsteuer eines Monatslohns nach dem amtlichen PAP – ohne Mitarbeiter anzulegen."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        values = {
+            key: _payload_value(key, payload[key])
+            for key in UPDATABLE_EMPLOYEE_FIELDS
+            if key in payload and not key.endswith("_account_id")
+        }
+        period_label = str(payload.get("period_label") or "").strip()
+    except (TypeError, ValueError):
+        return jsonify({"error": "valid wage tax payload is required."}), 400
+    try:
+        result = calculate_wage_tax_preview(values=values, period_label=period_label)
+    except PayrollError as exc:
+        return validation_error(str(exc))
+    return jsonify(result), 200
+
+
+def _wage_tax_preview_dict(result) -> dict[str, object]:
+    return {
+        "company_id": result.company_id,
+        "period_label": result.period_label,
+        "elster_period": elster_period_code(result.period_label),
+        "date_from": result.date_from.isoformat(),
+        "date_to": result.date_to.isoformat(),
+        "due_date": result.due_date.isoformat(),
+        "employee_count": result.employee_count,
+        "kennzahlen": serialize_rows(result.rows),
+        "payroll_runs": result.payroll_runs,
+        "draft_runs": result.draft_runs,
+        "liability": result.liability,
+        "issues": result.issues,
+        "warnings": result.warnings,
+    }
+
+
+@api_bp.get("/payroll/wage-tax-returns/preview")
+def preview_wage_tax_return_via_api():
+    company_id = request.args.get("company_id", type=int)
+    period_label = (request.args.get("period_label") or "").strip()
+    if not company_id or not period_label:
+        return jsonify({"error": "company_id and period_label are required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            result = compute_wage_tax_return(
+                session=session, company_id=company_id, period_label=period_label
+            )
+        except WageTaxReturnError as exc:
+            return validation_error(str(exc))
+        return jsonify(_wage_tax_preview_dict(result)), 200
+
+
+@api_bp.post("/payroll/wage-tax-returns")
+def create_wage_tax_return_via_api():
+    if not api_can_write():
+        return forbidden()
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = int(payload.get("company_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "company_id is required."}), 400
+    period_label = str(payload.get("period_label") or "").strip()
+    if not period_label:
+        return jsonify({"error": "period_label is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        try:
+            item = save_wage_tax_return(
+                session=session,
+                company_id=company_id,
+                period_label=period_label,
+                changed_by=_api_changed_by(),
+                correction=bool(payload.get("correction")),
+            )
+        except WageTaxReturnError as exc:
+            session.rollback()
+            return validation_error(str(exc))
+        except IntegrityError:
+            session.rollback()
+            return jsonify({"error": "Wage tax return already exists for this period."}), 409
+        return jsonify(_wage_tax_return_dict(item)), 201
+
+
+@api_bp.get("/payroll/wage-tax-returns")
+def list_wage_tax_returns_via_api():
+    company_id = request.args.get("company_id", type=int)
+    if not company_id:
+        return jsonify({"error": "company_id is required."}), 400
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        if api_scoped_company(session, company_id) is None:
+            return jsonify({"error": "Company not found."}), 404
+        items = list_wage_tax_returns(session=session, company_id=company_id)
+        return (
+            jsonify(
+                {
+                    "company_id": company_id,
+                    "wage_tax_returns": [_wage_tax_return_dict(item) for item in items],
+                }
+            ),
+            200,
+        )

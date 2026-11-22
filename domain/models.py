@@ -1724,6 +1724,13 @@ class PayrollEmployee(Base):
             "employer_social_security_rate >= 0",
             name="ck_payroll_employee_employer_sv_nonneg",
         ),
+        CheckConstraint(
+            "tax_calculation IN ('manual', 'pap')",
+            name="ck_payroll_employee_tax_calculation_known",
+        ),
+        CheckConstraint(
+            "care_insurance_children >= 0", name="ck_payroll_employee_care_children_nonneg"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1758,6 +1765,42 @@ class PayrollEmployee(Base):
     employer_social_security_rate: Mapped[Decimal] = mapped_column(
         Numeric(7, 4), nullable=False, default=0
     )
+    # Lohnsteuer nach amtlichem PAP ("pap") oder nach den Raten oben ("manual").
+    tax_calculation: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="manual", server_default="manual"
+    )
+    # Kirchensteuermerkmal laut ELStAM (z. B. "ev", "rk"); leer = keine Kirchensteuer.
+    church_denomination: Mapped[str | None] = mapped_column(String(2))
+    # PAP-Merkmale für die Vorsorgepauschale und Freibeträge (Monatswerte in Euro).
+    health_insurance_additional_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("2.90"), server_default="2.90"
+    )
+    private_health_insurance: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    private_health_premium: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    private_health_employer_subsidy: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    care_insurance_children: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    pension_insurance_compulsory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    unemployment_insurance_compulsory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    monthly_tax_allowance: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    monthly_tax_addition: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    # Faktor beim Faktorverfahren (nur Steuerklasse IV), drei Nachkommastellen.
+    tax_factor: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
     wage_expense_account_id: Mapped[int] = mapped_column(
         ForeignKey("account.id", ondelete="RESTRICT"), nullable=False
     )
@@ -1893,10 +1936,65 @@ class PayrollRunLine(Base):
     )
     net_pay: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     employer_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Kirchensteuermerkmal zum Zeitpunkt des Lohnlaufs (für die LSt-Anmeldung).
+    church_denomination: Mapped[str | None] = mapped_column(String(2))
     calculation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     payroll_run: Mapped[PayrollRun] = relationship(back_populates="lines")
     employee: Mapped[PayrollEmployee] = relationship(back_populates="payroll_lines")
+
+
+class WageTaxReturn(Base):
+    """Festgehaltene Lohnsteuer-Anmeldung (Kennzahlen-Snapshot je Anmeldungszeitraum).
+
+    Eine Berichtigung desselben Zeitraums bekommt die nächste ``correction_number``
+    (Kz 10); die ursprüngliche Anmeldung bleibt unverändert erhalten.
+    """
+
+    __tablename__ = "wage_tax_return"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "period_label",
+            "correction_number",
+            name="uq_wage_tax_return_company_period_correction",
+        ),
+        CheckConstraint("date_from <= date_to", name="ck_wage_tax_return_date_range"),
+        CheckConstraint(
+            "status IN ('erstellt', 'uebermittelt')", name="ck_wage_tax_return_status_known"
+        ),
+        CheckConstraint(
+            "correction_number >= 0", name="ck_wage_tax_return_correction_nonneg"
+        ),
+        CheckConstraint("employee_count >= 0", name="ck_wage_tax_return_employees_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    # Anmeldungszeitraum: "2026-05" (Monat), "2026-Q2" (Quartal) oder "2026" (Jahr).
+    period_label: Mapped[str] = mapped_column(String(10), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    correction_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    employee_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Liste von {kennzahl, label, amount} zum Zeitpunkt des Festhaltens.
+    kennzahlen: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    # Lohnläufe, aus denen die Anmeldung entstand (IDs), für den Prüfpfad.
+    payroll_run_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="erstellt")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    company: Mapped[Company] = relationship()
 
 
 class User(Base):
