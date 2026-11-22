@@ -56,17 +56,23 @@
             </select>
           </label>
           <label>Kinderfreibeträge <input name="child_allowances" inputmode="decimal" value="0.0" /></label>
-          <label>Bundesland <input name="federal_state" maxlength="2" placeholder="NW" /></label>
+          <label>Bundesland (Betriebsstätte)
+            <select name="federal_state">
+              <option value="">–</option>
+              {% for code, name in federal_states.items() %}<option value="{{ code }}">{{ code }} – {{ name }}</option>{% endfor %}
+            </select>
+          </label>
           <label>Arbeitsverhältnis
             <select name="main_employment">
               <option value="1">Hauptarbeitgeber</option>
               <option value="0">Nebenarbeitgeber</option>
             </select>
           </label>
+          {% include "_lohn_steuermerkmale.html" %}
           <label>Bruttogehalt <input name="gross_monthly_salary" inputmode="decimal" required /></label>
-          <label>Lohnsteuer-Rate <input name="wage_tax_rate" inputmode="decimal" value="0.00" /></label>
-          <label>Kirchensteuer-Rate <input name="church_tax_rate" inputmode="decimal" value="0.00" /></label>
-          <label>Soli-Rate <input name="solidarity_surcharge_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Lohnsteuer-Rate (manuell) <input name="wage_tax_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Kirchensteuer-Rate (manuell) <input name="church_tax_rate" inputmode="decimal" value="0.00" /></label>
+          <label>Soli-Rate (manuell) <input name="solidarity_surcharge_rate" inputmode="decimal" value="0.00" /></label>
           <label>Arbeitnehmer-SV-Rate <input name="employee_social_security_rate" inputmode="decimal" value="0.00" /></label>
           <label>Arbeitgeber-SV-Rate <input name="employer_social_security_rate" inputmode="decimal" value="0.00" /></label>
         </div>
@@ -136,10 +142,12 @@
               <th>Name</th>
               <th>Status</th>
               <th>StKl</th>
+              <th>Lohnsteuer</th>
+              <th>KiSt</th>
               <th class="num">Brutto</th>
-              <th class="num">LSt</th>
               <th class="num">AN-SV</th>
               <th class="num">AG-SV</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -149,10 +157,12 @@
                 <td>{{ employee.first_name }} {{ employee.last_name }}</td>
                 <td>{{ employee.status }}</td>
                 <td>{{ employee.tax_class }}</td>
+                <td>{% if employee.tax_calculation == "pap" %}PAP{% else %}Rate {{ employee.wage_tax_rate | satz }}{% endif %}</td>
+                <td>{{ employee.church_denomination or "–" }}</td>
                 <td class="num">{{ employee.gross_monthly_salary | betrag }}</td>
-                <td class="num">{{ employee.wage_tax_rate | satz }}</td>
                 <td class="num">{{ employee.employee_social_security_rate | satz }}</td>
                 <td class="num">{{ employee.employer_social_security_rate | satz }}</td>
+                <td><a href="{{ url_for('main.payroll_employee_page', employee_id=employee.id) }}">Bearbeiten</a></td>
               </tr>
             {% endfor %}
           </tbody>
@@ -191,6 +201,8 @@
                   <th>Mitarbeiter</th>
                   <th class="num">Brutto</th>
                   <th class="num">LSt</th>
+                  <th class="num">Soli</th>
+                  <th class="num">KiSt</th>
                   <th class="num">AN-SV</th>
                   <th class="num">Netto</th>
                   <th class="num">AG gesamt</th>
@@ -201,7 +213,9 @@
                   <tr>
                     <td>{{ line.employee.employee_number }} – {{ line.employee.first_name }} {{ line.employee.last_name }}</td>
                     <td class="num">{{ line.gross_pay | betrag }}</td>
-                    <td class="num">{{ (line.wage_tax + line.church_tax + line.solidarity_surcharge) | betrag }}</td>
+                    <td class="num">{{ line.wage_tax | betrag }}</td>
+                    <td class="num">{{ line.solidarity_surcharge | betrag }}</td>
+                    <td class="num">{{ line.church_tax | betrag }}{% if line.church_denomination %} <span class="muted">{{ line.church_denomination }}</span>{% endif %}</td>
                     <td class="num">{{ line.employee_social_security | betrag }}</td>
                     <td class="num">{{ line.net_pay | betrag }}</td>
                     <td class="num">{{ line.employer_total | betrag }}</td>
@@ -215,5 +229,119 @@
         <p class="muted">Noch keine Lohnläufe vorhanden.</p>
       {% endif %}
     </section>
+
+    <section class="card" id="lohnsteuer-anmeldung">
+      <h2>Lohnsteuer-Anmeldung</h2>
+      <p class="muted">Gezählt werden gebuchte Lohnläufe, deren Zahlungsdatum im Anmeldungszeitraum liegt. Die Aufteilung nach Vorjahr, laufendem Jahr und Folgejahr richtet sich nach dem Lohnmonat. Eine Übermittlung an ELSTER erfolgt hier noch nicht.</p>
+      <form method="get" action="{{ url_for('main.payroll_page') }}#lohnsteuer-anmeldung" class="inline-form">
+        <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+        <label for="lsta_period">Anmeldungszeitraum</label>
+        <select id="lsta_period" name="lsta_period" style="width:auto;">
+          {% for option in lsta_period_options %}
+            <option value="{{ option }}" {% if option == lsta_period %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Berechnen</button>
+      </form>
+      {% if lsta_error %}<p class="muted">{{ lsta_error }}</p>{% endif %}
+      {% if lsta_preview %}
+        <p>
+          <strong>{{ lsta_preview.period_label }}</strong>
+          <span class="muted">{{ lsta_preview.date_from | datum }} – {{ lsta_preview.date_to | datum }}, ELSTER-Zeitraum {{ elster_period_code(lsta_preview.period_label) }}</span>
+          <span class="badge">fällig {{ lsta_preview.due_date | datum }}</span>
+        </p>
+        <table>
+          <thead><tr><th>Kz</th><th>Bezeichnung</th><th class="num">Betrag</th></tr></thead>
+          <tbody>
+            {% for row in lsta_preview.rows %}
+              <tr>
+                <td>{{ row.kennzahl }}</td>
+                <td>{{ row.label }}</td>
+                <td class="num">{% if row.kennzahl == "86" %}{{ row.amount }}{% else %}{{ row.amount | betrag }}{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted">Abgleich Lohnsteuer-Verbindlichkeit: gebucht {{ lsta_preview.liability.booked | betrag }} €, angemeldet {{ lsta_preview.liability.declared | betrag }} €, Differenz {{ lsta_preview.liability.difference | betrag }} €.</p>
+        {% for issue in lsta_preview.issues %}<p class="callout callout-warning">{{ issue }}</p>{% endfor %}
+        {% for warning in lsta_preview.warnings %}<p class="muted">Hinweis: {{ warning }}</p>{% endfor %}
+        {% if not lsta_preview.issues %}
+          <form method="post" action="{{ url_for('main.create_wage_tax_return_action') }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="company_id" value="{{ selected_company_id }}" />
+            <input type="hidden" name="period_label" value="{{ lsta_preview.period_label }}" />
+            <label class="check"><input type="checkbox" name="correction" value="1" /> als Berichtigung (Kz 10)</label>
+            <button type="submit">Festhalten</button>
+          </form>
+        {% endif %}
+      {% endif %}
+
+      <h3 style="margin-top:1.5rem;">Festgehaltene Anmeldungen</h3>
+      {% if wage_tax_returns %}
+        <table>
+          <thead><tr><th>Zeitraum</th><th>Art</th><th class="num">Arbeitnehmer</th><th class="num">Gesamtbetrag (Kz 83)</th><th>Erstellt</th></tr></thead>
+          <tbody>
+            {% for item in wage_tax_returns %}
+              {% set total = (item.kennzahlen | selectattr("kennzahl", "equalto", "83") | first) %}
+              <tr>
+                <td><a href="{{ url_for('main.payroll_page', company_id=selected_company_id, lsta_period=item.period_label) }}#lohnsteuer-anmeldung">{{ item.period_label }}</a></td>
+                <td>{% if item.correction_number %}Berichtigung {{ item.correction_number }}{% else %}Erstanmeldung{% endif %}</td>
+                <td class="num">{{ item.employee_count }}</td>
+                <td class="num">{{ total.amount | betrag if total else "–" }}</td>
+                <td>{{ item.created_at | datum_zeit }} <span class="muted">{{ item.created_by }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Noch keine Lohnsteuer-Anmeldung festgehalten.</p>
+      {% endif %}
+    </section>
   {% endif %}
+
+  <section class="card" id="lohnsteuer-rechner">
+    <h2>Lohnsteuer-Rechner</h2>
+    <p class="muted">Laufender Monatslohn nach dem amtlichen Programmablaufplan des BMF ({% for year in payroll_readiness.pap_years %}{{ year }}{% if not loop.last %}, {% endif %}{% endfor %}). Es wird nichts gespeichert.</p>
+    <form method="post" action="{{ url_for('main.calculate_wage_tax_action') }}#lohnsteuer-rechner" class="stacked">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="company_id" value="{{ selected_company_id or '' }}" />
+      <div class="grid-2">
+        <label>Lohnmonat <input name="period_label" value="{{ calc_values.period_label or default_period }}" required /></label>
+        <label>Bruttolohn <input name="gross_monthly_salary" inputmode="decimal" value="{{ calc_values.gross_monthly_salary or '' }}" required /></label>
+        <label>Steuerklasse
+          <select name="tax_class">
+            {% for klass in range(1, 7) %}<option value="{{ klass }}" {% if calc_values.tax_class == klass %}selected{% endif %}>{{ klass }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Kinderfreibeträge <input name="child_allowances" inputmode="decimal" value="{{ calc_values.child_allowances or '0.0' }}" /></label>
+        <label>Geburtsdatum <input name="birth_date" type="date" value="{{ calc_values.birth_date or '' }}" required /></label>
+        <label>Bundesland
+          <select name="federal_state" required>
+            {% for code, name in federal_states.items() %}<option value="{{ code }}" {% if calc_values.federal_state == code %}selected{% endif %}>{{ code }} – {{ name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Kirchensteuermerkmal
+          <select name="church_denomination">
+            <option value="">keine Kirchensteuer</option>
+            {% for code, entry in church_denominations.items() %}<option value="{{ code }}" {% if calc_values.church_denomination == code %}selected{% endif %}>{{ code }} – {{ entry[0] }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>KV-Zusatzbeitrag in % <input name="health_insurance_additional_rate" inputmode="decimal" value="{{ calc_values.health_insurance_additional_rate or '2.90' }}" /></label>
+        <label>Kinder (Pflegeversicherung) <input name="care_insurance_children" type="number" min="0" value="{{ calc_values.care_insurance_children or 0 }}" /></label>
+      </div>
+      <button type="submit">Berechnen</button>
+    </form>
+    {% if calc_error %}<p class="callout callout-warning">{{ calc_error }}</p>{% endif %}
+    {% if calc_result %}
+      <table>
+        <tbody>
+          <tr><td>Lohnsteuer</td><td class="num">{{ calc_result.wage_tax | betrag }}</td></tr>
+          <tr><td>Solidaritätszuschlag</td><td class="num">{{ calc_result.solidarity_surcharge | betrag }}</td></tr>
+          <tr><td>Kirchensteuer</td><td class="num">{{ calc_result.church_tax | betrag }}</td></tr>
+          <tr><td><strong>Steuerabzüge gesamt</strong></td><td class="num"><strong>{{ calc_result.total_tax | betrag }}</strong></td></tr>
+        </tbody>
+      </table>
+      <p class="muted">{{ calc_result.version }}; Sozialversicherungsbeiträge sind nicht enthalten.</p>
+    {% endif %}
+  </section>
 {% endblock %}

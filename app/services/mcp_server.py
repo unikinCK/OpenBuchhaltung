@@ -6045,9 +6045,10 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="create_payroll_employee",
         description=(
-            "Legt Mitarbeiter-Stammdaten fuer das Lohnbuchhaltungs-MVP an. "
-            "Abzuege werden ueber konfigurierbare Raten gerechnet; amtliche "
-            "ELStAM/PAP-/DEUEV-Berechnung ist nicht enthalten."
+            "Legt Mitarbeiter-Stammdaten an. Mit tax_calculation='pap' rechnet der Lohnlauf "
+            "Lohnsteuer, Soli und Kirchensteuer nach dem amtlichen PAP des BMF (Pflicht dann: "
+            "birth_date, federal_state); 'manual' nutzt die Raten. SV-Beitraege laufen ueber "
+            "Raten; ELStAM-Abruf und DEUEV-Meldungen sind nicht enthalten."
         ),
         input_schema={
             "type": "object",
@@ -6119,6 +6120,65 @@ TOOLS: list[ToolSpec] = [
                     "type": "integer",
                     "description": "Standard-Profitcenter für Aufwandsbuchungen.",
                 },
+                "tax_calculation": {
+                    "type": "string",
+                    "enum": ["pap", "manual"],
+                    "description": "Lohnsteuer nach amtlichem PAP oder nach Raten.",
+                },
+                "church_denomination": {
+                    "type": "string",
+                    "description": (
+                        "Kirchensteuermerkmal laut ELStAM: ev, lt, rf, fr, rk, ak, is, jd; "
+                        "leer = keine Kirchensteuer."
+                    ),
+                },
+                "health_insurance_additional_rate": {
+                    "type": "string",
+                    "description": "Kassenindividueller KV-Zusatzbeitrag in Prozent, z. B. '2.90'.",
+                },
+                "private_health_insurance": {
+                    "type": "boolean",
+                    "description": "Ausschliesslich privat krankenversichert.",
+                },
+                "private_health_premium": {
+                    "type": "string",
+                    "description": "Monatlicher Basis-KV/PV-Beitrag bei PKV in Euro.",
+                },
+                "private_health_employer_subsidy": {
+                    "type": "string",
+                    "description": "Monatlicher Arbeitgeberzuschuss zur PKV in Euro.",
+                },
+                "care_insurance_children": {
+                    "type": "integer",
+                    "description": (
+                        "Zahl der Kinder fuer die Pflegeversicherung (0 = Kinderlosenzuschlag "
+                        "ab 23, ab 2 Kindern Abschlag)."
+                    ),
+                },
+                "pension_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": (
+                        "Rentenversicherungspflichtig (z. B. false bei beherrschendem GGF)."
+                    ),
+                },
+                "unemployment_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": "Arbeitslosenversicherungspflichtig.",
+                },
+                "monthly_tax_allowance": {
+                    "type": "string",
+                    "description": "Monatlicher Freibetrag laut ELStAM in Euro.",
+                },
+                "monthly_tax_addition": {
+                    "type": "string",
+                    "description": "Monatlicher Hinzurechnungsbetrag laut ELStAM in Euro.",
+                },
+                "tax_factor": {
+                    "type": "string",
+                    "description": (
+                        "Faktor beim Faktorverfahren (nur Steuerklasse IV), z. B. '0.912'."
+                    ),
+                },
             },
             "required": [
                 "company_id",
@@ -6132,6 +6192,205 @@ TOOLS: list[ToolSpec] = [
         },
         http_method="POST",
         path="/payroll/employees",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="update_payroll_employee",
+        description=(
+            "Aendert Mitarbeiter-Stammdaten (nur die uebergebenen Felder), z. B. Steuerklasse, "
+            "Kirchensteuermerkmal, Bruttogehalt oder Berechnungsart. Bestehende Lohnlaeufe "
+            "bleiben unveraendert. Kontenfelder als *_account_id."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "employee_id": {"type": "integer", "description": "ID des Mitarbeiters."},
+                "first_name": {"type": "string", "description": "Vorname."},
+                "last_name": {"type": "string", "description": "Nachname."},
+                "employment_start": {"type": "string", "description": "Eintritt JJJJ-MM-TT."},
+                "employment_end": {"type": "string", "description": "Austritt JJJJ-MM-TT."},
+                "status": {"type": "string", "enum": ["active", "inactive"]},
+                "birth_date": {"type": "string", "description": "Geburtsdatum JJJJ-MM-TT."},
+                "tax_id": {"type": "string", "description": "Steuer-ID."},
+                "tax_class": {"type": "integer", "description": "Steuerklasse 1 bis 6."},
+                "child_allowances": {"type": "string", "description": "Kinderfreibetraege."},
+                "federal_state": {"type": "string", "description": "Bundesland, z. B. NW."},
+                "main_employment": {"type": "boolean", "description": "Hauptarbeitgeber."},
+                "social_security_number": {"type": "string", "description": "SV-Nummer."},
+                "gross_monthly_salary": {"type": "string", "description": "Bruttogehalt."},
+                "wage_tax_rate": {"type": "string", "description": "LSt-Rate (manual)."},
+                "church_tax_rate": {"type": "string", "description": "KiSt-Rate (manual)."},
+                "solidarity_surcharge_rate": {"type": "string", "description": "Soli-Rate."},
+                "employee_social_security_rate": {"type": "string", "description": "AN-SV-Rate."},
+                "employer_social_security_rate": {"type": "string", "description": "AG-SV-Rate."},
+                "tax_calculation": {
+                    "type": "string",
+                    "enum": ["pap", "manual"],
+                    "description": "Lohnsteuer nach amtlichem PAP oder nach Raten.",
+                },
+                "church_denomination": {
+                    "type": "string",
+                    "description": (
+                        "Kirchensteuermerkmal laut ELStAM: ev, lt, rf, fr, rk, ak, is, jd; "
+                        "leer = keine Kirchensteuer."
+                    ),
+                },
+                "health_insurance_additional_rate": {
+                    "type": "string",
+                    "description": "Kassenindividueller KV-Zusatzbeitrag in Prozent, z. B. '2.90'.",
+                },
+                "private_health_insurance": {
+                    "type": "boolean",
+                    "description": "Ausschliesslich privat krankenversichert.",
+                },
+                "private_health_premium": {
+                    "type": "string",
+                    "description": "Monatlicher Basis-KV/PV-Beitrag bei PKV in Euro.",
+                },
+                "private_health_employer_subsidy": {
+                    "type": "string",
+                    "description": "Monatlicher Arbeitgeberzuschuss zur PKV in Euro.",
+                },
+                "care_insurance_children": {
+                    "type": "integer",
+                    "description": (
+                        "Zahl der Kinder fuer die Pflegeversicherung (0 = Kinderlosenzuschlag "
+                        "ab 23, ab 2 Kindern Abschlag)."
+                    ),
+                },
+                "pension_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": (
+                        "Rentenversicherungspflichtig (z. B. false bei beherrschendem GGF)."
+                    ),
+                },
+                "unemployment_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": "Arbeitslosenversicherungspflichtig.",
+                },
+                "monthly_tax_allowance": {
+                    "type": "string",
+                    "description": "Monatlicher Freibetrag laut ELStAM in Euro.",
+                },
+                "monthly_tax_addition": {
+                    "type": "string",
+                    "description": "Monatlicher Hinzurechnungsbetrag laut ELStAM in Euro.",
+                },
+                "tax_factor": {
+                    "type": "string",
+                    "description": (
+                        "Faktor beim Faktorverfahren (nur Steuerklasse IV), z. B. '0.912'."
+                    ),
+                },
+                "cost_center_id": {"type": "integer", "description": "Kostenstelle."},
+                "profit_center_id": {"type": "integer", "description": "Profitcenter."},
+                "wage_expense_account_id": {"type": "integer", "description": "Lohnaufwand."},
+                "employer_social_security_expense_account_id": {
+                    "type": "integer",
+                    "description": "AG-SV-Aufwand.",
+                },
+                "payroll_liability_account_id": {
+                    "type": "integer",
+                    "description": "Netto-Verbindlichkeit.",
+                },
+                "wage_tax_liability_account_id": {
+                    "type": "integer",
+                    "description": "Lohnsteuer-Verbindlichkeit.",
+                },
+                "social_security_liability_account_id": {
+                    "type": "integer",
+                    "description": "SV-Verbindlichkeit.",
+                },
+            },
+            "required": ["employee_id"],
+            "additionalProperties": False,
+        },
+        http_method="PATCH",
+        path="/payroll/employees/{employee_id}",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="calculate_wage_tax",
+        description=(
+            "Rechnet Lohnsteuer, Solidaritaetszuschlag und Kirchensteuer eines Monatslohns "
+            "nach dem amtlichen Programmablaufplan (PAP) des BMF, ohne etwas zu speichern. "
+            "Pflicht: period_label, gross_monthly_salary, birth_date, federal_state."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "period_label": {"type": "string", "description": "Lohnmonat JJJJ-MM."},
+                "gross_monthly_salary": {
+                    "type": "string",
+                    "description": "Steuerpflichtiger Monatsbruttolohn in Euro.",
+                },
+                "tax_class": {"type": "integer", "description": "Steuerklasse 1 bis 6."},
+                "child_allowances": {
+                    "type": "string",
+                    "description": "Kinderfreibetraege, z. B. '1.0'.",
+                },
+                "birth_date": {"type": "string", "description": "Geburtsdatum JJJJ-MM-TT."},
+                "federal_state": {"type": "string", "description": "Bundesland, z. B. NW."},
+                "church_denomination": {
+                    "type": "string",
+                    "description": (
+                        "Kirchensteuermerkmal laut ELStAM: ev, lt, rf, fr, rk, ak, is, jd; "
+                        "leer = keine Kirchensteuer."
+                    ),
+                },
+                "health_insurance_additional_rate": {
+                    "type": "string",
+                    "description": "Kassenindividueller KV-Zusatzbeitrag in Prozent, z. B. '2.90'.",
+                },
+                "private_health_insurance": {
+                    "type": "boolean",
+                    "description": "Ausschliesslich privat krankenversichert.",
+                },
+                "private_health_premium": {
+                    "type": "string",
+                    "description": "Monatlicher Basis-KV/PV-Beitrag bei PKV in Euro.",
+                },
+                "private_health_employer_subsidy": {
+                    "type": "string",
+                    "description": "Monatlicher Arbeitgeberzuschuss zur PKV in Euro.",
+                },
+                "care_insurance_children": {
+                    "type": "integer",
+                    "description": (
+                        "Zahl der Kinder fuer die Pflegeversicherung (0 = Kinderlosenzuschlag "
+                        "ab 23, ab 2 Kindern Abschlag)."
+                    ),
+                },
+                "pension_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": (
+                        "Rentenversicherungspflichtig (z. B. false bei beherrschendem GGF)."
+                    ),
+                },
+                "unemployment_insurance_compulsory": {
+                    "type": "boolean",
+                    "description": "Arbeitslosenversicherungspflichtig.",
+                },
+                "monthly_tax_allowance": {
+                    "type": "string",
+                    "description": "Monatlicher Freibetrag laut ELStAM in Euro.",
+                },
+                "monthly_tax_addition": {
+                    "type": "string",
+                    "description": "Monatlicher Hinzurechnungsbetrag laut ELStAM in Euro.",
+                },
+                "tax_factor": {
+                    "type": "string",
+                    "description": (
+                        "Faktor beim Faktorverfahren (nur Steuerklasse IV), z. B. '0.912'."
+                    ),
+                },
+            },
+            "required": ["period_label", "gross_monthly_salary", "birth_date", "federal_state"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payroll/wage-tax/calculate",
         arg_location="json",
     ),
     ToolSpec(
@@ -6190,6 +6449,67 @@ TOOLS: list[ToolSpec] = [
         http_method="POST",
         path="/payroll/runs/{payroll_run_id}/post",
         arg_location="json",
+    ),
+    ToolSpec(
+        name="preview_wage_tax_return",
+        description=(
+            "Berechnet die Lohnsteuer-Anmeldung eines Anmeldungszeitraums aus den gebuchten "
+            "Lohnlaeufen (Zuordnung nach Zahlungsdatum): Kennzahlen 86, 42, 48, 49, 61-64, 83 "
+            "mit Einzelaufstellung Vorjahr/laufendes Jahr/Folgejahr, Faelligkeit, Abgleich mit "
+            "dem Lohnsteuer-Verbindlichkeitskonto, Hinweise und blockierende Fehler."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period_label": {
+                    "type": "string",
+                    "description": "Anmeldungszeitraum JJJJ-MM, JJJJ-Qn oder JJJJ.",
+                },
+            },
+            "required": ["company_id", "period_label"],
+            "additionalProperties": False,
+        },
+        http_method="GET",
+        path="/payroll/wage-tax-returns/preview",
+        arg_location="query",
+    ),
+    ToolSpec(
+        name="create_wage_tax_return",
+        description=(
+            "Haelt die Lohnsteuer-Anmeldung eines Zeitraums als unveraenderlichen Snapshot fest. "
+            "Gibt es fuer den Zeitraum schon eine, nur mit correction=true (Berichtigung, Kz 10). "
+            "Eine Uebermittlung an ELSTER erfolgt nicht."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "company_id": {"type": "integer", "description": "ID der Gesellschaft."},
+                "period_label": {
+                    "type": "string",
+                    "description": "Anmeldungszeitraum JJJJ-MM, JJJJ-Qn oder JJJJ.",
+                },
+                "correction": {
+                    "type": "boolean",
+                    "description": (
+                        "Berichtigte Anmeldung fuer einen schon festgehaltenen Zeitraum."
+                    ),
+                },
+            },
+            "required": ["company_id", "period_label"],
+            "additionalProperties": False,
+        },
+        http_method="POST",
+        path="/payroll/wage-tax-returns",
+        arg_location="json",
+    ),
+    ToolSpec(
+        name="list_wage_tax_returns",
+        description="Listet festgehaltene Lohnsteuer-Anmeldungen einer Gesellschaft.",
+        input_schema=_company_id_schema(),
+        http_method="GET",
+        path="/payroll/wage-tax-returns",
+        arg_location="query",
     ),
     ToolSpec(
         name="create_fixed_asset",

@@ -8,6 +8,24 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Lohnsteuer nach amtlichem PAP und Lohnsteuer-Anmeldung
+- **Neu:** Lohnsteuer, Solidaritätszuschlag und Kirchensteuer für laufenden Monatslohn nach dem amtlichen
+  Programmablaufplan (PAP) 2026 des BMF. `tools/pap_codegen.py` erzeugt das Rechenmodul aus dem veröffentlichten
+  XML (`data/pap/Lohnsteuer2026.xml`); 207 Prüfwerte der BMF-Schnittstelle stimmen auf den Cent (ADR-012).
+  Kirchensteuer 8 % (BY, BW) bzw. 9 % der Bemessungsgrundlage des PAP.
+- **Neu:** Mitarbeiter mit Berechnungsart (`pap`/`manual`) und PAP-Merkmalen: Kirchensteuermerkmal, KV-Zusatzbeitrag,
+  PKV, Kinder für die Pflegeversicherung, RV-/ALV-Pflicht, Frei- und Hinzurechnungsbetrag, Faktor. Mitarbeiter lassen
+  sich jetzt ändern (UI „Bearbeiten“, `PATCH /payroll/employees/<id>`, MCP `update_payroll_employee`, mit
+  Audit-Eintrag). Bestehende Mitarbeiter bleiben bei den Raten.
+- **Neu:** Lohnsteuer-Rechner ohne Speichern (UI, `POST /payroll/wage-tax/calculate`, MCP `calculate_wage_tax`).
+- **Neu:** Lohnsteuer-Anmeldung je Monat, Quartal oder Jahr aus gebuchten Lohnläufen nach Zahlungsdatum: Kz 86, 42,
+  48, 49, 61–64, 83 mit Einzelaufstellung Vorjahr/laufendes Jahr/Folgejahr, Fälligkeit, Abgleich mit dem
+  Lohnsteuer-Verbindlichkeitskonto, Hinweise auf ungebuchte Läufe. Festhalten als Snapshot, Änderungen als
+  Berichtigung (Kz 10). REST `GET /payroll/wage-tax-returns/preview`, `POST|GET /payroll/wage-tax-returns`, MCP
+  `preview_wage_tax_return`, `create_wage_tax_return`, `list_wage_tax_returns`; Prüferexport-Tabelle
+  `wage_tax_returns`. Noch ohne ELSTER-Übermittlung.
+- Migration `20261122_0070` (Spalten an `payroll_employee` und `payroll_run_line`, Tabelle `wage_tax_return`).
+
 ### ELSTER-Zertifikat je Gesellschaft
 - **Neu:** Jede Gesellschaft kann ihr ELSTER-Zertifikat (.pfx) mit PIN in den Firmendaten hinterlegen (UI, REST
   `GET/POST /companies/<id>/elster-certificate`, `POST …/elster-certificate/delete`, MCP

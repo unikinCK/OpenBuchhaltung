@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ employee.first_name }} {{ employee.last_name }} – Lohn – OpenBuchhaltung{% endblock %}
+
+{% macro account_select(name, label, current) %}
+  <label>{{ label }}
+    <select name="{{ name }}" required>
+      {% for account in accounts %}<option value="{{ account.id }}" {% if account.id == current %}selected{% endif %}>{{ account.code }} – {{ account.name }}</option>{% endfor %}
+    </select>
+  </label>
+{% endmacro %}
+
+{% block content %}
+  <p><a href="{{ url_for('main.payroll_page', company_id=employee.company_id) }}">← Lohnbuchhaltung</a></p>
+  <h1 class="page-title">{{ employee.employee_number }} – {{ employee.first_name }} {{ employee.last_name }}</h1>
+
+  <section class="card">
+    <p class="muted">Änderungen gelten für künftige Lohnläufe; erstellte Lohnläufe bleiben unverändert.</p>
+    <form method="post" action="{{ url_for('main.update_payroll_employee_action', employee_id=employee.id) }}" class="stacked">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+      <h2>Stammdaten</h2>
+      <div class="grid-2">
+        <label>Vorname <input name="first_name" value="{{ employee.first_name }}" required /></label>
+        <label>Nachname <input name="last_name" value="{{ employee.last_name }}" required /></label>
+        <label>Eintritt <input name="employment_start" type="date" value="{{ employee.employment_start.isoformat() }}" required /></label>
+        <label>Austritt <input name="employment_end" type="date" value="{{ employee.employment_end.isoformat() if employee.employment_end else '' }}" /></label>
+        <label>Status
+          <select name="status">
+            <option value="active" {% if employee.status == "active" %}selected{% endif %}>aktiv</option>
+            <option value="inactive" {% if employee.status == "inactive" %}selected{% endif %}>inaktiv</option>
+          </select>
+        </label>
+        <label>Geburtsdatum <input name="birth_date" type="date" value="{{ employee.birth_date.isoformat() if employee.birth_date else '' }}" /></label>
+        <label>Steuer-ID <input name="tax_id" value="{{ employee.tax_id or '' }}" /></label>
+        <label>SV-Nummer <input name="social_security_number" value="{{ employee.social_security_number or '' }}" /></label>
+        <label>Steuerklasse
+          <select name="tax_class">
+            {% for klass in range(1, 7) %}<option value="{{ klass }}" {% if employee.tax_class == klass %}selected{% endif %}>{{ klass }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Kinderfreibeträge <input name="child_allowances" inputmode="decimal" value="{{ employee.child_allowances }}" /></label>
+        <label>Bundesland (Betriebsstätte)
+          <select name="federal_state">
+            <option value="">–</option>
+            {% for code, name in federal_states.items() %}<option value="{{ code }}" {% if employee.federal_state == code %}selected{% endif %}>{{ code }} – {{ name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Arbeitsverhältnis
+          <select name="main_employment">
+            <option value="1" {% if employee.main_employment %}selected{% endif %}>Hauptarbeitgeber</option>
+            <option value="0" {% if not employee.main_employment %}selected{% endif %}>Nebenarbeitgeber</option>
+          </select>
+        </label>
+        <label>Bruttogehalt <input name="gross_monthly_salary" inputmode="decimal" value="{{ employee.gross_monthly_salary }}" required /></label>
+      </div>
+
+      <h2>Lohnsteuer und Sozialversicherung</h2>
+      <div class="grid-2">
+        {% include "_lohn_steuermerkmale.html" %}
+        <label>Lohnsteuer-Rate (manuell) <input name="wage_tax_rate" inputmode="decimal" value="{{ employee.wage_tax_rate }}" /></label>
+        <label>Kirchensteuer-Rate (manuell) <input name="church_tax_rate" inputmode="decimal" value="{{ employee.church_tax_rate }}" /></label>
+        <label>Soli-Rate (manuell) <input name="solidarity_surcharge_rate" inputmode="decimal" value="{{ employee.solidarity_surcharge_rate }}" /></label>
+        <label>Arbeitnehmer-SV-Rate <input name="employee_social_security_rate" inputmode="decimal" value="{{ employee.employee_social_security_rate }}" /></label>
+        <label>Arbeitgeber-SV-Rate <input name="employer_social_security_rate" inputmode="decimal" value="{{ employee.employer_social_security_rate }}" /></label>
+      </div>
+
+      <h2>Konten und Kontierung</h2>
+      <div class="grid-2">
+        {{ account_select("wage_expense_account_id", "Lohnaufwand", employee.wage_expense_account_id) }}
+        {{ account_select("employer_social_security_expense_account_id", "AG-SV-Aufwand", employee.employer_social_security_expense_account_id) }}
+        {{ account_select("payroll_liability_account_id", "Netto-Verbindlichkeit", employee.payroll_liability_account_id) }}
+        {{ account_select("wage_tax_liability_account_id", "Lohnsteuer-Verbindlichkeit", employee.wage_tax_liability_account_id) }}
+        {{ account_select("social_security_liability_account_id", "SV-Verbindlichkeit", employee.social_security_liability_account_id) }}
+        <label>Standard-Kostenstelle
+          <select name="cost_center_id">
+            <option value="">Ohne Kostenstelle</option>
+            {% for unit in cost_centers %}<option value="{{ unit.id }}" {% if unit.id == employee.cost_center_id %}selected{% endif %}>{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Standard-Profitcenter
+          <select name="profit_center_id">
+            <option value="">Ohne Profitcenter</option>
+            {% for unit in profit_centers %}<option value="{{ unit.id }}" {% if unit.id == employee.profit_center_id %}selected{% endif %}>{{ unit.code }} – {{ unit.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <button type="submit">Speichern</button>
+    </form>
+  </section>
+{% endblock %}

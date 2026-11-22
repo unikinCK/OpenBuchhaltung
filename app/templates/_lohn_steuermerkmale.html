@@ -1,0 +1,40 @@
+{# PAP-Merkmale eines Mitarbeiters; erwartet `employee` (oder none), `church_denominations`. #}
+<label>Lohnsteuer-Berechnung
+  <select name="tax_calculation">
+    <option value="pap" {% if not employee or employee.tax_calculation == "pap" %}selected{% endif %}>Amtlicher PAP (BMF)</option>
+    <option value="manual" {% if employee and employee.tax_calculation == "manual" %}selected{% endif %}>Manuelle Raten</option>
+  </select>
+</label>
+<label>Kirchensteuermerkmal
+  <select name="church_denomination">
+    <option value="">keine Kirchensteuer</option>
+    {% for code, entry in church_denominations.items() %}
+      <option value="{{ code }}" {% if employee and employee.church_denomination == code %}selected{% endif %}>{{ code }} – {{ entry[0] }}</option>
+    {% endfor %}
+  </select>
+</label>
+<label>KV-Zusatzbeitrag in % <input name="health_insurance_additional_rate" inputmode="decimal" value="{{ employee.health_insurance_additional_rate if employee else '2.90' }}" /></label>
+<label>Kinder (Pflegeversicherung) <input name="care_insurance_children" type="number" min="0" value="{{ employee.care_insurance_children if employee else 0 }}" /></label>
+<label>Krankenversicherung
+  <select name="private_health_insurance">
+    <option value="0" {% if not employee or not employee.private_health_insurance %}selected{% endif %}>gesetzlich</option>
+    <option value="1" {% if employee and employee.private_health_insurance %}selected{% endif %}>privat</option>
+  </select>
+</label>
+<label>PKV-Basisbeitrag mtl. <input name="private_health_premium" inputmode="decimal" value="{{ employee.private_health_premium if employee else '0.00' }}" /></label>
+<label>AG-Zuschuss PKV mtl. <input name="private_health_employer_subsidy" inputmode="decimal" value="{{ employee.private_health_employer_subsidy if employee else '0.00' }}" /></label>
+<label>Rentenversicherung
+  <select name="pension_insurance_compulsory">
+    <option value="1" {% if not employee or employee.pension_insurance_compulsory %}selected{% endif %}>pflichtversichert</option>
+    <option value="0" {% if employee and not employee.pension_insurance_compulsory %}selected{% endif %}>nicht pflichtversichert</option>
+  </select>
+</label>
+<label>Arbeitslosenversicherung
+  <select name="unemployment_insurance_compulsory">
+    <option value="1" {% if not employee or employee.unemployment_insurance_compulsory %}selected{% endif %}>pflichtversichert</option>
+    <option value="0" {% if employee and not employee.unemployment_insurance_compulsory %}selected{% endif %}>nicht pflichtversichert</option>
+  </select>
+</label>
+<label>Freibetrag mtl. (ELStAM) <input name="monthly_tax_allowance" inputmode="decimal" value="{{ employee.monthly_tax_allowance if employee else '0.00' }}" /></label>
+<label>Hinzurechnungsbetrag mtl. <input name="monthly_tax_addition" inputmode="decimal" value="{{ employee.monthly_tax_addition if employee else '0.00' }}" /></label>
+<label>Faktor (nur StKl IV) <input name="tax_factor" inputmode="decimal" placeholder="z. B. 0,912" value="{{ employee.tax_factor if employee and employee.tax_factor else '' }}" /></label>

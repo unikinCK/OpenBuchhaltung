@@ -62,9 +62,11 @@ können, was gebucht, exportiert und protokolliert wird.
   Bankumsatz, Änderungsprotokoll).
 - **Anlagenbuchhaltung:** Anlagegüter, AfA-Pläne, GWG, Sammelposten,
   außerplanmäßige Abschreibung und Anlagenabgang.
-- **Lohnbuchhaltung:** Mitarbeiterstamm, konfigurierbare Abzugsraten,
-  Lohnläufe und automatische FiBu-Buchung von Brutto, Netto,
-  Lohnsteuer- und Sozialversicherungsverbindlichkeiten.
+- **Lohnbuchhaltung:** Mitarbeiterstamm, Lohnsteuer, Solidaritätszuschlag und
+  Kirchensteuer nach dem amtlichen Programmablaufplan (PAP) des BMF oder nach
+  Raten, Lohnläufe mit automatischer FiBu-Buchung von Brutto, Netto,
+  Lohnsteuer- und Sozialversicherungsverbindlichkeiten, Lohnsteuer-Rechner und
+  Lohnsteuer-Anmeldung (Kennzahlen, Fälligkeit, Abgleich, Berichtigung).
 - **Auswertungen & Exporte:** Summen-/Saldenliste, GuV, Bilanz,
   Journalexporte, DATEV-kompatibler Buchungsstapel und Prüferexport-Paket
   mit Manifest und Hashes.
@@ -104,10 +106,13 @@ Wichtig zur Einordnung:
   ERiC ist nicht enthalten: Betreiber laden sie im ELSTER-Entwicklerbereich
   und binden sie per `ELSTER_ERIC_LIBRARY_PATH` ein; dazu kommen Hersteller-ID
   und je Gesellschaft ELSTER-Zertifikat und PIN (Firmendaten, verschlüsselt). Die USt-Jahreserklärung geht noch nicht über ERiC.
-- Lohnbuchhaltung ist als technisches MVP umgesetzt; amtliche Lohnsteuer-/
-  Sozialversicherungsmeldungen, ELStAM und DEÜV sind noch nicht enthalten. Für
-  die Lohnsteuerberechnung kann ein lokaler `PAYROLL_PAP_COMMAND`-Runner
-  angebunden werden; ohne Runner nutzt das MVP manuelle Abzugsraten.
+- Lohnbuchhaltung: Die Lohnsteuer für laufenden Monatslohn rechnet OpenBuchhaltung
+  nach dem amtlichen PAP (aus dem BMF-XML erzeugt, ADR-012, derzeit 2026); sonstige
+  Bezüge, Versorgungsbezüge und Pauschalsteuer sind nicht abgebildet.
+  Sozialversicherungsbeiträge laufen über Raten. Die Lohnsteuer-Anmeldung wird
+  berechnet und festgehalten, aber noch nicht an ELSTER übermittelt; ELStAM-Abruf,
+  Lohnsteuerbescheinigung und DEÜV-Meldungen fehlen noch. Ein lokaler
+  `PAYROLL_PAP_COMMAND`-Runner kann den integrierten PAP ersetzen.
 
 ## Planung & Dokumentation
 
@@ -415,7 +420,7 @@ ein anderes Modell nachgeladen. Ist keines geladen, schlägt der Aufruf fehl.
 | `ELSTER_CERTIFICATE_PATH`, `ELSTER_CERTIFICATE_PIN`, `ELSTER_CERTIFICATE_ALIAS` | – | Instanz-Zertifikat (.pfx), seine PIN (Geheimnis) und ein Anzeigename; Rückfall für Gesellschaften ohne eigenes Zertifikat in den Firmendaten. |
 | `ELSTER_ERIC_COMMAND` | integrierter Runner | Eigener Befehl statt `python -m app.services.eric_runner` (gleicher Vertrag). |
 | `ELSTER_ERIC_TIMEOUT_SECONDS` | `60` | Timeout des ERiC-Runners. |
-| `PAYROLL_PAP_COMMAND` | – | Externer Lohnsteuer-PAP-Runner (ohne Runner: manuelle Abzugsraten). |
+| `PAYROLL_PAP_COMMAND` | – | Externer Lohnsteuer-PAP-Runner; hat Vorrang vor dem integrierten amtlichen PAP. |
 | `PAYROLL_PAP_TIMEOUT_SECONDS` | `30` | Timeout des PAP-Runners. |
 | `PAYROLL_PARAMETER_VERSION` | `manual` | Kennung des Lohn-Parametersatzes. |
 | `PAYROLL_ELSTAM_COMMAND`, `PAYROLL_DEUEV_COMMAND` | – | Runner für ELStAM/DEÜV (Readiness-Anzeige). |

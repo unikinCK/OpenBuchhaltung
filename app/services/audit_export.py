@@ -56,6 +56,7 @@ from domain.models import (
     User,
     VatExchangeRate,
     VatReturn,
+    WageTaxReturn,
 )
 
 
@@ -123,6 +124,7 @@ EXPORT_TABLE_MODELS = {
     "payroll_runs": PayrollRun,
     "payroll_run_lines": PayrollRunLine,
     "vat_returns": VatReturn,
+    "wage_tax_returns": WageTaxReturn,
     "income_tax_returns": IncomeTaxReturn,
     "elster_submissions": ElsterSubmission,
     "audit_log": AuditLog,
@@ -185,6 +187,9 @@ TABLE_DESCRIPTIONS = {
     "payroll_runs": "Lohnabrechnungsläufe und Summen.",
     "payroll_run_lines": "Beschäftigtenbezogene Ergebnisse der Lohnabrechnungsläufe.",
     "vat_returns": "Festgehaltene Umsatzsteuer-Voranmeldungen und Jahreserklärungen.",
+    "wage_tax_returns": (
+        "Festgehaltene Lohnsteuer-Anmeldungen mit Kennzahlen, Berichtigungsnummer und Lohnläufen."
+    ),
     "income_tax_returns": "Festgehaltene Körperschaft- und Gewerbesteuerberechnungen.",
     "elster_submissions": "ELSTER-Nutzdaten und Übermittlungsprotokolle.",
     "audit_log": "Gesellschaftsbezogene Ausschnitte des verketteten Audit-Logs.",
@@ -595,6 +600,21 @@ def build_audit_export_package(
                 VatReturn.date_to >= date_from if date_from is not None else None,
                 VatReturn.date_from <= date_to if date_to is not None else None,
                 order_by=(VatReturn.date_from, VatReturn.id),
+            )
+        ],
+        "wage_tax_returns": [
+            _model_dict(row)
+            for row in _rows(
+                session,
+                WageTaxReturn,
+                WageTaxReturn.company_id == company.id,
+                WageTaxReturn.date_to >= date_from if date_from is not None else None,
+                WageTaxReturn.date_from <= date_to if date_to is not None else None,
+                order_by=(
+                    WageTaxReturn.date_from,
+                    WageTaxReturn.correction_number,
+                    WageTaxReturn.id,
+                ),
             )
         ],
         "income_tax_returns": [
