@@ -1,6 +1,7 @@
 """FinTS-Bankzugänge und Umsatzabruf über die API.
 
-PIN und TAN werden nur durchgereicht, nie gespeichert oder geloggt.
+PIN und TAN werden nur durchgereicht, nie gespeichert oder geloggt — außer der PIN für den
+ausdrücklich eingeschalteten automatischen Abruf (verschlüsselt, app.api.bank_auto_sync).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.api.helpers import (
     get_session_factory,
 )
 from app.auth import current_api_user
+from app.services.bank_auto_sync import after_manual_fints_sync
 from app.services.fints_institutes import (
     FinTSInstituteError,
     fints_institute_list_status,
@@ -53,6 +55,18 @@ def _parse_optional_date(value: object, field: str) -> date | None:
         return date.fromisoformat(str(value))
     except ValueError as exc:
         raise FinTSSyncError(f"{field} muss ein ISO-Datum (YYYY-MM-DD) sein.") from exc
+
+
+def _after_manual_sync(session, result: FinTSSyncResult, connection_id: int, pin: str) -> None:
+    """Ein gelungener Handabruf setzt einen angehaltenen automatischen Abruf fort."""
+    if result.report is not None:
+        after_manual_fints_sync(
+            session,
+            connection_id=connection_id,
+            pin=pin,
+            secret_key=current_app.config.get("SECRET_KEY"),
+            changed_by=_api_changed_by(),
+        )
 
 
 def _sync_result_response(result: FinTSSyncResult):
@@ -198,6 +212,7 @@ def sync_fints_transactions_via_api(connection_id: int):
             )
         except FinTSSyncError as exc:
             return jsonify({"error": str(exc)}), 422
+        _after_manual_sync(session, result, connection_id, pin)
         return _sync_result_response(result)
 
 
@@ -215,6 +230,7 @@ def submit_fints_tan_via_api(dialog_id: str):
         pending = session.get(FinTSPendingDialog, dialog_id)
         if pending is None or api_scoped_company(session, pending.company_id) is None:
             return jsonify({"error": "FinTS dialog not found."}), 404
+        connection_id = pending.connection_id
         try:
             result = submit_fints_tan(
                 session=session,
@@ -226,6 +242,7 @@ def submit_fints_tan_via_api(dialog_id: str):
             )
         except FinTSSyncError as exc:
             return jsonify({"error": str(exc)}), 422
+        _after_manual_sync(session, result, connection_id, pin)
         return _sync_result_response(result)
 
 

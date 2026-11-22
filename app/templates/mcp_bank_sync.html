@@ -63,6 +63,21 @@
                       <button type="submit" class="secondary">Vorschau</button>
                     </form>
                     {% if default.from_date %}<span class="muted small">Standard: {{ default.from_date | datum }} bis {{ default.to_date | datum }}</span>{% endif %}
+                    {% set auto = auto_by_wallet.get(wallet.id) %}
+                    {% if auto %}
+                      <br /><span class="small">Täglich automatisch nach {{ auto.bank_account }}{% if auto.last_status_label %} · zuletzt {{ auto.last_status_label }}{% endif %} (<a href="{{ url_for('main.bank_page', company_id=company.id, _anchor='online-abruf') }}">Bankseite</a>)</span>
+                    {% elif not wallet.is_closed %}
+                      <form method="post" action="{{ url_for('main.mcp_auto_sync_enable_action') }}" class="inline-form">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="company_id" value="{{ company.id }}" />
+                        <input type="hidden" name="server_id" value="{{ server.id }}" />
+                        <input type="hidden" name="wallet_id" value="{{ wallet.id }}" />
+                        <select name="bank_account_id" aria-label="Bank-Sachkonto für den täglichen Abruf" required>
+                          {{ account_options(default.bank_account_id) }}
+                        </select>
+                        <button type="submit" class="secondary btn-sm">Täglich automatisch abrufen</button>
+                      </form>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

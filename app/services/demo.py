@@ -118,6 +118,8 @@ _DEMO_BLOCKED: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^/auth/zwei-faktor(/|$)", "Zwei-Faktor-Anmeldung"),
         (r"^/api/v1/(fints-|open-banking)", "Bankverbindungen"),
         (r"^/bank/(fints|open-banking)(/|$)", "Bankverbindungen"),
+        (r"^/api/v1/bank-auto-syncs(/|$)", "Bankverbindungen"),
+        (r"^/bank/automatik(/|$)", "Bankverbindungen"),
         (r"^/verwaltung/fints-bankenliste$", "Bankverbindungen"),
         (r"^/api/v1/mcp-servers(/|$)", "Externe MCP-Server"),
         (r"^/(verwaltung/mcp-server|obi-verbindungen)(/|$)", "Externe MCP-Server"),

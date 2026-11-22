@@ -146,6 +146,37 @@ services:
       app:
         condition: service_healthy
 
+  # Täglicher automatischer Umsatzabruf der Bankzugänge, für die er eingeschaltet ist
+  # (FinTS, Open Banking, Bank-MCP-Server): ein einzelner Prozess, damit kein Zugang
+  # doppelt abgerufen wird. Ab BANK_AUTO_SYNC_TIME (Standard 06:00, Europe/Berlin).
+  bank-sync:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    command: ["flask", "--app", "run", "bank-auto-sync", "--loop"]
+    restart: unless-stopped
+    # Kein Webserver: den HTTP-Healthcheck des Images nicht erben (sonst „unhealthy“).
+    healthcheck:
+      disable: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      DATABASE_URL: postgresql+psycopg://openbuchhaltung:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/openbuchhaltung
+      DB_AUTO_MIGRATE: "0"
+      BANK_AUTO_SYNC_TIME: ${BANK_AUTO_SYNC_TIME:-06:00}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+    volumes:
+      # Open Banking liest den Schlüssel der Enable-Banking-Anwendung aus /app/instance.
+      - app_data:/app/instance
+    depends_on:
+      app:
+        condition: service_healthy
+
   caddy:
     image: caddy:2
     profiles: ["proxy"]

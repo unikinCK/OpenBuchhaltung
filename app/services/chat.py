@@ -208,6 +208,10 @@ CHAT_TOOL_GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
             "list_mcp_bank_wallets",
             "preview_mcp_bank_transactions",
             "sync_mcp_bank_transactions",
+            "list_bank_auto_syncs",
+            "enable_mcp_bank_auto_sync",
+            "disable_bank_auto_sync",
+            "run_bank_auto_sync",
         ),
     ),
     "partnererkennung": (

@@ -8,6 +8,23 @@ Versionierung [SemVer](https://semver.org/lang/de/). Releases tragen den Git-Tag
 
 ## [Unreleased]
 
+### Täglicher automatischer Bankabruf
+- **Neu:** Eingerichtete Bankzugänge lassen sich täglich automatisch abrufen – FinTS, Open Banking und Wallets eines
+  Bank-MCP-Servers (z. B. Finom). Eingeschaltet wird je Zugang auf der Bankseite (FinTS mit PIN, Open Banking nach der
+  Bank-Zustimmung) bzw. auf der Abrufseite der Wallet; die Bankseite zeigt Stand und Meldung des letzten Laufs, „Jetzt
+  abrufen“ und „Ausschalten“. REST: `GET /bank-auto-syncs`, `POST /fints-connections/<id>/auto-sync`,
+  `POST /open-banking-connections/<id>/auto-sync`, `POST /bank-accounts/<id>/mcp-auto-sync`,
+  `POST /bank-auto-syncs/<id>/disable`, `POST /bank-auto-syncs/run`; MCP-Tools gleichen Namens (Obi nur für MCP-Wallets
+  und Anzeige, FinTS/Open Banking bleiben im Chat gesperrt).
+- **Neu:** Compose-Dienst `bank-sync` (`flask bank-auto-sync --loop`) ruft ab `BANK_AUTO_SYNC_TIME` (Standard 06:00,
+  Europe/Berlin) einmal täglich ab und holt verpasste Läufe nach einem Neustart nach; `flask bank-auto-sync` ruft sofort
+  ab. In der Demo-Instanz läuft er nicht.
+- **Sicherheit:** Für den FinTS-Abruf ohne Benutzer wird die PIN nur auf ausdrücklichen Wunsch gespeichert,
+  Fernet-verschlüsselt mit einem aus `SECRET_KEY` abgeleiteten Schlüssel, und nie ausgegeben. Verlangt die Bank eine
+  TAN oder meldet einen Fehler, hält der Abruf sofort an (keine wiederholten Fehlversuche bis zur Sperre, kein
+  täglicher pushTAN-Auftrag); ein erfolgreicher Handabruf setzt ihn fort und übernimmt die eingegebene PIN. Ausschalten
+  oder Deaktivieren des Zugangs löscht die PIN. Migration `20261122_0067` (Tabelle `bank_auto_sync`).
+
 ### Bankabruf per MCP: Umsätze über 0,00 € überspringen
 - **Behoben:** Finom liefert Kartenprüfungen als abgeschlossene Umsätze über 0,00 €. Der Abruf meldete sie als
   Importfehler („Betrag darf nicht 0 sein“) – bei jedem Lauf wieder, weil sie nie importiert werden. Sie werden jetzt

@@ -404,6 +404,50 @@ def register_cli_commands(app: Flask) -> None:
                 return
             time.sleep(interval)
 
+    @app.cli.command("bank-auto-sync")
+    @click.option(
+        "--loop",
+        is_flag=True,
+        help="Dauerbetrieb: täglich ab BANK_AUTO_SYNC_TIME, verpasste Läufe werden nachgeholt.",
+    )
+    @click.option("--company-id", type=int, default=None, help="Nur diese Gesellschaft.")
+    def bank_auto_sync(loop: bool, company_id: int | None):
+        """Ruft die Umsätze aller Bankzugänge mit eingeschaltetem automatischem Abruf ab."""
+        import time
+
+        from app.services.bank_auto_sync import (
+            CHECK_INTERVAL_SECONDS,
+            BankAutoSyncError,
+            due_now,
+            run_bank_auto_syncs,
+            sync_time,
+        )
+
+        try:
+            start = sync_time(app.config)
+        except BankAutoSyncError as exc:
+            raise click.ClickException(str(exc)) from exc
+        session_factory = app.extensions["db_session_factory"]
+
+        def run(only_due: bool) -> None:
+            runs = run_bank_auto_syncs(
+                session_factory, config=app.config, company_id=company_id, only_due=only_due
+            )
+            for item in runs:
+                click.echo(f"{item.name}: {item.status} – {item.message}")
+
+        if not loop:
+            run(only_due=False)
+            return
+        click.echo(f"Automatischer Bankabruf: täglich ab {start:%H:%M} (Europe/Berlin).")
+        while True:
+            try:
+                if due_now(app.config):
+                    run(only_due=True)
+            except Exception:  # Dauerbetrieb: Fehler protokollieren, weiterlaufen
+                logging.getLogger(__name__).exception("Automatischer Bankabruf fehlgeschlagen")
+            time.sleep(CHECK_INTERVAL_SECONDS)
+
     @app.cli.command("seed-demo")
     def seed_demo():
         """Legt Demo-Mandant, SKR03-Konten, Steuercodes, Benutzer und Buchungen an (idempotent)."""

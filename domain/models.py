@@ -2253,6 +2253,75 @@ class FinTSInstitute(Base):
     )
 
 
+class BankAutoSync(Base):
+    """Täglicher automatischer Umsatzabruf eines eingerichteten Bankzugangs.
+
+    Je Zeile eine Quelle: ein FinTS-Zugang, ein Open-Banking-Zugang oder eine Wallet eines
+    Bank-MCP-Servers (dann mit Ziel-Bankkonto). Für FinTS liegt die PIN nur hier und nur
+    Fernet-verschlüsselt vor (``secret_encrypted``, Schlüssel aus ``SECRET_KEY``); sie wird
+    nie ausgegeben. ``user_id`` ist, wer den Abruf eingeschaltet hat — sein persönlicher
+    MCP-Zugang wird verwendet. ``paused_reason`` hält den Abruf an, bis ein Mensch handelt
+    (TAN verlangt, Fehler der Bank), siehe app.services.bank_auto_sync.
+    """
+
+    __tablename__ = "bank_auto_sync"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('fints', 'open_banking', 'mcp')", name="ck_bank_auto_sync_source"
+        ),
+        UniqueConstraint("fints_connection_id", name="uq_bank_auto_sync_fints_connection"),
+        UniqueConstraint(
+            "open_banking_connection_id", name="uq_bank_auto_sync_open_banking_connection"
+        ),
+        UniqueConstraint(
+            "company_id", "mcp_server_id", "mcp_wallet_id", name="uq_bank_auto_sync_mcp_wallet"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    bank_account_id: Mapped[int] = mapped_column(
+        ForeignKey("account.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    fints_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fints_connection.id", ondelete="CASCADE")
+    )
+    open_banking_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("open_banking_connection.id", ondelete="CASCADE")
+    )
+    mcp_server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mcp_server.id", ondelete="CASCADE")
+    )
+    mcp_wallet_id: Mapped[str | None] = mapped_column(String(64))
+    mcp_wallet_name: Mapped[str | None] = mapped_column(String(120))
+    secret_encrypted: Mapped[str | None] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    paused_reason: Mapped[str | None] = mapped_column(String(30))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[str | None] = mapped_column(String(20))
+    last_message: Mapped[str | None] = mapped_column(Text)
+    last_imported: Mapped[int | None] = mapped_column(Integer)
+    # Bis-Datum des letzten erfolgreichen Abrufs (Startpunkt des nächsten FinTS-Abrufs).
+    last_synced_to: Mapped[date | None] = mapped_column(Date)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    bank_account: Mapped[Account] = relationship(foreign_keys=[bank_account_id])
+    fints_connection: Mapped[FinTSConnection | None] = relationship()
+    open_banking_connection: Mapped[OpenBankingConnection | None] = relationship()
+    mcp_server: Mapped[McpServer | None] = relationship()
+    user: Mapped[User | None] = relationship()
+
+
 class McpServer(Base):
     """Externer MCP-Server, auf den Obi im KI-Chat zugreift (z. B. Belegablage, CRM).
 

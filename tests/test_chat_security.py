@@ -79,6 +79,7 @@ EXPECTED_BLOCKED_TOOLS = {
     "set_fints_connection_active",
     "sync_fints_transactions",
     "submit_fints_tan",
+    "enable_fints_auto_sync",
     "lookup_fints_institute",
     "import_fints_institutes",
     # Open Banking (Bank-Zustimmung)
@@ -89,6 +90,7 @@ EXPECTED_BLOCKED_TOOLS = {
     "start_open_banking_authorization",
     "complete_open_banking_authorization",
     "sync_open_banking_transactions",
+    "enable_open_banking_auto_sync",
     # ELSTER
     "list_elster_submissions",
     "get_elster_submission_summary",
