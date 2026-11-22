@@ -3077,3 +3077,74 @@ class ConsolidationAdjustmentLine(Base):
     )
 
     adjustment: Mapped[ConsolidationAdjustment] = relationship(back_populates="lines")
+
+
+class PaymentAdvice(Base):
+    """Zahlungsavis eines Kunden: Auslesen, Zuordnung zu offenen Posten, Ausgleich.
+
+    Ein Kunde oder Zentralregulierer zahlt mehrere Rechnungen in einer Summe und schickt dazu
+    ein Avis mit Positionen und Abzügen (Skonto, Delkredere, Bonus …). Die KI schreibt die
+    Positionen je Seite wörtlich ab (``extraction``), das Programm prüft die Abschrift, ordnet
+    sie den offenen Posten zu und erklärt die Differenzen (``result`` mit Ampel). Der Ausgleich
+    bucht den Bankumsatz gegen die Posten und die Abzüge (``journal_entry_id``).
+
+    ``status``: ``running`` (Auslesen im Hintergrund), ``ready`` (Vorschlag liegt vor),
+    ``failed`` (``error`` nennt den Grund), ``applied`` (gebucht).
+    """
+
+    __tablename__ = "payment_advice"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'ready', 'failed', 'applied')",
+            name="ck_payment_advice_status",
+        ),
+        CheckConstraint(
+            "traffic_light IS NULL OR traffic_light IN ('green', 'yellow', 'red')",
+            name="ck_payment_advice_traffic_light",
+        ),
+        Index("ix_payment_advice_company", "company_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("document.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text)
+    # Kopfdaten aus dem Avis (vom Programm geprüft).
+    payer: Mapped[str | None] = mapped_column(String(255))
+    advice_number: Mapped[str | None] = mapped_column(String(120))
+    payment_date: Mapped[date | None] = mapped_column(Date)
+    currency_code: Mapped[str | None] = mapped_column(String(3))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    traffic_light: Mapped[str | None] = mapped_column(String(10))
+    partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_partner.id", ondelete="SET NULL")
+    )
+    # Abschrift der KI je Seite und Ergebnis der Zuordnung (Positionen, Hinweise).
+    extraction: Mapped[dict | None] = mapped_column(JSON)
+    result: Mapped[dict | None] = mapped_column(JSON)
+    bank_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_transaction.id", ondelete="SET NULL")
+    )
+    journal_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("journal_entry.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_by: Mapped[str | None] = mapped_column(String(120))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    document: Mapped[Document] = relationship()
+    partner: Mapped[BusinessPartner | None] = relationship()
+    bank_transaction: Mapped[BankTransaction | None] = relationship()
+    journal_entry: Mapped[JournalEntry | None] = relationship()

@@ -2133,6 +2133,44 @@ mit Nummer bzw. Namen sowie das vorgeschlagene Gegenkonto (`creditor_account_id`
 Verbindlichkeiten aLuL wie in der Freigabemaske) – genug, um einen Vorschlag mobil zu
 prüfen und freizugeben.
 
+## Zahlungsavise (Kunde zahlt mehrere Rechnungen in einer Summe)
+
+Unter **Bank & OPOS → Zahlungsavise** wird ein Avis eines Kunden oder Zentralregulierers
+hochgeladen (PDF oder Bild) oder ein vorhandener Beleg gewählt. Grundsatz (ADR-012): **die KI
+liest, das Programm rechnet.**
+
+1. **Auslesen (im Hintergrund):** Je Seite schreibt die KI (Beleg-KI des Benutzers bzw.
+   `RECEIPT_LLM_ENDPOINT_URL`) die Positionen wörtlich als JSON ab – Belegnummern, Datum,
+   Rechnungsbetrag, Skonto, Delkredere, sonstige Abzüge, Zahlbetrag, Art (Rechnung, Gutschrift,
+   Abzug, Gebühr) – sowie Zahler, Avis-Nummer, Zahldatum und Gesamtbetrag. Gescannte Avise
+   brauchen einen OCR-fähigen Zugang.
+2. **Prüfen:** Jede Nummer und jeder Betrag muss im Seitentext stehen, sonst gibt es einen zweiten
+   Versuch mit den Fehlern; Überträge und Summenzeilen entfallen.
+3. **Zuordnen:** Belegnummer → Referenz der offenen Forderung; ohne Nummer über den Betrag beim
+   erkannten Partner (gelb). Skonto aus der Spalte oder als glatter Satz (1, 2, 2,5, 3, 4 %),
+   Abzüge ohne Posten (Bonus, Konventionalstrafe, Delkredere, Reklamation, Gebühr, Retoure) über
+   Stichwörter in mehreren Sprachen.
+4. **Ampel:** grün = vollständig erklärt; gelb = Treffer über den Betrag, Skonto nach mehr als
+   30 Tagen, Gutschrift; rot = Summe geht nicht auf, Posten fehlt oder ist ausgeglichen, Abzug ohne
+   Grund, Rechnungsnummer im Avis, aber in keiner Position. Die Detailseite zeigt je Position den
+   Posten, die Abzüge und die Hinweise sowie die Summenprüfung.
+5. **Ausgleichen:** Für grüne und gelbe Avise wählt man den Zahlungseingang (vorgeschlagen werden
+   offene Eingänge über den Avis-Betrag, nach Nähe zum Zahldatum), das Skontokonto (vorbelegt mit
+   „Gewährte Skonti“, SKR03 8736/8730, SKR04 4736/4730) samt Steuercode für die
+   Umsatzsteuerkorrektur und ein Konto für übrige Abzüge. Eine Buchung bucht Bank an die
+   Forderungen, Skonto und Abzüge ins Soll und gleicht die Posten aus; das Avis wird als Beleg
+   verknüpft. Ein Storno der Buchung lässt Posten und Bankumsatz wieder aufleben.
+
+REST-API: `POST /api/v1/payment-advices` (`company_id`, `document_id`; 202, läuft im
+Hintergrund), `GET /api/v1/payment-advices?company_id=…`,
+`GET /api/v1/payment-advices/<id>?company_id=…[&include_extraction=true]`,
+`POST /api/v1/payment-advices/<id>/rematch`, `POST /api/v1/payment-advices/<id>/apply`
+(`bank_transaction_id`, `discount_account_id`, `discount_tax_code_id`, `deduction_account_id`,
+`deduction_tax_code_id`), `POST /api/v1/payment-advices/<id>/delete` bzw. `DELETE`. MCP-Tools:
+`start_payment_advice`, `list_payment_advices`, `get_payment_advice`, `rematch_payment_advice`,
+`apply_payment_advice`, `delete_payment_advice` (für Obi in der Werkzeuggruppe
+„zahlungsavise“). Audit: `payment_advice/created|applied|deleted`.
+
 ## KI-Zugang (LLM) je Benutzer
 
 Statt eines gemeinsamen API-Keys in der Umgebung hinterlegt der Administrator je

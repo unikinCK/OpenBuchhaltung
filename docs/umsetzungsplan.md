@@ -827,6 +827,17 @@ dann selbst betriebener Modellserver).
       Servern).
 - [ ] Kanäle (Mail, Teams) und Hintergrundläufe für Obi.
 
+## Phase 9 – Zahlungsavise (Stand 2026-11-22)
+- [x] **Avis auslesen und zuordnen (ADR-012):** KI schreibt je Seite wörtlich ab, das Programm
+      prüft die Abschrift, ordnet offenen Forderungen zu, erklärt Skonto, Delkredere und Abzüge
+      und vergibt eine Ampel; Ausgleich als eine Buchung (Bank, Posten, Skonto mit
+      Steuerkorrektur, übrige Abzüge); UI/API/MCP, Migration 0070 *(2026-11-22)*.
+- [ ] KI-Rückfrage nur für ungeklärte Fälle (Summe, Kategorie, Kandidatenwahl, Zerlegung der
+      Differenz), Vorschlag vom Programm nachgerechnet, höchstens gelb.
+- [ ] Skontofrist und -satz aus den Zahlungsbedingungen des Partners.
+- [ ] Gutschriften im Avis verrechnen; getrennte Konten je Abzugskategorie.
+- [ ] Avise aus einem Postfach abholen; Excel-/CSV-Avise.
+
 ## 8. Priorisierte Backlog-Tasks (sofort umsetzbar)
 1. **Architektur-ADR 001** (Monolith + modulare Schichten)
 2. **Datenmodell v0** inkl. ER-Diagramm
